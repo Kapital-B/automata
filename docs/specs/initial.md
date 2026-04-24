@@ -18,7 +18,7 @@ flowchart LR
   subgraph backend [Backend]
     API[FastAPI]
     Jobs[Scheduler / job runner]
-    DB[(PostgreSQL or SQLite)]
+    DB[(SQLite initially)]
   end
   subgraph external [External]
     Graph[Microsoft Graph]
@@ -59,6 +59,42 @@ Every persistent record that represents **user data**, **derived intelligence**,
 ### 2.3 Single operator
 
 - One **logical user** in v1 (`user_id` optional in schema for future multi-user hosting; can be fixed to a single row).
+
+### 2.4 Backend project structure (DDD, hexagonal, ports and adapters)
+
+The Python backend follows **domain-driven design** naming and a **hexagonal (ports and adapters)** layout so **HTTP**, **schedulers**, and **future CLIs** are thin **driving adapters** into the same **application** (use-case) layer, which orchestrates **domain** rules and persists through **driven ports** implemented in infrastructure.
+
+**Dependency direction:** `adapters` → `application` → `domain`. The **domain** layer imports neither FastAPI, SQLAlchemy, MSAL, nor HTTP clients. **Application** services depend on **domain** types and **port** protocols (ABCs or `typing.Protocol`) only; concrete **adapters** implement those ports.
+
+**Suggested package layout** (names are normative for this codebase):
+
+```text
+src/<product>/
+  domain/                    # entities, value objects, domain services, invariants
+    accounts/
+    messages/
+    shared/                  # cross-cutting value types (e.g. identifiers) if needed
+  application/               # use cases / application services; orchestration only
+    accounts/
+    messages/
+    ports/
+      driven/                # outbound: persistence, mail provider, token vault, clock, …
+  adapters/
+    inbound/
+      http/                  # FastAPI routers, middleware, app factory → call application/
+      jobs/                  # scheduler / worker entrypoints → same use cases as HTTP
+    outbound/
+      persistence/           # e.g. SQLAlchemy repositories implementing driven ports
+      microsoft/             # MSAL + Graph client; anti-corruption from Graph DTOs → domain
+      security/              # token encryption, etc.
+  configuration/             # env-backed settings (see [§9](#9-configuration-environment))
+```
+
+**Composition root:** a single wiring module (e.g. `adapters/inbound/http/dependencies.py` or `composition.py`) constructs concrete adapters and injects them into application services. **Jobs** and **on-demand API** handlers both invoke the **same** application use cases, matching [§1](#1-system-context).
+
+**Bounded contexts:** start with **`domain/accounts`** and **`domain/messages`** (and matching `application/` modules). Add further `domain/` / `application/` subtrees as features land (categorization, summaries, forwarding), each with its own **driven ports** rather than leaking infrastructure into domain.
+
+**PostgreSQL** remains the natural choice for **later** multi-process hosting or heavier workloads; the **persistence adapter** stays behind repository ports so the store can be swapped without changing domain or application code.
 
 ---
 
@@ -108,7 +144,7 @@ The same **Microsoft Graph** APIs apply to **work or school** mailboxes (Entra I
 
 ## 4. Data model
 
-Relational store (**PostgreSQL** recommended; **SQLite** acceptable for local-only). Names are **snake_case**; all timestamps **UTC** (`timestamptz`).
+Relational store: **SQLite** for the **initial** implementation and local development; **PostgreSQL** when scaling to multi-process servers or stricter production needs. The logical model below uses **snake_case** and **UTC** timestamps; map `timestamptz` to SQLite-compatible types (e.g. ISO8601 text or numeric epoch) in migrations—the **invariants** (uniqueness, FKs, provenance) are unchanged.
 
 ### 4.1 `users` (optional v1)
 
@@ -428,7 +464,7 @@ The backend **must** define **versioned** JSON shapes. Prompts end with: **“Re
 
 | Variable | Purpose |
 | -------- | ------- |
-| `DATABASE_URL` | SQLAlchemy/async URL. |
+| `DATABASE_URL` | SQLAlchemy/async URL (e.g. `sqlite+aiosqlite:///…` initially; `postgresql+asyncpg://…` when using Postgres). |
 | `MS_CLIENT_ID` / `MS_CLIENT_SECRET` | Entra app. |
 | `MS_REDIRECT_URI` | Must match app registration. |
 | `MS_AUTHORITY` | **Default** host only if you do not build URLs per [§3.1](#31-auth-and-account-types); in practice the backend **constructs** `.../organizations` vs `.../consumers` from `ms_account_kind` on `POST /api/accounts` (or override `MS_AUTHORITY_ORGANIZATIONS` / `MS_AUTHORITY_CONSUMERS` for rare clouds). |
@@ -515,7 +551,7 @@ Phases are **sequential**: each phase produces something **shippable** and **tes
 
 ### 12.0 Phase 0 — Foundation
 
-**Delivers:** FastAPI app, configuration (`DATABASE_URL`, `CORS_ORIGINS` placeholder), structured logging, `GET /api/health`, database migration tool and **initial schema** for `accounts` and `account_sync_state` (can be empty). Optional: `users` single row or skip.
+**Delivers:** FastAPI app, configuration (`DATABASE_URL`, `CORS_ORIGINS` placeholder), structured logging, `GET /api/health`, database migration tool and **initial schema** for `accounts` and `account_sync_state` (can be empty), **`domain/`**, **`application/`**, and **`adapters/`** layout per [§2.4](#24-backend-project-structure-ddd-hexagonal-ports-and-adapters). **SQLite** as the default database for Phase 0. Optional: `users` single row or skip.
 
 **Exit criteria:** Server starts; DB applies migrations; no mail or LLM yet.
 
