@@ -31,11 +31,12 @@ go run ./cmd/server
 
 | Method | Endpoint |
 | ------ | -------- |
-| Register | `POST /api/auth/register` `{"email","password"}` → `user_id`, `access_token` |
-| Login | `POST /api/auth/login` `{"email","password"}` → `access_token` |
-| Microsoft login | `GET /api/auth/microsoft` → `authorization_url`; callback `GET /api/auth/microsoft/callback` → redirect to `DASHBOARD_BASE_URL` + `AUTH_SUCCESS_PATH?access_token=...` |
-| Google login | `GET /api/auth/google` (if configured) → same pattern for `/api/auth/google/callback` |
-| Current user | `GET /api/me` with `Authorization: Bearer <jwt>` |
+| Register | `POST /api/auth/register` `{"email","password"}` → `user_id`, `access_token`, `refresh_token` |
+| Login | `POST /api/auth/login` `{"email","password"}` → `access_token`, `refresh_token` |
+| Refresh | `POST /api/auth/refresh` `{"refresh_token":"..."}` → new `access_token` + `refresh_token` (rotation) |
+| Microsoft login | `GET /api/auth/microsoft` → `authorization_url`; callback redirects to `DASHBOARD_BASE_URL` + `AUTH_SUCCESS_PATH#access_token=...&refresh_token=...` (URL **fragment**, not query—keeps tokens out of server logs/Referer) |
+| Google login | `GET /api/auth/google` (if configured) → same fragment redirect for `/api/auth/google/callback` |
+| Current user | `GET /api/me` with `Authorization: Bearer <access_token>` |
 
 **Linking:** Microsoft/Google sign-in uses the IdP **email** claim. If a user already exists with that email (e.g. registered with password), the external identity is **attached** to the same `users` row (`user_identities`).
 

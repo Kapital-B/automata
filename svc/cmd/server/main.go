@@ -100,7 +100,7 @@ func main() {
 		}
 	}
 
-	authSvc := auth.NewService(repo, repo, msAuthOAuth, googleClient, cfg.JWTSecret, cfg.JWTTTL)
+	authSvc := auth.NewService(repo, repo, repo, msAuthOAuth, googleClient, cfg.JWTSecret, cfg.JWTTTL, cfg.RefreshTTL)
 
 	h := &httphandler.Handlers{
 		Log:             log,

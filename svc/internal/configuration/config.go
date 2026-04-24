@@ -24,6 +24,7 @@ type Config struct {
 	OAuthStateTTL      time.Duration
 	JWTSecret          []byte
 	JWTTTL             time.Duration
+	RefreshTTL         time.Duration
 	MSAuthRedirectURI  string
 	GoogleClientID     string
 	GoogleClientSecret string
@@ -86,6 +87,14 @@ func Load() (Config, error) {
 		}
 	}
 
+	refreshTTL := 30 * 24 * time.Hour
+	if v := os.Getenv("REFRESH_TTL_DAYS"); v != "" {
+		var d int
+		if _, err := fmt.Sscanf(v, "%d", &d); err == nil && d > 0 {
+			refreshTTL = time.Duration(d) * 24 * time.Hour
+		}
+	}
+
 	defaultUID, err := uuid.Parse(getenv("AUTH_DEFAULT_USER_ID", "a0000001-0000-4000-8000-000000000001"))
 	if err != nil {
 		return Config{}, fmt.Errorf("AUTH_DEFAULT_USER_ID: %w", err)
@@ -107,6 +116,7 @@ func Load() (Config, error) {
 		OAuthStateTTL:    ttl,
 		JWTSecret:        jwtSecret,
 		JWTTTL:           jwtTTL,
+		RefreshTTL:       refreshTTL,
 		MSAuthRedirectURI: getenv("MS_AUTH_REDIRECT_URI", publicAPI+"/api/auth/microsoft/callback"),
 		GoogleClientID:    os.Getenv("GOOGLE_CLIENT_ID"),
 		GoogleClientSecret: os.Getenv("GOOGLE_CLIENT_SECRET"),
