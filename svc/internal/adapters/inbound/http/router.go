@@ -11,6 +11,7 @@ import (
 	"time"
 
 	appaccounts "github.com/Kapital-B/automata/svc/internal/application/accounts"
+	"github.com/Kapital-B/automata/svc/internal/application/auth"
 	appmessages "github.com/Kapital-B/automata/svc/internal/application/messages"
 	"github.com/Kapital-B/automata/svc/internal/application/ports/driven"
 	domainacc "github.com/Kapital-B/automata/svc/internal/domain/accounts"
@@ -23,19 +24,36 @@ type Handlers struct {
 	Log         *slog.Logger
 	AccountSvc  *appaccounts.Service
 	SyncSvc     *appmessages.SyncService
+	AuthSvc     *auth.Service
 	Accounts    driven.AccountRepository
 	Messages    driven.MessageRepository
 	OAuthStates driven.OAuthStateRepository
+	Users       driven.UserRepository
 	Dashboard   string
 	SuccessPath string
 	ErrorPath   string
+	AuthSuccessPath string
+	AuthErrorPath   string
 	StateTTL    time.Duration
+	JWTSecret      []byte
+	JWTTTL         time.Duration
+	DefaultUserID  uuid.UUID // dev fallback when no Bearer token
 }
 
 func (h *Handlers) Routes() http.Handler {
 	r := chi.NewRouter()
 	r.Use(requestIDMiddleware)
+	r.Use(optionalAuthMiddleware(h.JWTSecret, h.DefaultUserID))
 	r.Get("/api/health", h.health)
+
+	r.Post("/api/auth/register", h.register)
+	r.Post("/api/auth/login", h.loginPassword)
+	r.Get("/api/auth/microsoft", h.authMicrosoftStart)
+	r.Get("/api/auth/microsoft/callback", h.authMicrosoftCallback)
+	r.Get("/api/auth/google", h.authGoogleStart)
+	r.Get("/api/auth/google/callback", h.authGoogleCallback)
+	r.Get("/api/me", h.me)
+
 	r.Get("/api/accounts", h.listAccounts)
 	r.Post("/api/accounts", h.startConnect)
 	r.Get("/api/accounts/callback", h.oauthCallback)
@@ -52,7 +70,8 @@ func (h *Handlers) health(w http.ResponseWriter, r *http.Request) {
 }
 
 func (h *Handlers) listAccounts(w http.ResponseWriter, r *http.Request) {
-	rows, err := h.Accounts.ListAccounts(r.Context())
+	uid := userIDOrEmpty(r)
+	rows, err := h.Accounts.ListAccounts(r.Context(), uid)
 	if err != nil {
 		h.Log.Error("list accounts", "err", err)
 		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "internal"})
@@ -105,7 +124,7 @@ func (h *Handlers) startConnect(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	kind := domainacc.MsAccountKind(body.MsAccountKind)
-	res, err := h.AccountSvc.StartConnect(r.Context(), appaccounts.StartConnectInput{
+	res, err := h.AccountSvc.StartConnect(r.Context(), userIDOrEmpty(r), appaccounts.StartConnectInput{
 		Provider:      body.Provider,
 		MsAccountKind: kind,
 		LabelHint:     body.Label,
@@ -171,7 +190,7 @@ func (h *Handlers) getAccount(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "bad id"})
 		return
 	}
-	row, _, err := h.Accounts.GetAccount(r.Context(), id)
+	row, _, err := h.Accounts.GetAccount(r.Context(), userIDOrEmpty(r), id)
 	if err != nil {
 		h.Log.Error("get account", "err", err)
 		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "internal"})
@@ -205,7 +224,7 @@ func (h *Handlers) deleteAccount(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "bad id"})
 		return
 	}
-	if err := h.AccountSvc.Disconnect(r.Context(), id); err != nil {
+	if err := h.AccountSvc.Disconnect(r.Context(), userIDOrEmpty(r), id); err != nil {
 		h.Log.Error("delete account", "err", err)
 		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "internal"})
 		return
@@ -219,7 +238,7 @@ func (h *Handlers) syncAccount(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "bad id"})
 		return
 	}
-	res, err := h.SyncSvc.SyncInbox(r.Context(), id)
+	res, err := h.SyncSvc.SyncInbox(r.Context(), userIDOrEmpty(r), id)
 	if err != nil {
 		h.Log.Error("sync", "err", err)
 		writeJSON(w, http.StatusBadRequest, map[string]string{"error": err.Error()})
@@ -245,7 +264,7 @@ func (h *Handlers) listMessages(w http.ResponseWriter, r *http.Request) {
 	}
 	limit, _ := strconv.Atoi(r.URL.Query().Get("limit"))
 	offset, _ := strconv.Atoi(r.URL.Query().Get("offset"))
-	rows, err := h.Messages.ListMessagesByAccount(r.Context(), id, limit, offset)
+	rows, err := h.Messages.ListMessagesByAccount(r.Context(), userIDOrEmpty(r), id, limit, offset)
 	if err != nil {
 		h.Log.Error("list messages", "err", err)
 		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "internal"})
@@ -279,7 +298,7 @@ func (h *Handlers) getMessage(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "bad id"})
 		return
 	}
-	m, err := h.Messages.GetMessage(r.Context(), id)
+	m, err := h.Messages.GetMessage(r.Context(), userIDOrEmpty(r), id)
 	if err != nil {
 		h.Log.Error("get message", "err", err)
 		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "internal"})
@@ -305,4 +324,9 @@ func writeJSON(w http.ResponseWriter, status int, v any) {
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(status)
 	_ = json.NewEncoder(w).Encode(v)
+}
+
+func userIDOrEmpty(r *http.Request) uuid.UUID {
+	uid, _ := UserIDFromContext(r.Context())
+	return uid
 }

@@ -34,18 +34,24 @@ type StartConnectOutput struct {
 	State            string
 }
 
-func (s *Service) StartConnect(ctx context.Context, in StartConnectInput) (*StartConnectOutput, error) {
+const oauthFlowM365Mail = "m365_mail"
+
+func (s *Service) StartConnect(ctx context.Context, userID uuid.UUID, in StartConnectInput) (*StartConnectOutput, error) {
 	if in.Provider != "" && strings.ToLower(in.Provider) != "m365" {
 		return nil, fmt.Errorf("unsupported provider")
 	}
-	if !in.MsAccountKind.Valid() {
+	if !in.MsAccountKind.Valid() || in.MsAccountKind == domainacc.KindCommon {
 		return nil, fmt.Errorf("invalid ms_account_kind")
 	}
 	st, err := randomState()
 	if err != nil {
 		return nil, err
 	}
-	if err := s.deps.OAuthState.InsertState(ctx, st, in.MsAccountKind, in.LabelHint, time.Now().UTC()); err != nil {
+	payload, err := EncodeMailboxOAuthPayload(in.MsAccountKind, in.LabelHint)
+	if err != nil {
+		return nil, err
+	}
+	if err := s.deps.OAuthState.InsertOAuthState(ctx, st, oauthFlowM365Mail, &userID, payload, time.Now().UTC()); err != nil {
 		return nil, err
 	}
 	authURL, err := s.deps.OAuth.AuthorizationURL(ctx, in.MsAccountKind, st)
@@ -70,11 +76,15 @@ type CompleteOAuthResult struct {
 }
 
 func (s *Service) CompleteOAuth(ctx context.Context, code, state string) (*CompleteOAuthResult, error) {
-	kind, labelHint, ok, err := s.deps.OAuthState.TakeState(ctx, state)
+	flow, stateUserID, payloadJSON, ok, err := s.deps.OAuthState.TakeOAuthState(ctx, state)
 	if err != nil {
 		return nil, err
 	}
-	if !ok {
+	if !ok || flow != oauthFlowM365Mail || stateUserID == nil {
+		return nil, ErrInvalidOAuthState
+	}
+	kind, labelHint, err := DecodeMailboxOAuthPayload(payloadJSON)
+	if err != nil {
 		return nil, ErrInvalidOAuthState
 	}
 	tok, err := s.deps.OAuth.ExchangeCode(ctx, kind, code)
@@ -113,6 +123,7 @@ func (s *Service) CompleteOAuth(ctx context.Context, code, state string) (*Compl
 	}
 	now := time.Now().UTC()
 	row := driven.AccountRow{
+		UserID:           *stateUserID,
 		ID:               id,
 		Label:            label,
 		Provider:         "m365",
@@ -132,6 +143,6 @@ func (s *Service) CompleteOAuth(ctx context.Context, code, state string) (*Compl
 	return &CompleteOAuthResult{AccountID: id}, nil
 }
 
-func (s *Service) Disconnect(ctx context.Context, id uuid.UUID) error {
-	return s.deps.Accounts.DeleteAccount(ctx, id)
+func (s *Service) Disconnect(ctx context.Context, userID uuid.UUID, id uuid.UUID) error {
+	return s.deps.Accounts.DeleteAccount(ctx, userID, id)
 }

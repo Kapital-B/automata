@@ -13,6 +13,7 @@ import (
 	"github.com/Kapital-B/automata/svc/internal/adapters/outbound/microsoft"
 	"github.com/Kapital-B/automata/svc/internal/adapters/outbound/persistence/sqlite"
 	"github.com/Kapital-B/automata/svc/internal/adapters/outbound/security"
+	"github.com/google/uuid"
 	_ "modernc.org/sqlite"
 )
 
@@ -35,10 +36,13 @@ func TestHealth(t *testing.T) {
 		Dashboard: "http://localhost:5173", SuccessPath: "/ok", ErrorPath: "/err", StateTTL: 0,
 	})
 	syncSvc := &appmessages.SyncService{Accounts: repo, Messages: repo, OAuth: oauth, Graph: graph, Vault: vault, JobRuns: repo}
+	jwtSecret := []byte("abcdefghijklmnopqrstuvwxyz123456")
+	devUser := uuid.MustParse("a0000001-0000-4000-8000-000000000001")
 	h := &Handlers{
 		Log: slog.Default(), AccountSvc: accountSvc, SyncSvc: syncSvc,
-		Accounts: repo, Messages: repo, OAuthStates: repo,
+		Accounts: repo, Messages: repo, OAuthStates: repo, Users: repo,
 		Dashboard: "http://localhost:5173", SuccessPath: "/ok", ErrorPath: "/err",
+		JWTSecret: jwtSecret, JWTTTL: time.Hour, DefaultUserID: devUser,
 	}
 	srv := httptest.NewServer(h.Routes())
 	defer srv.Close()

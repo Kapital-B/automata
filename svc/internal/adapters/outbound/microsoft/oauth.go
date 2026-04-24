@@ -24,6 +24,15 @@ type OAuth struct {
 	// BaseAuthority, if non-empty, overrides the login host for both authorize and token URLs
 	// (e.g. httptest fake IdP). Default follows kind: organizations vs consumers.
 	BaseAuthority string
+	// Scopes, if non-empty, replaces the default Graph mail scopes (e.g. sign-in only).
+	Scopes string
+}
+
+func (o *OAuth) scopes() string {
+	if o.Scopes != "" {
+		return o.Scopes
+	}
+	return graphScope
 }
 
 func (o *OAuth) client() *http.Client {
@@ -39,6 +48,8 @@ func authorityBase(kind accounts.MsAccountKind) string {
 		return "https://login.microsoftonline.com/organizations"
 	case accounts.KindPersonal:
 		return "https://login.microsoftonline.com/consumers"
+	case accounts.KindCommon:
+		return "https://login.microsoftonline.com/common"
 	default:
 		return "https://login.microsoftonline.com/common"
 	}
@@ -60,7 +71,7 @@ func (o *OAuth) AuthorizationURL(ctx context.Context, kind accounts.MsAccountKin
 	v.Set("response_type", "code")
 	v.Set("redirect_uri", o.RedirectURI)
 	v.Set("response_mode", "query")
-	v.Set("scope", graphScope)
+	v.Set("scope", o.scopes())
 	v.Set("state", state)
 	v.Set("prompt", "consent")
 	return base + "?" + v.Encode(), nil
@@ -82,7 +93,7 @@ func (o *OAuth) ExchangeCode(ctx context.Context, kind accounts.MsAccountKind, c
 		"code":          {code},
 		"redirect_uri":  {o.RedirectURI},
 		"grant_type":    {"authorization_code"},
-		"scope":         {graphScope},
+		"scope":         {o.scopes()},
 	})
 }
 
@@ -93,7 +104,7 @@ func (o *OAuth) RefreshAccessToken(ctx context.Context, kind accounts.MsAccountK
 		"client_secret": {o.ClientSecret},
 		"refresh_token": {refreshToken},
 		"grant_type":    {"refresh_token"},
-		"scope":         {graphScope},
+		"scope":         {o.scopes()},
 	})
 }
 

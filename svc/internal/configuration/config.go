@@ -5,6 +5,8 @@ import (
 	"os"
 	"strings"
 	"time"
+
+	"github.com/google/uuid"
 )
 
 // Config holds environment-backed settings (spec §9).
@@ -20,6 +22,15 @@ type Config struct {
 	MSRedirectURI      string
 	EncryptionKey      []byte
 	OAuthStateTTL      time.Duration
+	JWTSecret          []byte
+	JWTTTL             time.Duration
+	MSAuthRedirectURI  string
+	GoogleClientID     string
+	GoogleClientSecret string
+	GoogleRedirectURI  string
+	AuthSuccessPath    string
+	AuthErrorPath      string
+	DefaultUserID      uuid.UUID
 }
 
 func getenv(key, def string) string {
@@ -63,6 +74,25 @@ func Load() (Config, error) {
 		}
 	}
 
+	jwtSecret := []byte(os.Getenv("JWT_SECRET"))
+	if len(jwtSecret) < 32 {
+		return Config{}, fmt.Errorf("JWT_SECRET must be at least 32 bytes")
+	}
+	jwtTTL := 24 * time.Hour
+	if v := os.Getenv("JWT_TTL_HOURS"); v != "" {
+		var h int
+		if _, err := fmt.Sscanf(v, "%d", &h); err == nil && h > 0 {
+			jwtTTL = time.Duration(h) * time.Hour
+		}
+	}
+
+	defaultUID, err := uuid.Parse(getenv("AUTH_DEFAULT_USER_ID", "a0000001-0000-4000-8000-000000000001"))
+	if err != nil {
+		return Config{}, fmt.Errorf("AUTH_DEFAULT_USER_ID: %w", err)
+	}
+
+	publicAPI := strings.TrimRight(getenv("APP_PUBLIC_URL", "http://localhost:8080"), "/")
+
 	cfg := Config{
 		ListenAddr:       getenv("LISTEN_ADDR", ":8080"),
 		DatabaseURL:      getenv("DATABASE_URL", "file:./data.db?_foreign_keys=on"),
@@ -75,9 +105,21 @@ func Load() (Config, error) {
 		MSRedirectURI:    os.Getenv("MS_REDIRECT_URI"),
 		EncryptionKey:    key,
 		OAuthStateTTL:    ttl,
+		JWTSecret:        jwtSecret,
+		JWTTTL:           jwtTTL,
+		MSAuthRedirectURI: getenv("MS_AUTH_REDIRECT_URI", publicAPI+"/api/auth/microsoft/callback"),
+		GoogleClientID:    os.Getenv("GOOGLE_CLIENT_ID"),
+		GoogleClientSecret: os.Getenv("GOOGLE_CLIENT_SECRET"),
+		GoogleRedirectURI: getenv("GOOGLE_REDIRECT_URI", publicAPI+"/api/auth/google/callback"),
+		AuthSuccessPath:   getenv("AUTH_SUCCESS_PATH", "/auth/callback"),
+		AuthErrorPath:     getenv("AUTH_ERROR_PATH", "/auth/error"),
+		DefaultUserID:     defaultUID,
 	}
 	if cfg.MSClientID == "" || cfg.MSClientSecret == "" || cfg.MSRedirectURI == "" {
-		return Config{}, fmt.Errorf("MS_CLIENT_ID, MS_CLIENT_SECRET, and MS_REDIRECT_URI are required for Phase 1")
+		return Config{}, fmt.Errorf("MS_CLIENT_ID, MS_CLIENT_SECRET, and MS_REDIRECT_URI are required for mail connect")
+	}
+	if cfg.GoogleClientID != "" && (cfg.GoogleClientSecret == "" || cfg.GoogleRedirectURI == "") {
+		return Config{}, fmt.Errorf("GOOGLE_CLIENT_ID set: also require GOOGLE_CLIENT_SECRET and GOOGLE_REDIRECT_URI")
 	}
 	return cfg, nil
 }

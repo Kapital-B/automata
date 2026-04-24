@@ -117,11 +117,14 @@ func TestOAuthStartConnectAndCallbackCreatesAccount(t *testing.T) {
 	syncSvc := &appmessages.SyncService{
 		Accounts: repo, Messages: repo, OAuth: oauth, Graph: graphCl, Vault: vault, JobRuns: repo,
 	}
+	devUser := uuid.MustParse("a0000001-0000-4000-8000-000000000001")
+	jwtSecret := []byte("abcdefghijklmnopqrstuvwxyz123456")
 	h := &Handlers{
 		Log: slog.New(slog.NewTextHandler(io.Discard, nil)),
 		AccountSvc: accountSvc, SyncSvc: syncSvc,
-		Accounts: repo, Messages: repo, OAuthStates: repo,
+		Accounts: repo, Messages: repo, OAuthStates: repo, Users: repo,
 		Dashboard: "http://dashboard.test", SuccessPath: "/connected", ErrorPath: "/error",
+		JWTSecret: jwtSecret, JWTTTL: time.Hour, DefaultUserID: devUser,
 	}
 	api := httptest.NewServer(h.Routes())
 	defer api.Close()
@@ -219,11 +222,14 @@ func TestOAuthCallbackInvalidStateRedirectsError(t *testing.T) {
 		Dashboard: "http://dashboard.test", SuccessPath: "/ok", ErrorPath: "/err", StateTTL: 15 * time.Minute,
 	})
 	syncSvc := &appmessages.SyncService{Accounts: repo, Messages: repo, OAuth: oauth, Graph: graphCl, Vault: vault, JobRuns: repo}
+	devUser := uuid.MustParse("a0000001-0000-4000-8000-000000000001")
+	jwtSecret := []byte("abcdefghijklmnopqrstuvwxyz123456")
 	h := &Handlers{
 		Log: slog.New(slog.NewTextHandler(io.Discard, nil)),
 		AccountSvc: accountSvc, SyncSvc: syncSvc,
-		Accounts: repo, Messages: repo, OAuthStates: repo,
+		Accounts: repo, Messages: repo, OAuthStates: repo, Users: repo,
 		Dashboard: "http://dashboard.test", SuccessPath: "/ok", ErrorPath: "/err",
+		JWTSecret: jwtSecret, JWTTTL: time.Hour, DefaultUserID: devUser,
 	}
 	api := httptest.NewServer(h.Routes())
 	defer api.Close()
@@ -242,7 +248,12 @@ func TestOAuthCallbackInvalidStateRedirectsError(t *testing.T) {
 }
 
 func TestOAuthCallbackAccessDeniedRedirects(t *testing.T) {
-	h := &Handlers{Dashboard: "http://d.test", ErrorPath: "/err"}
+	devUser := uuid.MustParse("a0000001-0000-4000-8000-000000000001")
+	jwtSecret := []byte("abcdefghijklmnopqrstuvwxyz123456")
+	h := &Handlers{
+		Dashboard: "http://d.test", ErrorPath: "/err",
+		JWTSecret: jwtSecret, DefaultUserID: devUser,
+	}
 	req, _ := http.NewRequest(http.MethodGet, "/cb?error=access_denied", nil)
 	rr := httptest.NewRecorder()
 	h.oauthCallback(rr, req)
