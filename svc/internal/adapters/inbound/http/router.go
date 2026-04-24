@@ -48,6 +48,7 @@ func (h *Handlers) Routes() http.Handler {
 
 	r.Post("/api/auth/register", h.register)
 	r.Post("/api/auth/login", h.loginPassword)
+	r.Post("/api/auth/refresh", h.authRefresh)
 	r.Get("/api/auth/microsoft", h.authMicrosoftStart)
 	r.Get("/api/auth/microsoft/callback", h.authMicrosoftCallback)
 	r.Get("/api/auth/google", h.authGoogleStart)

@@ -7,7 +7,6 @@ import (
 	"net/url"
 	"strings"
 
-	"github.com/Kapital-B/automata/svc/internal/adapters/outbound/security"
 	"github.com/Kapital-B/automata/svc/internal/application/auth"
 )
 
@@ -36,13 +35,15 @@ func (h *Handlers) register(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusBadRequest, map[string]string{"error": err.Error()})
 		return
 	}
-	tok, err := security.SignJWT(h.JWTSecret, id, h.JWTTTL)
+	pair, err := h.AuthSvc.IssueTokens(r.Context(), id)
 	if err != nil {
-		h.Log.Error("jwt after register", "err", err)
+		h.Log.Error("tokens after register", "err", err)
 		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "internal"})
 		return
 	}
-	writeJSON(w, http.StatusCreated, map[string]any{"user_id": id.String(), "access_token": tok})
+	writeJSON(w, http.StatusCreated, map[string]any{
+		"user_id": id.String(), "access_token": pair.AccessToken, "refresh_token": pair.RefreshToken,
+	})
 }
 
 type loginBody struct {
@@ -60,7 +61,7 @@ func (h *Handlers) loginPassword(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid json"})
 		return
 	}
-	tok, err := h.AuthSvc.LoginPassword(r.Context(), body.Email, body.Password)
+	pair, err := h.AuthSvc.LoginPassword(r.Context(), body.Email, body.Password)
 	if err != nil {
 		if errors.Is(err, auth.ErrInvalidCredentials) {
 			writeJSON(w, http.StatusUnauthorized, map[string]string{"error": "invalid credentials"})
@@ -70,7 +71,9 @@ func (h *Handlers) loginPassword(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "internal"})
 		return
 	}
-	writeJSON(w, http.StatusOK, map[string]string{"access_token": tok})
+	writeJSON(w, http.StatusOK, map[string]string{
+		"access_token": pair.AccessToken, "refresh_token": pair.RefreshToken,
+	})
 }
 
 func (h *Handlers) authMicrosoftStart(w http.ResponseWriter, r *http.Request) {
@@ -102,7 +105,7 @@ func (h *Handlers) authMicrosoftCallback(w http.ResponseWriter, r *http.Request)
 		h.redirectAuthError(w, r, "token_exchange_failed")
 		return
 	}
-	tok, err := h.AuthSvc.CompleteMicrosoftLogin(r.Context(), code, state)
+	pair, err := h.AuthSvc.CompleteMicrosoftLogin(r.Context(), code, state)
 	if err != nil {
 		if errors.Is(err, auth.ErrInvalidOAuthState) {
 			h.redirectAuthError(w, r, "invalid_state")
@@ -112,7 +115,7 @@ func (h *Handlers) authMicrosoftCallback(w http.ResponseWriter, r *http.Request)
 		h.redirectAuthError(w, r, "token_exchange_failed")
 		return
 	}
-	h.redirectAuthSuccess(w, r, tok)
+	h.redirectAuthSuccess(w, r, pair)
 }
 
 func (h *Handlers) authGoogleStart(w http.ResponseWriter, r *http.Request) {
@@ -144,7 +147,7 @@ func (h *Handlers) authGoogleCallback(w http.ResponseWriter, r *http.Request) {
 		h.redirectAuthError(w, r, "token_exchange_failed")
 		return
 	}
-	tok, err := h.AuthSvc.CompleteGoogleLogin(r.Context(), code, state)
+	pair, err := h.AuthSvc.CompleteGoogleLogin(r.Context(), code, state)
 	if err != nil {
 		if errors.Is(err, auth.ErrInvalidOAuthState) {
 			h.redirectAuthError(w, r, "invalid_state")
@@ -154,7 +157,36 @@ func (h *Handlers) authGoogleCallback(w http.ResponseWriter, r *http.Request) {
 		h.redirectAuthError(w, r, "token_exchange_failed")
 		return
 	}
-	h.redirectAuthSuccess(w, r, tok)
+	h.redirectAuthSuccess(w, r, pair)
+}
+
+type refreshBody struct {
+	RefreshToken string `json:"refresh_token"`
+}
+
+func (h *Handlers) authRefresh(w http.ResponseWriter, r *http.Request) {
+	if h.AuthSvc == nil {
+		writeJSON(w, http.StatusServiceUnavailable, map[string]string{"error": "auth not configured"})
+		return
+	}
+	var body refreshBody
+	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid json"})
+		return
+	}
+	pair, err := h.AuthSvc.RefreshTokens(r.Context(), body.RefreshToken)
+	if err != nil {
+		if errors.Is(err, auth.ErrInvalidRefreshToken) {
+			writeJSON(w, http.StatusUnauthorized, map[string]string{"error": "invalid refresh token"})
+			return
+		}
+		h.Log.Error("refresh", "err", err)
+		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "internal"})
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]string{
+		"access_token": pair.AccessToken, "refresh_token": pair.RefreshToken,
+	})
 }
 
 func (h *Handlers) me(w http.ResponseWriter, r *http.Request) {
@@ -172,16 +204,15 @@ func (h *Handlers) me(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, map[string]any{"user_id": uid.String(), "email": email})
 }
 
-func (h *Handlers) redirectAuthSuccess(w http.ResponseWriter, r *http.Request, accessToken string) {
+func (h *Handlers) redirectAuthSuccess(w http.ResponseWriter, r *http.Request, pair auth.TokenPair) {
 	base := strings.TrimRight(h.Dashboard, "/") + h.AuthSuccessPath
 	u, err := url.Parse(base)
 	if err != nil {
 		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "bad redirect config"})
 		return
 	}
-	q := u.Query()
-	q.Set("access_token", accessToken)
-	u.RawQuery = q.Encode()
+	// Fragment avoids sending tokens to the server as Referer on subsequent requests.
+	u.Fragment = "access_token=" + url.QueryEscape(pair.AccessToken) + "&refresh_token=" + url.QueryEscape(pair.RefreshToken)
 	http.Redirect(w, r, u.String(), http.StatusFound)
 }
 
