@@ -21,6 +21,9 @@ type OAuth struct {
 	ClientSecret string
 	RedirectURI  string
 	HTTPClient   *http.Client
+	// BaseAuthority, if non-empty, overrides the login host for both authorize and token URLs
+	// (e.g. httptest fake IdP). Default follows kind: organizations vs consumers.
+	BaseAuthority string
 }
 
 func (o *OAuth) client() *http.Client {
@@ -41,10 +44,17 @@ func authorityBase(kind accounts.MsAccountKind) string {
 	}
 }
 
+func (o *OAuth) authorityHost(kind accounts.MsAccountKind) string {
+	if o.BaseAuthority != "" {
+		return strings.TrimRight(o.BaseAuthority, "/")
+	}
+	return authorityBase(kind)
+}
+
 // AuthorizationURL builds the authorize URL for the given account kind.
 func (o *OAuth) AuthorizationURL(ctx context.Context, kind accounts.MsAccountKind, state string) (string, error) {
 	_ = ctx
-	base := authorityBase(kind) + "/oauth2/v2.0/authorize"
+	base := o.authorityHost(kind) + "/oauth2/v2.0/authorize"
 	v := url.Values{}
 	v.Set("client_id", o.ClientID)
 	v.Set("response_type", "code")
@@ -88,7 +98,7 @@ func (o *OAuth) RefreshAccessToken(ctx context.Context, kind accounts.MsAccountK
 }
 
 func (o *OAuth) postToken(ctx context.Context, kind accounts.MsAccountKind, form url.Values) (driven.TokenPair, error) {
-	endpoint := authorityBase(kind) + "/oauth2/v2.0/token"
+	endpoint := o.authorityHost(kind) + "/oauth2/v2.0/token"
 	req, err := http.NewRequestWithContext(ctx, http.MethodPost, endpoint, strings.NewReader(form.Encode()))
 	if err != nil {
 		return driven.TokenPair{}, err

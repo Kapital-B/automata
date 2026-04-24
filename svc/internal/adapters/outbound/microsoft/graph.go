@@ -19,6 +19,16 @@ const graphBase = "https://graph.microsoft.com/v1.0"
 // GraphClient implements driven.MicrosoftGraph.
 type GraphClient struct {
 	HTTPClient *http.Client
+	// APIRoot overrides the Graph API root (scheme + host + version prefix), e.g.
+	// "http://127.0.0.1:1234/v1.0" for tests. Default is graphBase.
+	APIRoot string
+}
+
+func (g *GraphClient) apiRoot() string {
+	if g.APIRoot != "" {
+		return strings.TrimRight(g.APIRoot, "/")
+	}
+	return graphBase
 }
 
 func (g *GraphClient) client() *http.Client {
@@ -68,7 +78,7 @@ type meResponse struct {
 // GetMe returns profile from Graph /me.
 func (g *GraphClient) GetMe(ctx context.Context, accessToken string) (*driven.GraphProfile, error) {
 	var me meResponse
-	if err := g.getJSON(ctx, accessToken, graphBase+"/me", &me); err != nil {
+	if err := g.getJSON(ctx, accessToken, g.apiRoot()+"/me", &me); err != nil {
 		return nil, err
 	}
 	email := me.Mail
@@ -142,7 +152,7 @@ func (g *GraphClient) ListInboxMessages(ctx context.Context, accessToken string,
 	if top > 100 {
 		top = 100
 	}
-	u, _ := url.Parse(graphBase + "/me/mailFolders/inbox/messages")
+	u, _ := url.Parse(g.apiRoot() + "/me/mailFolders/inbox/messages")
 	q := u.Query()
 	q.Set("$top", fmt.Sprintf("%d", top))
 	q.Set("$orderby", "receivedDateTime desc")
@@ -179,7 +189,7 @@ func (g *GraphClient) ListInboxMessages(ctx context.Context, accessToken string,
 
 // GetMessageBody fetches full message for body text.
 func (g *GraphClient) GetMessageBody(ctx context.Context, accessToken string, providerMessageID string) (*driven.GraphMessage, error) {
-	u := graphBase + "/me/messages/" + url.PathEscape(providerMessageID) + "?$select=id,conversationId,receivedDateTime,subject,body,bodyPreview,from,hasAttachments,changeKey"
+	u := g.apiRoot() + "/me/messages/" + url.PathEscape(providerMessageID) + "?$select=id,conversationId,receivedDateTime,subject,body,bodyPreview,from,hasAttachments,changeKey"
 	var m graphMessageJSON
 	if err := g.getJSON(ctx, accessToken, u, &m); err != nil {
 		return nil, err
