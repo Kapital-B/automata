@@ -323,7 +323,9 @@ func (h *Handlers) getMessage(w http.ResponseWriter, r *http.Request) {
 func writeJSON(w http.ResponseWriter, status int, v any) {
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(status)
-	_ = json.NewEncoder(w).Encode(v)
+	enc := json.NewEncoder(w)
+	enc.SetEscapeHTML(false) // keep & in URLs as real ampersands (not \u0026) for copy-paste from JSON
+	_ = enc.Encode(v)
 }
 
 func userIDOrEmpty(r *http.Request) uuid.UUID {

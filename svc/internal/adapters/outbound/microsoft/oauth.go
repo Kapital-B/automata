@@ -13,7 +13,8 @@ import (
 	"github.com/Kapital-B/automata/svc/internal/domain/accounts"
 )
 
-const graphScope = "https://graph.microsoft.com/Mail.Read https://graph.microsoft.com/Mail.Send https://graph.microsoft.com/User.Read offline_access"
+// Space-separated v2 scopes: include openid/offline_access explicitly (Microsoft v2.0 guidance).
+const graphScope = "openid offline_access https://graph.microsoft.com/Mail.Read https://graph.microsoft.com/Mail.Send https://graph.microsoft.com/User.Read"
 
 // OAuth implements driven.MicrosoftOAuth using the v2.0 token endpoint.
 type OAuth struct {
