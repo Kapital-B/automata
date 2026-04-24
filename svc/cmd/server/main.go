@@ -11,8 +11,10 @@ import (
 	"time"
 
 	appaccounts "github.com/Kapital-B/automata/svc/internal/application/accounts"
+	"github.com/Kapital-B/automata/svc/internal/application/auth"
 	appmessages "github.com/Kapital-B/automata/svc/internal/application/messages"
 	httphandler "github.com/Kapital-B/automata/svc/internal/adapters/inbound/http"
+	googleoauth "github.com/Kapital-B/automata/svc/internal/adapters/outbound/google"
 	"github.com/Kapital-B/automata/svc/internal/adapters/outbound/microsoft"
 	"github.com/Kapital-B/automata/svc/internal/adapters/outbound/persistence/sqlite"
 	"github.com/Kapital-B/automata/svc/internal/adapters/outbound/security"
@@ -20,6 +22,8 @@ import (
 	"github.com/go-chi/cors"
 	_ "modernc.org/sqlite"
 )
+
+const msSignInScopes = "openid offline_access profile email"
 
 func main() {
 	log := slog.New(slog.NewJSONHandler(os.Stdout, &slog.HandlerOptions{Level: slog.LevelInfo}))
@@ -51,10 +55,17 @@ func main() {
 	}
 
 	repo := sqlite.NewRepository(db, cfg.OAuthStateTTL)
-	oauth := &microsoft.OAuth{
+
+	msMailOAuth := &microsoft.OAuth{
 		ClientID:     cfg.MSClientID,
 		ClientSecret: cfg.MSClientSecret,
 		RedirectURI:  cfg.MSRedirectURI,
+	}
+	msAuthOAuth := &microsoft.OAuth{
+		ClientID:     cfg.MSClientID,
+		ClientSecret: cfg.MSClientSecret,
+		RedirectURI:  cfg.MSAuthRedirectURI,
+		Scopes:       msSignInScopes,
 	}
 	graph := &microsoft.GraphClient{}
 
@@ -62,7 +73,7 @@ func main() {
 		Accounts:    repo,
 		OAuthState:  repo,
 		JobRuns:     repo,
-		OAuth:       oauth,
+		OAuth:       msMailOAuth,
 		Graph:       graph,
 		Vault:       vault,
 		Dashboard:   cfg.DashboardBaseURL,
@@ -74,23 +85,41 @@ func main() {
 	syncSvc := &appmessages.SyncService{
 		Accounts: repo,
 		Messages: repo,
-		OAuth:    oauth,
+		OAuth:    msMailOAuth,
 		Graph:    graph,
 		Vault:    vault,
 		JobRuns:  repo,
 	}
 
+	var googleClient *googleoauth.OAuth
+	if cfg.GoogleClientID != "" {
+		googleClient = &googleoauth.OAuth{
+			ClientID:     cfg.GoogleClientID,
+			ClientSecret: cfg.GoogleClientSecret,
+			RedirectURI:  cfg.GoogleRedirectURI,
+		}
+	}
+
+	authSvc := auth.NewService(repo, repo, msAuthOAuth, googleClient, cfg.JWTSecret, cfg.JWTTTL)
+
 	h := &httphandler.Handlers{
-		Log:         log,
-		AccountSvc:  accountSvc,
-		SyncSvc:     syncSvc,
-		Accounts:    repo,
-		Messages:    repo,
-		OAuthStates: repo,
-		Dashboard:   cfg.DashboardBaseURL,
-		SuccessPath: cfg.OAuthSuccessPath,
-		ErrorPath:   cfg.OAuthErrorPath,
-		StateTTL:    cfg.OAuthStateTTL,
+		Log:             log,
+		AccountSvc:      accountSvc,
+		SyncSvc:         syncSvc,
+		AuthSvc:         authSvc,
+		Accounts:        repo,
+		Messages:        repo,
+		OAuthStates:     repo,
+		Users:           repo,
+		Dashboard:       cfg.DashboardBaseURL,
+		SuccessPath:     cfg.OAuthSuccessPath,
+		ErrorPath:       cfg.OAuthErrorPath,
+		AuthSuccessPath: cfg.AuthSuccessPath,
+		AuthErrorPath:   cfg.AuthErrorPath,
+		StateTTL:        cfg.OAuthStateTTL,
+		JWTSecret:       cfg.JWTSecret,
+		JWTTTL:          cfg.JWTTTL,
+		DefaultUserID:   cfg.DefaultUserID,
 	}
 
 	go func() {
@@ -107,7 +136,7 @@ func main() {
 		r = cors.New(cors.Options{
 			AllowedOrigins:   cfg.CORSOrigins,
 			AllowedMethods:   []string{"GET", "POST", "DELETE", "OPTIONS"},
-			AllowedHeaders:   []string{"Accept", "Content-Type", "X-Request-ID"},
+			AllowedHeaders:   []string{"Accept", "Content-Type", "X-Request-ID", "Authorization"},
 			AllowCredentials: false,
 		}).Handler(r)
 	}
