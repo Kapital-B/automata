@@ -27,8 +27,8 @@ type SyncResult struct {
 	MessagesUpserted   int
 }
 
-func (s *SyncService) SyncInbox(ctx context.Context, accountID uuid.UUID) (*SyncResult, error) {
-	row, cipher, err := s.Accounts.GetAccount(ctx, accountID)
+func (s *SyncService) SyncInbox(ctx context.Context, userID uuid.UUID, accountID uuid.UUID) (*SyncResult, error) {
+	row, cipher, err := s.Accounts.GetAccount(ctx, userID, accountID)
 	if err != nil {
 		return nil, err
 	}
@@ -62,7 +62,7 @@ func (s *SyncService) SyncInbox(ctx context.Context, accountID uuid.UUID) (*Sync
 	if err != nil {
 		return nil, err
 	}
-	if err := s.Accounts.UpdateAccountTokens(ctx, accountID, newCipher, row.PrimaryEmail, row.GraphTenantID, row.MsalHomeAccountID, "connected", nil); err != nil {
+	if err := s.Accounts.UpdateAccountTokens(ctx, userID, accountID, newCipher, row.PrimaryEmail, row.GraphTenantID, row.MsalHomeAccountID, "connected", nil); err != nil {
 		return nil, err
 	}
 
@@ -121,7 +121,7 @@ func (s *SyncService) SyncInbox(ctx context.Context, accountID uuid.UUID) (*Sync
 		}
 		n++
 	}
-	if err := s.Accounts.UpsertSyncStateTime(ctx, accountID, time.Now().UTC()); err != nil {
+	if err := s.Accounts.UpsertSyncStateTime(ctx, userID, accountID, time.Now().UTC()); err != nil {
 		return nil, err
 	}
 	finished := time.Now().UTC()

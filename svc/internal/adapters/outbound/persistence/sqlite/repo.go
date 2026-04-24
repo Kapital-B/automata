@@ -37,10 +37,10 @@ func parseTime(s string) (time.Time, error) {
 func (r *Repository) InsertAccount(ctx context.Context, a driven.AccountRow, tokenCiphertext []byte) error {
 	now := formatRFC3339(time.Now().UTC())
 	_, err := r.db.ExecContext(ctx, `
-		INSERT INTO accounts (id, label, provider, ms_account_kind, graph_tenant_id, primary_email, msal_home_account_id,
+		INSERT INTO accounts (id, user_id, label, provider, ms_account_kind, graph_tenant_id, primary_email, msal_home_account_id,
 			connection_status, last_error, token_ciphertext, created_at, updated_at)
-		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-		a.ID.String(), a.Label, a.Provider, string(a.MsAccountKind), nullStr(a.GraphTenantID), a.PrimaryEmail,
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+		a.ID.String(), a.UserID.String(), a.Label, a.Provider, string(a.MsAccountKind), nullStr(a.GraphTenantID), a.PrimaryEmail,
 		nullStr(a.MsalHomeAccountID), a.ConnectionStatus, nullStr(a.LastError), tokenCiphertext, now, now,
 	)
 	if err != nil {
@@ -53,18 +53,18 @@ func (r *Repository) InsertAccount(ctx context.Context, a driven.AccountRow, tok
 	return err
 }
 
-func (r *Repository) UpdateAccountTokens(ctx context.Context, id uuid.UUID, tokenCiphertext []byte, primaryEmail string, graphTenantID *string, msalHome *string, status string, lastErr *string) error {
+func (r *Repository) UpdateAccountTokens(ctx context.Context, userID uuid.UUID, id uuid.UUID, tokenCiphertext []byte, primaryEmail string, graphTenantID *string, msalHome *string, status string, lastErr *string) error {
 	now := formatRFC3339(time.Now().UTC())
 	_, err := r.db.ExecContext(ctx, `
 		UPDATE accounts SET token_ciphertext = ?, primary_email = ?, graph_tenant_id = ?, msal_home_account_id = ?,
 			connection_status = ?, last_error = ?, updated_at = ?
-		WHERE id = ?`,
-		tokenCiphertext, primaryEmail, nullStr(graphTenantID), nullStr(msalHome), status, nullStr(lastErr), now, id.String(),
+		WHERE id = ? AND user_id = ?`,
+		tokenCiphertext, primaryEmail, nullStr(graphTenantID), nullStr(msalHome), status, nullStr(lastErr), now, id.String(), userID.String(),
 	)
 	return err
 }
 
-func (r *Repository) GetAccount(ctx context.Context, id uuid.UUID) (*driven.AccountRow, []byte, error) {
+func (r *Repository) GetAccount(ctx context.Context, userID uuid.UUID, id uuid.UUID) (*driven.AccountRow, []byte, error) {
 	var a driven.AccountRow
 	var idStr string
 	var kindStr string
@@ -73,14 +73,15 @@ func (r *Repository) GetAccount(ctx context.Context, id uuid.UUID) (*driven.Acco
 	var createdAt, updatedAt string
 	var lastSync sql.NullString
 
+	var userStr string
 	err := r.db.QueryRowContext(ctx, `
-		SELECT a.id, a.label, a.provider, a.ms_account_kind, a.graph_tenant_id, a.primary_email, a.msal_home_account_id,
+		SELECT a.user_id, a.id, a.label, a.provider, a.ms_account_kind, a.graph_tenant_id, a.primary_email, a.msal_home_account_id,
 			a.connection_status, a.last_error, a.token_ciphertext, a.created_at, a.updated_at, s.last_synced_at
 		FROM accounts a
 		LEFT JOIN account_sync_state s ON s.account_id = a.id
-		WHERE a.id = ?`, id.String(),
+		WHERE a.id = ? AND a.user_id = ?`, id.String(), userID.String(),
 	).Scan(
-		&idStr, &a.Label, &a.Provider, &kindStr, &graphT, &a.PrimaryEmail, &msalH,
+		&userStr, &idStr, &a.Label, &a.Provider, &kindStr, &graphT, &a.PrimaryEmail, &msalH,
 		&a.ConnectionStatus, &lastE, &tok, &createdAt, &updatedAt, &lastSync,
 	)
 	if errors.Is(err, sql.ErrNoRows) {
@@ -89,6 +90,11 @@ func (r *Repository) GetAccount(ctx context.Context, id uuid.UUID) (*driven.Acco
 	if err != nil {
 		return nil, nil, err
 	}
+	uidUser, err := uuid.Parse(userStr)
+	if err != nil {
+		return nil, nil, err
+	}
+	a.UserID = uidUser
 	uid, err := uuid.Parse(idStr)
 	if err != nil {
 		return nil, nil, err
@@ -121,13 +127,14 @@ func (r *Repository) GetAccount(ctx context.Context, id uuid.UUID) (*driven.Acco
 	return &a, tokenBytes, nil
 }
 
-func (r *Repository) ListAccounts(ctx context.Context) ([]driven.AccountRow, error) {
+func (r *Repository) ListAccounts(ctx context.Context, userID uuid.UUID) ([]driven.AccountRow, error) {
 	rows, err := r.db.QueryContext(ctx, `
-		SELECT a.id, a.label, a.provider, a.ms_account_kind, a.graph_tenant_id, a.primary_email, a.msal_home_account_id,
+		SELECT a.user_id, a.id, a.label, a.provider, a.ms_account_kind, a.graph_tenant_id, a.primary_email, a.msal_home_account_id,
 			a.connection_status, a.last_error, a.created_at, a.updated_at, s.last_synced_at
 		FROM accounts a
 		LEFT JOIN account_sync_state s ON s.account_id = a.id
-		ORDER BY a.created_at ASC`)
+		WHERE a.user_id = ?
+		ORDER BY a.created_at ASC`, userID.String())
 	if err != nil {
 		return nil, err
 	}
@@ -139,12 +146,18 @@ func (r *Repository) ListAccounts(ctx context.Context) ([]driven.AccountRow, err
 		var graphT, msalH, lastE sql.NullString
 		var createdAt, updatedAt string
 		var lastSync sql.NullString
+		var userStr string
 		if err := rows.Scan(
-			&idStr, &a.Label, &a.Provider, &kindStr, &graphT, &a.PrimaryEmail, &msalH,
+			&userStr, &idStr, &a.Label, &a.Provider, &kindStr, &graphT, &a.PrimaryEmail, &msalH,
 			&a.ConnectionStatus, &lastE, &createdAt, &updatedAt, &lastSync,
 		); err != nil {
 			return nil, err
 		}
+		uidUser, err := uuid.Parse(userStr)
+		if err != nil {
+			return nil, err
+		}
+		a.UserID = uidUser
 		uid, err := uuid.Parse(idStr)
 		if err != nil {
 			return nil, err
@@ -175,29 +188,30 @@ func (r *Repository) ListAccounts(ctx context.Context) ([]driven.AccountRow, err
 	return out, rows.Err()
 }
 
-func (r *Repository) DeleteAccount(ctx context.Context, id uuid.UUID) error {
+func (r *Repository) DeleteAccount(ctx context.Context, userID uuid.UUID, id uuid.UUID) error {
 	tx, err := r.db.BeginTx(ctx, nil)
 	if err != nil {
 		return err
 	}
 	defer tx.Rollback()
-	if _, err := tx.ExecContext(ctx, `DELETE FROM messages WHERE account_id = ?`, id.String()); err != nil {
+	if _, err := tx.ExecContext(ctx, `DELETE FROM messages WHERE account_id IN (SELECT id FROM accounts WHERE id = ? AND user_id = ?)`, id.String(), userID.String()); err != nil {
 		return err
 	}
-	if _, err := tx.ExecContext(ctx, `DELETE FROM account_sync_state WHERE account_id = ?`, id.String()); err != nil {
+	if _, err := tx.ExecContext(ctx, `DELETE FROM account_sync_state WHERE account_id IN (SELECT id FROM accounts WHERE id = ? AND user_id = ?)`, id.String(), userID.String()); err != nil {
 		return err
 	}
-	if _, err := tx.ExecContext(ctx, `DELETE FROM accounts WHERE id = ?`, id.String()); err != nil {
+	if _, err := tx.ExecContext(ctx, `DELETE FROM accounts WHERE id = ? AND user_id = ?`, id.String(), userID.String()); err != nil {
 		return err
 	}
 	return tx.Commit()
 }
 
-func (r *Repository) UpsertSyncStateTime(ctx context.Context, accountID uuid.UUID, at time.Time) error {
+func (r *Repository) UpsertSyncStateTime(ctx context.Context, userID uuid.UUID, accountID uuid.UUID, at time.Time) error {
 	now := formatRFC3339(at.UTC())
 	_, err := r.db.ExecContext(ctx, `
-		UPDATE account_sync_state SET last_synced_at = ? WHERE account_id = ?`,
-		now, accountID.String(),
+		UPDATE account_sync_state SET last_synced_at = ?
+		WHERE account_id = ? AND EXISTS (SELECT 1 FROM accounts WHERE id = ? AND user_id = ?)`,
+		now, accountID.String(), accountID.String(), userID.String(),
 	)
 	return err
 }
@@ -233,7 +247,7 @@ func (r *Repository) UpsertMessage(ctx context.Context, m driven.MessageRow) err
 	return err
 }
 
-func (r *Repository) ListMessagesByAccount(ctx context.Context, accountID uuid.UUID, limit, offset int) ([]driven.MessageRow, error) {
+func (r *Repository) ListMessagesByAccount(ctx context.Context, userID uuid.UUID, accountID uuid.UUID, limit, offset int) ([]driven.MessageRow, error) {
 	if limit <= 0 {
 		limit = 50
 	}
@@ -244,10 +258,12 @@ func (r *Repository) ListMessagesByAccount(ctx context.Context, accountID uuid.U
 		offset = 0
 	}
 	rows, err := r.db.QueryContext(ctx, `
-		SELECT id, account_id, provider_message_id, conversation_id, received_at, subject, from_json,
-			to_cc_preview, body_text, body_fetched_at, has_attachments, raw_etag, created_at, updated_at
-		FROM messages WHERE account_id = ? ORDER BY received_at DESC LIMIT ? OFFSET ?`,
-		accountID.String(), limit, offset,
+		SELECT m.id, m.account_id, m.provider_message_id, m.conversation_id, m.received_at, m.subject, m.from_json,
+			m.to_cc_preview, m.body_text, m.body_fetched_at, m.has_attachments, m.raw_etag, m.created_at, m.updated_at
+		FROM messages m
+		INNER JOIN accounts a ON a.id = m.account_id AND a.user_id = ?
+		WHERE m.account_id = ? ORDER BY m.received_at DESC LIMIT ? OFFSET ?`,
+		userID.String(), accountID.String(), limit, offset,
 	)
 	if err != nil {
 		return nil, err
@@ -256,11 +272,13 @@ func (r *Repository) ListMessagesByAccount(ctx context.Context, accountID uuid.U
 	return scanMessageRows(rows)
 }
 
-func (r *Repository) GetMessage(ctx context.Context, id uuid.UUID) (*driven.MessageRow, error) {
+func (r *Repository) GetMessage(ctx context.Context, userID uuid.UUID, id uuid.UUID) (*driven.MessageRow, error) {
 	row := r.db.QueryRowContext(ctx, `
-		SELECT id, account_id, provider_message_id, conversation_id, received_at, subject, from_json,
-			to_cc_preview, body_text, body_fetched_at, has_attachments, raw_etag, created_at, updated_at
-		FROM messages WHERE id = ?`, id.String(),
+		SELECT m.id, m.account_id, m.provider_message_id, m.conversation_id, m.received_at, m.subject, m.from_json,
+			m.to_cc_preview, m.body_text, m.body_fetched_at, m.has_attachments, m.raw_etag, m.created_at, m.updated_at
+		FROM messages m
+		INNER JOIN accounts a ON a.id = m.account_id AND a.user_id = ?
+		WHERE m.id = ?`, userID.String(), id.String(),
 	)
 	m, err := scanMessageRow(row)
 	if err != nil {
@@ -342,12 +360,59 @@ func scanMessageScanner(s rowScanner) (*driven.MessageRow, error) {
 
 // --- oauth state ---
 
-func (r *Repository) InsertState(ctx context.Context, state string, kind accounts.MsAccountKind, labelHint *string, createdAt time.Time) error {
+func (r *Repository) InsertOAuthState(ctx context.Context, state, flow string, userID *uuid.UUID, payloadJSON string, createdAt time.Time) error {
+	var uid any
+	if userID != nil {
+		uid = userID.String()
+	}
 	_, err := r.db.ExecContext(ctx, `
-		INSERT INTO oauth_states (state, ms_account_kind, label_hint, created_at) VALUES (?, ?, ?, ?)`,
-		state, string(kind), nullStr(labelHint), formatRFC3339(createdAt.UTC()),
+		INSERT INTO oauth_states (state, flow, user_id, payload_json, created_at) VALUES (?, ?, ?, ?, ?)`,
+		state, flow, uid, payloadJSON, formatRFC3339(createdAt.UTC()),
 	)
 	return err
+}
+
+func (r *Repository) TakeOAuthState(ctx context.Context, state string) (flow string, userID *uuid.UUID, payloadJSON string, ok bool, err error) {
+	tx, err := r.db.BeginTx(ctx, nil)
+	if err != nil {
+		return "", nil, "", false, err
+	}
+	defer tx.Rollback()
+	var f, payload, created string
+	var uid sql.NullString
+	err = tx.QueryRowContext(ctx, `SELECT flow, user_id, payload_json, created_at FROM oauth_states WHERE state = ?`, state).Scan(&f, &uid, &payload, &created)
+	if errors.Is(err, sql.ErrNoRows) {
+		return "", nil, "", false, nil
+	}
+	if err != nil {
+		return "", nil, "", false, err
+	}
+	createdAt, err := parseTime(created)
+	if err != nil {
+		return "", nil, "", false, err
+	}
+	if time.Now().UTC().Sub(createdAt) > r.OAuthStateTTL {
+		_, _ = tx.ExecContext(ctx, `DELETE FROM oauth_states WHERE state = ?`, state)
+		if err := tx.Commit(); err != nil {
+			return "", nil, "", false, err
+		}
+		return "", nil, "", false, nil
+	}
+	if _, err := tx.ExecContext(ctx, `DELETE FROM oauth_states WHERE state = ?`, state); err != nil {
+		return "", nil, "", false, err
+	}
+	if err := tx.Commit(); err != nil {
+		return "", nil, "", false, err
+	}
+	var u *uuid.UUID
+	if uid.Valid {
+		parsed, e := uuid.Parse(uid.String)
+		if e != nil {
+			return "", nil, "", false, e
+		}
+		u = &parsed
+	}
+	return f, u, payload, true, nil
 }
 
 func (r *Repository) DeleteExpiredStates(ctx context.Context, before time.Time) error {
