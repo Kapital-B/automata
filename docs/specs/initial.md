@@ -2,7 +2,7 @@
 
 **Status:** Draft  
 **Companion PRD:** [docs/prds/initial.md](../prds/initial.md)  
-**Last updated:** 2026-04-24
+**Last updated:** 2026-04-24 (monorepo `svc/`/`web/`, Go backend, Phase 1 API-only)
 
 This document specifies architecture, data model, integrations, APIs, and operational behavior. The **PRD** remains the source of product intent; this document is the source of **implementation invariants** (especially **multi-account provenance**).
 
@@ -13,10 +13,10 @@ This document specifies architecture, data model, integrations, APIs, and operat
 ```mermaid
 flowchart LR
   subgraph client [Client]
-    UI[React dashboard]
+    UI[web/ dashboard]
   end
   subgraph backend [Backend]
-    API[FastAPI]
+    API[Go HTTP API in svc/]
     Jobs[Scheduler / job runner]
     DB[(SQLite initially)]
   end
@@ -32,13 +32,24 @@ flowchart LR
   API --> Graph
 ```
 
-- **React** talks only to **FastAPI** (same origin or CORS-controlled).
+- The **`web/`** app (React per [§10](#10-react-dashboard-contract)) talks only to the **`svc/`** HTTP API (same origin or CORS-controlled).
 - **Background work** (sync, summarize, rules) runs in a **job runner** invoked by a **scheduler** and by **on-demand** API calls; both paths **mutate state only through the same domain services** so behavior and provenance stay consistent.
 - **LLM** is **out of process**; the backend calls it over HTTP with a configurable base URL and model name.
 
 ---
 
 ## 2. Architectural principles
+
+### 2.0 Repository layout (`svc/` and `web/`)
+
+The repository root has **two top-level directories**:
+
+| Directory | Role |
+| --------- | ---- |
+| **`svc/`** | **Backend:** Go service(s), migrations, domain/application/adapters code per [§2.4](#24-backend-project-structure-ddd-hexagonal-ports-and-adapters). |
+| **`web/`** | **Frontend:** reserved for the React dashboard ([§10](#10-react-dashboard-contract)); product UI is **not** implemented in **Phase 1** (see [§12.1](#121-phase-1--microsoft-mail-read--message-store)). |
+
+**Phase 0–1:** Ship and verify behavior from **`svc/`** only (HTTP API, persistence, Microsoft integration). **`web/`** should still exist as a **placeholder** (for example `README.md` describing the future app, or a minimal scaffold) so CI, documentation, and **`CORS_ORIGINS` / `DASHBOARD_BASE_URL`** have a stable target for when the UI lands in a later phase.
 
 ### 2.1 Provenance (non-negotiable)
 
@@ -62,37 +73,39 @@ Every persistent record that represents **user data**, **derived intelligence**,
 
 ### 2.4 Backend project structure (DDD, hexagonal, ports and adapters)
 
-The Python backend follows **domain-driven design** naming and a **hexagonal (ports and adapters)** layout so **HTTP**, **schedulers**, and **future CLIs** are thin **driving adapters** into the same **application** (use-case) layer, which orchestrates **domain** rules and persists through **driven ports** implemented in infrastructure.
+The backend in **`svc/`** is implemented in **Go** and follows **domain-driven design** naming and a **hexagonal (ports and adapters)** layout so **HTTP**, **schedulers**, and **future CLIs** are thin **driving adapters** into the same **application** (use-case) layer, which orchestrates **domain** rules and persists through **driven ports** implemented in infrastructure.
 
-**Dependency direction:** `adapters` → `application` → `domain`. The **domain** layer imports neither FastAPI, SQLAlchemy, MSAL, nor HTTP clients. **Application** services depend on **domain** types and **port** protocols (ABCs or `typing.Protocol`) only; concrete **adapters** implement those ports.
+**Dependency direction:** `adapters` → `application` → `domain`. The **domain** package must not import HTTP frameworks, SQL drivers, Microsoft SDKs, or other adapters. **Application** code depends on **domain** types and small **interfaces** (ports) only; **adapters** in `internal/adapters/...` implement those interfaces (`database/sql`, Graph REST client, OAuth2 token exchange, etc.).
 
-**Suggested package layout** (names are normative for this codebase):
+**Suggested layout under `svc/`** (names are normative; adjust `internal/` subtree names to match the Go module path):
 
 ```text
-src/<product>/
-  domain/                    # entities, value objects, domain services, invariants
-    accounts/
-    messages/
-    shared/                  # cross-cutting value types (e.g. identifiers) if needed
-  application/               # use cases / application services; orchestration only
-    accounts/
-    messages/
-    ports/
-      driven/                # outbound: persistence, mail provider, token vault, clock, …
-  adapters/
-    inbound/
-      http/                  # FastAPI routers, middleware, app factory → call application/
-      jobs/                  # scheduler / worker entrypoints → same use cases as HTTP
-    outbound/
-      persistence/           # e.g. SQLAlchemy repositories implementing driven ports
-      microsoft/             # MSAL + Graph client; anti-corruption from Graph DTOs → domain
-      security/              # token encryption, etc.
-  configuration/             # env-backed settings (see [§9](#9-configuration-environment))
+svc/
+  cmd/server/                # HTTP API entrypoint: wiring, listen, graceful shutdown
+  cmd/worker/                # optional: separate binary for jobs when isolation is needed
+  internal/
+    domain/                  # entities, value objects, domain services, invariants
+      accounts/
+      messages/
+      shared/                # cross-cutting value types (e.g. identifiers) if needed
+    application/             # use cases; orchestration only
+      accounts/
+      messages/
+      ports/                 # driven port interfaces consumed by application
+    adapters/
+      inbound/
+        http/                # e.g. chi/echo/std net/http handlers → application use cases
+        schedule/            # cron / ticker entrypoints → same use cases as HTTP
+      outbound/
+        persistence/         # sqlite/postgres repositories implementing ports
+        microsoft/           # OAuth2 (authorization code) + Graph HTTP; map DTOs → domain
+        security/            # token encryption at rest, etc.
+  migrations/                # SQL migrations (goose, golang-migrate, Atlas, etc.)
 ```
 
-**Composition root:** a single wiring module (e.g. `adapters/inbound/http/dependencies.py` or `composition.py`) constructs concrete adapters and injects them into application services. **Jobs** and **on-demand API** handlers both invoke the **same** application use cases, matching [§1](#1-system-context).
+**Composition root:** construct repositories, token vault, and mail clients in **`cmd/server/main.go`** (or a dedicated `internal/wiring` package) and pass them into application constructors. **Scheduled jobs** and **HTTP handlers** call the **same** application services, matching [§1](#1-system-context).
 
-**Bounded contexts:** start with **`domain/accounts`** and **`domain/messages`** (and matching `application/` modules). Add further `domain/` / `application/` subtrees as features land (categorization, summaries, forwarding), each with its own **driven ports** rather than leaking infrastructure into domain.
+**Bounded contexts:** start with **`internal/domain/accounts`** and **`internal/domain/messages`** (and matching `application/` packages). Add further subtrees as features land (categorization, summaries, forwarding), each behind **ports** rather than leaking infrastructure into domain.
 
 **PostgreSQL** remains the natural choice for **later** multi-process hosting or heavier workloads; the **persistence adapter** stays behind repository ports so the store can be swapped without changing domain or application code.
 
@@ -106,7 +119,7 @@ The same **Microsoft Graph** APIs apply to **work or school** mailboxes (Entra I
 
 - **Entra / Azure app registration — supported sign-in audience:** To allow **personal Outlook** in the same app you use for work, register with **“Accounts in any organizational directory and personal Microsoft accounts”** (multi-tenant + MSA) or the equivalent. A **work-only, single-tenant** app **cannot** sign in **MSA (personal)** users.
 - **Microsoft Entra** app (confidential client where applicable): **delegated** permissions to the signed-in mailbox.
-- **MSAL** (or equivalent) for authorization code + refresh flow; **store refresh token per `account_id`** (encrypted at rest). Access token refresh is internal to the connector before each Graph batch.
+- **OAuth 2.0 authorization code + refresh** (in Go: use a maintained Microsoft Entra / OAuth2 client or direct HTTP to the token endpoint; the spec does not require a particular SDK). **Store refresh token per `account_id`** (encrypted at rest). Access token refresh is internal to the connector before each Graph batch.
 - **Authority** for each connect attempt (which login experience the user gets):
   - **`https://login.microsoftonline.com/organizations`** — work or school only;
   - **`https://login.microsoftonline.com/consumers`** — **personal** Microsoft account only;
@@ -165,7 +178,7 @@ If omitted, use application singleton or omit table.
 | `ms_account_kind`   | enum string | `work` \| `personal` (which authority was used at connect) |
 | `graph_tenant_id`   | text nullable | For work: tenant id; for **personal** MSA often a placeholder or claim-derived id—document behavior |
 | `primary_email`     | text        | Mailbox UPN or SMTP |
-| `msal_home_account_id` | text nullable | MSAL account identifier for token cache binding |
+| `msal_home_account_id` | text nullable | Stable **home account** identifier from the identity platform for token cache binding (name retained for compatibility; set when the OAuth library exposes it) |
 | `connection_status` | enum        | `connected` \| `error` \| `expired` \| … |
 | `last_error`        | text nullable | Sanitized, no secrets |
 | `created_at` / `updated_at` | timestamptz | |
@@ -400,9 +413,9 @@ The backend **must** define **versioned** JSON shapes. Prompts end with: **“Re
 
 ---
 
-## 6. HTTP API (FastAPI)
+## 6. HTTP API (Go service in `svc/`)
 
-**Conventions:** JSON bodies. **`X-Request-ID`** correlation. All list responses that touch mail include **`account_id`** on each item. **Auth** for v1: session cookie or API key for local use (TBD; document in deployment).
+The **`svc/`** process exposes the routes below (for example via **chi**, **Echo**, or **`net/http`**). **Conventions:** JSON bodies. **`X-Request-ID`** correlation. All list responses that touch mail include **`account_id`** on each item. **Auth** for v1: session cookie or API key for local use (TBD; document in deployment).
 
 | Method & path | Purpose |
 | ------------- | ------- |
@@ -433,7 +446,7 @@ The backend **must** define **versioned** JSON shapes. Prompts end with: **“Re
 - **Success response:** `302` redirect to a **frontend** URL only (e.g. `{DASHBOARD_BASE_URL}/accounts/connected?account_id={uuid}`). Pass **at most** the internal `account_id` (non-secret). **Do not** put access tokens, refresh tokens, or Graph IDs in the query string.
 - **Failure response:** `302` to an app error route (e.g. `{DASHBOARD_BASE_URL}/accounts/error?code=…`) with **stable, client-readable** `code` values such as: `access_denied`, `admin_consent_required`, `invalid_state`, `token_exchange_failed`, `redirect_mismatch` (so the UI can show the right [§10.1](#101-account-connection-flow-ui) recovery copy).
 - **Re-connect:** Running `POST /api/accounts` again for a user who may already have accounts is the same as “add another” unless you implement a dedicated **re-link** that pairs with an existing `account_id` (optional; otherwise user **Disconnect** then add again, or add a second account).
-- **`redirect_uri` in Entra:** Must be the **API** callback (e.g. `https://api…/api/accounts/callback`), not the React dev server URL, and must **exactly** match the app registration.
+- **`redirect_uri` in Entra:** Must be the **API** callback (e.g. `https://api…/api/accounts/callback`), not the **`web/`** dev server URL, and must **exactly** match the app registration.
 
 **WebSocket (optional):** `WS /api/runs/{id}/stream` for job progress; not required for v1 if polling is acceptable.
 
@@ -441,7 +454,7 @@ The backend **must** define **versioned** JSON shapes. Prompts end with: **“Re
 
 ## 7. Scheduler and job runner
 
-- **APScheduler** (in-process) or **Celery** + **Redis** (separate workers): choose based on need for long-running tasks and process isolation. Minimum behavior:
+- **In-process** scheduling in Go (for example `robfig/cron` or a simple **goroutine + ticker** for v1), **or** a **separate worker binary** under `svc/cmd/worker` with **Redis** / queue if isolation is required. Minimum behavior:
   - **Nightly (per account):** `sync` → `categorize` (if separate) → `summarize` → `forward_rules` (if enabled).
   - **Concurrency:** at most one **sync** per `account_id` at a time; **LLM** calls batched with concurrency limits to avoid OOM on LM Studio host.
 - **On-demand** endpoints enqueue the same `job_type` with `trigger=api`.
@@ -464,13 +477,13 @@ The backend **must** define **versioned** JSON shapes. Prompts end with: **“Re
 
 | Variable | Purpose |
 | -------- | ------- |
-| `DATABASE_URL` | SQLAlchemy/async URL (e.g. `sqlite+aiosqlite:///…` initially; `postgresql+asyncpg://…` when using Postgres). |
+| `DATABASE_URL` | SQL store DSN or path. **SQLite:** e.g. `file:./data.db` or driver-specific DSN supported by the chosen driver (`modernc.org/sqlite`, `mattn/go-sqlite3`, etc.). **PostgreSQL:** standard `postgres://…` URL when using `pgx` / `lib/pq`. |
 | `MS_CLIENT_ID` / `MS_CLIENT_SECRET` | Entra app. |
 | `MS_REDIRECT_URI` | Must match app registration. |
 | `MS_AUTHORITY` | **Default** host only if you do not build URLs per [§3.1](#31-auth-and-account-types); in practice the backend **constructs** `.../organizations` vs `.../consumers` from `ms_account_kind` on `POST /api/accounts` (or override `MS_AUTHORITY_ORGANIZATIONS` / `MS_AUTHORITY_CONSUMERS` for rare clouds). |
 | `LLM_BASE_URL` / `LLM_MODEL` / `LLM_API_KEY` | Local LM Studio. |
 | `CORS_ORIGINS` | Comma list. |
-| `DASHBOARD_BASE_URL` | Origin of the React app, used to build `302` targets after OAuth (see [§6.1](#61-oauth-and-account-connection-backend)). |
+| `DASHBOARD_BASE_URL` | Origin of the future **`web/`** app (for example `http://localhost:5173` in dev), used to build `302` targets after OAuth (see [§6.1](#61-oauth-and-account-connection-backend)). Must align with **`CORS_ORIGINS`** when the UI is enabled. |
 | `OAUTH_SUCCESS_PATH` / `OAUTH_ERROR_PATH` | Optional path suffixes; default e.g. `/accounts/connected` and `/accounts/error` if you avoid separate `OAUTH_SUCCESS_URL`. |
 | `SCHEDULER_UTC_CRON` | Nightly default. |
 | `ENCRYPTION_KEY` | For token field (if not using host KMS). |
@@ -478,6 +491,8 @@ The backend **must** define **versioned** JSON shapes. Prompts end with: **“Re
 ---
 
 ## 10. React dashboard (contract)
+
+The production dashboard is implemented under repository **`web/`** (see [§2.0](#20-repository-layout-svc-and-web)). **Phase 1** does **not** ship this UI; the contracts below remain the **authoritative product contract** for when **`web/`** is built.
 
 - **Account switcher** + visible **account badge** on every message/summary line.
 - **Refresh summary** → `POST .../summaries/refresh` then poll `GET /api/runs/{id}` or refetch `GET /api/summaries`.
@@ -505,8 +520,8 @@ The backend **must** define **versioned** JSON shapes. Prompts end with: **“Re
 ```mermaid
 sequenceDiagram
   participant U as User
-  participant R as React
-  participant A as FastAPI
+  participant R as web/ app
+  participant A as svc/ API
   participant M as Microsoft
   U->>R: Add account, Continue
   R->>A: POST /api/accounts
@@ -540,8 +555,8 @@ Phases are **sequential**: each phase produces something **shippable** and **tes
 
 | Phase | Name | Goal |
 | ----- | ---- | ---- |
-| 0 | Foundation | Runnable API, DB, health, project layout. |
-| 1 | Microsoft mail + message store | Connect **work and/or personal** account(s) via Graph, pull mail into `messages` with full provenance. |
+| 0 | Foundation | Runnable **`svc/`** Go API, DB, health, **`svc/`**/**`web/`** layout ([§2.0](#20-repository-layout-svc-and-web)). |
+| 1 | Microsoft mail + message store | **`svc/`** API: connect **work and/or personal** account(s) via Graph, pull mail into `messages` with full provenance; **`web/`** UI deferred ([§12.1](#121-phase-1--microsoft-mail-read--message-store)). |
 | 2 | Incremental sync + job runs | Delta (or resumable) sync, `job_runs`, scheduled + on-demand sync. |
 | 3 | LLM categorization | JSON triage, `message_categories` + `category_definitions`. |
 | 4 | Summaries | `summary_snapshots`, action items + FYI, refresh API, minimal UI. |
@@ -551,7 +566,7 @@ Phases are **sequential**: each phase produces something **shippable** and **tes
 
 ### 12.0 Phase 0 — Foundation
 
-**Delivers:** FastAPI app, configuration (`DATABASE_URL`, `CORS_ORIGINS` placeholder), structured logging, `GET /api/health`, database migration tool and **initial schema** for `accounts` and `account_sync_state` (can be empty), **`domain/`**, **`application/`**, and **`adapters/`** layout per [§2.4](#24-backend-project-structure-ddd-hexagonal-ports-and-adapters). **SQLite** as the default database for Phase 0. Optional: `users` single row or skip.
+**Delivers:** **`svc/`** Go module with HTTP server, configuration (`DATABASE_URL`, `CORS_ORIGINS` placeholder), structured logging, `GET /api/health`, database migration tool and **initial schema** for `accounts` and `account_sync_state` (can be empty), **`internal/domain/`**, **`internal/application/`**, and **`internal/adapters/`** layout per [§2.4](#24-backend-project-structure-ddd-hexagonal-ports-and-adapters). **SQLite** as the default database for Phase 0. Repo root includes **`web/`** per [§2.0](#20-repository-layout-svc-and-web) (placeholder only in this phase). Optional: `users` single row or skip.
 
 **Exit criteria:** Server starts; DB applies migrations; no mail or LLM yet.
 
@@ -559,9 +574,11 @@ Phases are **sequential**: each phase produces something **shippable** and **tes
 
 ### 12.1 Phase 1 — Microsoft mail read + message store
 
-**Delivers:** Entra app with **work + personal Microsoft accounts** as supported sign-in types (per [§3.1](#31-auth-and-account-types)), env + MSAL authorization-code flow, **per-request authority** for `ms_account_kind` `work` vs `personal`, `GET/POST` OAuth start + callback, encrypted **refresh token per account** in `accounts` with `ms_account_kind` persisted. Microsoft Graph: **list and fetch** messages (Inbox) into `messages` with `provider_message_id` and **unique** `(account_id, provider_message_id)`. APIs: `GET /api/accounts`, `POST` connect flow, `POST /api/accounts/{id}/sync` (sync can be synchronous in this phase to simplify debugging). **UI:** A minimal **connect flow** as in [§10.1](#101-account-connection-flow-ui): **Settings/Accounts** with empty state, **Add account** → **Work or school** vs **Personal** → `302` to Microsoft, **success and error** return routes, list of connected accounts and **Disconnect**; full-page `authorization_url` redirect (no popups required for v1).
+**Delivers:** Entra app with **work + personal Microsoft accounts** as supported sign-in types (per [§3.1](#31-auth-and-account-types)), env + **OAuth2 authorization-code flow** (refresh tokens stored per account), **per-request authority** for `ms_account_kind` `work` vs `personal`, OAuth start (`POST /api/accounts`) + callback (`GET /api/accounts/callback`), encrypted **refresh token per account** in `accounts` with `ms_account_kind` persisted. Microsoft Graph: **list and fetch** messages (Inbox) into `messages` with `provider_message_id` and **unique** `(account_id, provider_message_id)`. APIs: `GET /api/accounts`, `GET /api/accounts/{id}`, `DELETE /api/accounts/{id}`, `POST /api/accounts/{id}/sync` (sync can be synchronous in this phase to simplify debugging). Configure **`CORS_ORIGINS`** and **`DASHBOARD_BASE_URL`** so a future **`web/`** app can call the API and receive OAuth **302** redirects to the URLs described in [§6.1](#61-oauth-and-account-connection-backend) and [§10.1](#101-account-connection-flow-ui).
 
-**Exit criteria:** At least one **work** and one **personal** connection can be created (or two of same type) with **distinct** `account_id` rows; messages never cross accounts; `ms_account_kind` is correct in the API and DB.
+**Out of scope for Phase 1:** **No React (or other) UI in `web/`** — the dashboard flow in [§10.1](#101-account-connection-flow-ui) is **not** implemented in this phase. Verify connect, sync, list, and disconnect via **automated tests** (mocked Graph where practical), **`curl`**, or **OpenAPI**/**Bruno**/Postman against **`svc/`**; document manual steps in `svc/` (or repo) README.
+
+**Exit criteria:** At least one **work** and one **personal** connection can be created (or two of same type) with **distinct** `account_id` rows; messages never cross accounts; `ms_account_kind` is correct in the API and DB; **`web/`** exists at repo root as reserved space per [§2.0](#20-repository-layout-svc-and-web).
 
 **Depends on:** Phase 0.
 
@@ -609,9 +626,9 @@ Phases are **sequential**: each phase produces something **shippable** and **tes
 
 ### 12.7 Phase 7 — Hardening + dashboard UX
 
-**Delivers:** Full **React** app per [§10](#10-react-dashboard-contract) (account switcher, all lists with `account_id` visible, error states for token expiry, run polling). E2E or integration tests (mocked Graph) for [§11](#11-testing-and-verification-engineering). Production-minded **CORS**, secret handling, and **no** sensitive logging.
+**Delivers:** Full **React** app in **`web/`** per [§10](#10-react-dashboard-contract) (account switcher, all lists with `account_id` visible, error states for token expiry, run polling). E2E or integration tests (mocked Graph) for [§11](#11-testing-and-verification-engineering). Production-minded **CORS**, secret handling, and **no** sensitive logging.
 
-**Exit criteria:** `README` run instructions; two-account manual test passes.
+**Exit criteria:** `README` run instructions for **`svc/`** and **`web/`**; two-account manual test passes in the UI.
 
 **Depends on:** Phases 0–6 (or 0–4 + 6 if Phase 5 deferred per optional reorder above).
 

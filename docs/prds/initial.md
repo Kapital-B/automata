@@ -2,11 +2,11 @@
 
 **Status:** Draft  
 **Owner:** Product (single-user / self-hosted context)  
-**Last updated:** 2026-04-24
+**Last updated:** 2026-04-24 (monorepo `svc/`/`web/`, Go backend)
 
 ## 1. Summary
 
-This document defines a personal automation product that helps manage email through a **React-based dashboard**, a **FastAPI** backend, and a **locally hosted LLM** (for example via LM Studio). The system summarizes incoming mail, surfaces action items and important but non-urgent information, categorizes messages, supports **rule-based forwarding** to allowlisted addresses, and **auto-drafts** replies in-app (with explicit send approval). The backend runs scheduled jobs (for example daily summarization) and on-demand tasks (for example “refresh summary now”).
+This document defines a personal automation product that helps manage email through a **React-based dashboard** (repository **`web/`**), a **Go** HTTP API (**`svc/`**), and a **locally hosted LLM** (for example via LM Studio). The system summarizes incoming mail, surfaces action items and important but non-urgent information, categorizes messages, supports **rule-based forwarding** to allowlisted addresses, and **auto-drafts** replies in-app (with explicit send approval). The backend runs scheduled jobs (for example daily summarization) and on-demand tasks (for example “refresh summary now”).
 
 A **core requirement** is support for **multiple connected email accounts**. Every piece of data—messages, summaries, categories, drafts, and audit logs—**must be attributable to a specific account** (full **provenance**). No user-facing or stored artifact should be ambiguous about its source account.
 
@@ -87,8 +87,13 @@ Managing several mailboxes and high volume is time-consuming. A local LLM can ex
 
 ### 6.6 Backend and operations
 
-- **FastAPI** serves APIs and (if used) a thin auth/session layer for the dashboard.
+- The **`svc/`** Go service serves APIs and (if used) a thin auth/session layer for the dashboard.
 - **Scheduled tasks** run periodic sync, summarization, and reporting; **on-demand** jobs map to the same internal pipeline with explicit run metadata (**account** + job type + time range).
+
+### 6.7 Repository layout
+
+- **`svc/`** — backend (Go), persistence, Microsoft Graph integration, jobs.
+- **`web/`** — frontend (React). Early implementation phases may ship **`svc/`** alone; **`web/`** remains the home for the dashboard contract in the technical spec.
 
 ## 7. Security and Trust (Product-Level)
 
