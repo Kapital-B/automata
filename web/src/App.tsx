@@ -19,6 +19,8 @@ import LoginPage from "./pages/Login";
 import RegisterPage from "./pages/Register";
 import AuthCallbackPage from "./pages/AuthCallback";
 import AuthErrorPage from "./pages/AuthError";
+import AccountsConnectedPage from "./pages/AccountsConnected";
+import AccountsErrorPage from "./pages/AccountsError";
 
 const queryClient = new QueryClient();
 
@@ -42,6 +44,8 @@ const App = () => (
             <Route path="/register" element={<RegisterPage />} />
             <Route path="/auth/callback" element={<AuthCallbackPage />} />
             <Route path="/auth/error" element={<AuthErrorPage />} />
+            <Route path="/accounts/connected" element={<AccountsConnectedPage />} />
+            <Route path="/accounts/error" element={<AccountsErrorPage />} />
             <Route
               path="/today"
               element={

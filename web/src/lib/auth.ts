@@ -28,6 +28,45 @@ type OAuthStartResponse = {
   authorization_url: string;
 };
 
+export type MailAccount = {
+  id: string;
+  label: string;
+  provider: string;
+  ms_account_kind: "work" | "personal" | "common";
+  primary_email: string;
+  connection_status: "connected" | "error" | "expired";
+  last_error?: string;
+  last_synced_at?: string;
+};
+
+export type SyncAccountResponse = {
+  job_run_id: string;
+  messages_upserted: number;
+  status: string;
+};
+
+export type JobRun = {
+  id: string;
+  account_id?: string;
+  account_label?: string;
+  job_type: string;
+  trigger: "api" | "schedule";
+  status: "pending" | "running" | "success" | "failed" | "cancelled";
+  time_window_start?: string;
+  time_window_end?: string;
+  started_at: string;
+  finished_at?: string;
+  error_message?: string;
+  meta_json: Record<string, unknown>;
+};
+
+export type ListRunsFilter = {
+  accountId?: string;
+  jobType?: string;
+  limit?: number;
+  offset?: number;
+};
+
 export class ApiError extends Error {
   status: number;
 
@@ -51,7 +90,7 @@ async function parseApiError(response: Response) {
   throw new ApiError(message, response.status);
 }
 
-async function apiRequest<T>(path: string, init?: RequestInit): Promise<T> {
+export async function apiRequest<T>(path: string, init?: RequestInit): Promise<T> {
   const response = await fetch(`${API_BASE_URL}${path}`, {
     ...init,
     headers: {
@@ -65,6 +104,12 @@ async function apiRequest<T>(path: string, init?: RequestInit): Promise<T> {
   }
 
   return response.json() as Promise<T>;
+}
+
+function toAuthHeader(accessToken: string) {
+  return {
+    Authorization: `Bearer ${accessToken}`,
+  };
 }
 
 export function getStoredTokens(): AuthTokens | null {
@@ -119,9 +164,7 @@ export async function refreshAuthTokens(refreshToken: string) {
 
 export async function fetchCurrentUser(accessToken: string): Promise<AuthUser> {
   const response = await apiRequest<MeResponse>("/api/me", {
-    headers: {
-      Authorization: `Bearer ${accessToken}`,
-    },
+    headers: toAuthHeader(accessToken),
   });
   return {
     userId: response.user_id,
@@ -132,6 +175,60 @@ export async function fetchCurrentUser(accessToken: string): Promise<AuthUser> {
 export async function startOAuthLogin(provider: "google" | "microsoft") {
   const response = await apiRequest<OAuthStartResponse>(`/api/auth/${provider}`);
   window.location.assign(response.authorization_url);
+}
+
+export async function listAccounts(accessToken: string) {
+  return apiRequest<MailAccount[]>("/api/accounts", {
+    headers: toAuthHeader(accessToken),
+  });
+}
+
+export async function startMailboxConnect(accessToken: string, kind: "work" | "personal") {
+  return apiRequest<OAuthStartResponse>("/api/accounts", {
+    method: "POST",
+    headers: toAuthHeader(accessToken),
+    body: JSON.stringify({ provider: "m365", ms_account_kind: kind }),
+  });
+}
+
+export async function deleteAccount(accessToken: string, accountID: string) {
+  const response = await fetch(`${API_BASE_URL}/api/accounts/${accountID}`, {
+    method: "DELETE",
+    headers: {
+      "Content-Type": "application/json",
+      ...toAuthHeader(accessToken),
+    },
+  });
+  if (!response.ok) {
+    await parseApiError(response);
+  }
+}
+
+export async function syncAccount(accessToken: string, accountID: string) {
+  return apiRequest<SyncAccountResponse>(`/api/accounts/${accountID}/sync`, {
+    method: "POST",
+    headers: toAuthHeader(accessToken),
+  });
+}
+
+export async function listRuns(accessToken: string, filter: ListRunsFilter = {}) {
+  const params = new URLSearchParams();
+  if (filter.accountId) {
+    params.set("account_id", filter.accountId);
+  }
+  if (filter.jobType) {
+    params.set("job_type", filter.jobType);
+  }
+  if (typeof filter.limit === "number") {
+    params.set("limit", String(filter.limit));
+  }
+  if (typeof filter.offset === "number") {
+    params.set("offset", String(filter.offset));
+  }
+  const suffix = params.size > 0 ? `?${params.toString()}` : "";
+  return apiRequest<JobRun[]>(`/api/runs${suffix}`, {
+    headers: toAuthHeader(accessToken),
+  });
 }
 
 export function readTokensFromFragment(hash: string): AuthTokens | null {

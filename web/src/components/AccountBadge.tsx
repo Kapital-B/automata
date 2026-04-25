@@ -1,8 +1,8 @@
-import { Account } from "@/lib/mock-data";
+import type { UiAccount } from "@/lib/accounts";
 import { cn } from "@/lib/utils";
 
 interface AccountBadgeProps {
-  account?: Account;
+  account?: UiAccount;
   size?: "sm" | "md";
   showEmail?: boolean;
   className?: string;

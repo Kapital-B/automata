@@ -124,7 +124,7 @@ func TestOAuthStartConnectAndCallbackCreatesAccount(t *testing.T) {
 	h := &Handlers{
 		Log: slog.New(slog.NewTextHandler(io.Discard, nil)),
 		AccountSvc: accountSvc, SyncSvc: syncSvc, AuthSvc: authSvc,
-		Accounts: repo, Messages: repo, OAuthStates: repo, Users: repo,
+		Accounts: repo, Messages: repo, JobRuns: repo, OAuthStates: repo, Users: repo,
 		Dashboard: "http://dashboard.test", SuccessPath: "/connected", ErrorPath: "/error",
 		JWTSecret: jwtSecret, JWTTTL: time.Hour, DefaultUserID: devUser,
 	}
@@ -230,7 +230,7 @@ func TestOAuthCallbackInvalidStateRedirectsError(t *testing.T) {
 	h := &Handlers{
 		Log: slog.New(slog.NewTextHandler(io.Discard, nil)),
 		AccountSvc: accountSvc, SyncSvc: syncSvc, AuthSvc: authSvc,
-		Accounts: repo, Messages: repo, OAuthStates: repo, Users: repo,
+		Accounts: repo, Messages: repo, JobRuns: repo, OAuthStates: repo, Users: repo,
 		Dashboard: "http://dashboard.test", SuccessPath: "/ok", ErrorPath: "/err",
 		JWTSecret: jwtSecret, JWTTTL: time.Hour, DefaultUserID: devUser,
 	}

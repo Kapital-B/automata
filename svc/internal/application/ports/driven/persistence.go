@@ -43,6 +43,30 @@ type MessageRow struct {
 	UpdatedAt          time.Time
 }
 
+// JobRunRow is the persisted job run shape for API responses and auditing.
+type JobRunRow struct {
+	ID              uuid.UUID
+	AccountID       *uuid.UUID
+	AccountLabel    *string
+	JobType         string
+	TriggerKind     string
+	Status          string
+	TimeWindowStart *time.Time
+	TimeWindowEnd   *time.Time
+	StartedAt       time.Time
+	FinishedAt      *time.Time
+	ErrorMessage    *string
+	MetaJSON        string
+}
+
+// JobRunListFilter narrows a run listing for one user.
+type JobRunListFilter struct {
+	AccountID *uuid.UUID
+	JobType   string
+	Limit     int
+	Offset    int
+}
+
 // AccountRepository persists accounts and OAuth tokens (ciphertext).
 type AccountRepository interface {
 	InsertAccount(ctx context.Context, a AccountRow, tokenCiphertext []byte) error
@@ -79,4 +103,6 @@ type UserRepository interface {
 // JobRunRepository records sync runs (Phase 1: synchronous insert).
 type JobRunRepository interface {
 	InsertJobRun(ctx context.Context, id uuid.UUID, accountID uuid.UUID, jobType string, trigger string, status string, startedAt, finishedAt time.Time, errMsg *string, metaJSON string) error
+	ListJobRuns(ctx context.Context, userID uuid.UUID, filter JobRunListFilter) ([]JobRunRow, error)
+	GetJobRun(ctx context.Context, userID uuid.UUID, id uuid.UUID) (*JobRunRow, error)
 }

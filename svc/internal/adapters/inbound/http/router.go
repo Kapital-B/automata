@@ -27,6 +27,7 @@ type Handlers struct {
 	AuthSvc     *auth.Service
 	Accounts    driven.AccountRepository
 	Messages    driven.MessageRepository
+	JobRuns     driven.JobRunRepository
 	OAuthStates driven.OAuthStateRepository
 	Users       driven.UserRepository
 	Dashboard   string
@@ -61,6 +62,8 @@ func (h *Handlers) Routes() http.Handler {
 	r.Get("/api/accounts/{id}", h.getAccount)
 	r.Delete("/api/accounts/{id}", h.deleteAccount)
 	r.Post("/api/accounts/{id}/sync", h.syncAccount)
+	r.Get("/api/runs", h.listRuns)
+	r.Get("/api/runs/{id}", h.getRun)
 	r.Get("/api/messages", h.listMessages)
 	r.Get("/api/messages/{id}", h.getMessage)
 	return r
@@ -318,6 +321,163 @@ func (h *Handlers) getMessage(w http.ResponseWriter, r *http.Request) {
 		"from_json":           json.RawMessage(m.FromJSON),
 		"body_text":           m.BodyText,
 		"has_attachments":     m.HasAttachments,
+	})
+}
+
+func (h *Handlers) listRuns(w http.ResponseWriter, r *http.Request) {
+	if h.JobRuns == nil {
+		writeJSON(w, http.StatusServiceUnavailable, map[string]string{"error": "job runs not configured"})
+		return
+	}
+	uid := userIDOrEmpty(r)
+	filter := driven.JobRunListFilter{
+		JobType: r.URL.Query().Get("job_type"),
+	}
+	if aid := r.URL.Query().Get("account_id"); aid != "" {
+		id, err := uuid.Parse(aid)
+		if err != nil {
+			writeJSON(w, http.StatusBadRequest, map[string]string{"error": "bad account_id"})
+			return
+		}
+		filter.AccountID = &id
+	}
+	if v := r.URL.Query().Get("limit"); v != "" {
+		n, err := strconv.Atoi(v)
+		if err != nil {
+			writeJSON(w, http.StatusBadRequest, map[string]string{"error": "bad limit"})
+			return
+		}
+		filter.Limit = n
+	}
+	if v := r.URL.Query().Get("offset"); v != "" {
+		n, err := strconv.Atoi(v)
+		if err != nil {
+			writeJSON(w, http.StatusBadRequest, map[string]string{"error": "bad offset"})
+			return
+		}
+		filter.Offset = n
+	}
+	rows, err := h.JobRuns.ListJobRuns(r.Context(), uid, filter)
+	if err != nil {
+		h.Log.Error("list runs", "err", err)
+		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "internal"})
+		return
+	}
+	type item struct {
+		ID              string          `json:"id"`
+		AccountID       *string         `json:"account_id,omitempty"`
+		AccountLabel    *string         `json:"account_label,omitempty"`
+		JobType         string          `json:"job_type"`
+		Trigger         string          `json:"trigger"`
+		Status          string          `json:"status"`
+		TimeWindowStart *string         `json:"time_window_start,omitempty"`
+		TimeWindowEnd   *string         `json:"time_window_end,omitempty"`
+		StartedAt       string          `json:"started_at"`
+		FinishedAt      *string         `json:"finished_at,omitempty"`
+		ErrorMessage    *string         `json:"error_message,omitempty"`
+		Meta            json.RawMessage `json:"meta_json"`
+	}
+	out := make([]item, 0, len(rows))
+	for _, row := range rows {
+		var accountID *string
+		if row.AccountID != nil {
+			s := row.AccountID.String()
+			accountID = &s
+		}
+		var twStart *string
+		if row.TimeWindowStart != nil {
+			s := row.TimeWindowStart.UTC().Format(time.RFC3339Nano)
+			twStart = &s
+		}
+		var twEnd *string
+		if row.TimeWindowEnd != nil {
+			s := row.TimeWindowEnd.UTC().Format(time.RFC3339Nano)
+			twEnd = &s
+		}
+		var finishedAt *string
+		if row.FinishedAt != nil {
+			s := row.FinishedAt.UTC().Format(time.RFC3339Nano)
+			finishedAt = &s
+		}
+		meta := json.RawMessage("{}")
+		if row.MetaJSON != "" {
+			meta = json.RawMessage(row.MetaJSON)
+		}
+		out = append(out, item{
+			ID:              row.ID.String(),
+			AccountID:       accountID,
+			AccountLabel:    row.AccountLabel,
+			JobType:         row.JobType,
+			Trigger:         row.TriggerKind,
+			Status:          row.Status,
+			TimeWindowStart: twStart,
+			TimeWindowEnd:   twEnd,
+			StartedAt:       row.StartedAt.UTC().Format(time.RFC3339Nano),
+			FinishedAt:      finishedAt,
+			ErrorMessage:    row.ErrorMessage,
+			Meta:            meta,
+		})
+	}
+	writeJSON(w, http.StatusOK, out)
+}
+
+func (h *Handlers) getRun(w http.ResponseWriter, r *http.Request) {
+	if h.JobRuns == nil {
+		writeJSON(w, http.StatusServiceUnavailable, map[string]string{"error": "job runs not configured"})
+		return
+	}
+	id, err := uuid.Parse(chi.URLParam(r, "id"))
+	if err != nil {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "bad id"})
+		return
+	}
+	row, err := h.JobRuns.GetJobRun(r.Context(), userIDOrEmpty(r), id)
+	if err != nil {
+		h.Log.Error("get run", "err", err)
+		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "internal"})
+		return
+	}
+	if row == nil {
+		writeJSON(w, http.StatusNotFound, map[string]string{"error": "not found"})
+		return
+	}
+	var accountID *string
+	if row.AccountID != nil {
+		s := row.AccountID.String()
+		accountID = &s
+	}
+	var twStart *string
+	if row.TimeWindowStart != nil {
+		s := row.TimeWindowStart.UTC().Format(time.RFC3339Nano)
+		twStart = &s
+	}
+	var twEnd *string
+	if row.TimeWindowEnd != nil {
+		s := row.TimeWindowEnd.UTC().Format(time.RFC3339Nano)
+		twEnd = &s
+	}
+	var finishedAt *string
+	if row.FinishedAt != nil {
+		s := row.FinishedAt.UTC().Format(time.RFC3339Nano)
+		finishedAt = &s
+	}
+	meta := json.RawMessage("{}")
+	if row.MetaJSON != "" {
+		meta = json.RawMessage(row.MetaJSON)
+	}
+	writeJSON(w, http.StatusOK, map[string]any{
+		"id":                row.ID.String(),
+		"account_id":        accountID,
+		"account_label":     row.AccountLabel,
+		"job_type":          row.JobType,
+		"trigger":           row.TriggerKind,
+		"status":            row.Status,
+		"time_window_start": twStart,
+		"time_window_end":   twEnd,
+		"started_at":        row.StartedAt.UTC().Format(time.RFC3339Nano),
+		"finished_at":       finishedAt,
+		"error_message":     row.ErrorMessage,
+		"meta_json":         meta,
 	})
 }
 

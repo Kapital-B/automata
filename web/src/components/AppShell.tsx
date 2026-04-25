@@ -1,8 +1,8 @@
 import { ReactNode, useState } from "react";
 import { SidebarProvider, SidebarTrigger } from "@/components/ui/sidebar";
 import { AppSidebar } from "@/components/AppSidebar";
-import { accounts } from "@/lib/mock-data";
 import { useAuth } from "@/components/auth/AuthProvider";
+import { useAccountsData } from "@/hooks/useAccountsData";
 import { ChevronDown, Search } from "lucide-react";
 import {
   DropdownMenu,
@@ -32,6 +32,7 @@ interface AppShellProps {
 export function AppShell({ children }: AppShellProps) {
   const [accountFilter, setAccountFilter] = useState<AccountFilter>("all");
   const { user } = useAuth();
+  const { accounts } = useAccountsData();
   const current = accounts.find((a) => a.id === accountFilter);
   const initials =
     user?.email

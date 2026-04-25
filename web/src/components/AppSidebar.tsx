@@ -27,9 +27,9 @@ import {
   SidebarMenuItem,
   useSidebar,
 } from "@/components/ui/sidebar";
-import { accounts } from "@/lib/mock-data";
 import { cn } from "@/lib/utils";
 import { useAuth } from "@/components/auth/AuthProvider";
+import { useAccountsData } from "@/hooks/useAccountsData";
 
 const assistantNav = [
   { title: "Assistant", url: "/", icon: MessageSquare, end: true },
@@ -60,6 +60,7 @@ export function AppSidebar() {
   const collapsed = state === "collapsed";
   const location = useLocation();
   const { user, signOut } = useAuth();
+  const { accounts } = useAccountsData();
 
   const isActive = (url: string, end?: boolean) =>
     end ? location.pathname === url : location.pathname.startsWith(url) && url !== "/";

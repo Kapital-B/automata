@@ -109,6 +109,7 @@ func main() {
 		AuthSvc:         authSvc,
 		Accounts:        repo,
 		Messages:        repo,
+		JobRuns:         repo,
 		OAuthStates:     repo,
 		Users:           repo,
 		Dashboard:       cfg.DashboardBaseURL,

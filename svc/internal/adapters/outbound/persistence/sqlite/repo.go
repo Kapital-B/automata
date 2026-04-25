@@ -4,6 +4,7 @@ import (
 	"context"
 	"database/sql"
 	"errors"
+	"strings"
 	"time"
 
 	"github.com/Kapital-B/automata/svc/internal/application/ports/driven"
@@ -441,6 +442,74 @@ func (r *Repository) InsertJobRun(ctx context.Context, id uuid.UUID, accountID u
 	return err
 }
 
+func (r *Repository) ListJobRuns(ctx context.Context, userID uuid.UUID, filter driven.JobRunListFilter) ([]driven.JobRunRow, error) {
+	limit := filter.Limit
+	if limit <= 0 {
+		limit = 50
+	}
+	if limit > 200 {
+		limit = 200
+	}
+	offset := filter.Offset
+	if offset < 0 {
+		offset = 0
+	}
+
+	var b strings.Builder
+	b.WriteString(`
+		SELECT j.id, j.account_id, a.label, j.job_type, j.trigger_kind, j.status,
+			j.time_window_start, j.time_window_end, j.started_at, j.finished_at, j.error_message, j.meta_json
+		FROM job_runs j
+		LEFT JOIN accounts a ON a.id = j.account_id
+		WHERE a.user_id = ?`)
+	args := []any{userID.String()}
+	if filter.AccountID != nil {
+		b.WriteString(` AND j.account_id = ?`)
+		args = append(args, filter.AccountID.String())
+	}
+	if filter.JobType != "" {
+		b.WriteString(` AND j.job_type = ?`)
+		args = append(args, filter.JobType)
+	}
+	b.WriteString(` ORDER BY j.started_at DESC LIMIT ? OFFSET ?`)
+	args = append(args, limit, offset)
+
+	rows, err := r.db.QueryContext(ctx, b.String(), args...)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	out := make([]driven.JobRunRow, 0)
+	for rows.Next() {
+		item, err := scanJobRunRow(rows)
+		if err != nil {
+			return nil, err
+		}
+		out = append(out, *item)
+	}
+	return out, rows.Err()
+}
+
+func (r *Repository) GetJobRun(ctx context.Context, userID uuid.UUID, id uuid.UUID) (*driven.JobRunRow, error) {
+	row := r.db.QueryRowContext(ctx, `
+		SELECT j.id, j.account_id, a.label, j.job_type, j.trigger_kind, j.status,
+			j.time_window_start, j.time_window_end, j.started_at, j.finished_at, j.error_message, j.meta_json
+		FROM job_runs j
+		LEFT JOIN accounts a ON a.id = j.account_id
+		WHERE j.id = ? AND a.user_id = ?`,
+		id.String(), userID.String(),
+	)
+	item, err := scanJobRunRow(row)
+	if err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			return nil, nil
+		}
+		return nil, err
+	}
+	return item, nil
+}
+
 // --- helpers ---
 
 func nullStr(p *string) any {
@@ -470,4 +539,62 @@ func boolInt(b bool) int {
 		return 1
 	}
 	return 0
+}
+
+func scanJobRunRow(s rowScanner) (*driven.JobRunRow, error) {
+	var item driven.JobRunRow
+	var idStr string
+	var accountID sql.NullString
+	var accountLabel sql.NullString
+	var twStart sql.NullString
+	var twEnd sql.NullString
+	var startedAt string
+	var finishedAt sql.NullString
+	var errMsg sql.NullString
+	if err := s.Scan(
+		&idStr, &accountID, &accountLabel, &item.JobType, &item.TriggerKind, &item.Status,
+		&twStart, &twEnd, &startedAt, &finishedAt, &errMsg, &item.MetaJSON,
+	); err != nil {
+		return nil, err
+	}
+	var err error
+	item.ID, err = uuid.Parse(idStr)
+	if err != nil {
+		return nil, err
+	}
+	if accountID.Valid {
+		aid, err := uuid.Parse(accountID.String)
+		if err != nil {
+			return nil, err
+		}
+		item.AccountID = &aid
+	}
+	item.AccountLabel = nullStringPtr(accountLabel)
+	item.ErrorMessage = nullStringPtr(errMsg)
+	item.StartedAt, err = parseTime(startedAt)
+	if err != nil {
+		return nil, err
+	}
+	if finishedAt.Valid {
+		t, err := parseTime(finishedAt.String)
+		if err != nil {
+			return nil, err
+		}
+		item.FinishedAt = &t
+	}
+	if twStart.Valid {
+		t, err := parseTime(twStart.String)
+		if err != nil {
+			return nil, err
+		}
+		item.TimeWindowStart = &t
+	}
+	if twEnd.Valid {
+		t, err := parseTime(twEnd.String)
+		if err != nil {
+			return nil, err
+		}
+		item.TimeWindowEnd = &t
+	}
+	return &item, nil
 }
