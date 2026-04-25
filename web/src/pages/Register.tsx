@@ -7,32 +7,50 @@ import { Label } from "@/components/ui/label";
 import { toast } from "@/hooks/use-toast";
 import { GoogleIcon, MicrosoftIcon } from "@/components/auth/SocialIcons";
 import { AuthLayout } from "@/components/auth/AuthLayout";
+import { useAuth } from "@/components/auth/AuthProvider";
+import { ApiError, startOAuthLogin } from "@/lib/auth";
 
 export default function RegisterPage() {
   const navigate = useNavigate();
+  const { register } = useAuth();
   const [name, setName] = useState("");
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
-  const [loading, setLoading] = useState(false);
+  const [loading, setLoading] = useState<"email" | "google" | "microsoft" | null>(null);
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
-    setLoading(true);
-    await new Promise((r) => setTimeout(r, 700));
-    setLoading(false);
-    toast({
-      title: "Account created",
-      description: `Welcome to Postern, ${name || "friend"}.`,
-    });
-    navigate("/");
+    setLoading("email");
+    try {
+      await register(email, password);
+      toast({
+        title: "Account created",
+        description: `Welcome to Postern, ${name || email}.`,
+      });
+      navigate("/", { replace: true });
+    } catch (error) {
+      toast({
+        title: "Registration failed",
+        description: error instanceof ApiError ? error.message : "Please check your details and try again.",
+        variant: "destructive",
+      });
+    } finally {
+      setLoading(null);
+    }
   };
 
-  const handleGoogle = async () => {
-    setLoading(true);
-    await new Promise((r) => setTimeout(r, 400));
-    setLoading(false);
-    toast({ title: "Google sign-up", description: "Mock flow — connect Cloud to enable." });
-    navigate("/");
+  const handleOAuth = async (provider: "google" | "microsoft") => {
+    setLoading(provider);
+    try {
+      await startOAuthLogin(provider);
+    } catch (error) {
+      setLoading(null);
+      toast({
+        title: `${provider === "google" ? "Google" : "Microsoft"} sign-up failed`,
+        description: error instanceof ApiError ? error.message : "Could not start the OAuth flow.",
+        variant: "destructive",
+      });
+    }
   };
 
   return (
@@ -46,23 +64,25 @@ export default function RegisterPage() {
           type="button"
           variant="outline"
           className="w-full justify-center gap-3 h-11"
-          onClick={handleGoogle}
-          disabled={loading}
+          onClick={() => handleOAuth("google")}
+          disabled={loading !== null}
         >
-          <GoogleIcon className="h-4 w-4" />
+          {loading === "google" ? <Loader2 className="h-4 w-4 animate-spin" /> : <GoogleIcon className="h-4 w-4" />}
           Sign up with Google
         </Button>
         <Button
           type="button"
           variant="outline"
           className="w-full justify-center gap-3 h-11"
-          disabled
+          onClick={() => handleOAuth("microsoft")}
+          disabled={loading !== null}
         >
-          <MicrosoftIcon className="h-4 w-4" />
+          {loading === "microsoft" ? (
+            <Loader2 className="h-4 w-4 animate-spin" />
+          ) : (
+            <MicrosoftIcon className="h-4 w-4" />
+          )}
           Sign up with Microsoft
-          <span className="ml-1 text-[10px] uppercase tracking-wider text-muted-foreground">
-            soon
-          </span>
         </Button>
       </div>
 
@@ -125,8 +145,8 @@ export default function RegisterPage() {
           </p>
         </div>
 
-        <Button type="submit" className="w-full h-11 gap-2" disabled={loading}>
-          {loading ? (
+        <Button type="submit" className="w-full h-11 gap-2" disabled={loading !== null}>
+          {loading === "email" ? (
             <Loader2 className="h-4 w-4 animate-spin" />
           ) : (
             <>

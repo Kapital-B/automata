@@ -4,6 +4,8 @@ import { Toaster as Sonner } from "@/components/ui/sonner";
 import { Toaster } from "@/components/ui/toaster";
 import { TooltipProvider } from "@/components/ui/tooltip";
 import { AppShell } from "@/components/AppShell";
+import { AuthProvider } from "@/components/auth/AuthProvider";
+import { ProtectedRoute } from "@/components/auth/ProtectedRoute";
 import Index from "./pages/Index.tsx";
 import NotFound from "./pages/NotFound.tsx";
 import TodayPage from "./pages/Today";
@@ -15,6 +17,8 @@ import RunsPage from "./pages/Runs";
 import SettingsPage from "./pages/Settings";
 import LoginPage from "./pages/Login";
 import RegisterPage from "./pages/Register";
+import AuthCallbackPage from "./pages/AuthCallback";
+import AuthErrorPage from "./pages/AuthError";
 
 const queryClient = new QueryClient();
 
@@ -24,41 +28,80 @@ const App = () => (
       <Toaster />
       <Sonner />
       <BrowserRouter>
-        <Routes>
-          <Route path="/" element={<Index />} />
-          <Route path="/login" element={<LoginPage />} />
-          <Route path="/register" element={<RegisterPage />} />
-          <Route
-            path="/today"
-            element={<AppShell>{(ctx) => <TodayPage {...ctx} />}</AppShell>}
-          />
-          <Route
-            path="/inbox"
-            element={<AppShell>{(ctx) => <InboxPage {...ctx} />}</AppShell>}
-          />
-          <Route
-            path="/drafts"
-            element={<AppShell>{(ctx) => <DraftsPage {...ctx} />}</AppShell>}
-          />
-          <Route
-            path="/rules"
-            element={<AppShell>{(ctx) => <RulesPage {...ctx} />}</AppShell>}
-          />
-          <Route
-            path="/accounts"
-            element={<AppShell>{() => <AccountsPage />}</AppShell>}
-          />
-          <Route
-            path="/runs"
-            element={<AppShell>{(ctx) => <RunsPage {...ctx} />}</AppShell>}
-          />
-          <Route
-            path="/settings"
-            element={<AppShell>{() => <SettingsPage />}</AppShell>}
-          />
-          {/* ADD ALL CUSTOM ROUTES ABOVE THE CATCH-ALL "*" ROUTE */}
-          <Route path="*" element={<NotFound />} />
-        </Routes>
+        <AuthProvider>
+          <Routes>
+            <Route
+              path="/"
+              element={
+                <ProtectedRoute>
+                  <Index />
+                </ProtectedRoute>
+              }
+            />
+            <Route path="/login" element={<LoginPage />} />
+            <Route path="/register" element={<RegisterPage />} />
+            <Route path="/auth/callback" element={<AuthCallbackPage />} />
+            <Route path="/auth/error" element={<AuthErrorPage />} />
+            <Route
+              path="/today"
+              element={
+                <ProtectedRoute>
+                  <AppShell>{(ctx) => <TodayPage {...ctx} />}</AppShell>
+                </ProtectedRoute>
+              }
+            />
+            <Route
+              path="/inbox"
+              element={
+                <ProtectedRoute>
+                  <AppShell>{(ctx) => <InboxPage {...ctx} />}</AppShell>
+                </ProtectedRoute>
+              }
+            />
+            <Route
+              path="/drafts"
+              element={
+                <ProtectedRoute>
+                  <AppShell>{(ctx) => <DraftsPage {...ctx} />}</AppShell>
+                </ProtectedRoute>
+              }
+            />
+            <Route
+              path="/rules"
+              element={
+                <ProtectedRoute>
+                  <AppShell>{(ctx) => <RulesPage {...ctx} />}</AppShell>
+                </ProtectedRoute>
+              }
+            />
+            <Route
+              path="/accounts"
+              element={
+                <ProtectedRoute>
+                  <AppShell>{() => <AccountsPage />}</AppShell>
+                </ProtectedRoute>
+              }
+            />
+            <Route
+              path="/runs"
+              element={
+                <ProtectedRoute>
+                  <AppShell>{(ctx) => <RunsPage {...ctx} />}</AppShell>
+                </ProtectedRoute>
+              }
+            />
+            <Route
+              path="/settings"
+              element={
+                <ProtectedRoute>
+                  <AppShell>{() => <SettingsPage />}</AppShell>
+                </ProtectedRoute>
+              }
+            />
+            {/* ADD ALL CUSTOM ROUTES ABOVE THE CATCH-ALL "*" ROUTE */}
+            <Route path="*" element={<NotFound />} />
+          </Routes>
+        </AuthProvider>
       </BrowserRouter>
     </TooltipProvider>
   </QueryClientProvider>

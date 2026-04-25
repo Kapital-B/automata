@@ -2,6 +2,7 @@ import { ReactNode, useState } from "react";
 import { SidebarProvider, SidebarTrigger } from "@/components/ui/sidebar";
 import { AppSidebar } from "@/components/AppSidebar";
 import { accounts } from "@/lib/mock-data";
+import { useAuth } from "@/components/auth/AuthProvider";
 import { ChevronDown, Search } from "lucide-react";
 import {
   DropdownMenu,
@@ -30,7 +31,16 @@ interface AppShellProps {
  */
 export function AppShell({ children }: AppShellProps) {
   const [accountFilter, setAccountFilter] = useState<AccountFilter>("all");
+  const { user } = useAuth();
   const current = accounts.find((a) => a.id === accountFilter);
+  const initials =
+    user?.email
+      .split("@")[0]
+      .split(/[._-]/)
+      .filter(Boolean)
+      .slice(0, 2)
+      .map((part) => part[0]?.toUpperCase())
+      .join("") || "P";
 
   return (
     <SidebarProvider>
@@ -129,8 +139,9 @@ export function AppShell({ children }: AppShellProps) {
               <div
                 className="hidden h-8 w-8 place-items-center rounded-full md:grid"
                 style={{ background: "var(--gradient-ink)" }}
+                title={user?.email ?? "Signed in"}
               >
-                <span className="text-xs font-semibold text-primary-foreground">EP</span>
+                <span className="text-xs font-semibold text-primary-foreground">{initials}</span>
               </div>
             </div>
           </header>

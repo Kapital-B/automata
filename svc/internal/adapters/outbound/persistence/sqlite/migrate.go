@@ -23,9 +23,23 @@ func Migrate(db *sql.DB) error {
 		if err != nil {
 			return err
 		}
-		if _, err := db.Exec(string(b)); err != nil {
-			return err
+		for _, stmt := range strings.Split(string(b), ";") {
+			stmt = strings.TrimSpace(stmt)
+			if stmt == "" {
+				continue
+			}
+			if _, err := db.Exec(stmt); err != nil {
+				if ignoreRepeatedMigrationError(err) {
+					continue
+				}
+				return err
+			}
 		}
 	}
 	return nil
+}
+
+func ignoreRepeatedMigrationError(err error) bool {
+	msg := strings.ToLower(err.Error())
+	return strings.Contains(msg, "duplicate column name: user_id")
 }

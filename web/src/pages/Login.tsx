@@ -1,5 +1,6 @@
 import { useState } from "react";
-import { Link, useNavigate } from "react-router-dom";
+import { Link, useLocation, useNavigate } from "react-router-dom";
+import type { Location as RouterLocation } from "react-router-dom";
 import { ArrowRight, Loader2, Mail } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -7,32 +8,51 @@ import { Label } from "@/components/ui/label";
 import { toast } from "@/hooks/use-toast";
 import { GoogleIcon, MicrosoftIcon } from "@/components/auth/SocialIcons";
 import { AuthLayout } from "@/components/auth/AuthLayout";
+import { useAuth } from "@/components/auth/AuthProvider";
+import { ApiError, startOAuthLogin } from "@/lib/auth";
 
 export default function LoginPage() {
   const navigate = useNavigate();
+  const location = useLocation();
+  const { signIn } = useAuth();
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
-  const [loading, setLoading] = useState(false);
+  const [loading, setLoading] = useState<"email" | "google" | "microsoft" | null>(null);
+  const redirectTo = (location.state as { from?: RouterLocation } | null)?.from?.pathname ?? "/";
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
-    setLoading(true);
-    // Mock auth
-    await new Promise((r) => setTimeout(r, 600));
-    setLoading(false);
-    toast({
-      title: "Signed in",
-      description: `Welcome back, ${email || "friend"}.`,
-    });
-    navigate("/");
+    setLoading("email");
+    try {
+      await signIn(email, password);
+      toast({
+        title: "Signed in",
+        description: `Welcome back, ${email}.`,
+      });
+      navigate(redirectTo, { replace: true });
+    } catch (error) {
+      toast({
+        title: "Sign-in failed",
+        description: error instanceof ApiError ? error.message : "Please check your details and try again.",
+        variant: "destructive",
+      });
+    } finally {
+      setLoading(null);
+    }
   };
 
-  const handleGoogle = async () => {
-    setLoading(true);
-    await new Promise((r) => setTimeout(r, 400));
-    setLoading(false);
-    toast({ title: "Google sign-in", description: "Mock flow — connect Cloud to enable." });
-    navigate("/");
+  const handleOAuth = async (provider: "google" | "microsoft") => {
+    setLoading(provider);
+    try {
+      await startOAuthLogin(provider);
+    } catch (error) {
+      setLoading(null);
+      toast({
+        title: `${provider === "google" ? "Google" : "Microsoft"} sign-in failed`,
+        description: error instanceof ApiError ? error.message : "Could not start the OAuth flow.",
+        variant: "destructive",
+      });
+    }
   };
 
   return (
@@ -46,24 +66,25 @@ export default function LoginPage() {
           type="button"
           variant="outline"
           className="w-full justify-center gap-3 h-11"
-          onClick={handleGoogle}
-          disabled={loading}
+          onClick={() => handleOAuth("google")}
+          disabled={loading !== null}
         >
-          <GoogleIcon className="h-4 w-4" />
+          {loading === "google" ? <Loader2 className="h-4 w-4 animate-spin" /> : <GoogleIcon className="h-4 w-4" />}
           Continue with Google
         </Button>
         <Button
           type="button"
           variant="outline"
           className="w-full justify-center gap-3 h-11"
-          disabled
-          title="Microsoft sign-in coming soon"
+          onClick={() => handleOAuth("microsoft")}
+          disabled={loading !== null}
         >
-          <MicrosoftIcon className="h-4 w-4" />
+          {loading === "microsoft" ? (
+            <Loader2 className="h-4 w-4 animate-spin" />
+          ) : (
+            <MicrosoftIcon className="h-4 w-4" />
+          )}
           Continue with Microsoft
-          <span className="ml-1 text-[10px] uppercase tracking-wider text-muted-foreground">
-            soon
-          </span>
         </Button>
       </div>
 
@@ -112,8 +133,8 @@ export default function LoginPage() {
           />
         </div>
 
-        <Button type="submit" className="w-full h-11 gap-2" disabled={loading}>
-          {loading ? (
+        <Button type="submit" className="w-full h-11 gap-2" disabled={loading !== null}>
+          {loading === "email" ? (
             <Loader2 className="h-4 w-4 animate-spin" />
           ) : (
             <>

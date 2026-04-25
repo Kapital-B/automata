@@ -29,6 +29,7 @@ import {
 } from "@/components/ui/sidebar";
 import { accounts } from "@/lib/mock-data";
 import { cn } from "@/lib/utils";
+import { useAuth } from "@/components/auth/AuthProvider";
 
 const assistantNav = [
   { title: "Assistant", url: "/", icon: MessageSquare, end: true },
@@ -58,6 +59,7 @@ export function AppSidebar() {
   const { state } = useSidebar();
   const collapsed = state === "collapsed";
   const location = useLocation();
+  const { user, signOut } = useAuth();
 
   const isActive = (url: string, end?: boolean) =>
     end ? location.pathname === url : location.pathname.startsWith(url) && url !== "/";
@@ -236,16 +238,32 @@ export function AppSidebar() {
       <SidebarFooter className="px-3 py-3 space-y-2">
         {!collapsed && (
           <>
-            <NavLink
-              to="/login"
-              className="block rounded-md border border-sidebar-border px-2 py-1.5 text-center text-xs font-medium text-sidebar-foreground hover:bg-sidebar-accent transition-colors"
-            >
-              Sign in
-            </NavLink>
+            <div className="rounded-md border border-sidebar-border px-2 py-2">
+              <p className="truncate text-xs font-medium text-sidebar-foreground">
+                {user?.email ?? "Signed in"}
+              </p>
+              <button
+                type="button"
+                onClick={signOut}
+                className="mt-1 text-xs text-sidebar-foreground/70 transition-colors hover:text-sidebar-foreground"
+              >
+                Sign out
+              </button>
+            </div>
             <p className="text-[10px] text-muted-foreground text-center">
               Local LLM · LM Studio
             </p>
           </>
+        )}
+        {collapsed && (
+          <button
+            type="button"
+            onClick={signOut}
+            className="rounded-md border border-sidebar-border px-2 py-1.5 text-center text-xs font-medium text-sidebar-foreground hover:bg-sidebar-accent transition-colors"
+            title={`Sign out${user?.email ? ` ${user.email}` : ""}`}
+          >
+            Out
+          </button>
         )}
       </SidebarFooter>
     </Sidebar>
