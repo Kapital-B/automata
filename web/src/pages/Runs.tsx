@@ -2,7 +2,7 @@ import { PageHeader } from "@/components/PageHeader";
 import { AccountBadge } from "@/components/AccountBadge";
 import { listRuns } from "@/lib/auth";
 import { relativeTime } from "@/lib/accounts";
-import { CheckCircle2, XCircle, Clock } from "lucide-react";
+import { CheckCircle2, XCircle, Clock, Ban } from "lucide-react";
 import { cn } from "@/lib/utils";
 import type { AccountFilter } from "@/components/AppShell";
 import { useAuth } from "@/components/auth/AuthProvider";
@@ -17,6 +17,8 @@ const statusIcon = {
   success: <CheckCircle2 className="h-3.5 w-3.5 text-success" />,
   failed: <XCircle className="h-3.5 w-3.5 text-destructive" />,
   running: <Clock className="h-3.5 w-3.5 text-accent" />,
+  pending: <Clock className="h-3.5 w-3.5 text-muted-foreground" />,
+  cancelled: <Ban className="h-3.5 w-3.5 text-muted-foreground" />,
 };
 
 export default function RunsPage({ accountFilter }: Props) {
@@ -29,6 +31,10 @@ export default function RunsPage({ accountFilter }: Props) {
         accountId: accountFilter === "all" ? undefined : accountFilter,
       }),
     enabled: Boolean(accessToken),
+    refetchInterval: (query) => {
+      const rows = (query.state.data ?? []) as Array<{ status?: string }>;
+      return rows.some((r) => r.status === "pending" || r.status === "running") ? 2000 : false;
+    },
   });
   const visible =
     runsQuery.data?.filter(
@@ -97,11 +103,7 @@ export default function RunsPage({ accountFilter }: Props) {
                 </td>
                 <td className="px-4 py-3">
                   <span className="font-mono text-[11px] text-muted-foreground">
-                    {r.meta_json
-                      ? Object.entries(r.meta_json)
-                          .map(([k, v]) => `${k}=${v}`)
-                          .join(" · ")
-                      : "—"}
+                    {renderRunResult(r.meta_json)}
                   </span>
                 </td>
               </tr>
@@ -111,4 +113,15 @@ export default function RunsPage({ accountFilter }: Props) {
       </div>
     </div>
   );
+}
+
+function renderRunResult(meta: Record<string, unknown>) {
+  const processed = typeof meta.processed_messages === "number" ? meta.processed_messages : undefined;
+  const total = typeof meta.total_messages === "number" ? meta.total_messages : undefined;
+  if (typeof processed === "number" && typeof total === "number" && total > 0) {
+    return `${processed}/${total} processed`;
+  }
+  const entries = Object.entries(meta ?? {});
+  if (entries.length === 0) return "—";
+  return entries.map(([k, v]) => `${k}=${v}`).join(" · ");
 }

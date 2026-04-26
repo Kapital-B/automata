@@ -10,6 +10,7 @@ import (
 	"syscall"
 	"time"
 
+	asynqadapter "github.com/Kapital-B/automata/svc/internal/adapters/inbound/asynq"
 	appaccounts "github.com/Kapital-B/automata/svc/internal/application/accounts"
 	"github.com/Kapital-B/automata/svc/internal/application/auth"
 	appmessages "github.com/Kapital-B/automata/svc/internal/application/messages"
@@ -56,6 +57,8 @@ func main() {
 	}
 
 	repo := sqlite.NewRepository(db, cfg.OAuthStateTTL)
+	queueClient := asynqadapter.NewQueueClient(cfg.RedisAddr, cfg.AsynqPrefix)
+	defer queueClient.Close()
 
 	msMailOAuth := &microsoft.OAuth{
 		ClientID:     cfg.MSClientID,
@@ -135,6 +138,7 @@ func main() {
 		JWTSecret:       cfg.JWTSecret,
 		JWTTTL:          cfg.JWTTTL,
 		DefaultUserID:   cfg.DefaultUserID,
+		JobQueue:        queueClient,
 	}
 
 	go func() {

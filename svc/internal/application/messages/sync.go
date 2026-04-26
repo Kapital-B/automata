@@ -28,7 +28,16 @@ type SyncResult struct {
 	MessagesUpserted   int
 }
 
+type SyncOptions struct {
+	RunID   *uuid.UUID
+	Trigger string
+}
+
 func (s *SyncService) SyncInbox(ctx context.Context, userID uuid.UUID, accountID uuid.UUID) (*SyncResult, error) {
+	return s.SyncInboxWithOptions(ctx, userID, accountID, SyncOptions{})
+}
+
+func (s *SyncService) SyncInboxWithOptions(ctx context.Context, userID uuid.UUID, accountID uuid.UUID, opts SyncOptions) (*SyncResult, error) {
 	row, cipher, err := s.Accounts.GetAccount(ctx, userID, accountID)
 	if err != nil {
 		return nil, err
@@ -68,15 +77,28 @@ func (s *SyncService) SyncInbox(ctx context.Context, userID uuid.UUID, accountID
 	}
 
 	jobID := uuid.New()
+	if opts.RunID != nil {
+		jobID = *opts.RunID
+	}
+	trigger := strings.TrimSpace(opts.Trigger)
+	if trigger == "" {
+		trigger = "api"
+	}
 	started := time.Now().UTC()
+	if s.JobRuns != nil {
+		_ = s.JobRuns.InsertJobRun(ctx, jobID, accountID, "sync", trigger, "running", started, time.Time{}, nil, `{}`)
+	}
 
 	list, err := s.Graph.ListInboxMessages(ctx, tok.AccessToken, 50)
 	if err != nil {
 		if s.JobRuns != nil {
 			msg := err.Error()
-			_ = s.JobRuns.InsertJobRun(ctx, jobID, accountID, "sync", "api", "failed", started, time.Now().UTC(), &msg, `{}`)
+			_ = s.JobRuns.UpdateJobRunStatus(ctx, jobID, "failed", timePtrSync(time.Now().UTC()), &msg, `{}`)
 		}
 		return nil, err
+	}
+	if s.JobRuns != nil {
+		_ = s.JobRuns.UpdateJobRunMeta(ctx, jobID, fmt.Sprintf(`{"total_messages":%d,"processed_messages":0,"messages_upserted":0}`, len(list)))
 	}
 
 	n := 0
@@ -116,11 +138,14 @@ func (s *SyncService) SyncInbox(ctx context.Context, userID uuid.UUID, accountID
 		if err := s.Messages.UpsertMessage(ctx, m); err != nil {
 			if s.JobRuns != nil {
 				em := err.Error()
-				_ = s.JobRuns.InsertJobRun(ctx, jobID, accountID, "sync", "api", "failed", started, time.Now().UTC(), &em, `{}`)
+				_ = s.JobRuns.UpdateJobRunStatus(ctx, jobID, "failed", timePtrSync(time.Now().UTC()), &em, `{}`)
 			}
 			return nil, err
 		}
 		n++
+		if s.JobRuns != nil {
+			_ = s.JobRuns.UpdateJobRunMeta(ctx, jobID, fmt.Sprintf(`{"total_messages":%d,"processed_messages":%d,"messages_upserted":%d}`, len(list), n, n))
+		}
 	}
 	if err := s.Accounts.UpsertSyncStateTime(ctx, userID, accountID, time.Now().UTC()); err != nil {
 		return nil, err
@@ -128,7 +153,7 @@ func (s *SyncService) SyncInbox(ctx context.Context, userID uuid.UUID, accountID
 	finished := time.Now().UTC()
 	if s.JobRuns != nil {
 		meta := fmt.Sprintf(`{"messages_upserted":%d}`, n)
-		_ = s.JobRuns.InsertJobRun(ctx, jobID, accountID, "sync", "api", "success", started, finished, nil, meta)
+		_ = s.JobRuns.UpdateJobRunStatus(ctx, jobID, "success", timePtrSync(finished), nil, meta)
 	}
 	return &SyncResult{JobRunID: jobID, MessagesUpserted: n}, nil
 }
@@ -194,4 +219,8 @@ func nullIfEmpty(s string) *string {
 		return nil
 	}
 	return &s
+}
+
+func timePtrSync(t time.Time) *time.Time {
+	return &t
 }

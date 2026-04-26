@@ -25,6 +25,8 @@ type CategorizeResult struct {
 
 type CategorizeOptions struct {
 	Recategorize bool
+	RunID        *uuid.UUID
+	Trigger      string
 }
 
 type categorizePayload struct {
@@ -38,13 +40,23 @@ func (s *CategorizeService) CategorizeAccount(ctx context.Context, userID, accou
 		return nil, fmt.Errorf("categorize service not configured")
 	}
 	jobID := uuid.New()
+	if opts.RunID != nil {
+		jobID = *opts.RunID
+	}
+	trigger := strings.TrimSpace(opts.Trigger)
+	if trigger == "" {
+		trigger = "api"
+	}
 	started := time.Now().UTC()
 	fail := func(err error) (*CategorizeResult, error) {
 		if s.JobRuns != nil {
 			msg := err.Error()
-			_ = s.JobRuns.InsertJobRun(ctx, jobID, accountID, "categorize", "api", "failed", started, time.Now().UTC(), &msg, `{}`)
+			_ = s.JobRuns.UpdateJobRunStatus(ctx, jobID, "failed", timePtr(time.Now().UTC()), &msg, `{}`)
 		}
 		return nil, err
+	}
+	if s.JobRuns != nil {
+		_ = s.JobRuns.InsertJobRun(ctx, jobID, accountID, "categorize", trigger, "running", started, time.Time{}, nil, `{}`)
 	}
 
 	categories, err := s.Messages.ListCategoryDefinitions(ctx, userID)
@@ -71,6 +83,9 @@ func (s *CategorizeService) CategorizeAccount(ctx context.Context, userID, accou
 			}
 		}
 		rows = uncategorized
+	}
+	if s.JobRuns != nil {
+		_ = s.JobRuns.UpdateJobRunMeta(ctx, jobID, fmt.Sprintf(`{"total_messages":%d,"processed_messages":0,"messages_categorized":0,"recategorize":%t}`, len(rows), opts.Recategorize))
 	}
 
 	count := 0
@@ -111,11 +126,14 @@ func (s *CategorizeService) CategorizeAccount(ctx context.Context, userID, accou
 			return fail(err)
 		}
 		count++
+		if s.JobRuns != nil {
+			_ = s.JobRuns.UpdateJobRunMeta(ctx, jobID, fmt.Sprintf(`{"total_messages":%d,"processed_messages":%d,"messages_categorized":%d,"recategorize":%t}`, len(rows), count, count, opts.Recategorize))
+		}
 	}
 
 	if s.JobRuns != nil {
 		meta := fmt.Sprintf(`{"messages_categorized":%d,"recategorize":%t}`, count, opts.Recategorize)
-		_ = s.JobRuns.InsertJobRun(ctx, jobID, accountID, "categorize", "api", "success", started, time.Now().UTC(), nil, meta)
+		_ = s.JobRuns.UpdateJobRunStatus(ctx, jobID, "success", timePtr(time.Now().UTC()), nil, meta)
 	}
 	return &CategorizeResult{JobRunID: jobID, MessagesCategorized: count}, nil
 }
@@ -251,4 +269,8 @@ func fallbackCategorySlug(categories []driven.CategoryDefinitionRow) string {
 		return strings.Compare(a.Slug, b.Slug)
 	})
 	return sorted[0].Slug
+}
+
+func timePtr(t time.Time) *time.Time {
+	return &t
 }

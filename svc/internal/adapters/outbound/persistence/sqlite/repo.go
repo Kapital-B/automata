@@ -626,12 +626,27 @@ func (r *Repository) InsertJobRun(ctx context.Context, id uuid.UUID, accountID u
 		VALUES (?, ?, ?, ?, ?, NULL, NULL, ?, ?, ?, ?)
 		ON CONFLICT(id) DO UPDATE SET
 			status = excluded.status,
+			started_at = CASE WHEN job_runs.started_at IS NULL OR job_runs.started_at = '' THEN excluded.started_at ELSE job_runs.started_at END,
 			finished_at = excluded.finished_at,
 			error_message = excluded.error_message,
 			meta_json = excluded.meta_json`,
 		id.String(), accountID.String(), jobType, trigger, status,
 		formatRFC3339(startedAt.UTC()), fin, nullStr(errMsg), metaJSON,
 	)
+	return err
+}
+
+func (r *Repository) UpdateJobRunMeta(ctx context.Context, id uuid.UUID, metaJSON string) error {
+	_, err := r.db.ExecContext(ctx, `UPDATE job_runs SET meta_json = ? WHERE id = ?`, metaJSON, id.String())
+	return err
+}
+
+func (r *Repository) UpdateJobRunStatus(ctx context.Context, id uuid.UUID, status string, finishedAt *time.Time, errMsg *string, metaJSON string) error {
+	_, err := r.db.ExecContext(ctx, `
+		UPDATE job_runs
+		SET status = ?, finished_at = ?, error_message = ?, meta_json = ?
+		WHERE id = ?
+	`, status, nullTimeStr(finishedAt), nullStr(errMsg), metaJSON, id.String())
 	return err
 }
 

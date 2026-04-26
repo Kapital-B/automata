@@ -3,6 +3,7 @@ package http
 import (
 	"encoding/json"
 	"errors"
+	"fmt"
 	"html"
 	"log/slog"
 	"net/http"
@@ -13,6 +14,7 @@ import (
 	"time"
 
 	appaccounts "github.com/Kapital-B/automata/svc/internal/application/accounts"
+	asynqadapter "github.com/Kapital-B/automata/svc/internal/adapters/inbound/asynq"
 	"github.com/Kapital-B/automata/svc/internal/application/auth"
 	appmessages "github.com/Kapital-B/automata/svc/internal/application/messages"
 	"github.com/Kapital-B/automata/svc/internal/application/ports/driven"
@@ -42,6 +44,7 @@ type Handlers struct {
 	JWTSecret       []byte
 	JWTTTL          time.Duration
 	DefaultUserID   uuid.UUID // dev fallback when no Bearer token
+	JobQueue        *asynqadapter.QueueClient
 }
 
 func (h *Handlers) Routes() http.Handler {
@@ -248,21 +251,54 @@ func (h *Handlers) deleteAccount(w http.ResponseWriter, r *http.Request) {
 }
 
 func (h *Handlers) syncAccount(w http.ResponseWriter, r *http.Request) {
+	if h.SyncSvc == nil || h.JobRuns == nil {
+		writeJSON(w, http.StatusServiceUnavailable, map[string]string{"error": "sync queue not configured"})
+		return
+	}
 	id, err := uuid.Parse(chi.URLParam(r, "id"))
 	if err != nil {
 		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "bad id"})
 		return
 	}
-	res, err := h.SyncSvc.SyncInbox(r.Context(), userIDOrEmpty(r), id)
+	uid := userIDOrEmpty(r)
+	if h.JobQueue == nil {
+		res, err := h.SyncSvc.SyncInbox(r.Context(), uid, id)
+		if err != nil {
+			h.Log.Error("sync", "err", err)
+			writeJSON(w, http.StatusBadRequest, map[string]string{"error": err.Error()})
+			return
+		}
+		writeJSON(w, http.StatusOK, map[string]any{
+			"job_run_id":        res.JobRunID.String(),
+			"messages_upserted": res.MessagesUpserted,
+			"status":            "success",
+		})
+		return
+	}
+	jobID := uuid.New()
+	started := time.Now().UTC()
+	if err := h.JobRuns.InsertJobRun(r.Context(), jobID, id, "sync", "api", "pending", started, time.Time{}, nil, `{"queued":true}`); err != nil {
+		h.Log.Error("create sync run", "err", err)
+		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "internal"})
+		return
+	}
+	err = h.JobQueue.EnqueueSync(r.Context(), asynqadapter.TaskPayload{
+		SchemaVersion: 1,
+		RunID:         jobID,
+		UserID:        uid,
+		AccountID:     id,
+		TriggerKind:   "api",
+	})
 	if err != nil {
-		h.Log.Error("sync", "err", err)
+		msg := err.Error()
+		_ = h.JobRuns.UpdateJobRunStatus(r.Context(), jobID, "failed", timePtrHTTP(time.Now().UTC()), &msg, `{"queued":false}`)
+		h.Log.Error("enqueue sync", "err", err)
 		writeJSON(w, http.StatusBadRequest, map[string]string{"error": err.Error()})
 		return
 	}
-	writeJSON(w, http.StatusOK, map[string]any{
-		"job_run_id":        res.JobRunID.String(),
-		"messages_upserted": res.MessagesUpserted,
-		"status":            "success",
+	writeJSON(w, http.StatusAccepted, map[string]any{
+		"job_run_id": jobID.String(),
+		"status":     "queued",
 	})
 }
 
@@ -613,7 +649,7 @@ func (h *Handlers) deleteCategory(w http.ResponseWriter, r *http.Request) {
 }
 
 func (h *Handlers) categorizeAccount(w http.ResponseWriter, r *http.Request) {
-	if h.CategorizeSvc == nil {
+	if h.CategorizeSvc == nil || h.JobRuns == nil {
 		writeJSON(w, http.StatusServiceUnavailable, map[string]string{"error": "categorize service not configured"})
 		return
 	}
@@ -631,19 +667,51 @@ func (h *Handlers) categorizeAccount(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 	}
-	res, err := h.CategorizeSvc.CategorizeAccount(r.Context(), userIDOrEmpty(r), id, appmessages.CategorizeOptions{
-		Recategorize: body.Recategorize,
+	uid := userIDOrEmpty(r)
+	if h.JobQueue == nil {
+		res, err := h.CategorizeSvc.CategorizeAccount(r.Context(), uid, id, appmessages.CategorizeOptions{
+			Recategorize: body.Recategorize,
+		})
+		if err != nil {
+			h.Log.Error("categorize", "err", err)
+			writeJSON(w, http.StatusBadRequest, map[string]string{"error": err.Error()})
+			return
+		}
+		writeJSON(w, http.StatusOK, map[string]any{
+			"job_run_id":           res.JobRunID.String(),
+			"messages_categorized": res.MessagesCategorized,
+			"recategorize":         body.Recategorize,
+			"status":               "success",
+		})
+		return
+	}
+	jobID := uuid.New()
+	started := time.Now().UTC()
+	meta := fmt.Sprintf(`{"queued":true,"recategorize":%t}`, body.Recategorize)
+	if err := h.JobRuns.InsertJobRun(r.Context(), jobID, id, "categorize", "api", "pending", started, time.Time{}, nil, meta); err != nil {
+		h.Log.Error("create categorize run", "err", err)
+		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "internal"})
+		return
+	}
+	err = h.JobQueue.EnqueueCategorize(r.Context(), asynqadapter.TaskPayload{
+		SchemaVersion: 1,
+		RunID:         jobID,
+		UserID:        uid,
+		AccountID:     id,
+		TriggerKind:   "api",
+		Recategorize:  body.Recategorize,
 	})
 	if err != nil {
-		h.Log.Error("categorize", "err", err)
+		msg := err.Error()
+		_ = h.JobRuns.UpdateJobRunStatus(r.Context(), jobID, "failed", timePtrHTTP(time.Now().UTC()), &msg, fmt.Sprintf(`{"queued":false,"recategorize":%t}`, body.Recategorize))
+		h.Log.Error("enqueue categorize", "err", err)
 		writeJSON(w, http.StatusBadRequest, map[string]string{"error": err.Error()})
 		return
 	}
-	writeJSON(w, http.StatusOK, map[string]any{
-		"job_run_id":           res.JobRunID.String(),
-		"messages_categorized": res.MessagesCategorized,
-		"recategorize":         body.Recategorize,
-		"status":               "success",
+	writeJSON(w, http.StatusAccepted, map[string]any{
+		"job_run_id":   jobID.String(),
+		"recategorize": body.Recategorize,
+		"status":       "queued",
 	})
 }
 
@@ -815,4 +883,8 @@ func writeJSON(w http.ResponseWriter, status int, v any) {
 func userIDOrEmpty(r *http.Request) uuid.UUID {
 	uid, _ := UserIDFromContext(r.Context())
 	return uid
+}
+
+func timePtrHTTP(t time.Time) *time.Time {
+	return &t
 }

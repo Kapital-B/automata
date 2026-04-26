@@ -5,6 +5,7 @@ HTTP service per [docs/specs/initial.md](../docs/specs/initial.md): **app auth**
 ## Requirements
 
 - Go **1.22+**
+- Redis **7+** (used by Asynq for background jobs)
 - Microsoft Entra app: **mail** redirect `MS_REDIRECT_URI` (e.g. `http://localhost:8080/api/accounts/callback`) with delegated `Mail.Read`, `Mail.Send`, `User.Read`, `offline_access`.
 - Same app (or another) **sign-in**: add redirect `MS_AUTH_REDIRECT_URI` (default `http://localhost:8080/api/auth/microsoft/callback`) with delegated `openid`, `offline_access`, `email`, `profile` (v2 endpoint).
 - **Google** (optional): OAuth Web client with redirect `GOOGLE_REDIRECT_URI` (default `APP_PUBLIC_URL/api/auth/google/callback`).
@@ -17,17 +18,35 @@ cp .env.example .env
 # edit .env — MS_*, ENCRYPTION_KEY (32 chars), JWT_SECRET (≥32 chars)
 
 set -a && source .env && set +a
+# terminal 1
 go run ./cmd/server
+# terminal 2
+go run ./cmd/worker
+```
+
+For local Redis:
+
+```bash
+docker compose up -d redis
 ```
 
 - **Health:** `GET http://localhost:8080/api/health`
 - **Start OAuth:** `POST /api/accounts` with body `{"provider":"m365","ms_account_kind":"work"}` or `"personal"`
 - Open **`authorization_url`** in a browser: use the URL from **parsed** JSON (e.g. `jq -r .authorization_url`) so query parameters stay intact. Pasting from raw JSON that contains `\u0026` instead of `&` can break the request and trigger Azure errors such as **AADSTS900144** (missing `scope`).
 - Microsoft redirects to `GET /api/accounts/callback?code=...&state=...`, then **302** to `{DASHBOARD_BASE_URL}{OAUTH_SUCCESS_PATH}?account_id=...`
-- **Sync inbox:** `POST /api/accounts/{id}/sync`
-- **Categorize inbox:** `POST /api/accounts/{id}/categorize` (requires `LLM_BASE_URL` + `LLM_MODEL`)
+- **Sync inbox:** `POST /api/accounts/{id}/sync` returns quickly with `job_run_id` and queues work
+- **Categorize inbox:** `POST /api/accounts/{id}/categorize` (requires `LLM_BASE_URL` + `LLM_MODEL`) returns quickly with `job_run_id` and queues work
+- **Track progress:** `GET /api/runs` / `GET /api/runs/{id}`; progress counters are written in `meta_json` while jobs run
 - **List messages:** `GET /api/messages?account_id={uuid}`
 - **List categories:** `GET /api/categories`
+
+## Async run flow
+
+`cmd/server` enqueues sync/categorize tasks to Redis via Asynq and creates a `job_runs` row in `pending` status.
+
+`cmd/worker` consumes tasks, updates `job_runs` through `running` to `success` or `failed`, and writes incremental progress (for example `processed_messages` / `total_messages`) into `meta_json`.
+
+UI and API consumers should treat `job_runs` as the durable source of truth for run state.
 
 ## Auth
 

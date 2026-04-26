@@ -79,8 +79,8 @@ export default function AccountsPage() {
       void queryClient.invalidateQueries({ queryKey: ["accounts"] });
       void queryClient.invalidateQueries({ queryKey: ["runs"] });
       toast({
-        title: "Sync started",
-        description: `Run ${result.job_run_id.slice(0, 8)} started.`,
+        title: "Sync queued",
+        description: `Run ${result.job_run_id.slice(0, 8)} started in background.`,
       });
     },
     onError: (err) => {

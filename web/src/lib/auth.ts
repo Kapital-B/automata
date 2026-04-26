@@ -41,7 +41,7 @@ export type MailAccount = {
 
 export type SyncAccountResponse = {
   job_run_id: string;
-  messages_upserted: number;
+  messages_upserted?: number;
   status: string;
 };
 
@@ -261,6 +261,12 @@ export async function listRuns(accessToken: string, filter: ListRunsFilter = {})
   });
 }
 
+export async function getRun(accessToken: string, id: string) {
+  return apiRequest<JobRun>(`/api/runs/${id}`, {
+    headers: toAuthHeader(accessToken),
+  });
+}
+
 export async function listCategories(accessToken: string) {
   return apiRequest<CategoryDefinition[]>("/api/categories", {
     headers: toAuthHeader(accessToken),
@@ -332,7 +338,7 @@ export async function categorizeAccount(
   accountID: string,
   options: { recategorize?: boolean } = {},
 ) {
-  return apiRequest<{ job_run_id: string; messages_categorized: number; recategorize?: boolean; status: string }>(
+  return apiRequest<{ job_run_id: string; messages_categorized?: number; recategorize?: boolean; status: string }>(
     `/api/accounts/${accountID}/categorize`,
     {
       method: "POST",

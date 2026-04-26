@@ -146,6 +146,8 @@ type UserRepository interface {
 // JobRunRepository records sync runs (Phase 1: synchronous insert).
 type JobRunRepository interface {
 	InsertJobRun(ctx context.Context, id uuid.UUID, accountID uuid.UUID, jobType string, trigger string, status string, startedAt, finishedAt time.Time, errMsg *string, metaJSON string) error
+	UpdateJobRunMeta(ctx context.Context, id uuid.UUID, metaJSON string) error
+	UpdateJobRunStatus(ctx context.Context, id uuid.UUID, status string, finishedAt *time.Time, errMsg *string, metaJSON string) error
 	ListJobRuns(ctx context.Context, userID uuid.UUID, filter JobRunListFilter) ([]JobRunRow, error)
 	GetJobRun(ctx context.Context, userID uuid.UUID, id uuid.UUID) (*JobRunRow, error)
 }

@@ -35,6 +35,11 @@ type Config struct {
 	LLMBaseURL         string
 	LLMModel           string
 	LLMAPIKey          string
+	RedisAddr          string
+	AsynqPrefix        string
+	QueueSyncConcurrency       int
+	QueueCategorizeConcurrency int
+	GlobalMaxConcurrentJobs    int
 }
 
 func getenv(key, def string) string {
@@ -97,6 +102,27 @@ func Load() (Config, error) {
 			refreshTTL = time.Duration(d) * 24 * time.Hour
 		}
 	}
+	queueSyncConcurrency := 2
+	if v := os.Getenv("JOB_QUEUE_SYNC_CONCURRENCY"); v != "" {
+		var n int
+		if _, err := fmt.Sscanf(v, "%d", &n); err == nil && n > 0 {
+			queueSyncConcurrency = n
+		}
+	}
+	queueCategorizeConcurrency := 1
+	if v := os.Getenv("JOB_QUEUE_CATEGORIZE_CONCURRENCY"); v != "" {
+		var n int
+		if _, err := fmt.Sscanf(v, "%d", &n); err == nil && n > 0 {
+			queueCategorizeConcurrency = n
+		}
+	}
+	globalMaxConcurrentJobs := 2
+	if v := os.Getenv("GLOBAL_MAX_CONCURRENT_JOBS"); v != "" {
+		var n int
+		if _, err := fmt.Sscanf(v, "%d", &n); err == nil && n > 0 {
+			globalMaxConcurrentJobs = n
+		}
+	}
 
 	defaultUID, err := uuid.Parse(getenv("AUTH_DEFAULT_USER_ID", "a0000001-0000-4000-8000-000000000001"))
 	if err != nil {
@@ -130,6 +156,11 @@ func Load() (Config, error) {
 		LLMBaseURL:        os.Getenv("LLM_BASE_URL"),
 		LLMModel:          os.Getenv("LLM_MODEL"),
 		LLMAPIKey:         os.Getenv("LLM_API_KEY"),
+		RedisAddr:         getenv("REDIS_ADDR", "localhost:6379"),
+		AsynqPrefix:       getenv("ASYNQ_PREFIX", "automata"),
+		QueueSyncConcurrency:       queueSyncConcurrency,
+		QueueCategorizeConcurrency: queueCategorizeConcurrency,
+		GlobalMaxConcurrentJobs:    globalMaxConcurrentJobs,
 	}
 	if cfg.MSClientID == "" || cfg.MSClientSecret == "" || cfg.MSRedirectURI == "" {
 		return Config{}, fmt.Errorf("MS_CLIENT_ID, MS_CLIENT_SECRET, and MS_REDIRECT_URI are required for mail connect")

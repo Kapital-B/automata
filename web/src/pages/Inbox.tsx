@@ -118,10 +118,13 @@ export default function InboxPage({ accountFilter }: Props) {
       if (!accessToken || accountFilter === "all") return;
       return categorizeAccount(accessToken, accountFilter, { recategorize });
     },
-    onSuccess: (_, vars) => {
+    onSuccess: (res, vars) => {
       void queryClient.invalidateQueries({ queryKey: ["messages"] });
       void queryClient.invalidateQueries({ queryKey: ["runs"] });
-      toast({ title: vars.recategorize ? "Re-categorization completed" : "Categorization completed" });
+      toast({
+        title: vars.recategorize ? "Re-categorization queued" : "Categorization queued",
+        description: res?.job_run_id ? `Run ${res.job_run_id.slice(0, 8)} started in background.` : undefined,
+      });
     },
     onError: (err) => {
       toast({
