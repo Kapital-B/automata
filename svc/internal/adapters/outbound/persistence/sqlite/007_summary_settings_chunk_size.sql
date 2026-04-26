@@ -1,0 +1,1 @@
+ALTER TABLE summary_settings ADD COLUMN chunk_size INTEGER NOT NULL DEFAULT 12;

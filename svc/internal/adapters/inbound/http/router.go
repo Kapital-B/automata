@@ -29,10 +29,12 @@ type Handlers struct {
 	AccountSvc      *appaccounts.Service
 	SyncSvc         *appmessages.SyncService
 	CategorizeSvc   *appmessages.CategorizeService
+	SummarizeSvc    *appmessages.SummarizeService
 	AuthSvc         *auth.Service
 	Accounts        driven.AccountRepository
 	Messages        driven.MessageRepository
 	JobRuns         driven.JobRunRepository
+	Summaries       driven.SummaryRepository
 	OAuthStates     driven.OAuthStateRepository
 	Users           driven.UserRepository
 	Dashboard       string
@@ -72,12 +74,18 @@ func (h *Handlers) Routes() http.Handler {
 	r.Delete("/api/accounts/{id}", h.deleteAccount)
 	r.Post("/api/accounts/{id}/sync", h.syncAccount)
 	r.Post("/api/accounts/{id}/categorize", h.categorizeAccount)
+	r.Post("/api/accounts/{id}/summaries/refresh", h.refreshSummary)
 	r.Get("/api/categories", h.listCategories)
 	r.Post("/api/categories", h.createCategory)
 	r.Patch("/api/categories/{id}", h.updateCategory)
 	r.Delete("/api/categories/{id}", h.deleteCategory)
 	r.Get("/api/runs", h.listRuns)
 	r.Get("/api/runs/{id}", h.getRun)
+	r.Get("/api/summaries", h.listSummaries)
+	r.Post("/api/action-items/{id}/done", h.markActionItemDone)
+	r.Post("/api/fyi/{id}/dismiss", h.dismissFYI)
+	r.Get("/api/settings/summaries", h.getSummarySettings)
+	r.Patch("/api/settings/summaries", h.updateSummarySettings)
 	r.Get("/api/messages", h.listMessages)
 	r.Get("/api/messages/{id}", h.getMessage)
 	return r
@@ -713,6 +721,232 @@ func (h *Handlers) categorizeAccount(w http.ResponseWriter, r *http.Request) {
 		"recategorize": body.Recategorize,
 		"status":       "queued",
 	})
+}
+
+func (h *Handlers) refreshSummary(w http.ResponseWriter, r *http.Request) {
+	if h.SummarizeSvc == nil || h.JobRuns == nil {
+		writeJSON(w, http.StatusServiceUnavailable, map[string]string{"error": "summarize service not configured"})
+		return
+	}
+	id, err := uuid.Parse(chi.URLParam(r, "id"))
+	if err != nil {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "bad id"})
+		return
+	}
+	uid := userIDOrEmpty(r)
+	if h.JobQueue == nil {
+		res, err := h.SummarizeSvc.SummarizeAccount(r.Context(), uid, id, appmessages.SummarizeOptions{})
+		if err != nil {
+			h.Log.Error("summarize", "err", err)
+			writeJSON(w, http.StatusBadRequest, map[string]string{"error": err.Error()})
+			return
+		}
+		writeJSON(w, http.StatusOK, map[string]any{"job_run_id": res.JobRunID.String(), "status": "success"})
+		return
+	}
+	jobID := uuid.New()
+	started := time.Now().UTC()
+	if err := h.JobRuns.InsertJobRun(r.Context(), jobID, id, "summarize", "api", "pending", started, time.Time{}, nil, `{"queued":true}`); err != nil {
+		h.Log.Error("create summarize run", "err", err)
+		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "internal"})
+		return
+	}
+	err = h.JobQueue.EnqueueSummarize(r.Context(), asynqadapter.TaskPayload{
+		SchemaVersion: 1,
+		RunID:         jobID,
+		UserID:        uid,
+		AccountID:     id,
+		TriggerKind:   "api",
+	})
+	if err != nil {
+		msg := err.Error()
+		_ = h.JobRuns.UpdateJobRunStatus(r.Context(), jobID, "failed", timePtrHTTP(time.Now().UTC()), &msg, `{"queued":false}`)
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": err.Error()})
+		return
+	}
+	writeJSON(w, http.StatusAccepted, map[string]any{"job_run_id": jobID.String(), "status": "queued"})
+}
+
+func (h *Handlers) listSummaries(w http.ResponseWriter, r *http.Request) {
+	if h.Summaries == nil {
+		writeJSON(w, http.StatusServiceUnavailable, map[string]string{"error": "summaries not configured"})
+		return
+	}
+	uid := userIDOrEmpty(r)
+	var accountID *uuid.UUID
+	if aid := strings.TrimSpace(r.URL.Query().Get("account_id")); aid != "" {
+		id, err := uuid.Parse(aid)
+		if err != nil {
+			writeJSON(w, http.StatusBadRequest, map[string]string{"error": "bad account_id"})
+			return
+		}
+		accountID = &id
+	}
+	snaps, err := h.Summaries.ListSummarySnapshots(r.Context(), uid, accountID, 1)
+	if err != nil {
+		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "internal"})
+		return
+	}
+	if len(snaps) == 0 {
+		writeJSON(w, http.StatusOK, map[string]any{
+			"snapshot":      nil,
+			"action_items":  []any{},
+			"fyi":           []any{},
+		})
+		return
+	}
+	snap := snaps[0]
+	items, err := h.Summaries.ListOpenActionItems(r.Context(), uid, accountID)
+	if err != nil {
+		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "internal"})
+		return
+	}
+	fyiRows, err := h.Summaries.ListFYIByRun(r.Context(), uid, snap.RunID)
+	if err != nil {
+		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "internal"})
+		return
+	}
+	type actionItem struct {
+		ID         string  `json:"id"`
+		AccountID  string  `json:"account_id"`
+		MessageID  string  `json:"message_id"`
+		Text       string  `json:"text"`
+		DueAt      *string `json:"due_at,omitempty"`
+		IsOverdue  bool    `json:"is_overdue"`
+	}
+	outItems := make([]actionItem, 0, len(items))
+	now := time.Now().UTC()
+	for _, it := range items {
+		var dueAt *string
+		overdue := false
+		if it.DueAt != nil {
+			s := it.DueAt.UTC().Format(time.RFC3339Nano)
+			dueAt = &s
+			overdue = it.DueAt.Before(now)
+		}
+		outItems = append(outItems, actionItem{
+			ID: it.ID.String(), AccountID: it.AccountID.String(), MessageID: it.MessageID.String(), Text: it.Text, DueAt: dueAt, IsOverdue: overdue,
+		})
+	}
+	type fyiItem struct {
+		ID        string `json:"id"`
+		AccountID string `json:"account_id"`
+		MessageID string `json:"message_id"`
+		Text      string `json:"text"`
+	}
+	outFYI := make([]fyiItem, 0, len(fyiRows))
+	for _, it := range fyiRows {
+		outFYI = append(outFYI, fyiItem{ID: it.ID.String(), AccountID: it.AccountID.String(), MessageID: it.MessageID.String(), Text: it.Text})
+	}
+	var snapAccountID *string
+	if snap.AccountID != nil {
+		s := snap.AccountID.String()
+		snapAccountID = &s
+	}
+	writeJSON(w, http.StatusOK, map[string]any{
+		"snapshot": map[string]any{
+			"id":              snap.ID.String(),
+			"account_id":      snapAccountID,
+			"run_id":          snap.RunID.String(),
+			"window_start":    snap.WindowStart.UTC().Format(time.RFC3339Nano),
+			"window_end":      snap.WindowEnd.UTC().Format(time.RFC3339Nano),
+			"general_summary": snap.GeneralSummary,
+			"created_at":      snap.CreatedAt.UTC().Format(time.RFC3339Nano),
+		},
+		"action_items": outItems,
+		"fyi":          outFYI,
+	})
+}
+
+func (h *Handlers) markActionItemDone(w http.ResponseWriter, r *http.Request) {
+	if h.Summaries == nil {
+		writeJSON(w, http.StatusServiceUnavailable, map[string]string{"error": "summaries not configured"})
+		return
+	}
+	id, err := uuid.Parse(chi.URLParam(r, "id"))
+	if err != nil {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "bad id"})
+		return
+	}
+	if err := h.Summaries.MarkActionItemDone(r.Context(), userIDOrEmpty(r), id, time.Now().UTC()); err != nil {
+		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "internal"})
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"status": "success"})
+}
+
+func (h *Handlers) dismissFYI(w http.ResponseWriter, r *http.Request) {
+	if h.Summaries == nil {
+		writeJSON(w, http.StatusServiceUnavailable, map[string]string{"error": "summaries not configured"})
+		return
+	}
+	id, err := uuid.Parse(chi.URLParam(r, "id"))
+	if err != nil {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "bad id"})
+		return
+	}
+	if err := h.Summaries.DeleteFYI(r.Context(), userIDOrEmpty(r), id); err != nil {
+		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "internal"})
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"status": "success"})
+}
+
+func (h *Handlers) getSummarySettings(w http.ResponseWriter, r *http.Request) {
+	if h.Summaries == nil {
+		writeJSON(w, http.StatusServiceUnavailable, map[string]string{"error": "summaries not configured"})
+		return
+	}
+	row, err := h.Summaries.GetSummarySettings(r.Context(), userIDOrEmpty(r))
+	if err != nil {
+		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "internal"})
+		return
+	}
+	if row == nil {
+		writeJSON(w, http.StatusOK, map[string]any{
+			"include_category_slugs": []string{},
+			"exclude_category_slugs": []string{},
+			"chunk_size":             12,
+		})
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{
+		"include_category_slugs": row.IncludeCategorySlugs,
+		"exclude_category_slugs": row.ExcludeCategorySlugs,
+		"chunk_size":             row.ChunkSize,
+		"updated_at":             row.UpdatedAt.UTC().Format(time.RFC3339Nano),
+	})
+}
+
+func (h *Handlers) updateSummarySettings(w http.ResponseWriter, r *http.Request) {
+	if h.Summaries == nil {
+		writeJSON(w, http.StatusServiceUnavailable, map[string]string{"error": "summaries not configured"})
+		return
+	}
+	var body struct {
+		Include []string `json:"include_category_slugs"`
+		Exclude []string `json:"exclude_category_slugs"`
+		ChunkSize int `json:"chunk_size"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid json"})
+		return
+	}
+	row := driven.SummarySettingsRow{
+		UserID:               userIDOrEmpty(r),
+		IncludeCategorySlugs: body.Include,
+		ExcludeCategorySlugs: body.Exclude,
+		ChunkSize:            body.ChunkSize,
+		UpdatedAt:            time.Now().UTC(),
+	}
+	if row.ChunkSize <= 0 {
+		row.ChunkSize = 12
+	}
+	if err := h.Summaries.UpsertSummarySettings(r.Context(), row); err != nil {
+		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "internal"})
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"status": "success"})
 }
 
 func (h *Handlers) listRuns(w http.ResponseWriter, r *http.Request) {

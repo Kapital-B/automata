@@ -1,48 +1,119 @@
 import { PageHeader } from "@/components/PageHeader";
 import { AccountBadge } from "@/components/AccountBadge";
 import { Button } from "@/components/ui/button";
-import { summary, accounts, getAccount, getMessage, relativeTime } from "@/lib/mock-data";
-import { ArrowUpRight, RefreshCw, CheckCircle2, Info } from "lucide-react";
+import { dismissFYI, getSummary, markActionItemDone, refreshSummary } from "@/lib/auth";
+import { RefreshCw, CheckCircle2, Info } from "lucide-react";
 import { Link } from "react-router-dom";
 import type { AccountFilter } from "@/components/AppShell";
+import { useAuth } from "@/components/auth/AuthProvider";
+import { useAccountsData } from "@/hooks/useAccountsData";
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import { toast } from "@/hooks/use-toast";
+import { relativeTime } from "@/lib/accounts";
 
 interface Props {
   accountFilter: AccountFilter;
 }
 
 export default function TodayPage({ accountFilter }: Props) {
-  const filterFn = <T extends { accountId: string }>(arr: T[]) =>
-    accountFilter === "all" ? arr : arr.filter((x) => x.accountId === accountFilter);
+  const { accessToken } = useAuth();
+  const { accounts } = useAccountsData();
+  const queryClient = useQueryClient();
+  const activeAccountID = accountFilter === "all" ? undefined : accountFilter;
 
-  const actionItems = filterFn(summary.actionItems);
-  const fyi = filterFn(summary.fyi);
+  const summaryQuery = useQuery({
+    queryKey: ["summary", accessToken, activeAccountID],
+    queryFn: () => getSummary(accessToken!, activeAccountID),
+    enabled: Boolean(accessToken),
+  });
+  const actionItems = summaryQuery.data?.action_items ?? [];
+  const fyi = summaryQuery.data?.fyi ?? [];
+  const snapshot = summaryQuery.data?.snapshot;
+
+  const refreshMutation = useMutation({
+    mutationFn: async () => {
+      if (!accessToken) return { queued: 0, failed: 0, total: 0 };
+      const targetAccountIDs =
+        activeAccountID != null
+          ? [activeAccountID]
+          : accounts.filter((a) => a.status === "connected").map((a) => a.id);
+      if (targetAccountIDs.length === 0) {
+        return { queued: 0, failed: 0, total: 0 };
+      }
+      const results = await Promise.allSettled(targetAccountIDs.map((id) => refreshSummary(accessToken, id)));
+      const queued = results.filter((r) => r.status === "fulfilled").length;
+      return { queued, failed: results.length - queued, total: results.length };
+    },
+    onSuccess: (res) => {
+      void queryClient.invalidateQueries({ queryKey: ["runs"] });
+      void queryClient.invalidateQueries({ queryKey: ["summary"] });
+      if (res.total === 0) {
+        toast({ title: "No connected accounts available" });
+        return;
+      }
+      toast({
+        title: "Summary refresh queued",
+        description:
+          res.failed > 0
+            ? `${res.queued}/${res.total} accounts queued (${res.failed} failed).`
+            : `${res.queued} account${res.queued === 1 ? "" : "s"} queued.`,
+      });
+    },
+  });
+  const doneMutation = useMutation({
+    mutationFn: async (itemID: string) => {
+      if (!accessToken) throw new Error("Not authenticated");
+      return markActionItemDone(accessToken, itemID);
+    },
+    onSuccess: () => {
+      void queryClient.invalidateQueries({ queryKey: ["summary"] });
+    },
+  });
+  const dismissFYIMutation = useMutation({
+    mutationFn: async (fyiID: string) => {
+      if (!accessToken) throw new Error("Not authenticated");
+      return dismissFYI(accessToken, fyiID);
+    },
+    onSuccess: () => {
+      void queryClient.invalidateQueries({ queryKey: ["summary"] });
+    },
+  });
 
   // Group action items by account for clear provenance
   const grouped = accounts
     .map((a) => ({
       account: a,
-      items: actionItems.filter((i) => i.accountId === a.id),
+      items: actionItems.filter((i) => i.account_id === a.id),
     }))
     .filter((g) => g.items.length > 0);
 
   return (
     <div className="space-y-10">
       <PageHeader
-        eyebrow={`Daily summary · ${new Date(summary.generatedAt).toLocaleDateString(undefined, {
+        eyebrow={`Daily summary · ${new Date(snapshot?.created_at ?? Date.now()).toLocaleDateString(undefined, {
           weekday: "long",
           month: "long",
           day: "numeric",
         })}`}
         title="What needs your attention today."
-        description={`Generated ${relativeTime(summary.generatedAt)} from ${
-          accountFilter === "all" ? `${accounts.length} accounts` : getAccount(accountFilter)?.label
-        } · model: ${summary.model}`}
+        description={
+          snapshot
+            ? `Generated ${relativeTime(snapshot.created_at)} from ${
+                accountFilter === "all" ? `${accounts.length} accounts` : accounts.find((a) => a.id === accountFilter)?.label
+              }`
+            : "No summary generated yet."
+        }
         actions={
           <>
             <Button variant="outline" size="sm">
               <CheckCircle2 className="mr-1.5 h-3.5 w-3.5" /> Mark all reviewed
             </Button>
-            <Button size="sm" className="bg-foreground text-background hover:bg-foreground/90">
+            <Button
+              size="sm"
+              className="bg-foreground text-background hover:bg-foreground/90"
+              disabled={refreshMutation.isPending}
+              onClick={() => refreshMutation.mutate()}
+            >
               <RefreshCw className="mr-1.5 h-3.5 w-3.5" /> Refresh summary
             </Button>
           </>
@@ -54,8 +125,8 @@ export default function TodayPage({ accountFilter }: Props) {
         {[
           { label: "Action items", value: actionItems.length, tone: "text-foreground" },
           { label: "FYI", value: fyi.length, tone: "text-foreground" },
-          { label: "Drafts ready", value: 3, tone: "text-foreground" },
-          { label: "Run id", value: summary.runId.split("_").pop(), tone: "font-mono text-sm text-muted-foreground" },
+          { label: "Drafts ready", value: "-", tone: "text-foreground" },
+          { label: "Run id", value: snapshot?.run_id.slice(0, 8) ?? "-", tone: "font-mono text-sm text-muted-foreground" },
         ].map((s) => (
           <div key={s.label} className="surface-card px-4 py-3">
             <p className="text-[10px] uppercase tracking-widest text-muted-foreground">
@@ -86,30 +157,24 @@ export default function TodayPage({ accountFilter }: Props) {
               <AccountBadge account={account} showEmail size="sm" />
               <ul className="surface-card divide-y divide-border/70 overflow-hidden">
                 {items.map((item) => {
-                  const msg = getMessage(item.messageId);
                   return (
                     <li key={item.id} className="group flex items-start gap-4 px-5 py-4 transition hover:bg-secondary/40">
                       <div className="mt-1.5 h-1.5 w-1.5 shrink-0 rounded-full bg-foreground/70" />
                       <div className="min-w-0 flex-1">
                         <p className="text-sm leading-snug text-foreground">{item.text}</p>
-                        {msg && (
-                          <p className="mt-1 truncate text-xs text-muted-foreground">
-                            From {msg.from.name} · "{msg.subject}"
-                          </p>
-                        )}
+                        <Link
+                          to={`/inbox?message_id=${encodeURIComponent(item.message_id)}&account_id=${encodeURIComponent(item.account_id)}`}
+                          className="mt-1 inline-block truncate text-xs text-primary underline underline-offset-2 hover:text-primary/80"
+                        >
+                          Message {item.message_id.slice(0, 8)}
+                        </Link>
                       </div>
-                      {item.due && (
+                      {item.due_at && (
                         <span className="rounded-full border border-border bg-background px-2 py-0.5 text-[10px] font-medium uppercase tracking-wider text-foreground/80">
-                          {item.due}
+                          {item.is_overdue ? "Overdue" : new Date(item.due_at).toLocaleDateString()}
                         </span>
                       )}
-                      <Link
-                        to="/inbox"
-                        className="opacity-0 transition group-hover:opacity-100"
-                        aria-label="Open message"
-                      >
-                        <ArrowUpRight className="h-4 w-4 text-muted-foreground" />
-                      </Link>
+                      <Button size="sm" variant="outline" onClick={() => doneMutation.mutate(item.id)}>Done</Button>
                     </li>
                   );
                 })}
@@ -133,19 +198,28 @@ export default function TodayPage({ accountFilter }: Props) {
               <Info className="mt-0.5 h-4 w-4 shrink-0 text-muted-foreground" />
               <div className="min-w-0 flex-1">
                 <p className="text-sm leading-snug">{item.text}</p>
+                <Link
+                  to={`/inbox?message_id=${encodeURIComponent(item.message_id)}&account_id=${encodeURIComponent(item.account_id)}`}
+                  className="mt-1 inline-block truncate text-xs text-primary underline underline-offset-2 hover:text-primary/80"
+                >
+                  Message {item.message_id.slice(0, 8)}
+                </Link>
                 <div className="mt-2">
-                  <AccountBadge account={getAccount(item.accountId)} />
+                  <AccountBadge account={accounts.find((a) => a.id === item.account_id)} />
                 </div>
               </div>
+              <Button size="sm" variant="outline" onClick={() => dismissFYIMutation.mutate(item.id)}>
+                Dismiss
+              </Button>
             </li>
           ))}
         </ul>
       </section>
 
       <footer className="hairline pt-6 text-xs text-muted-foreground">
-        Window: {new Date(summary.windowStart).toLocaleString()} → {new Date(summary.windowEnd).toLocaleString()}
+        Window: {snapshot ? new Date(snapshot.window_start).toLocaleString() : "-"} → {snapshot ? new Date(snapshot.window_end).toLocaleString() : "-"}
         <span className="mx-2">·</span>
-        Run <span className="font-mono">{summary.runId}</span>
+        Run <span className="font-mono">{snapshot?.run_id ?? "-"}</span>
       </footer>
     </div>
   );

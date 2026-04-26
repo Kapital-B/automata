@@ -39,6 +39,7 @@ type Config struct {
 	AsynqPrefix        string
 	QueueSyncConcurrency       int
 	QueueCategorizeConcurrency int
+	QueueSummarizeConcurrency  int
 	GlobalMaxConcurrentJobs    int
 }
 
@@ -116,6 +117,13 @@ func Load() (Config, error) {
 			queueCategorizeConcurrency = n
 		}
 	}
+	queueSummarizeConcurrency := 1
+	if v := os.Getenv("JOB_QUEUE_SUMMARIZE_CONCURRENCY"); v != "" {
+		var n int
+		if _, err := fmt.Sscanf(v, "%d", &n); err == nil && n > 0 {
+			queueSummarizeConcurrency = n
+		}
+	}
 	globalMaxConcurrentJobs := 2
 	if v := os.Getenv("GLOBAL_MAX_CONCURRENT_JOBS"); v != "" {
 		var n int
@@ -160,6 +168,7 @@ func Load() (Config, error) {
 		AsynqPrefix:       getenv("ASYNQ_PREFIX", "automata"),
 		QueueSyncConcurrency:       queueSyncConcurrency,
 		QueueCategorizeConcurrency: queueCategorizeConcurrency,
+		QueueSummarizeConcurrency:  queueSummarizeConcurrency,
 		GlobalMaxConcurrentJobs:    globalMaxConcurrentJobs,
 	}
 	if cfg.MSClientID == "" || cfg.MSClientSecret == "" || cfg.MSRedirectURI == "" {

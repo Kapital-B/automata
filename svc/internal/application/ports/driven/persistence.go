@@ -100,6 +100,49 @@ type JobRunListFilter struct {
 	Offset    int
 }
 
+type SummarySettingsRow struct {
+	UserID               uuid.UUID
+	IncludeCategorySlugs []string
+	ExcludeCategorySlugs []string
+	ChunkSize            int
+	UpdatedAt            time.Time
+}
+
+type SummarySnapshotRow struct {
+	ID              uuid.UUID
+	UserID          uuid.UUID
+	AccountID       *uuid.UUID
+	RunID           uuid.UUID
+	WindowStart     time.Time
+	WindowEnd       time.Time
+	GeneralSummary  string
+	CreatedAt       time.Time
+}
+
+type ActionItemRow struct {
+	ID          uuid.UUID
+	UserID      uuid.UUID
+	AccountID   uuid.UUID
+	MessageID   uuid.UUID
+	RunID       uuid.UUID
+	Text        string
+	DueAt       *time.Time
+	Status      string
+	ActionedAt  *time.Time
+	CreatedAt   time.Time
+	UpdatedAt   time.Time
+}
+
+type FYIRow struct {
+	ID         uuid.UUID
+	UserID     uuid.UUID
+	AccountID  uuid.UUID
+	MessageID  uuid.UUID
+	RunID      uuid.UUID
+	Text       string
+	CreatedAt  time.Time
+}
+
 // AccountRepository persists accounts and OAuth tokens (ciphertext).
 type AccountRepository interface {
 	InsertAccount(ctx context.Context, a AccountRow, tokenCiphertext []byte) error
@@ -150,4 +193,17 @@ type JobRunRepository interface {
 	UpdateJobRunStatus(ctx context.Context, id uuid.UUID, status string, finishedAt *time.Time, errMsg *string, metaJSON string) error
 	ListJobRuns(ctx context.Context, userID uuid.UUID, filter JobRunListFilter) ([]JobRunRow, error)
 	GetJobRun(ctx context.Context, userID uuid.UUID, id uuid.UUID) (*JobRunRow, error)
+}
+
+type SummaryRepository interface {
+	GetSummarySettings(ctx context.Context, userID uuid.UUID) (*SummarySettingsRow, error)
+	UpsertSummarySettings(ctx context.Context, row SummarySettingsRow) error
+	InsertSummarySnapshot(ctx context.Context, row SummarySnapshotRow) error
+	ListSummarySnapshots(ctx context.Context, userID uuid.UUID, accountID *uuid.UUID, limit int) ([]SummarySnapshotRow, error)
+	InsertActionItems(ctx context.Context, rows []ActionItemRow) error
+	ListOpenActionItems(ctx context.Context, userID uuid.UUID, accountID *uuid.UUID) ([]ActionItemRow, error)
+	MarkActionItemDone(ctx context.Context, userID uuid.UUID, itemID uuid.UUID, at time.Time) error
+	InsertFYI(ctx context.Context, rows []FYIRow) error
+	ListFYIByRun(ctx context.Context, userID uuid.UUID, runID uuid.UUID) ([]FYIRow, error)
+	DeleteFYI(ctx context.Context, userID uuid.UUID, id uuid.UUID) error
 }

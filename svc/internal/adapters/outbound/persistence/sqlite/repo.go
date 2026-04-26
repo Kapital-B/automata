@@ -3,6 +3,7 @@ package sqlite
 import (
 	"context"
 	"database/sql"
+	"encoding/json"
 	"errors"
 	"strings"
 	"time"
@@ -718,6 +719,222 @@ func (r *Repository) GetJobRun(ctx context.Context, userID uuid.UUID, id uuid.UU
 	return item, nil
 }
 
+func (r *Repository) GetSummarySettings(ctx context.Context, userID uuid.UUID) (*driven.SummarySettingsRow, error) {
+	var includeJSON, excludeJSON, updatedAt string
+	var chunkSize int
+	err := r.db.QueryRowContext(ctx, `
+		SELECT include_category_slugs, exclude_category_slugs, chunk_size, updated_at
+		FROM summary_settings
+		WHERE user_id = ?
+	`, userID.String()).Scan(&includeJSON, &excludeJSON, &chunkSize, &updatedAt)
+	if errors.Is(err, sql.ErrNoRows) {
+		return nil, nil
+	}
+	if err != nil {
+		return nil, err
+	}
+	row := &driven.SummarySettingsRow{UserID: userID}
+	if err := json.Unmarshal([]byte(includeJSON), &row.IncludeCategorySlugs); err != nil {
+		return nil, err
+	}
+	if err := json.Unmarshal([]byte(excludeJSON), &row.ExcludeCategorySlugs); err != nil {
+		return nil, err
+	}
+	t, err := parseTime(updatedAt)
+	if err != nil {
+		return nil, err
+	}
+	row.UpdatedAt = t
+	row.ChunkSize = chunkSize
+	return row, nil
+}
+
+func (r *Repository) UpsertSummarySettings(ctx context.Context, row driven.SummarySettingsRow) error {
+	includeJSON, _ := json.Marshal(row.IncludeCategorySlugs)
+	excludeJSON, _ := json.Marshal(row.ExcludeCategorySlugs)
+	_, err := r.db.ExecContext(ctx, `
+		INSERT INTO summary_settings (user_id, include_category_slugs, exclude_category_slugs, chunk_size, updated_at)
+		VALUES (?, ?, ?, ?, ?)
+		ON CONFLICT(user_id) DO UPDATE SET
+			include_category_slugs = excluded.include_category_slugs,
+			exclude_category_slugs = excluded.exclude_category_slugs,
+			chunk_size = excluded.chunk_size,
+			updated_at = excluded.updated_at
+	`, row.UserID.String(), string(includeJSON), string(excludeJSON), row.ChunkSize, formatRFC3339(row.UpdatedAt.UTC()))
+	return err
+}
+
+func (r *Repository) InsertSummarySnapshot(ctx context.Context, row driven.SummarySnapshotRow) error {
+	_, err := r.db.ExecContext(ctx, `
+		INSERT INTO summary_snapshots (id, user_id, account_id, run_id, window_start, window_end, general_summary, created_at)
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+	`, row.ID.String(), row.UserID.String(), nullUUID(row.AccountID), row.RunID.String(),
+		formatRFC3339(row.WindowStart.UTC()), formatRFC3339(row.WindowEnd.UTC()), row.GeneralSummary, formatRFC3339(row.CreatedAt.UTC()))
+	return err
+}
+
+func (r *Repository) ListSummarySnapshots(ctx context.Context, userID uuid.UUID, accountID *uuid.UUID, limit int) ([]driven.SummarySnapshotRow, error) {
+	if limit <= 0 {
+		limit = 1
+	}
+	var b strings.Builder
+	b.WriteString(`SELECT id, user_id, account_id, run_id, window_start, window_end, general_summary, created_at FROM summary_snapshots WHERE user_id = ?`)
+	args := []any{userID.String()}
+	if accountID != nil {
+		b.WriteString(` AND account_id = ?`)
+		args = append(args, accountID.String())
+	}
+	b.WriteString(` ORDER BY created_at DESC LIMIT ?`)
+	args = append(args, limit)
+	rows, err := r.db.QueryContext(ctx, b.String(), args...)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	out := make([]driven.SummarySnapshotRow, 0)
+	for rows.Next() {
+		var idStr, uidStr, runStr, ws, we, summary, createdAt string
+		var acc sql.NullString
+		if err := rows.Scan(&idStr, &uidStr, &acc, &runStr, &ws, &we, &summary, &createdAt); err != nil {
+			return nil, err
+		}
+		id, _ := uuid.Parse(idStr)
+		uid, _ := uuid.Parse(uidStr)
+		runID, _ := uuid.Parse(runStr)
+		wst, _ := parseTime(ws)
+		wet, _ := parseTime(we)
+		cat, _ := parseTime(createdAt)
+		item := driven.SummarySnapshotRow{ID: id, UserID: uid, RunID: runID, WindowStart: wst, WindowEnd: wet, GeneralSummary: summary, CreatedAt: cat}
+		if acc.Valid {
+			aid, _ := uuid.Parse(acc.String)
+			item.AccountID = &aid
+		}
+		out = append(out, item)
+	}
+	return out, rows.Err()
+}
+
+func (r *Repository) InsertActionItems(ctx context.Context, rows []driven.ActionItemRow) error {
+	tx, err := r.db.BeginTx(ctx, nil)
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback()
+	for _, row := range rows {
+		_, err := tx.ExecContext(ctx, `
+			INSERT INTO action_items (id, user_id, account_id, message_id, run_id, text, due_at, status, actioned_at, created_at, updated_at)
+			VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+		`, row.ID.String(), row.UserID.String(), row.AccountID.String(), row.MessageID.String(), row.RunID.String(), row.Text,
+			nullTimeStr(row.DueAt), row.Status, nullTimeStr(row.ActionedAt), formatRFC3339(row.CreatedAt.UTC()), formatRFC3339(row.UpdatedAt.UTC()))
+		if err != nil {
+			return err
+		}
+	}
+	return tx.Commit()
+}
+
+func (r *Repository) ListOpenActionItems(ctx context.Context, userID uuid.UUID, accountID *uuid.UUID) ([]driven.ActionItemRow, error) {
+	var b strings.Builder
+	b.WriteString(`SELECT id, user_id, account_id, message_id, run_id, text, due_at, status, actioned_at, created_at, updated_at FROM action_items WHERE user_id = ? AND status = 'open'`)
+	args := []any{userID.String()}
+	if accountID != nil {
+		b.WriteString(` AND account_id = ?`)
+		args = append(args, accountID.String())
+	}
+	b.WriteString(` ORDER BY created_at DESC`)
+	rows, err := r.db.QueryContext(ctx, b.String(), args...)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	out := make([]driven.ActionItemRow, 0)
+	for rows.Next() {
+		var idStr, uidStr, accStr, msgStr, runStr, text, status, createdAt, updatedAt string
+		var dueAt, actioned sql.NullString
+		if err := rows.Scan(&idStr, &uidStr, &accStr, &msgStr, &runStr, &text, &dueAt, &status, &actioned, &createdAt, &updatedAt); err != nil {
+			return nil, err
+		}
+		id, _ := uuid.Parse(idStr)
+		uid, _ := uuid.Parse(uidStr)
+		acc, _ := uuid.Parse(accStr)
+		msg, _ := uuid.Parse(msgStr)
+		runID, _ := uuid.Parse(runStr)
+		cat, _ := parseTime(createdAt)
+		upd, _ := parseTime(updatedAt)
+		item := driven.ActionItemRow{ID: id, UserID: uid, AccountID: acc, MessageID: msg, RunID: runID, Text: text, Status: status, CreatedAt: cat, UpdatedAt: upd}
+		if dueAt.Valid {
+			t, _ := parseTime(dueAt.String)
+			item.DueAt = &t
+		}
+		if actioned.Valid {
+			t, _ := parseTime(actioned.String)
+			item.ActionedAt = &t
+		}
+		out = append(out, item)
+	}
+	return out, rows.Err()
+}
+
+func (r *Repository) MarkActionItemDone(ctx context.Context, userID uuid.UUID, itemID uuid.UUID, at time.Time) error {
+	_, err := r.db.ExecContext(ctx, `
+		UPDATE action_items SET status = 'done', actioned_at = ?, updated_at = ?
+		WHERE id = ? AND user_id = ?
+	`, formatRFC3339(at.UTC()), formatRFC3339(at.UTC()), itemID.String(), userID.String())
+	return err
+}
+
+func (r *Repository) InsertFYI(ctx context.Context, rows []driven.FYIRow) error {
+	tx, err := r.db.BeginTx(ctx, nil)
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback()
+	for _, row := range rows {
+		_, err := tx.ExecContext(ctx, `
+			INSERT INTO fyi_items (id, user_id, account_id, message_id, run_id, text, created_at)
+			VALUES (?, ?, ?, ?, ?, ?, ?)
+		`, row.ID.String(), row.UserID.String(), row.AccountID.String(), row.MessageID.String(), row.RunID.String(), row.Text, formatRFC3339(row.CreatedAt.UTC()))
+		if err != nil {
+			return err
+		}
+	}
+	return tx.Commit()
+}
+
+func (r *Repository) ListFYIByRun(ctx context.Context, userID uuid.UUID, runID uuid.UUID) ([]driven.FYIRow, error) {
+	rows, err := r.db.QueryContext(ctx, `
+		SELECT id, user_id, account_id, message_id, run_id, text, created_at
+		FROM fyi_items WHERE user_id = ? AND run_id = ? ORDER BY created_at DESC
+	`, userID.String(), runID.String())
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	out := make([]driven.FYIRow, 0)
+	for rows.Next() {
+		var idStr, uidStr, accStr, msgStr, runStr, text, createdAt string
+		if err := rows.Scan(&idStr, &uidStr, &accStr, &msgStr, &runStr, &text, &createdAt); err != nil {
+			return nil, err
+		}
+		id, _ := uuid.Parse(idStr)
+		uid, _ := uuid.Parse(uidStr)
+		acc, _ := uuid.Parse(accStr)
+		msg, _ := uuid.Parse(msgStr)
+		rid, _ := uuid.Parse(runStr)
+		cat, _ := parseTime(createdAt)
+		out = append(out, driven.FYIRow{ID: id, UserID: uid, AccountID: acc, MessageID: msg, RunID: rid, Text: text, CreatedAt: cat})
+	}
+	return out, rows.Err()
+}
+
+func (r *Repository) DeleteFYI(ctx context.Context, userID uuid.UUID, id uuid.UUID) error {
+	_, err := r.db.ExecContext(ctx, `
+		DELETE FROM fyi_items
+		WHERE id = ? AND user_id = ?
+	`, id.String(), userID.String())
+	return err
+}
+
 // --- helpers ---
 
 func nullStr(p *string) any {
@@ -754,6 +971,13 @@ func nullFloat(v *float64) any {
 		return nil
 	}
 	return *v
+}
+
+func nullUUID(v *uuid.UUID) any {
+	if v == nil {
+		return nil
+	}
+	return v.String()
 }
 
 func scanJobRunRow(s rowScanner) (*driven.JobRunRow, error) {

@@ -75,6 +75,45 @@ export type CategoryDefinition = {
   sort_order: number;
 };
 
+export type SummarySnapshot = {
+  id: string;
+  account_id?: string;
+  run_id: string;
+  window_start: string;
+  window_end: string;
+  general_summary: string;
+  created_at: string;
+};
+
+export type SummaryActionItem = {
+  id: string;
+  account_id: string;
+  message_id: string;
+  text: string;
+  due_at?: string;
+  is_overdue: boolean;
+};
+
+export type SummaryFYI = {
+  id: string;
+  account_id: string;
+  message_id: string;
+  text: string;
+};
+
+export type SummaryPayload = {
+  snapshot: SummarySnapshot | null;
+  action_items: SummaryActionItem[];
+  fyi: SummaryFYI[];
+};
+
+export type SummarySettings = {
+  include_category_slugs: string[];
+  exclude_category_slugs: string[];
+  chunk_size: number;
+  updated_at?: string;
+};
+
 export type MessageItem = {
   id: string;
   account_id: string;
@@ -270,6 +309,48 @@ export async function getRun(accessToken: string, id: string) {
 export async function listCategories(accessToken: string) {
   return apiRequest<CategoryDefinition[]>("/api/categories", {
     headers: toAuthHeader(accessToken),
+  });
+}
+
+export async function getSummary(accessToken: string, accountID?: string) {
+  const suffix = accountID ? `?account_id=${encodeURIComponent(accountID)}` : "";
+  return apiRequest<SummaryPayload>(`/api/summaries${suffix}`, {
+    headers: toAuthHeader(accessToken),
+  });
+}
+
+export async function refreshSummary(accessToken: string, accountID: string) {
+  return apiRequest<{ job_run_id: string; status: string }>(`/api/accounts/${accountID}/summaries/refresh`, {
+    method: "POST",
+    headers: toAuthHeader(accessToken),
+  });
+}
+
+export async function markActionItemDone(accessToken: string, itemID: string) {
+  return apiRequest<{ status: string }>(`/api/action-items/${itemID}/done`, {
+    method: "POST",
+    headers: toAuthHeader(accessToken),
+  });
+}
+
+export async function dismissFYI(accessToken: string, fyiID: string) {
+  return apiRequest<{ status: string }>(`/api/fyi/${fyiID}/dismiss`, {
+    method: "POST",
+    headers: toAuthHeader(accessToken),
+  });
+}
+
+export async function getSummarySettings(accessToken: string) {
+  return apiRequest<SummarySettings>("/api/settings/summaries", {
+    headers: toAuthHeader(accessToken),
+  });
+}
+
+export async function updateSummarySettings(accessToken: string, payload: SummarySettings) {
+  return apiRequest<{ status: string }>("/api/settings/summaries", {
+    method: "PATCH",
+    headers: toAuthHeader(accessToken),
+    body: JSON.stringify(payload),
   });
 }
 

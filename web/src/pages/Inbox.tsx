@@ -12,6 +12,7 @@ import { useAuth } from "@/components/auth/AuthProvider";
 import { useAccountsData } from "@/hooks/useAccountsData";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { toast } from "@/hooks/use-toast";
+import { useSearchParams } from "react-router-dom";
 
 interface Props {
   accountFilter: AccountFilter;
@@ -95,6 +96,8 @@ export default function InboxPage({ accountFilter }: Props) {
   const [selectedId, setSelectedId] = useState<string>("");
   const [htmlRefreshAttempts, setHtmlRefreshAttempts] = useState<Set<string>>(() => new Set());
   const [refreshingHtmlMessageIds, setRefreshingHtmlMessageIds] = useState<Set<string>>(() => new Set());
+  const [searchParams, setSearchParams] = useSearchParams();
+  const deepLinkedMessageID = searchParams.get("message_id");
 
   const categoriesQuery = useQuery({
     queryKey: ["categories", accessToken],
@@ -151,6 +154,26 @@ export default function InboxPage({ accountFilter }: Props) {
   );
 
   useEffect(() => {
+    if (!deepLinkedMessageID || filtered.length === 0) {
+      return;
+    }
+    const target = filtered.find((m) => m.id === deepLinkedMessageID);
+    if (!target) {
+      return;
+    }
+    setSelectedId(target.id);
+    // Clean query string after honoring the deep link to avoid reselect loops.
+    const next = new URLSearchParams(searchParams);
+    next.delete("message_id");
+    next.delete("account_id");
+    setSearchParams(next, { replace: true });
+  }, [deepLinkedMessageID, filtered, searchParams, setSearchParams]);
+
+  useEffect(() => {
+    // Avoid overriding deep-link selection before it is applied.
+    if (deepLinkedMessageID) {
+      return;
+    }
     if (filtered.length === 0) {
       setSelectedId("");
       return;
@@ -158,7 +181,7 @@ export default function InboxPage({ accountFilter }: Props) {
     if (!selectedId || !filtered.find((m) => m.id === selectedId)) {
       setSelectedId(filtered[0].id);
     }
-  }, [filtered, selectedId]);
+  }, [deepLinkedMessageID, filtered, selectedId]);
 
   const selected = filtered.find((m) => m.id === selectedId) ?? filtered[0];
   const selAccount = selected ? accounts.find((a) => a.id === selected.account_id) : undefined;

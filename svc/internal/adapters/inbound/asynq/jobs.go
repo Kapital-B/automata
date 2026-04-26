@@ -16,9 +16,11 @@ import (
 const (
 	QueueSync       = "sync"
 	QueueCategorize = "categorize"
+	QueueSummarize  = "summarize"
 
 	TypeSyncV1       = "sync:v1"
 	TypeCategorizeV1 = "categorize:v1"
+	TypeSummarizeV1  = "summarize:v1"
 )
 
 type TaskPayload struct {
@@ -57,6 +59,10 @@ func (q *QueueClient) EnqueueCategorize(ctx context.Context, payload TaskPayload
 	return q.enqueue(ctx, TypeCategorizeV1, QueueCategorize, payload, false)
 }
 
+func (q *QueueClient) EnqueueSummarize(ctx context.Context, payload TaskPayload) error {
+	return q.enqueue(ctx, TypeSummarizeV1, QueueSummarize, payload, false)
+}
+
 func (q *QueueClient) enqueue(ctx context.Context, taskType string, queue string, payload TaskPayload, uniqueSync bool) error {
 	if q == nil || q.client == nil {
 		return fmt.Errorf("queue client not configured")
@@ -81,6 +87,7 @@ type WorkerDeps struct {
 	Log             *slog.Logger
 	SyncSvc         *appmessages.SyncService
 	CategorizeSvc   *appmessages.CategorizeService
+	SummarizeSvc    *appmessages.SummarizeService
 	JobRuns         driven.JobRunRepository
 	GlobalSemaphore chan struct{}
 }
@@ -92,6 +99,9 @@ func NewWorkerMux(deps WorkerDeps) *asynq.ServeMux {
 	})
 	mux.HandleFunc(TypeCategorizeV1, func(ctx context.Context, task *asynq.Task) error {
 		return handleCategorize(ctx, task, deps)
+	})
+	mux.HandleFunc(TypeSummarizeV1, func(ctx context.Context, task *asynq.Task) error {
+		return handleSummarize(ctx, task, deps)
 	})
 	return mux
 }
@@ -143,6 +153,32 @@ func handleCategorize(ctx context.Context, task *asynq.Task, deps WorkerDeps) er
 		return err
 	}
 	deps.Log.Info("job success", "job_type", "categorize", "run_id", p.RunID, "account_id", p.AccountID)
+	return nil
+}
+
+func handleSummarize(ctx context.Context, task *asynq.Task, deps WorkerDeps) error {
+	if deps.SummarizeSvc == nil {
+		return fmt.Errorf("summarize service not configured")
+	}
+	var p TaskPayload
+	if err := json.Unmarshal(task.Payload(), &p); err != nil {
+		return err
+	}
+	if err := acquire(deps.GlobalSemaphore); err != nil {
+		return err
+	}
+	defer release(deps.GlobalSemaphore)
+
+	deps.Log.Info("job start", "job_type", "summarize", "run_id", p.RunID, "account_id", p.AccountID, "trigger_kind", p.TriggerKind)
+	_, err := deps.SummarizeSvc.SummarizeAccount(ctx, p.UserID, p.AccountID, appmessages.SummarizeOptions{
+		RunID:   &p.RunID,
+		Trigger: p.TriggerKind,
+	})
+	if err != nil {
+		deps.Log.Error("job failed", "job_type", "summarize", "run_id", p.RunID, "account_id", p.AccountID, "err", err)
+		return err
+	}
+	deps.Log.Info("job success", "job_type", "summarize", "run_id", p.RunID, "account_id", p.AccountID)
 	return nil
 }
 

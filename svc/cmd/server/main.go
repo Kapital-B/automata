@@ -95,15 +95,23 @@ func main() {
 		JobRuns:  repo,
 	}
 	var categorizeSvc *appmessages.CategorizeService
+	var summarizeSvc *appmessages.SummarizeService
 	if cfg.LLMBaseURL != "" && cfg.LLMModel != "" {
+		llm := &llmadapter.OpenAIClient{
+			BaseURL: cfg.LLMBaseURL,
+			Model:   cfg.LLMModel,
+			APIKey:  cfg.LLMAPIKey,
+		}
 		categorizeSvc = &appmessages.CategorizeService{
 			Messages: repo,
-			LLM: &llmadapter.OpenAIClient{
-				BaseURL: cfg.LLMBaseURL,
-				Model: cfg.LLMModel,
-				APIKey: cfg.LLMAPIKey,
-			},
+			LLM:      llm,
 			JobRuns: repo,
+		}
+		summarizeSvc = &appmessages.SummarizeService{
+			Messages:  repo,
+			Summaries: repo,
+			LLM:       llm,
+			JobRuns:   repo,
 		}
 	}
 
@@ -123,10 +131,12 @@ func main() {
 		AccountSvc:      accountSvc,
 		SyncSvc:         syncSvc,
 		CategorizeSvc:   categorizeSvc,
+		SummarizeSvc:    summarizeSvc,
 		AuthSvc:         authSvc,
 		Accounts:        repo,
 		Messages:        repo,
 		JobRuns:         repo,
+		Summaries:       repo,
 		OAuthStates:     repo,
 		Users:           repo,
 		Dashboard:       cfg.DashboardBaseURL,

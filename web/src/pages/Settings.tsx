@@ -20,7 +20,9 @@ import {
   ApiError,
   createCategory,
   deleteCategory,
+  getSummarySettings,
   listCategories,
+  updateSummarySettings,
   updateCategory,
   type UpsertCategoryInput,
 } from "@/lib/auth";
@@ -48,6 +50,9 @@ export default function SettingsPage() {
   const [replacementByID, setReplacementByID] = useState<Record<string, string>>({});
   const [isEditMode, setIsEditMode] = useState(false);
   const [draftByID, setDraftByID] = useState<Record<string, CategoryFormState>>({});
+  const [includeSlugs, setIncludeSlugs] = useState<string[]>([]);
+  const [excludeSlugs, setExcludeSlugs] = useState<string[]>([]);
+  const [chunkSize, setChunkSize] = useState<number>(12);
 
   const categoriesQuery = useQuery({
     queryKey: ["categories", accessToken],
@@ -55,6 +60,11 @@ export default function SettingsPage() {
     enabled: Boolean(accessToken),
   });
   const categoryList = useMemo(() => categoriesQuery.data ?? [], [categoriesQuery.data]);
+  const summarySettingsQuery = useQuery({
+    queryKey: ["summary-settings", accessToken],
+    queryFn: () => getSummarySettings(accessToken!),
+    enabled: Boolean(accessToken),
+  });
 
   useEffect(() => {
     const next: Record<string, CategoryFormState> = {};
@@ -68,6 +78,13 @@ export default function SettingsPage() {
     }
     setDraftByID(next);
   }, [categoryList]);
+  useEffect(() => {
+    const row = summarySettingsQuery.data;
+    if (!row) return;
+    setIncludeSlugs(row.include_category_slugs ?? []);
+    setExcludeSlugs(row.exclude_category_slugs ?? []);
+    setChunkSize(row.chunk_size || 12);
+  }, [summarySettingsQuery.data]);
 
   const saveMutation = useMutation({
     mutationFn: async (payload: { id: string; body: CategoryFormState }[]) => {
@@ -129,6 +146,20 @@ export default function SettingsPage() {
       });
     },
   });
+  const summarySettingsMutation = useMutation({
+    mutationFn: async () => {
+      if (!accessToken) throw new Error("Not authenticated");
+      return updateSummarySettings(accessToken, {
+        include_category_slugs: includeSlugs,
+        exclude_category_slugs: excludeSlugs,
+        chunk_size: chunkSize,
+      });
+    },
+    onSuccess: () => {
+      void queryClient.invalidateQueries({ queryKey: ["summary-settings"] });
+      toast({ title: "Summary settings updated" });
+    },
+  });
 
   return (
     <div className="space-y-6">
@@ -141,6 +172,7 @@ export default function SettingsPage() {
       <Tabs defaultValue="categorization" className="space-y-4">
         <TabsList>
           <TabsTrigger value="categorization">Categorization</TabsTrigger>
+          <TabsTrigger value="summarization">Summarization</TabsTrigger>
         </TabsList>
 
         <TabsContent value="categorization" className="space-y-4">
@@ -390,6 +422,67 @@ export default function SettingsPage() {
                 })}
               </TableBody>
             </Table>
+          </div>
+        </TabsContent>
+        <TabsContent value="summarization" className="space-y-4">
+          <div className="surface-card space-y-4 p-4">
+            <h3 className="font-display text-lg">Summary category filters</h3>
+            <p className="text-sm text-muted-foreground">
+              Include limits summaries to selected categories. Exclude always removes selected categories.
+            </p>
+            <div className="grid gap-4 md:grid-cols-2">
+              <div>
+                <p className="mb-2 text-xs uppercase tracking-wider text-muted-foreground">Include</p>
+                <div className="flex flex-wrap gap-2">
+                  {categoryList.map((c) => (
+                    <Button
+                      key={`inc-${c.id}`}
+                      size="sm"
+                      variant={includeSlugs.includes(c.slug) ? "default" : "outline"}
+                      onClick={() =>
+                        setIncludeSlugs((prev) => (prev.includes(c.slug) ? prev.filter((s) => s !== c.slug) : [...prev, c.slug]))
+                      }
+                    >
+                      {c.display_name}
+                    </Button>
+                  ))}
+                </div>
+              </div>
+              <div>
+                <p className="mb-2 text-xs uppercase tracking-wider text-muted-foreground">Exclude</p>
+                <div className="flex flex-wrap gap-2">
+                  {categoryList.map((c) => (
+                    <Button
+                      key={`exc-${c.id}`}
+                      size="sm"
+                      variant={excludeSlugs.includes(c.slug) ? "destructive" : "outline"}
+                      onClick={() =>
+                        setExcludeSlugs((prev) => (prev.includes(c.slug) ? prev.filter((s) => s !== c.slug) : [...prev, c.slug]))
+                      }
+                    >
+                      {c.display_name}
+                    </Button>
+                  ))}
+                </div>
+              </div>
+            </div>
+            <div className="max-w-xs space-y-2">
+              <Label htmlFor="summary-chunk-size">Chunk size</Label>
+              <Input
+                id="summary-chunk-size"
+                type="number"
+                min={3}
+                max={30}
+                value={chunkSize}
+                onChange={(e) => setChunkSize(Number(e.target.value) || 12)}
+              />
+              <p className="text-xs text-muted-foreground">Messages per LLM summarize request (recommended: 8-16).</p>
+            </div>
+            <div>
+              <Button onClick={() => summarySettingsMutation.mutate()} disabled={summarySettingsMutation.isPending}>
+                {summarySettingsMutation.isPending ? "Saving..." : "Save summary settings"}
+              </Button>
+            </div>
           </div>
         </TabsContent>
       </Tabs>
