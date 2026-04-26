@@ -97,6 +97,13 @@ func main() {
 	var categorizeSvc *appmessages.CategorizeService
 	var summarizeSvc *appmessages.SummarizeService
 	var autoDraftSvc *appmessages.AutoDraftService
+	draftsSvc := &appmessages.DraftLifecycleService{
+		Summaries: repo,
+		Accounts:  repo,
+		OAuth:     msMailOAuth,
+		Graph:     graph,
+		Vault:     vault,
+	}
 	if cfg.LLMBaseURL != "" && cfg.LLMModel != "" {
 		llm := &llmadapter.OpenAIClient{
 			BaseURL: cfg.LLMBaseURL,
@@ -123,7 +130,6 @@ func main() {
 		}
 	}
 	_ = autoDraftSvc
-
 	var googleClient *googleoauth.OAuth
 	if cfg.GoogleClientID != "" {
 		googleClient = &googleoauth.OAuth{
@@ -141,6 +147,7 @@ func main() {
 		SyncSvc:         syncSvc,
 		CategorizeSvc:   categorizeSvc,
 		SummarizeSvc:    summarizeSvc,
+		DraftsSvc:       draftsSvc,
 		AuthSvc:         authSvc,
 		Accounts:        repo,
 		Messages:        repo,

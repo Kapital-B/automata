@@ -155,7 +155,23 @@ type DraftSuggestionRow struct {
 	Body         string
 	Model        string
 	FromJSON     string
+	Status       string
+	SentAt       *time.Time
+	DiscardedAt  *time.Time
+	UpdatedAt    *time.Time
 	CreatedAt    time.Time
+}
+
+type SendAttemptRow struct {
+	ID                uuid.UUID
+	UserID            uuid.UUID
+	AccountID         uuid.UUID
+	DraftID           uuid.UUID
+	MessageID         uuid.UUID
+	Status            string
+	ProviderMessageID *string
+	ErrorMessage      *string
+	CreatedAt         time.Time
 }
 
 type ScheduleChainRow struct {
@@ -239,6 +255,11 @@ type SummaryRepository interface {
 	MarkActionItemsAutoDraftSeen(ctx context.Context, userID uuid.UUID, itemIDs []uuid.UUID, at time.Time) error
 	InsertDraftSuggestions(ctx context.Context, rows []DraftSuggestionRow) error
 	ListDraftSuggestions(ctx context.Context, userID uuid.UUID, accountID *uuid.UUID, limit int) ([]DraftSuggestionRow, error)
+	GetDraftSuggestion(ctx context.Context, userID uuid.UUID, draftID uuid.UUID) (*DraftSuggestionRow, error)
+	UpdateDraftSuggestion(ctx context.Context, userID uuid.UUID, draftID uuid.UUID, subject, body string, at time.Time) error
+	MarkDraftSuggestionStatus(ctx context.Context, userID uuid.UUID, draftID uuid.UUID, status string, at time.Time) error
+	InsertSendAttempt(ctx context.Context, row SendAttemptRow) error
+	ListSendAttemptsByDraft(ctx context.Context, userID uuid.UUID, draftID uuid.UUID, limit int) ([]SendAttemptRow, error)
 }
 
 type ScheduleRepository interface {

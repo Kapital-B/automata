@@ -22,9 +22,9 @@ type MicrosoftOAuth interface {
 
 // GraphProfile is returned from Graph /me.
 type GraphProfile struct {
-	Mail         string
+	Mail              string
 	UserPrincipalName string
-	TenantID     string // oid of tenant for work; consumers may use placeholder
+	TenantID          string // oid of tenant for work; consumers may use placeholder
 }
 
 // GraphMessage is a subset of Graph message JSON.
@@ -47,6 +47,7 @@ type MicrosoftGraph interface {
 	GetMe(ctx context.Context, accessToken string) (*GraphProfile, error)
 	ListInboxMessages(ctx context.Context, accessToken string, top int) ([]GraphMessage, error)
 	GetMessageBody(ctx context.Context, accessToken string, providerMessageID string) (*GraphMessage, error)
+	SendMail(ctx context.Context, accessToken string, toEmail, subject, body string) error
 }
 
 // TokenVault encrypts refresh tokens at rest.

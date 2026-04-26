@@ -1,6 +1,7 @@
 package microsoft
 
 import (
+	"bytes"
 	"context"
 	"encoding/base64"
 	"encoding/json"
@@ -59,6 +60,32 @@ func (g *GraphClient) getJSON(ctx context.Context, accessToken, reqURL string, o
 	}
 	if out != nil {
 		return json.Unmarshal(body, out)
+	}
+	return nil
+}
+
+func (g *GraphClient) postJSON(ctx context.Context, accessToken, reqURL string, body any) error {
+	raw, err := json.Marshal(body)
+	if err != nil {
+		return err
+	}
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, reqURL, bytes.NewReader(raw))
+	if err != nil {
+		return err
+	}
+	req.Header.Set("Authorization", "Bearer "+accessToken)
+	req.Header.Set("Content-Type", "application/json")
+	resp, err := g.client().Do(req)
+	if err != nil {
+		return err
+	}
+	defer resp.Body.Close()
+	b, err := io.ReadAll(io.LimitReader(resp.Body, 4<<20))
+	if err != nil {
+		return err
+	}
+	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
+		return fmt.Errorf("graph %s: %s", resp.Status, truncate(string(b), 300))
 	}
 	return nil
 }
@@ -207,4 +234,21 @@ func (g *GraphClient) GetMessageBody(ctx context.Context, accessToken string, pr
 		HasAttachments:   m.HasAttachments,
 		ChangeKey:        m.ChangeKey,
 	}, nil
+}
+
+func (g *GraphClient) SendMail(ctx context.Context, accessToken string, toEmail, subject, body string) error {
+	payload := map[string]any{
+		"message": map[string]any{
+			"subject": subject,
+			"body": map[string]any{
+				"contentType": "Text",
+				"content":     body,
+			},
+			"toRecipients": []map[string]any{
+				{"emailAddress": map[string]any{"address": toEmail}},
+			},
+		},
+		"saveToSentItems": true,
+	}
+	return g.postJSON(ctx, accessToken, g.apiRoot()+"/me/sendMail", payload)
 }

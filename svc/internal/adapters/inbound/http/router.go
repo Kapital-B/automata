@@ -30,6 +30,7 @@ type Handlers struct {
 	SyncSvc         *appmessages.SyncService
 	CategorizeSvc   *appmessages.CategorizeService
 	SummarizeSvc    *appmessages.SummarizeService
+	DraftsSvc       *appmessages.DraftLifecycleService
 	AuthSvc         *auth.Service
 	Accounts        driven.AccountRepository
 	Messages        driven.MessageRepository
@@ -92,6 +93,10 @@ func (h *Handlers) Routes() http.Handler {
 	r.Get("/api/messages", h.listMessages)
 	r.Get("/api/messages/{id}", h.getMessage)
 	r.Get("/api/drafts", h.listDrafts)
+	r.Get("/api/drafts/{id}/attempts", h.listDraftAttempts)
+	r.Patch("/api/drafts/{id}", h.saveDraft)
+	r.Delete("/api/drafts/{id}", h.discardDraft)
+	r.Post("/api/drafts/{id}/send", h.sendDraft)
 	return r
 }
 
@@ -516,6 +521,98 @@ func (h *Handlers) listDrafts(w http.ResponseWriter, r *http.Request) {
 		})
 	}
 	writeJSON(w, http.StatusOK, out)
+}
+
+func (h *Handlers) listDraftAttempts(w http.ResponseWriter, r *http.Request) {
+	if h.Summaries == nil {
+		writeJSON(w, http.StatusServiceUnavailable, map[string]string{"error": "summaries not configured"})
+		return
+	}
+	draftID, err := uuid.Parse(chi.URLParam(r, "id"))
+	if err != nil {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "bad id"})
+		return
+	}
+	rows, err := h.Summaries.ListSendAttemptsByDraft(r.Context(), userIDOrEmpty(r), draftID, 50)
+	if err != nil {
+		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "internal"})
+		return
+	}
+	out := make([]map[string]any, 0, len(rows))
+	for _, row := range rows {
+		out = append(out, map[string]any{
+			"id":                  row.ID.String(),
+			"draft_id":            row.DraftID.String(),
+			"account_id":          row.AccountID.String(),
+			"message_id":          row.MessageID.String(),
+			"status":              row.Status,
+			"provider_message_id": row.ProviderMessageID,
+			"error_message":       row.ErrorMessage,
+			"created_at":          row.CreatedAt.UTC().Format(time.RFC3339Nano),
+		})
+	}
+	writeJSON(w, http.StatusOK, out)
+}
+
+type draftUpdateBody struct {
+	Subject string `json:"subject"`
+	Body    string `json:"body"`
+}
+
+func (h *Handlers) saveDraft(w http.ResponseWriter, r *http.Request) {
+	if h.DraftsSvc == nil {
+		writeJSON(w, http.StatusServiceUnavailable, map[string]string{"error": "draft service not configured"})
+		return
+	}
+	id, err := uuid.Parse(chi.URLParam(r, "id"))
+	if err != nil {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "bad id"})
+		return
+	}
+	var body draftUpdateBody
+	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid json"})
+		return
+	}
+	if err := h.DraftsSvc.SaveDraft(r.Context(), userIDOrEmpty(r), id, body.Subject, body.Body); err != nil {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": err.Error()})
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"ok": true})
+}
+
+func (h *Handlers) discardDraft(w http.ResponseWriter, r *http.Request) {
+	if h.DraftsSvc == nil {
+		writeJSON(w, http.StatusServiceUnavailable, map[string]string{"error": "draft service not configured"})
+		return
+	}
+	id, err := uuid.Parse(chi.URLParam(r, "id"))
+	if err != nil {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "bad id"})
+		return
+	}
+	if err := h.DraftsSvc.DiscardDraft(r.Context(), userIDOrEmpty(r), id); err != nil {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": err.Error()})
+		return
+	}
+	w.WriteHeader(http.StatusNoContent)
+}
+
+func (h *Handlers) sendDraft(w http.ResponseWriter, r *http.Request) {
+	if h.DraftsSvc == nil {
+		writeJSON(w, http.StatusServiceUnavailable, map[string]string{"error": "draft service not configured"})
+		return
+	}
+	id, err := uuid.Parse(chi.URLParam(r, "id"))
+	if err != nil {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "bad id"})
+		return
+	}
+	if err := h.DraftsSvc.SendDraft(r.Context(), userIDOrEmpty(r), id); err != nil {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": err.Error()})
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"ok": true})
 }
 
 func (h *Handlers) listCategories(w http.ResponseWriter, r *http.Request) {

@@ -146,8 +146,20 @@ export type DraftSuggestion = {
   subject: string;
   body: string;
   model: string;
+  status?: "ready" | "sent" | "discarded";
   to_name: string;
   to_email: string;
+  created_at: string;
+};
+
+export type DraftSendAttempt = {
+  id: string;
+  draft_id: string;
+  account_id: string;
+  message_id: string;
+  status: "success" | "failed";
+  provider_message_id?: string;
+  error_message?: string;
   created_at: string;
 };
 
@@ -456,6 +468,41 @@ export async function listDraftSuggestions(accessToken: string, accountID?: stri
   return apiRequest<DraftSuggestion[]>(`/api/drafts${suffix}`, {
     headers: toAuthHeader(accessToken),
   });
+}
+
+export async function listDraftSendAttempts(accessToken: string, draftID: string) {
+  return apiRequest<DraftSendAttempt[]>(`/api/drafts/${draftID}/attempts`, {
+    headers: toAuthHeader(accessToken),
+  });
+}
+
+export async function saveDraftSuggestion(
+  accessToken: string,
+  draftID: string,
+  payload: { subject: string; body: string },
+) {
+  return apiRequest<{ ok: boolean }>(`/api/drafts/${draftID}`, {
+    method: "PATCH",
+    headers: toAuthHeader(accessToken),
+    body: JSON.stringify(payload),
+  });
+}
+
+export async function sendDraftSuggestion(accessToken: string, draftID: string) {
+  return apiRequest<{ ok: boolean }>(`/api/drafts/${draftID}/send`, {
+    method: "POST",
+    headers: toAuthHeader(accessToken),
+  });
+}
+
+export async function discardDraftSuggestion(accessToken: string, draftID: string) {
+  const response = await fetch(`${API_BASE_URL}/api/drafts/${draftID}`, {
+    method: "DELETE",
+    headers: toAuthHeader(accessToken),
+  });
+  if (!response.ok) {
+    await parseApiError(response);
+  }
 }
 
 export async function categorizeAccount(

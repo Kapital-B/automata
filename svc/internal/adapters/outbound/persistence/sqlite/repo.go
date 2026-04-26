@@ -1021,11 +1021,11 @@ func (r *Repository) InsertDraftSuggestions(ctx context.Context, rows []driven.D
 	defer tx.Rollback()
 	for _, row := range rows {
 		_, err := tx.ExecContext(ctx, `
-			INSERT INTO draft_suggestions (id, user_id, account_id, message_id, action_item_id, run_id, subject, body, model, created_at)
-			VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+			INSERT INTO draft_suggestions (id, user_id, account_id, message_id, action_item_id, run_id, subject, body, model, status, sent_at, discarded_at, updated_at, created_at)
+			VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 		`,
 			row.ID.String(), row.UserID.String(), row.AccountID.String(), row.MessageID.String(), row.ActionItemID.String(),
-			row.RunID.String(), row.Subject, row.Body, row.Model, formatRFC3339(row.CreatedAt.UTC()),
+			row.RunID.String(), row.Subject, row.Body, row.Model, "ready", nil, nil, formatRFC3339(row.CreatedAt.UTC()), formatRFC3339(row.CreatedAt.UTC()),
 		)
 		if err != nil {
 			return err
@@ -1040,10 +1040,10 @@ func (r *Repository) ListDraftSuggestions(ctx context.Context, userID uuid.UUID,
 	}
 	var b strings.Builder
 	b.WriteString(`
-		SELECT ds.id, ds.user_id, ds.account_id, ds.message_id, ds.action_item_id, ds.run_id, ds.subject, ds.body, ds.model, m.from_json, ds.created_at
+		SELECT ds.id, ds.user_id, ds.account_id, ds.message_id, ds.action_item_id, ds.run_id, ds.subject, ds.body, ds.model, m.from_json, ds.status, ds.sent_at, ds.discarded_at, ds.updated_at, ds.created_at
 		FROM draft_suggestions ds
 		INNER JOIN messages m ON m.id = ds.message_id
-		WHERE ds.user_id = ?
+		WHERE ds.user_id = ? AND ds.status = 'ready'
 	`)
 	args := []any{userID.String()}
 	if accountID != nil {
@@ -1059,8 +1059,9 @@ func (r *Repository) ListDraftSuggestions(ctx context.Context, userID uuid.UUID,
 	defer rows.Close()
 	out := make([]driven.DraftSuggestionRow, 0)
 	for rows.Next() {
-		var idStr, userStr, accStr, msgStr, actionStr, runStr, subject, body, model, fromJSON, createdAt string
-		if err := rows.Scan(&idStr, &userStr, &accStr, &msgStr, &actionStr, &runStr, &subject, &body, &model, &fromJSON, &createdAt); err != nil {
+		var idStr, userStr, accStr, msgStr, actionStr, runStr, subject, body, model, fromJSON, status, createdAt string
+		var sentAt, discardedAt, updatedAt sql.NullString
+		if err := rows.Scan(&idStr, &userStr, &accStr, &msgStr, &actionStr, &runStr, &subject, &body, &model, &fromJSON, &status, &sentAt, &discardedAt, &updatedAt, &createdAt); err != nil {
 			return nil, err
 		}
 		id, _ := uuid.Parse(idStr)
@@ -1070,7 +1071,7 @@ func (r *Repository) ListDraftSuggestions(ctx context.Context, userID uuid.UUID,
 		actionID, _ := uuid.Parse(actionStr)
 		runID, _ := uuid.Parse(runStr)
 		cat, _ := parseTime(createdAt)
-		out = append(out, driven.DraftSuggestionRow{
+		item := driven.DraftSuggestionRow{
 			ID:           id,
 			UserID:       uid,
 			AccountID:    acc,
@@ -1081,8 +1082,155 @@ func (r *Repository) ListDraftSuggestions(ctx context.Context, userID uuid.UUID,
 			Body:         body,
 			Model:        model,
 			FromJSON:     fromJSON,
+			Status:       status,
 			CreatedAt:    cat,
-		})
+		}
+		if sentAt.Valid {
+			t, _ := parseTime(sentAt.String)
+			item.SentAt = &t
+		}
+		if discardedAt.Valid {
+			t, _ := parseTime(discardedAt.String)
+			item.DiscardedAt = &t
+		}
+		if updatedAt.Valid {
+			t, _ := parseTime(updatedAt.String)
+			item.UpdatedAt = &t
+		}
+		out = append(out, item)
+	}
+	return out, rows.Err()
+}
+
+func (r *Repository) GetDraftSuggestion(ctx context.Context, userID uuid.UUID, draftID uuid.UUID) (*driven.DraftSuggestionRow, error) {
+	row := r.db.QueryRowContext(ctx, `
+		SELECT ds.id, ds.user_id, ds.account_id, ds.message_id, ds.action_item_id, ds.run_id, ds.subject, ds.body, ds.model, m.from_json, ds.status, ds.sent_at, ds.discarded_at, ds.updated_at, ds.created_at
+		FROM draft_suggestions ds
+		INNER JOIN messages m ON m.id = ds.message_id
+		WHERE ds.id = ? AND ds.user_id = ?
+	`, draftID.String(), userID.String())
+	var idStr, userStr, accStr, msgStr, actionStr, runStr, subject, body, model, fromJSON, status, createdAt string
+	var sentAt, discardedAt, updatedAt sql.NullString
+	if err := row.Scan(&idStr, &userStr, &accStr, &msgStr, &actionStr, &runStr, &subject, &body, &model, &fromJSON, &status, &sentAt, &discardedAt, &updatedAt, &createdAt); err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			return nil, nil
+		}
+		return nil, err
+	}
+	id, _ := uuid.Parse(idStr)
+	uid, _ := uuid.Parse(userStr)
+	acc, _ := uuid.Parse(accStr)
+	msg, _ := uuid.Parse(msgStr)
+	actionID, _ := uuid.Parse(actionStr)
+	runID, _ := uuid.Parse(runStr)
+	cat, _ := parseTime(createdAt)
+	item := &driven.DraftSuggestionRow{
+		ID:           id,
+		UserID:       uid,
+		AccountID:    acc,
+		MessageID:    msg,
+		ActionItemID: actionID,
+		RunID:        runID,
+		Subject:      subject,
+		Body:         body,
+		Model:        model,
+		FromJSON:     fromJSON,
+		Status:       status,
+		CreatedAt:    cat,
+	}
+	if sentAt.Valid {
+		t, _ := parseTime(sentAt.String)
+		item.SentAt = &t
+	}
+	if discardedAt.Valid {
+		t, _ := parseTime(discardedAt.String)
+		item.DiscardedAt = &t
+	}
+	if updatedAt.Valid {
+		t, _ := parseTime(updatedAt.String)
+		item.UpdatedAt = &t
+	}
+	return item, nil
+}
+
+func (r *Repository) UpdateDraftSuggestion(ctx context.Context, userID uuid.UUID, draftID uuid.UUID, subject, body string, at time.Time) error {
+	_, err := r.db.ExecContext(ctx, `
+		UPDATE draft_suggestions
+		SET subject = ?, body = ?, updated_at = ?
+		WHERE id = ? AND user_id = ? AND status = 'ready'
+	`, subject, body, formatRFC3339(at.UTC()), draftID.String(), userID.String())
+	return err
+}
+
+func (r *Repository) MarkDraftSuggestionStatus(ctx context.Context, userID uuid.UUID, draftID uuid.UUID, status string, at time.Time) error {
+	var sentAt any
+	var discardedAt any
+	if status == "sent" {
+		sentAt = formatRFC3339(at.UTC())
+	}
+	if status == "discarded" {
+		discardedAt = formatRFC3339(at.UTC())
+	}
+	_, err := r.db.ExecContext(ctx, `
+		UPDATE draft_suggestions
+		SET status = ?, sent_at = COALESCE(?, sent_at), discarded_at = COALESCE(?, discarded_at), updated_at = ?
+		WHERE id = ? AND user_id = ?
+	`, status, sentAt, discardedAt, formatRFC3339(at.UTC()), draftID.String(), userID.String())
+	return err
+}
+
+func (r *Repository) InsertSendAttempt(ctx context.Context, row driven.SendAttemptRow) error {
+	_, err := r.db.ExecContext(ctx, `
+		INSERT INTO send_attempts (id, user_id, account_id, draft_id, message_id, status, provider_message_id, error_message, created_at)
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+	`, row.ID.String(), row.UserID.String(), row.AccountID.String(), row.DraftID.String(), row.MessageID.String(),
+		row.Status, nullStr(row.ProviderMessageID), nullStr(row.ErrorMessage), formatRFC3339(row.CreatedAt.UTC()))
+	return err
+}
+
+func (r *Repository) ListSendAttemptsByDraft(ctx context.Context, userID uuid.UUID, draftID uuid.UUID, limit int) ([]driven.SendAttemptRow, error) {
+	if limit <= 0 {
+		limit = 20
+	}
+	if limit > 200 {
+		limit = 200
+	}
+	rows, err := r.db.QueryContext(ctx, `
+		SELECT id, user_id, account_id, draft_id, message_id, status, provider_message_id, error_message, created_at
+		FROM send_attempts
+		WHERE user_id = ? AND draft_id = ?
+		ORDER BY created_at DESC
+		LIMIT ?
+	`, userID.String(), draftID.String(), limit)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	out := make([]driven.SendAttemptRow, 0, limit)
+	for rows.Next() {
+		var idStr, userStr, accountStr, draftStr, msgStr, status, createdAt string
+		var providerMsg, errMsg sql.NullString
+		if err := rows.Scan(&idStr, &userStr, &accountStr, &draftStr, &msgStr, &status, &providerMsg, &errMsg, &createdAt); err != nil {
+			return nil, err
+		}
+		id, _ := uuid.Parse(idStr)
+		uid, _ := uuid.Parse(userStr)
+		acc, _ := uuid.Parse(accountStr)
+		did, _ := uuid.Parse(draftStr)
+		msg, _ := uuid.Parse(msgStr)
+		cat, _ := parseTime(createdAt)
+		item := driven.SendAttemptRow{
+			ID:        id,
+			UserID:    uid,
+			AccountID: acc,
+			DraftID:   did,
+			MessageID: msg,
+			Status:    status,
+			CreatedAt: cat,
+		}
+		item.ProviderMessageID = nullStringPtr(providerMsg)
+		item.ErrorMessage = nullStringPtr(errMsg)
+		out = append(out, item)
 	}
 	return out, rows.Err()
 }

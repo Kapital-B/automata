@@ -116,6 +116,15 @@ export default function RunsPage({ accountFilter }: Props) {
 }
 
 function renderRunResult(meta: Record<string, unknown>) {
+  const draftsGenerated = typeof meta.drafts_generated === "number" ? meta.drafts_generated : undefined;
+  const actionItemsSeen = typeof meta.action_items_seen === "number" ? meta.action_items_seen : undefined;
+  if (typeof draftsGenerated === "number") {
+    const extra = typeof actionItemsSeen === "number" ? ` · ${actionItemsSeen} seen` : "";
+    return `${draftsGenerated} drafts generated${extra}`;
+  }
+  if (typeof meta.chain_started_at === "string") {
+    return `chain started ${relativeTime(meta.chain_started_at)}`;
+  }
   const processed = typeof meta.processed_messages === "number" ? meta.processed_messages : undefined;
   const total = typeof meta.total_messages === "number" ? meta.total_messages : undefined;
   if (typeof processed === "number" && typeof total === "number" && total > 0) {
