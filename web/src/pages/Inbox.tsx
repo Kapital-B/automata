@@ -1,37 +1,92 @@
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { PageHeader } from "@/components/PageHeader";
 import { AccountBadge } from "@/components/AccountBadge";
 import { CategoryPill } from "@/components/CategoryPill";
-import { messages, getAccount, relativeTime, Category } from "@/lib/mock-data";
-import { Paperclip, Reply, Forward, Archive } from "lucide-react";
+import { relativeTime } from "@/lib/accounts";
+import { categorizeAccount, listCategories, listMessages, type MessageItem } from "@/lib/auth";
+import { Paperclip, Reply, Forward, Archive, Loader2 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { Button } from "@/components/ui/button";
 import type { AccountFilter } from "@/components/AppShell";
+import { useAuth } from "@/components/auth/AuthProvider";
+import { useAccountsData } from "@/hooks/useAccountsData";
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import { toast } from "@/hooks/use-toast";
 
 interface Props {
   accountFilter: AccountFilter;
 }
 
-const categoryFilters: (Category | "all")[] = [
-  "all", "important", "finance", "personal", "newsletter", "spam",
-];
-
 export default function InboxPage({ accountFilter }: Props) {
-  const [cat, setCat] = useState<Category | "all">("all");
-  const [selectedId, setSelectedId] = useState<string>(messages[0].id);
+  const { accessToken } = useAuth();
+  const { accounts } = useAccountsData();
+  const queryClient = useQueryClient();
+  const [cat, setCat] = useState<string>("all");
+  const [selectedId, setSelectedId] = useState<string>("");
+
+  const categoriesQuery = useQuery({
+    queryKey: ["categories", accessToken],
+    queryFn: () => listCategories(accessToken!),
+    enabled: Boolean(accessToken),
+  });
+
+  const messagesQuery = useQuery({
+    queryKey: ["messages", accessToken, accountFilter, cat],
+    queryFn: () =>
+      listMessages(accessToken!, {
+        accountId: accountFilter === "all" ? undefined : accountFilter,
+        category: cat === "all" ? undefined : cat,
+        limit: 200,
+      }),
+    enabled: Boolean(accessToken),
+  });
+
+  const categorizeMutation = useMutation({
+    mutationFn: async ({ recategorize }: { recategorize: boolean }) => {
+      if (!accessToken || accountFilter === "all") return;
+      return categorizeAccount(accessToken, accountFilter, { recategorize });
+    },
+    onSuccess: (_, vars) => {
+      void queryClient.invalidateQueries({ queryKey: ["messages"] });
+      void queryClient.invalidateQueries({ queryKey: ["runs"] });
+      toast({ title: vars.recategorize ? "Re-categorization completed" : "Categorization completed" });
+    },
+    onError: (err) => {
+      toast({
+        title: "Categorization failed",
+        description: err instanceof Error ? err.message : "Please try again.",
+        variant: "destructive",
+      });
+    },
+  });
+
+  const categoryFilters = useMemo(() => {
+    const slugs = categoriesQuery.data?.map((c) => c.slug) ?? [];
+    return ["all", ...slugs];
+  }, [categoriesQuery.data]);
 
   const filtered = useMemo(
-    () =>
-      messages.filter(
-        (m) =>
-          (accountFilter === "all" || m.accountId === accountFilter) &&
-          (cat === "all" || m.category === cat)
-      ),
-    [accountFilter, cat]
+    () => messagesQuery.data ?? [],
+    [messagesQuery.data]
   );
 
-  const selected = messages.find((m) => m.id === selectedId) ?? filtered[0];
-  const selAccount = selected ? getAccount(selected.accountId) : undefined;
+  const hasCategorizedMessages = useMemo(
+    () => (messagesQuery.data ?? []).some((m: MessageItem) => Boolean(m.category_slug)),
+    [messagesQuery.data]
+  );
+
+  useEffect(() => {
+    if (filtered.length === 0) {
+      setSelectedId("");
+      return;
+    }
+    if (!selectedId || !filtered.find((m) => m.id === selectedId)) {
+      setSelectedId(filtered[0].id);
+    }
+  }, [filtered, selectedId]);
+
+  const selected = filtered.find((m) => m.id === selectedId) ?? filtered[0];
+  const selAccount = selected ? accounts.find((a) => a.id === selected.account_id) : undefined;
 
   return (
     <div className="space-y-6">
@@ -39,6 +94,33 @@ export default function InboxPage({ accountFilter }: Props) {
         eyebrow="Mailbox"
         title="Inbox"
         description="Per-account messages with LLM-assigned categories. Provenance preserved on every row."
+        actions={
+          <div className="flex items-center gap-2">
+            <Button
+              size="sm"
+              variant="outline"
+              disabled={accountFilter === "all" || categorizeMutation.isPending}
+              onClick={() => categorizeMutation.mutate({ recategorize: false })}
+            >
+              {categorizeMutation.isPending ? (
+                <>
+                  <Loader2 className="mr-1.5 h-3.5 w-3.5 animate-spin" />
+                  Categorizing...
+                </>
+              ) : (
+                "Categorize new"
+              )}
+            </Button>
+            <Button
+              size="sm"
+              variant="outline"
+              disabled={accountFilter === "all" || categorizeMutation.isPending || !hasCategorizedMessages}
+              onClick={() => categorizeMutation.mutate({ recategorize: true })}
+            >
+              Re-categorize all
+            </Button>
+          </div>
+        }
       />
 
       {/* Filters */}
@@ -62,11 +144,20 @@ export default function InboxPage({ accountFilter }: Props) {
         </span>
       </div>
 
+      {messagesQuery.isLoading && (
+        <div className="surface-card px-4 py-3 text-sm text-muted-foreground">Loading messages...</div>
+      )}
+      {messagesQuery.isError && (
+        <div className="surface-card px-4 py-3 text-sm text-destructive">
+          Could not load messages: {messagesQuery.error instanceof Error ? messagesQuery.error.message : "unknown error"}
+        </div>
+      )}
+
       <div className="grid gap-6 lg:grid-cols-[minmax(0,1fr)_minmax(0,1.2fr)]">
         {/* List */}
         <ul className="surface-card divide-y divide-border/70 overflow-hidden">
           {filtered.map((m) => {
-            const acct = getAccount(m.accountId);
+            const acct = accounts.find((a) => a.id === m.account_id);
             const isSel = selected?.id === m.id;
             return (
               <li
@@ -80,28 +171,23 @@ export default function InboxPage({ accountFilter }: Props) {
                 <div className="flex items-center justify-between gap-2">
                   <AccountBadge account={acct} />
                   <span className="text-[11px] text-muted-foreground">
-                    {relativeTime(m.receivedAt)}
+                    {relativeTime(m.received_at)}
                   </span>
                 </div>
                 <p
                   className={cn(
                     "mt-1.5 truncate text-sm",
-                    m.unread ? "font-semibold text-foreground" : "text-foreground/90"
+                    "text-foreground/90"
                   )}
                 >
-                  {m.from.name}
+                  {m.from_json?.name ?? m.from_json?.address ?? "Unknown sender"}
                 </p>
                 <p className="truncate text-sm text-foreground/85">{m.subject}</p>
                 <p className="mt-0.5 truncate text-xs text-muted-foreground">{m.preview}</p>
                 <div className="mt-2 flex items-center gap-2">
-                  <CategoryPill category={m.category} />
-                  {m.hasAttachments && (
+                  <CategoryPill category={m.category_slug ?? "other"} />
+                  {m.has_attachments && (
                     <Paperclip className="h-3 w-3 text-muted-foreground" />
-                  )}
-                  {m.needsReply && (
-                    <span className="text-[10px] font-medium uppercase tracking-wider text-accent">
-                      reply suggested
-                    </span>
                   )}
                 </div>
               </li>
@@ -125,28 +211,19 @@ export default function InboxPage({ accountFilter }: Props) {
                 <h2 className="font-display text-2xl font-medium leading-snug">
                   {selected.subject}
                 </h2>
-                <CategoryPill category={selected.category} />
+                <CategoryPill category={selected.category_slug ?? "other"} />
               </div>
               <p className="mt-2 text-sm text-muted-foreground">
-                <span className="font-medium text-foreground/80">{selected.from.name}</span>{" "}
-                &lt;{selected.from.address}&gt; · {relativeTime(selected.receivedAt)}
+                <span className="font-medium text-foreground/80">
+                  {selected.from_json?.name ?? selected.from_json?.address ?? "Unknown sender"}
+                </span>{" "}
+                &lt;{selected.from_json?.address ?? "unknown"}&gt; · {relativeTime(selected.received_at)}
               </p>
             </div>
             <div className="hairline" />
             <div className="prose prose-sm max-w-none whitespace-pre-wrap px-6 py-5 text-foreground/90">
-              {selected.body}
+              {selected.body_text ?? ""}
             </div>
-            {selected.needsReply && (
-              <div className="border-t border-border/70 bg-secondary/40 px-6 py-4">
-                <p className="text-[10px] font-mono uppercase tracking-widest text-muted-foreground">
-                  AI suggestion
-                </p>
-                <p className="mt-1 text-sm">A draft reply is waiting in the Drafts area.</p>
-                <Button size="sm" className="mt-3 bg-foreground text-background hover:bg-foreground/90">
-                  Open draft
-                </Button>
-              </div>
-            )}
           </article>
         )}
       </div>

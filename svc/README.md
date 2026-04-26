@@ -25,7 +25,9 @@ go run ./cmd/server
 - Open **`authorization_url`** in a browser: use the URL from **parsed** JSON (e.g. `jq -r .authorization_url`) so query parameters stay intact. Pasting from raw JSON that contains `\u0026` instead of `&` can break the request and trigger Azure errors such as **AADSTS900144** (missing `scope`).
 - Microsoft redirects to `GET /api/accounts/callback?code=...&state=...`, then **302** to `{DASHBOARD_BASE_URL}{OAUTH_SUCCESS_PATH}?account_id=...`
 - **Sync inbox:** `POST /api/accounts/{id}/sync`
+- **Categorize inbox:** `POST /api/accounts/{id}/categorize` (requires `LLM_BASE_URL` + `LLM_MODEL`)
 - **List messages:** `GET /api/messages?account_id={uuid}`
+- **List categories:** `GET /api/categories`
 
 ## Auth
 

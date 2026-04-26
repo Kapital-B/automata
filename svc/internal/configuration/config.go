@@ -32,6 +32,9 @@ type Config struct {
 	AuthSuccessPath    string
 	AuthErrorPath      string
 	DefaultUserID      uuid.UUID
+	LLMBaseURL         string
+	LLMModel           string
+	LLMAPIKey          string
 }
 
 func getenv(key, def string) string {
@@ -124,12 +127,18 @@ func Load() (Config, error) {
 		AuthSuccessPath:   getenv("AUTH_SUCCESS_PATH", "/auth/callback"),
 		AuthErrorPath:     getenv("AUTH_ERROR_PATH", "/auth/error"),
 		DefaultUserID:     defaultUID,
+		LLMBaseURL:        os.Getenv("LLM_BASE_URL"),
+		LLMModel:          os.Getenv("LLM_MODEL"),
+		LLMAPIKey:         os.Getenv("LLM_API_KEY"),
 	}
 	if cfg.MSClientID == "" || cfg.MSClientSecret == "" || cfg.MSRedirectURI == "" {
 		return Config{}, fmt.Errorf("MS_CLIENT_ID, MS_CLIENT_SECRET, and MS_REDIRECT_URI are required for mail connect")
 	}
 	if cfg.GoogleClientID != "" && (cfg.GoogleClientSecret == "" || cfg.GoogleRedirectURI == "") {
 		return Config{}, fmt.Errorf("GOOGLE_CLIENT_ID set: also require GOOGLE_CLIENT_SECRET and GOOGLE_REDIRECT_URI")
+	}
+	if cfg.LLMBaseURL != "" && cfg.LLMModel == "" {
+		return Config{}, fmt.Errorf("LLM_BASE_URL set: also require LLM_MODEL")
 	}
 	return cfg, nil
 }

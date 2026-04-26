@@ -14,6 +14,7 @@ import (
 	"github.com/Kapital-B/automata/svc/internal/application/auth"
 	appmessages "github.com/Kapital-B/automata/svc/internal/application/messages"
 	httphandler "github.com/Kapital-B/automata/svc/internal/adapters/inbound/http"
+	llmadapter "github.com/Kapital-B/automata/svc/internal/adapters/outbound/llm"
 	googleoauth "github.com/Kapital-B/automata/svc/internal/adapters/outbound/google"
 	"github.com/Kapital-B/automata/svc/internal/adapters/outbound/microsoft"
 	"github.com/Kapital-B/automata/svc/internal/adapters/outbound/persistence/sqlite"
@@ -90,6 +91,18 @@ func main() {
 		Vault:    vault,
 		JobRuns:  repo,
 	}
+	var categorizeSvc *appmessages.CategorizeService
+	if cfg.LLMBaseURL != "" && cfg.LLMModel != "" {
+		categorizeSvc = &appmessages.CategorizeService{
+			Messages: repo,
+			LLM: &llmadapter.OpenAIClient{
+				BaseURL: cfg.LLMBaseURL,
+				Model: cfg.LLMModel,
+				APIKey: cfg.LLMAPIKey,
+			},
+			JobRuns: repo,
+		}
+	}
 
 	var googleClient *googleoauth.OAuth
 	if cfg.GoogleClientID != "" {
@@ -106,6 +119,7 @@ func main() {
 		Log:             log,
 		AccountSvc:      accountSvc,
 		SyncSvc:         syncSvc,
+		CategorizeSvc:   categorizeSvc,
 		AuthSvc:         authSvc,
 		Accounts:        repo,
 		Messages:        repo,

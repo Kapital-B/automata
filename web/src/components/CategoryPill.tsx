@@ -1,7 +1,6 @@
-import { Category } from "@/lib/mock-data";
 import { cn } from "@/lib/utils";
 
-const styles: Record<Category, string> = {
+const styles: Record<string, string> = {
   important: "bg-[hsl(184_55%_22%/0.08)] text-[hsl(184_55%_22%)] border-[hsl(184_55%_22%/0.18)]",
   finance: "bg-[hsl(152_45%_38%/0.10)] text-[hsl(152_45%_28%)] border-[hsl(152_45%_38%/0.20)]",
   newsletter: "bg-[hsl(220_10%_42%/0.08)] text-[hsl(220_10%_30%)] border-[hsl(220_10%_42%/0.18)]",
@@ -10,16 +9,17 @@ const styles: Record<Category, string> = {
   other: "bg-muted text-muted-foreground border-border",
 };
 
-export function CategoryPill({ category, className }: { category: Category; className?: string }) {
+export function CategoryPill({ category, className }: { category: string; className?: string }) {
+  const normalized = (category || "other").toLowerCase();
   return (
     <span
       className={cn(
         "inline-flex items-center rounded-full border px-2 py-0.5 text-[10px] font-medium uppercase tracking-wider",
-        styles[category],
+        styles[normalized] ?? styles.other,
         className
       )}
     >
-      {category}
+      {normalized}
     </span>
   );
 }

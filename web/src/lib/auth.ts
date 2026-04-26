@@ -67,6 +67,35 @@ export type ListRunsFilter = {
   offset?: number;
 };
 
+export type CategoryDefinition = {
+  id: string;
+  slug: string;
+  display_name: string;
+  sort_order: number;
+};
+
+export type MessageItem = {
+  id: string;
+  account_id: string;
+  provider_message_id: string;
+  subject: string;
+  received_at: string;
+  has_attachments: boolean;
+  from_json: { name?: string; address?: string };
+  body_text?: string;
+  preview: string;
+  category_slug?: string;
+  category_confidence?: number;
+};
+
+export type ListMessagesFilter = {
+  accountId?: string;
+  category?: string;
+  since?: string;
+  limit?: number;
+  offset?: number;
+};
+
 export class ApiError extends Error {
   status: number;
 
@@ -229,6 +258,56 @@ export async function listRuns(accessToken: string, filter: ListRunsFilter = {})
   return apiRequest<JobRun[]>(`/api/runs${suffix}`, {
     headers: toAuthHeader(accessToken),
   });
+}
+
+export async function listCategories(accessToken: string) {
+  return apiRequest<CategoryDefinition[]>("/api/categories", {
+    headers: toAuthHeader(accessToken),
+  });
+}
+
+export async function listMessages(accessToken: string, filter: ListMessagesFilter = {}) {
+  const params = new URLSearchParams();
+  if (filter.accountId) {
+    params.set("account_id", filter.accountId);
+  }
+  if (filter.category) {
+    params.set("category", filter.category);
+  }
+  if (filter.since) {
+    params.set("since", filter.since);
+  }
+  if (typeof filter.limit === "number") {
+    params.set("limit", String(filter.limit));
+  }
+  if (typeof filter.offset === "number") {
+    params.set("offset", String(filter.offset));
+  }
+  const suffix = params.size > 0 ? `?${params.toString()}` : "";
+  return apiRequest<MessageItem[]>(`/api/messages${suffix}`, {
+    headers: toAuthHeader(accessToken),
+  });
+}
+
+export async function getMessage(accessToken: string, id: string) {
+  return apiRequest<MessageItem>(`/api/messages/${id}`, {
+    headers: toAuthHeader(accessToken),
+  });
+}
+
+export async function categorizeAccount(
+  accessToken: string,
+  accountID: string,
+  options: { recategorize?: boolean } = {},
+) {
+  return apiRequest<{ job_run_id: string; messages_categorized: number; recategorize?: boolean; status: string }>(
+    `/api/accounts/${accountID}/categorize`,
+    {
+      method: "POST",
+      headers: toAuthHeader(accessToken),
+      body: JSON.stringify({ recategorize: Boolean(options.recategorize) }),
+    },
+  );
 }
 
 export function readTokensFromFragment(hash: string): AuthTokens | null {

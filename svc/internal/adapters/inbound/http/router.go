@@ -24,6 +24,7 @@ type Handlers struct {
 	Log         *slog.Logger
 	AccountSvc  *appaccounts.Service
 	SyncSvc     *appmessages.SyncService
+	CategorizeSvc *appmessages.CategorizeService
 	AuthSvc     *auth.Service
 	Accounts    driven.AccountRepository
 	Messages    driven.MessageRepository
@@ -62,6 +63,8 @@ func (h *Handlers) Routes() http.Handler {
 	r.Get("/api/accounts/{id}", h.getAccount)
 	r.Delete("/api/accounts/{id}", h.deleteAccount)
 	r.Post("/api/accounts/{id}/sync", h.syncAccount)
+	r.Post("/api/accounts/{id}/categorize", h.categorizeAccount)
+	r.Get("/api/categories", h.listCategories)
 	r.Get("/api/runs", h.listRuns)
 	r.Get("/api/runs/{id}", h.getRun)
 	r.Get("/api/messages", h.listMessages)
@@ -256,19 +259,40 @@ func (h *Handlers) syncAccount(w http.ResponseWriter, r *http.Request) {
 }
 
 func (h *Handlers) listMessages(w http.ResponseWriter, r *http.Request) {
-	aid := r.URL.Query().Get("account_id")
-	if aid == "" {
-		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "account_id required"})
-		return
+	filter := driven.MessageListFilter{Category: r.URL.Query().Get("category")}
+	if aid := r.URL.Query().Get("account_id"); aid != "" {
+		id, err := uuid.Parse(aid)
+		if err != nil {
+			writeJSON(w, http.StatusBadRequest, map[string]string{"error": "bad account_id"})
+			return
+		}
+		filter.AccountID = &id
 	}
-	id, err := uuid.Parse(aid)
-	if err != nil {
-		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "bad account_id"})
-		return
+	if v := r.URL.Query().Get("since"); v != "" {
+		ts, err := time.Parse(time.RFC3339, v)
+		if err != nil {
+			writeJSON(w, http.StatusBadRequest, map[string]string{"error": "bad since"})
+			return
+		}
+		filter.Since = &ts
 	}
-	limit, _ := strconv.Atoi(r.URL.Query().Get("limit"))
-	offset, _ := strconv.Atoi(r.URL.Query().Get("offset"))
-	rows, err := h.Messages.ListMessagesByAccount(r.Context(), userIDOrEmpty(r), id, limit, offset)
+	if v := r.URL.Query().Get("limit"); v != "" {
+		n, err := strconv.Atoi(v)
+		if err != nil {
+			writeJSON(w, http.StatusBadRequest, map[string]string{"error": "bad limit"})
+			return
+		}
+		filter.Limit = n
+	}
+	if v := r.URL.Query().Get("offset"); v != "" {
+		n, err := strconv.Atoi(v)
+		if err != nil {
+			writeJSON(w, http.StatusBadRequest, map[string]string{"error": "bad offset"})
+			return
+		}
+		filter.Offset = n
+	}
+	rows, err := h.Messages.ListMessages(r.Context(), userIDOrEmpty(r), filter)
 	if err != nil {
 		h.Log.Error("list messages", "err", err)
 		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "internal"})
@@ -281,9 +305,21 @@ func (h *Handlers) listMessages(w http.ResponseWriter, r *http.Request) {
 		Subject           string `json:"subject"`
 		ReceivedAt        string `json:"received_at"`
 		HasAttachments    bool   `json:"has_attachments"`
+		FromJSON          json.RawMessage `json:"from_json"`
+		BodyText          *string `json:"body_text,omitempty"`
+		Preview           string `json:"preview"`
+		CategorySlug      *string `json:"category_slug,omitempty"`
+		CategoryConfidence *float64 `json:"category_confidence,omitempty"`
 	}
 	out := make([]item, 0, len(rows))
 	for _, m := range rows {
+		preview := ""
+		if m.BodyText != nil {
+			preview = *m.BodyText
+			if len(preview) > 160 {
+				preview = preview[:160]
+			}
+		}
 		out = append(out, item{
 			ID:                m.ID.String(),
 			AccountID:         m.AccountID.String(),
@@ -291,6 +327,11 @@ func (h *Handlers) listMessages(w http.ResponseWriter, r *http.Request) {
 			Subject:           m.Subject,
 			ReceivedAt:        m.ReceivedAt.UTC().Format(time.RFC3339Nano),
 			HasAttachments:    m.HasAttachments,
+			FromJSON:          json.RawMessage(m.FromJSON),
+			BodyText:          m.BodyText,
+			Preview:           preview,
+			CategorySlug:      m.CategorySlug,
+			CategoryConfidence: m.CategoryConfidence,
 		})
 	}
 	writeJSON(w, http.StatusOK, out)
@@ -321,6 +362,68 @@ func (h *Handlers) getMessage(w http.ResponseWriter, r *http.Request) {
 		"from_json":           json.RawMessage(m.FromJSON),
 		"body_text":           m.BodyText,
 		"has_attachments":     m.HasAttachments,
+		"category_slug":       m.CategorySlug,
+		"category_confidence": m.CategoryConfidence,
+	})
+}
+
+func (h *Handlers) listCategories(w http.ResponseWriter, r *http.Request) {
+	rows, err := h.Messages.ListCategoryDefinitions(r.Context())
+	if err != nil {
+		h.Log.Error("list categories", "err", err)
+		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "internal"})
+		return
+	}
+	type item struct {
+		ID          string `json:"id"`
+		Slug        string `json:"slug"`
+		DisplayName string `json:"display_name"`
+		SortOrder   int    `json:"sort_order"`
+	}
+	out := make([]item, 0, len(rows))
+	for _, row := range rows {
+		out = append(out, item{
+			ID:          row.ID.String(),
+			Slug:        row.Slug,
+			DisplayName: row.DisplayName,
+			SortOrder:   row.SortOrder,
+		})
+	}
+	writeJSON(w, http.StatusOK, out)
+}
+
+func (h *Handlers) categorizeAccount(w http.ResponseWriter, r *http.Request) {
+	if h.CategorizeSvc == nil {
+		writeJSON(w, http.StatusServiceUnavailable, map[string]string{"error": "categorize service not configured"})
+		return
+	}
+	id, err := uuid.Parse(chi.URLParam(r, "id"))
+	if err != nil {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "bad id"})
+		return
+	}
+	var body struct {
+		Recategorize bool `json:"recategorize"`
+	}
+	if r.ContentLength > 0 {
+		if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+			writeJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid json"})
+			return
+		}
+	}
+	res, err := h.CategorizeSvc.CategorizeAccount(r.Context(), userIDOrEmpty(r), id, appmessages.CategorizeOptions{
+		Recategorize: body.Recategorize,
+	})
+	if err != nil {
+		h.Log.Error("categorize", "err", err)
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": err.Error()})
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{
+		"job_run_id":            res.JobRunID.String(),
+		"messages_categorized":  res.MessagesCategorized,
+		"recategorize":          body.Recategorize,
+		"status":                "success",
 	})
 }
 

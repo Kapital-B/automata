@@ -249,36 +249,23 @@ func (r *Repository) UpsertMessage(ctx context.Context, m driven.MessageRow) err
 }
 
 func (r *Repository) ListMessagesByAccount(ctx context.Context, userID uuid.UUID, accountID uuid.UUID, limit, offset int) ([]driven.MessageRow, error) {
-	if limit <= 0 {
-		limit = 50
+	filter := driven.MessageListFilter{
+		AccountID: &accountID,
+		Limit:     limit,
+		Offset:    offset,
 	}
-	if limit > 200 {
-		limit = 200
-	}
-	if offset < 0 {
-		offset = 0
-	}
-	rows, err := r.db.QueryContext(ctx, `
-		SELECT m.id, m.account_id, m.provider_message_id, m.conversation_id, m.received_at, m.subject, m.from_json,
-			m.to_cc_preview, m.body_text, m.body_fetched_at, m.has_attachments, m.raw_etag, m.created_at, m.updated_at
-		FROM messages m
-		INNER JOIN accounts a ON a.id = m.account_id AND a.user_id = ?
-		WHERE m.account_id = ? ORDER BY m.received_at DESC LIMIT ? OFFSET ?`,
-		userID.String(), accountID.String(), limit, offset,
-	)
-	if err != nil {
-		return nil, err
-	}
-	defer rows.Close()
-	return scanMessageRows(rows)
+	return r.ListMessages(ctx, userID, filter)
 }
 
 func (r *Repository) GetMessage(ctx context.Context, userID uuid.UUID, id uuid.UUID) (*driven.MessageRow, error) {
 	row := r.db.QueryRowContext(ctx, `
 		SELECT m.id, m.account_id, m.provider_message_id, m.conversation_id, m.received_at, m.subject, m.from_json,
-			m.to_cc_preview, m.body_text, m.body_fetched_at, m.has_attachments, m.raw_etag, m.created_at, m.updated_at
+			m.to_cc_preview, m.body_text, m.body_fetched_at, m.has_attachments, m.raw_etag,
+			cd.slug, mc.confidence, m.created_at, m.updated_at
 		FROM messages m
 		INNER JOIN accounts a ON a.id = m.account_id AND a.user_id = ?
+		LEFT JOIN message_categories mc ON mc.message_id = m.id AND mc.source = 'llm'
+		LEFT JOIN category_definitions cd ON cd.id = mc.category_id
 		WHERE m.id = ?`, userID.String(), id.String(),
 	)
 	m, err := scanMessageRow(row)
@@ -289,6 +276,110 @@ func (r *Repository) GetMessage(ctx context.Context, userID uuid.UUID, id uuid.U
 		return nil, err
 	}
 	return m, nil
+}
+
+func (r *Repository) ListMessages(ctx context.Context, userID uuid.UUID, filter driven.MessageListFilter) ([]driven.MessageRow, error) {
+	limit := filter.Limit
+	if limit <= 0 {
+		limit = 50
+	}
+	if limit > 200 {
+		limit = 200
+	}
+	offset := filter.Offset
+	if offset < 0 {
+		offset = 0
+	}
+	var b strings.Builder
+	b.WriteString(`
+		SELECT m.id, m.account_id, m.provider_message_id, m.conversation_id, m.received_at, m.subject, m.from_json,
+			m.to_cc_preview, m.body_text, m.body_fetched_at, m.has_attachments, m.raw_etag,
+			cd.slug, mc.confidence, m.created_at, m.updated_at
+		FROM messages m
+		INNER JOIN accounts a ON a.id = m.account_id AND a.user_id = ?
+		LEFT JOIN message_categories mc ON mc.message_id = m.id AND mc.source = 'llm'
+		LEFT JOIN category_definitions cd ON cd.id = mc.category_id
+		WHERE 1=1`)
+	args := []any{userID.String()}
+	if filter.AccountID != nil {
+		b.WriteString(` AND m.account_id = ?`)
+		args = append(args, filter.AccountID.String())
+	}
+	if filter.Category != "" {
+		b.WriteString(` AND cd.slug = ?`)
+		args = append(args, filter.Category)
+	}
+	if filter.Since != nil {
+		b.WriteString(` AND m.received_at >= ?`)
+		args = append(args, formatRFC3339(filter.Since.UTC()))
+	}
+	b.WriteString(` ORDER BY m.received_at DESC LIMIT ? OFFSET ?`)
+	args = append(args, limit, offset)
+	rows, err := r.db.QueryContext(ctx, b.String(), args...)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	return scanMessageRows(rows)
+}
+
+func (r *Repository) UpsertMessageCategory(ctx context.Context, row driven.MessageCategoryRow) error {
+	_, err := r.db.ExecContext(ctx, `
+		INSERT INTO message_categories (id, message_id, account_id, category_id, source, confidence, run_id, created_at, updated_at)
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+		ON CONFLICT(message_id, source) DO UPDATE SET
+			category_id = excluded.category_id,
+			account_id = excluded.account_id,
+			confidence = excluded.confidence,
+			run_id = excluded.run_id,
+			updated_at = excluded.updated_at`,
+		row.ID.String(), row.MessageID.String(), row.AccountID.String(), row.CategoryID.String(), row.Source, nullFloat(row.Confidence),
+		row.RunID.String(), formatRFC3339(row.CreatedAt.UTC()), formatRFC3339(row.UpdatedAt.UTC()),
+	)
+	return err
+}
+
+func (r *Repository) ListCategoryDefinitions(ctx context.Context) ([]driven.CategoryDefinitionRow, error) {
+	rows, err := r.db.QueryContext(ctx, `SELECT id, slug, display_name, sort_order FROM category_definitions ORDER BY sort_order ASC, slug ASC`)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	out := make([]driven.CategoryDefinitionRow, 0)
+	for rows.Next() {
+		var idStr string
+		var row driven.CategoryDefinitionRow
+		if err := rows.Scan(&idStr, &row.Slug, &row.DisplayName, &row.SortOrder); err != nil {
+			return nil, err
+		}
+		uid, err := uuid.Parse(idStr)
+		if err != nil {
+			return nil, err
+		}
+		row.ID = uid
+		out = append(out, row)
+	}
+	return out, rows.Err()
+}
+
+func (r *Repository) GetCategoryDefinitionBySlug(ctx context.Context, slug string) (*driven.CategoryDefinitionRow, error) {
+	var row driven.CategoryDefinitionRow
+	var idStr string
+	err := r.db.QueryRowContext(ctx, `SELECT id, slug, display_name, sort_order FROM category_definitions WHERE slug = ?`, slug).Scan(
+		&idStr, &row.Slug, &row.DisplayName, &row.SortOrder,
+	)
+	if errors.Is(err, sql.ErrNoRows) {
+		return nil, nil
+	}
+	if err != nil {
+		return nil, err
+	}
+	uid, err := uuid.Parse(idStr)
+	if err != nil {
+		return nil, err
+	}
+	row.ID = uid
+	return &row, nil
 }
 
 func scanMessageRows(rows *sql.Rows) ([]driven.MessageRow, error) {
@@ -316,10 +407,12 @@ func scanMessageScanner(s rowScanner) (*driven.MessageRow, error) {
 	var idStr, accStr string
 	var conv, preview, body, bodyAt, etag sql.NullString
 	var receivedAt, createdAt, updatedAt string
+	var categorySlug sql.NullString
+	var confidence sql.NullFloat64
 	var hasAtt int
 	if err := s.Scan(
 		&idStr, &accStr, &m.ProviderMessageID, &conv, &receivedAt, &m.Subject, &m.FromJSON,
-		&preview, &body, &bodyAt, &hasAtt, &etag, &createdAt, &updatedAt,
+		&preview, &body, &bodyAt, &hasAtt, &etag, &categorySlug, &confidence, &createdAt, &updatedAt,
 	); err != nil {
 		return nil, err
 	}
@@ -335,6 +428,11 @@ func scanMessageScanner(s rowScanner) (*driven.MessageRow, error) {
 	m.ConversationID = nullStringPtr(conv)
 	m.ToCCPreview = nullStringPtr(preview)
 	m.BodyText = nullStringPtr(body)
+	m.CategorySlug = nullStringPtr(categorySlug)
+	if confidence.Valid {
+		v := confidence.Float64
+		m.CategoryConfidence = &v
+	}
 	if bodyAt.Valid {
 		t, err := parseTime(bodyAt.String)
 		if err != nil {
@@ -539,6 +637,13 @@ func boolInt(b bool) int {
 		return 1
 	}
 	return 0
+}
+
+func nullFloat(v *float64) any {
+	if v == nil {
+		return nil
+	}
+	return *v
 }
 
 func scanJobRunRow(s rowScanner) (*driven.JobRunRow, error) {

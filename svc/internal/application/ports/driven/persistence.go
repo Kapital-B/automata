@@ -39,8 +39,37 @@ type MessageRow struct {
 	BodyFetchedAt      *time.Time
 	HasAttachments     bool
 	RawEtag            *string
+	CategorySlug       *string
+	CategoryConfidence *float64
 	CreatedAt          time.Time
 	UpdatedAt          time.Time
+}
+
+type CategoryDefinitionRow struct {
+	ID          uuid.UUID
+	Slug        string
+	DisplayName string
+	SortOrder   int
+}
+
+type MessageCategoryRow struct {
+	ID         uuid.UUID
+	MessageID  uuid.UUID
+	AccountID  uuid.UUID
+	CategoryID uuid.UUID
+	Source     string
+	Confidence *float64
+	RunID      uuid.UUID
+	CreatedAt  time.Time
+	UpdatedAt  time.Time
+}
+
+type MessageListFilter struct {
+	AccountID *uuid.UUID
+	Category  string
+	Since     *time.Time
+	Limit     int
+	Offset    int
 }
 
 // JobRunRow is the persisted job run shape for API responses and auditing.
@@ -81,7 +110,11 @@ type AccountRepository interface {
 type MessageRepository interface {
 	UpsertMessage(ctx context.Context, m MessageRow) error
 	ListMessagesByAccount(ctx context.Context, userID uuid.UUID, accountID uuid.UUID, limit, offset int) ([]MessageRow, error)
+	ListMessages(ctx context.Context, userID uuid.UUID, filter MessageListFilter) ([]MessageRow, error)
 	GetMessage(ctx context.Context, userID uuid.UUID, id uuid.UUID) (*MessageRow, error)
+	UpsertMessageCategory(ctx context.Context, row MessageCategoryRow) error
+	ListCategoryDefinitions(ctx context.Context) ([]CategoryDefinitionRow, error)
+	GetCategoryDefinitionBySlug(ctx context.Context, slug string) (*CategoryDefinitionRow, error)
 }
 
 // OAuthStateRepository stores one-time OAuth state values (mail connect + auth flows).
