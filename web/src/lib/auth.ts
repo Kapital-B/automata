@@ -71,6 +71,7 @@ export type CategoryDefinition = {
   id: string;
   slug: string;
   display_name: string;
+  definition: string;
   sort_order: number;
 };
 
@@ -262,6 +263,37 @@ export async function listRuns(accessToken: string, filter: ListRunsFilter = {})
 
 export async function listCategories(accessToken: string) {
   return apiRequest<CategoryDefinition[]>("/api/categories", {
+    headers: toAuthHeader(accessToken),
+  });
+}
+
+export type UpsertCategoryInput = {
+  slug: string;
+  display_name: string;
+  definition: string;
+  sort_order: number;
+};
+
+export async function createCategory(accessToken: string, input: UpsertCategoryInput) {
+  return apiRequest<CategoryDefinition>("/api/categories", {
+    method: "POST",
+    headers: toAuthHeader(accessToken),
+    body: JSON.stringify(input),
+  });
+}
+
+export async function updateCategory(accessToken: string, id: string, input: UpsertCategoryInput) {
+  return apiRequest<CategoryDefinition>(`/api/categories/${id}`, {
+    method: "PATCH",
+    headers: toAuthHeader(accessToken),
+    body: JSON.stringify(input),
+  });
+}
+
+export async function deleteCategory(accessToken: string, id: string, replacementID?: string) {
+  const suffix = replacementID ? `?replacement_id=${encodeURIComponent(replacementID)}` : "";
+  return apiRequest<{ status: string }>(`/api/categories/${id}${suffix}`, {
+    method: "DELETE",
     headers: toAuthHeader(accessToken),
   });
 }

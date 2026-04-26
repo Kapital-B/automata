@@ -1,0 +1,3 @@
+-- User-scoped editable category definitions with short definitions.
+-- Implemented in migrate.go because this repository reruns migrations on each startup,
+-- and this conversion must be guarded by the live table shape.

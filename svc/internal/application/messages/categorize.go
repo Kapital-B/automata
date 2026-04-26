@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"slices"
 	"strings"
 	"time"
 
@@ -46,6 +47,14 @@ func (s *CategorizeService) CategorizeAccount(ctx context.Context, userID, accou
 		return nil, err
 	}
 
+	categories, err := s.Messages.ListCategoryDefinitions(ctx, userID)
+	if err != nil {
+		return fail(err)
+	}
+	if len(categories) == 0 {
+		return fail(fmt.Errorf("no categories defined for user"))
+	}
+
 	rows, err := s.Messages.ListMessages(ctx, userID, driven.MessageListFilter{
 		AccountID: &accountID,
 		Limit:     200,
@@ -66,19 +75,19 @@ func (s *CategorizeService) CategorizeAccount(ctx context.Context, userID, accou
 
 	count := 0
 	for _, m := range rows {
-		p, err := s.classifyMessage(ctx, m)
+		p, err := s.classifyMessage(ctx, m, categories)
 		if err != nil {
 			return fail(err)
 		}
-		if p.CategorySlug == "" {
-			p.CategorySlug = "other"
+		if p.CategorySlug == "" || !hasCategorySlug(categories, p.CategorySlug) {
+			p.CategorySlug = fallbackCategorySlug(categories)
 		}
-		def, err := s.Messages.GetCategoryDefinitionBySlug(ctx, p.CategorySlug)
+		def, err := s.Messages.GetCategoryDefinitionBySlug(ctx, userID, p.CategorySlug)
 		if err != nil {
 			return fail(err)
 		}
 		if def == nil {
-			def, err = s.Messages.GetCategoryDefinitionBySlug(ctx, "other")
+			def, err = s.Messages.GetCategoryDefinitionBySlug(ctx, userID, fallbackCategorySlug(categories))
 			if err != nil || def == nil {
 				if err == nil {
 					err = fmt.Errorf("missing category definition for %q", p.CategorySlug)
@@ -111,7 +120,7 @@ func (s *CategorizeService) CategorizeAccount(ctx context.Context, userID, accou
 	return &CategorizeResult{JobRunID: jobID, MessagesCategorized: count}, nil
 }
 
-func (s *CategorizeService) classifyMessage(ctx context.Context, m driven.MessageRow) (*categorizePayload, error) {
+func (s *CategorizeService) classifyMessage(ctx context.Context, m driven.MessageRow, categories []driven.CategoryDefinitionRow) (*categorizePayload, error) {
 	const (
 		maxSubjectChars = 220
 		maxFromChars    = 280
@@ -121,9 +130,10 @@ func (s *CategorizeService) classifyMessage(ctx context.Context, m driven.Messag
 	if looksLikeHTML(body) {
 		body = stripHTML(body)
 	}
-	prompt := "Classify this email into one category slug from: important, finance, personal, newsletter, spam, other. " +
+	prompt := "Classify this email into one category slug from: " + strings.Join(categorySlugList(categories), ", ") + ". " +
 		"Respond with a single JSON object only: {\"schema_version\":1,\"category_slug\":\"...\",\"confidence\":0..1}. " +
 		"Use category_slug as lowercase.\n\n" +
+		"Category definitions:\n" + categoryDefinitionsBlock(categories) + "\n\n" +
 		"Subject: " + clampText(m.Subject, maxSubjectChars) + "\n" +
 		"From: " + clampText(m.FromJSON, maxFromChars) + "\n" +
 		"Body: " + clampText(body, maxBodyChars)
@@ -190,4 +200,55 @@ func normalizeJSONContent(s string) string {
 		return strings.TrimSpace(trimmed[start : end+1])
 	}
 	return trimmed
+}
+
+func categorySlugList(categories []driven.CategoryDefinitionRow) []string {
+	out := make([]string, 0, len(categories))
+	for _, c := range categories {
+		out = append(out, c.Slug)
+	}
+	return out
+}
+
+func categoryDefinitionsBlock(categories []driven.CategoryDefinitionRow) string {
+	lines := make([]string, 0, len(categories))
+	for _, c := range categories {
+		def := strings.TrimSpace(c.Definition)
+		if def == "" {
+			def = "(no extra definition)"
+		}
+		lines = append(lines, "- "+c.Slug+": "+def)
+	}
+	return strings.Join(lines, "\n")
+}
+
+func hasCategorySlug(categories []driven.CategoryDefinitionRow, slug string) bool {
+	for _, c := range categories {
+		if c.Slug == slug {
+			return true
+		}
+	}
+	return false
+}
+
+func fallbackCategorySlug(categories []driven.CategoryDefinitionRow) string {
+	if len(categories) == 0 {
+		return ""
+	}
+	for _, c := range categories {
+		if c.Slug == "other" {
+			return "other"
+		}
+	}
+	sorted := append([]driven.CategoryDefinitionRow(nil), categories...)
+	slices.SortFunc(sorted, func(a, b driven.CategoryDefinitionRow) int {
+		if a.SortOrder != b.SortOrder {
+			if a.SortOrder < b.SortOrder {
+				return -1
+			}
+			return 1
+		}
+		return strings.Compare(a.Slug, b.Slug)
+	})
+	return sorted[0].Slug
 }

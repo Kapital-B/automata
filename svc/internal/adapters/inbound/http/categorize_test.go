@@ -155,3 +155,118 @@ func TestListCategories(t *testing.T) {
 		t.Fatalf("expected seeded categories, got %d", len(categories))
 	}
 }
+
+func TestCategoryCRUDEndpoints(t *testing.T) {
+	srv, _, _, _ := newCategorizeTestServer(t)
+
+	createReq, err := http.NewRequest(http.MethodPost, srv.URL+"/api/categories", bytes.NewBufferString(`{
+		"slug":"travel",
+		"display_name":"Travel",
+		"definition":"Flights, hotels, trips, and bookings",
+		"sort_order":75
+	}`))
+	if err != nil {
+		t.Fatal(err)
+	}
+	createRes, err := http.DefaultClient.Do(createReq)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer createRes.Body.Close()
+	if createRes.StatusCode != http.StatusCreated {
+		t.Fatalf("create status %d", createRes.StatusCode)
+	}
+	var created map[string]any
+	if err := json.NewDecoder(createRes.Body).Decode(&created); err != nil {
+		t.Fatal(err)
+	}
+	catID, _ := created["id"].(string)
+	if catID == "" {
+		t.Fatalf("missing id in create response: %+v", created)
+	}
+
+	updateReq, err := http.NewRequest(http.MethodPatch, srv.URL+"/api/categories/"+catID, bytes.NewBufferString(`{
+		"slug":"travel",
+		"display_name":"Travel & Trips",
+		"definition":"Booking confirmations and travel plans",
+		"sort_order":76
+	}`))
+	if err != nil {
+		t.Fatal(err)
+	}
+	updateRes, err := http.DefaultClient.Do(updateReq)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer updateRes.Body.Close()
+	if updateRes.StatusCode != http.StatusOK {
+		t.Fatalf("update status %d", updateRes.StatusCode)
+	}
+}
+
+func TestDeleteCategoryRequiresReplacementWhenInUse(t *testing.T) {
+	srv, _, _, accountID := newCategorizeTestServer(t)
+	// Categorize once so "important" is in active use.
+	req, err := http.NewRequest(http.MethodPost, srv.URL+"/api/accounts/"+accountID.String()+"/categorize", bytes.NewBufferString(`{"recategorize":true}`))
+	if err != nil {
+		t.Fatal(err)
+	}
+	res, err := http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	_ = res.Body.Close()
+	if res.StatusCode != http.StatusOK {
+		t.Fatalf("categorize status %d", res.StatusCode)
+	}
+
+	listRes, err := http.Get(srv.URL + "/api/categories")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer listRes.Body.Close()
+	var categories []map[string]any
+	if err := json.NewDecoder(listRes.Body).Decode(&categories); err != nil {
+		t.Fatal(err)
+	}
+	var importantID, otherID string
+	for _, c := range categories {
+		slug, _ := c["slug"].(string)
+		id, _ := c["id"].(string)
+		if slug == "important" {
+			importantID = id
+		}
+		if slug == "other" {
+			otherID = id
+		}
+	}
+	if importantID == "" || otherID == "" {
+		t.Fatalf("missing required seeded categories")
+	}
+
+	delReq, err := http.NewRequest(http.MethodDelete, srv.URL+"/api/categories/"+importantID, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	delRes, err := http.DefaultClient.Do(delReq)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer delRes.Body.Close()
+	if delRes.StatusCode != http.StatusBadRequest {
+		t.Fatalf("expected bad request when deleting in-use category, got %d", delRes.StatusCode)
+	}
+
+	delReq2, err := http.NewRequest(http.MethodDelete, srv.URL+"/api/categories/"+importantID+"?replacement_id="+otherID, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	delRes2, err := http.DefaultClient.Do(delReq2)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer delRes2.Body.Close()
+	if delRes2.StatusCode != http.StatusOK {
+		t.Fatalf("expected successful delete with replacement, got %d", delRes2.StatusCode)
+	}
+}

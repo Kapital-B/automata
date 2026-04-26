@@ -47,9 +47,13 @@ type MessageRow struct {
 
 type CategoryDefinitionRow struct {
 	ID          uuid.UUID
+	UserID      uuid.UUID
 	Slug        string
 	DisplayName string
+	Definition  string
 	SortOrder   int
+	CreatedAt   time.Time
+	UpdatedAt   time.Time
 }
 
 type MessageCategoryRow struct {
@@ -113,8 +117,14 @@ type MessageRepository interface {
 	ListMessages(ctx context.Context, userID uuid.UUID, filter MessageListFilter) ([]MessageRow, error)
 	GetMessage(ctx context.Context, userID uuid.UUID, id uuid.UUID) (*MessageRow, error)
 	UpsertMessageCategory(ctx context.Context, row MessageCategoryRow) error
-	ListCategoryDefinitions(ctx context.Context) ([]CategoryDefinitionRow, error)
-	GetCategoryDefinitionBySlug(ctx context.Context, slug string) (*CategoryDefinitionRow, error)
+	ListCategoryDefinitions(ctx context.Context, userID uuid.UUID) ([]CategoryDefinitionRow, error)
+	GetCategoryDefinitionBySlug(ctx context.Context, userID uuid.UUID, slug string) (*CategoryDefinitionRow, error)
+	GetCategoryDefinitionByID(ctx context.Context, userID uuid.UUID, id uuid.UUID) (*CategoryDefinitionRow, error)
+	CreateCategoryDefinition(ctx context.Context, row CategoryDefinitionRow) error
+	UpdateCategoryDefinition(ctx context.Context, row CategoryDefinitionRow) error
+	DeleteCategoryDefinition(ctx context.Context, userID uuid.UUID, id uuid.UUID) error
+	ReassignMessageCategories(ctx context.Context, userID uuid.UUID, fromCategoryID, toCategoryID uuid.UUID) (int, error)
+	CountMessageCategoriesByCategory(ctx context.Context, userID uuid.UUID, categoryID uuid.UUID) (int, error)
 }
 
 // OAuthStateRepository stores one-time OAuth state values (mail connect + auth flows).

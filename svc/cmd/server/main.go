@@ -150,7 +150,7 @@ func main() {
 	if len(cfg.CORSOrigins) > 0 {
 		r = cors.New(cors.Options{
 			AllowedOrigins:   cfg.CORSOrigins,
-			AllowedMethods:   []string{"GET", "POST", "DELETE", "OPTIONS"},
+			AllowedMethods:   []string{"GET", "POST", "PATCH", "DELETE", "OPTIONS"},
 			AllowedHeaders:   []string{"Accept", "Content-Type", "X-Request-ID", "Authorization"},
 			AllowCredentials: false,
 		}).Handler(r)

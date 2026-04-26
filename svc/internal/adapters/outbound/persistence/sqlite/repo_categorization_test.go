@@ -39,14 +39,14 @@ func TestCategorizationTablesAndMessageFilters(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	cats, err := repo.ListCategoryDefinitions(ctx)
+	cats, err := repo.ListCategoryDefinitions(ctx, userID)
 	if err != nil {
 		t.Fatal(err)
 	}
 	if len(cats) < 6 {
 		t.Fatalf("expected seeded categories, got %d", len(cats))
 	}
-	important, err := repo.GetCategoryDefinitionBySlug(ctx, "important")
+	important, err := repo.GetCategoryDefinitionBySlug(ctx, userID, "important")
 	if err != nil || important == nil {
 		t.Fatalf("important category missing: %v", err)
 	}
@@ -94,6 +94,58 @@ func TestCategorizationTablesAndMessageFilters(t *testing.T) {
 	}
 	if rows[0].CategorySlug == nil || *rows[0].CategorySlug != "important" {
 		t.Fatalf("expected category important, got %v", rows[0].CategorySlug)
+	}
+}
+
+func TestMigrateCanRunRepeatedlyAfterUserScopedCategories(t *testing.T) {
+	db, err := sql.Open("sqlite", "file::memory:?cache=shared")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer db.Close()
+	if err := Migrate(db); err != nil {
+		t.Fatal(err)
+	}
+	if err := Migrate(db); err != nil {
+		t.Fatal(err)
+	}
+	repo := NewRepository(db, 15*time.Minute)
+	userID := uuid.MustParse("a0000001-0000-4000-8000-000000000001")
+	cats, err := repo.ListCategoryDefinitions(context.Background(), userID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(cats) < 6 {
+		t.Fatalf("expected seeded categories after repeated migration, got %d", len(cats))
+	}
+}
+
+func TestMigrateSeedsDefaultsWhenUserScopedCategoriesAreEmpty(t *testing.T) {
+	db, err := sql.Open("sqlite", "file::memory:?cache=shared")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer db.Close()
+	if err := Migrate(db); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := db.Exec(`DELETE FROM category_definitions`); err != nil {
+		t.Fatal(err)
+	}
+	if err := Migrate(db); err != nil {
+		t.Fatal(err)
+	}
+	repo := NewRepository(db, 15*time.Minute)
+	userID := uuid.MustParse("a0000001-0000-4000-8000-000000000001")
+	other, err := repo.GetCategoryDefinitionBySlug(context.Background(), userID, "other")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if other == nil {
+		t.Fatal("expected default other category to be reseeded")
+	}
+	if other.Definition == "" {
+		t.Fatal("expected reseeded category to include a definition")
 	}
 }
 

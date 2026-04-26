@@ -7,6 +7,7 @@ import (
 	"log/slog"
 	"net/http"
 	"net/url"
+	"regexp"
 	"strconv"
 	"strings"
 	"time"
@@ -22,30 +23,33 @@ import (
 
 // Handlers holds wired application services for HTTP.
 type Handlers struct {
-	Log         *slog.Logger
-	AccountSvc  *appaccounts.Service
-	SyncSvc     *appmessages.SyncService
-	CategorizeSvc *appmessages.CategorizeService
-	AuthSvc     *auth.Service
-	Accounts    driven.AccountRepository
-	Messages    driven.MessageRepository
-	JobRuns     driven.JobRunRepository
-	OAuthStates driven.OAuthStateRepository
-	Users       driven.UserRepository
-	Dashboard   string
-	SuccessPath string
-	ErrorPath   string
+	Log             *slog.Logger
+	AccountSvc      *appaccounts.Service
+	SyncSvc         *appmessages.SyncService
+	CategorizeSvc   *appmessages.CategorizeService
+	AuthSvc         *auth.Service
+	Accounts        driven.AccountRepository
+	Messages        driven.MessageRepository
+	JobRuns         driven.JobRunRepository
+	OAuthStates     driven.OAuthStateRepository
+	Users           driven.UserRepository
+	Dashboard       string
+	SuccessPath     string
+	ErrorPath       string
 	AuthSuccessPath string
 	AuthErrorPath   string
-	StateTTL    time.Duration
-	JWTSecret      []byte
-	JWTTTL         time.Duration
-	DefaultUserID  uuid.UUID // dev fallback when no Bearer token
+	StateTTL        time.Duration
+	JWTSecret       []byte
+	JWTTTL          time.Duration
+	DefaultUserID   uuid.UUID // dev fallback when no Bearer token
 }
 
 func (h *Handlers) Routes() http.Handler {
 	r := chi.NewRouter()
 	r.Use(requestIDMiddleware)
+	if h.Log != nil {
+		r.Use(requestLogMiddleware(h.Log))
+	}
 	r.Use(optionalAuthMiddleware(h.JWTSecret, h.DefaultUserID))
 	r.Get("/api/health", h.health)
 
@@ -66,6 +70,9 @@ func (h *Handlers) Routes() http.Handler {
 	r.Post("/api/accounts/{id}/sync", h.syncAccount)
 	r.Post("/api/accounts/{id}/categorize", h.categorizeAccount)
 	r.Get("/api/categories", h.listCategories)
+	r.Post("/api/categories", h.createCategory)
+	r.Patch("/api/categories/{id}", h.updateCategory)
+	r.Delete("/api/categories/{id}", h.deleteCategory)
 	r.Get("/api/runs", h.listRuns)
 	r.Get("/api/runs/{id}", h.getRun)
 	r.Get("/api/messages", h.listMessages)
@@ -86,14 +93,14 @@ func (h *Handlers) listAccounts(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	type item struct {
-		ID                 string  `json:"id"`
-		Label              string  `json:"label"`
-		Provider           string  `json:"provider"`
-		MsAccountKind      string  `json:"ms_account_kind"`
-		PrimaryEmail       string  `json:"primary_email"`
-		ConnectionStatus   string  `json:"connection_status"`
-		LastError          *string `json:"last_error,omitempty"`
-		LastSyncedAt       *string `json:"last_synced_at,omitempty"`
+		ID               string  `json:"id"`
+		Label            string  `json:"label"`
+		Provider         string  `json:"provider"`
+		MsAccountKind    string  `json:"ms_account_kind"`
+		PrimaryEmail     string  `json:"primary_email"`
+		ConnectionStatus string  `json:"connection_status"`
+		LastError        *string `json:"last_error,omitempty"`
+		LastSyncedAt     *string `json:"last_synced_at,omitempty"`
 	}
 	out := make([]item, 0, len(rows))
 	for _, a := range rows {
@@ -214,15 +221,15 @@ func (h *Handlers) getAccount(w http.ResponseWriter, r *http.Request) {
 		lastSync = &s
 	}
 	writeJSON(w, http.StatusOK, map[string]any{
-		"id":                 row.ID.String(),
-		"label":              row.Label,
-		"provider":           row.Provider,
-		"ms_account_kind":    string(row.MsAccountKind),
-		"primary_email":      row.PrimaryEmail,
-		"connection_status":  row.ConnectionStatus,
-		"last_error":         row.LastError,
-		"last_synced_at":     lastSync,
-		"graph_tenant_id":    row.GraphTenantID,
+		"id":                row.ID.String(),
+		"label":             row.Label,
+		"provider":          row.Provider,
+		"ms_account_kind":   string(row.MsAccountKind),
+		"primary_email":     row.PrimaryEmail,
+		"connection_status": row.ConnectionStatus,
+		"last_error":        row.LastError,
+		"last_synced_at":    lastSync,
+		"graph_tenant_id":   row.GraphTenantID,
 	})
 }
 
@@ -253,9 +260,9 @@ func (h *Handlers) syncAccount(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	writeJSON(w, http.StatusOK, map[string]any{
-		"job_run_id":          res.JobRunID.String(),
-		"messages_upserted":   res.MessagesUpserted,
-		"status":              "success",
+		"job_run_id":        res.JobRunID.String(),
+		"messages_upserted": res.MessagesUpserted,
+		"status":            "success",
 	})
 }
 
@@ -419,28 +426,190 @@ func (h *Handlers) getMessage(w http.ResponseWriter, r *http.Request) {
 }
 
 func (h *Handlers) listCategories(w http.ResponseWriter, r *http.Request) {
-	rows, err := h.Messages.ListCategoryDefinitions(r.Context())
+	rows, err := h.Messages.ListCategoryDefinitions(r.Context(), userIDOrEmpty(r))
 	if err != nil {
 		h.Log.Error("list categories", "err", err)
 		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "internal"})
 		return
 	}
-	type item struct {
-		ID          string `json:"id"`
-		Slug        string `json:"slug"`
-		DisplayName string `json:"display_name"`
-		SortOrder   int    `json:"sort_order"`
-	}
-	out := make([]item, 0, len(rows))
+	out := make([]categoryItem, 0, len(rows))
 	for _, row := range rows {
-		out = append(out, item{
-			ID:          row.ID.String(),
-			Slug:        row.Slug,
-			DisplayName: row.DisplayName,
-			SortOrder:   row.SortOrder,
-		})
+		out = append(out, toCategoryItem(row))
 	}
 	writeJSON(w, http.StatusOK, out)
+}
+
+type categoryItem struct {
+	ID          string `json:"id"`
+	Slug        string `json:"slug"`
+	DisplayName string `json:"display_name"`
+	Definition  string `json:"definition"`
+	SortOrder   int    `json:"sort_order"`
+}
+
+func toCategoryItem(row driven.CategoryDefinitionRow) categoryItem {
+	return categoryItem{
+		ID:          row.ID.String(),
+		Slug:        row.Slug,
+		DisplayName: row.DisplayName,
+		Definition:  row.Definition,
+		SortOrder:   row.SortOrder,
+	}
+}
+
+type categoryUpsertBody struct {
+	Slug        string `json:"slug"`
+	DisplayName string `json:"display_name"`
+	Definition  string `json:"definition"`
+	SortOrder   int    `json:"sort_order"`
+}
+
+var slugPattern = regexp.MustCompile(`^[a-z0-9][a-z0-9_-]{1,62}[a-z0-9]$|^[a-z0-9]$`)
+
+func normalizeCategoryInput(body categoryUpsertBody) (categoryUpsertBody, error) {
+	body.Slug = strings.ToLower(strings.TrimSpace(body.Slug))
+	body.DisplayName = strings.TrimSpace(body.DisplayName)
+	body.Definition = strings.TrimSpace(body.Definition)
+	if !slugPattern.MatchString(body.Slug) {
+		return body, errors.New("slug must be 1-64 chars: lowercase letters, digits, '_' or '-'")
+	}
+	if body.DisplayName == "" {
+		return body, errors.New("display_name is required")
+	}
+	if len(body.Definition) > 280 {
+		return body, errors.New("definition is too long (max 280 chars)")
+	}
+	return body, nil
+}
+
+func (h *Handlers) createCategory(w http.ResponseWriter, r *http.Request) {
+	var body categoryUpsertBody
+	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid json"})
+		return
+	}
+	body, err := normalizeCategoryInput(body)
+	if err != nil {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": err.Error()})
+		return
+	}
+	uid := userIDOrEmpty(r)
+	now := time.Now().UTC()
+	row := driven.CategoryDefinitionRow{
+		ID:          uuid.New(),
+		UserID:      uid,
+		Slug:        body.Slug,
+		DisplayName: body.DisplayName,
+		Definition:  body.Definition,
+		SortOrder:   body.SortOrder,
+		CreatedAt:   now,
+		UpdatedAt:   now,
+	}
+	if err := h.Messages.CreateCategoryDefinition(r.Context(), row); err != nil {
+		h.Log.Error("create category", "err", err)
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "create failed"})
+		return
+	}
+	writeJSON(w, http.StatusCreated, toCategoryItem(row))
+}
+
+func (h *Handlers) updateCategory(w http.ResponseWriter, r *http.Request) {
+	id, err := uuid.Parse(chi.URLParam(r, "id"))
+	if err != nil {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "bad id"})
+		return
+	}
+	var body categoryUpsertBody
+	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid json"})
+		return
+	}
+	body, err = normalizeCategoryInput(body)
+	if err != nil {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": err.Error()})
+		return
+	}
+	uid := userIDOrEmpty(r)
+	cur, err := h.Messages.GetCategoryDefinitionByID(r.Context(), uid, id)
+	if err != nil {
+		h.Log.Error("get category for update", "err", err)
+		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "internal"})
+		return
+	}
+	if cur == nil {
+		writeJSON(w, http.StatusNotFound, map[string]string{"error": "not found"})
+		return
+	}
+	cur.Slug = body.Slug
+	cur.DisplayName = body.DisplayName
+	cur.Definition = body.Definition
+	cur.SortOrder = body.SortOrder
+	cur.UpdatedAt = time.Now().UTC()
+	if err := h.Messages.UpdateCategoryDefinition(r.Context(), *cur); err != nil {
+		h.Log.Error("update category", "err", err)
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "update failed"})
+		return
+	}
+	writeJSON(w, http.StatusOK, toCategoryItem(*cur))
+}
+
+func (h *Handlers) deleteCategory(w http.ResponseWriter, r *http.Request) {
+	id, err := uuid.Parse(chi.URLParam(r, "id"))
+	if err != nil {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "bad id"})
+		return
+	}
+	uid := userIDOrEmpty(r)
+	cur, err := h.Messages.GetCategoryDefinitionByID(r.Context(), uid, id)
+	if err != nil {
+		h.Log.Error("get category for delete", "err", err)
+		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "internal"})
+		return
+	}
+	if cur == nil {
+		writeJSON(w, http.StatusNotFound, map[string]string{"error": "not found"})
+		return
+	}
+	replRaw := strings.TrimSpace(r.URL.Query().Get("replacement_id"))
+	if replRaw == "" {
+		n, err := h.Messages.CountMessageCategoriesByCategory(r.Context(), uid, id)
+		if err != nil {
+			h.Log.Error("count category usage", "err", err)
+			writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "internal"})
+			return
+		}
+		if n > 0 {
+			writeJSON(w, http.StatusBadRequest, map[string]string{"error": "category is in use; pass replacement_id"})
+			return
+		}
+	} else {
+		replID, err := uuid.Parse(replRaw)
+		if err != nil || replID == id {
+			writeJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid replacement_id"})
+			return
+		}
+		repl, err := h.Messages.GetCategoryDefinitionByID(r.Context(), uid, replID)
+		if err != nil {
+			h.Log.Error("get replacement category", "err", err)
+			writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "internal"})
+			return
+		}
+		if repl == nil {
+			writeJSON(w, http.StatusBadRequest, map[string]string{"error": "replacement category not found"})
+			return
+		}
+		if _, err := h.Messages.ReassignMessageCategories(r.Context(), uid, id, replID); err != nil {
+			h.Log.Error("reassign categories", "err", err)
+			writeJSON(w, http.StatusBadRequest, map[string]string{"error": "reassign failed"})
+			return
+		}
+	}
+	if err := h.Messages.DeleteCategoryDefinition(r.Context(), uid, id); err != nil {
+		h.Log.Error("delete category", "err", err)
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "delete failed"})
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"status": "success"})
 }
 
 func (h *Handlers) categorizeAccount(w http.ResponseWriter, r *http.Request) {
@@ -471,10 +640,10 @@ func (h *Handlers) categorizeAccount(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	writeJSON(w, http.StatusOK, map[string]any{
-		"job_run_id":            res.JobRunID.String(),
-		"messages_categorized":  res.MessagesCategorized,
-		"recategorize":          body.Recategorize,
-		"status":                "success",
+		"job_run_id":           res.JobRunID.String(),
+		"messages_categorized": res.MessagesCategorized,
+		"recategorize":         body.Recategorize,
+		"status":               "success",
 	})
 }
 

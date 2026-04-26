@@ -339,17 +339,22 @@ func (r *Repository) UpsertMessageCategory(ctx context.Context, row driven.Messa
 	return err
 }
 
-func (r *Repository) ListCategoryDefinitions(ctx context.Context) ([]driven.CategoryDefinitionRow, error) {
-	rows, err := r.db.QueryContext(ctx, `SELECT id, slug, display_name, sort_order FROM category_definitions ORDER BY sort_order ASC, slug ASC`)
+func (r *Repository) ListCategoryDefinitions(ctx context.Context, userID uuid.UUID) ([]driven.CategoryDefinitionRow, error) {
+	rows, err := r.db.QueryContext(ctx, `
+		SELECT id, user_id, slug, display_name, definition, sort_order, created_at, updated_at
+		FROM category_definitions
+		WHERE user_id = ?
+		ORDER BY sort_order ASC, slug ASC
+	`, userID.String())
 	if err != nil {
 		return nil, err
 	}
 	defer rows.Close()
 	out := make([]driven.CategoryDefinitionRow, 0)
 	for rows.Next() {
-		var idStr string
+		var idStr, userIDStr, createdAt, updatedAt string
 		var row driven.CategoryDefinitionRow
-		if err := rows.Scan(&idStr, &row.Slug, &row.DisplayName, &row.SortOrder); err != nil {
+		if err := rows.Scan(&idStr, &userIDStr, &row.Slug, &row.DisplayName, &row.Definition, &row.SortOrder, &createdAt, &updatedAt); err != nil {
 			return nil, err
 		}
 		uid, err := uuid.Parse(idStr)
@@ -357,16 +362,37 @@ func (r *Repository) ListCategoryDefinitions(ctx context.Context) ([]driven.Cate
 			return nil, err
 		}
 		row.ID = uid
+		userUID, err := uuid.Parse(userIDStr)
+		if err != nil {
+			return nil, err
+		}
+		row.UserID = userUID
+		row.CreatedAt, err = parseTime(createdAt)
+		if err != nil {
+			return nil, err
+		}
+		row.UpdatedAt, err = parseTime(updatedAt)
+		if err != nil {
+			return nil, err
+		}
 		out = append(out, row)
 	}
 	return out, rows.Err()
 }
 
-func (r *Repository) GetCategoryDefinitionBySlug(ctx context.Context, slug string) (*driven.CategoryDefinitionRow, error) {
+func (r *Repository) GetCategoryDefinitionBySlug(ctx context.Context, userID uuid.UUID, slug string) (*driven.CategoryDefinitionRow, error) {
+	return r.getCategoryDefinition(ctx, `SELECT id, user_id, slug, display_name, definition, sort_order, created_at, updated_at FROM category_definitions WHERE user_id = ? AND slug = ?`, userID.String(), slug)
+}
+
+func (r *Repository) GetCategoryDefinitionByID(ctx context.Context, userID uuid.UUID, id uuid.UUID) (*driven.CategoryDefinitionRow, error) {
+	return r.getCategoryDefinition(ctx, `SELECT id, user_id, slug, display_name, definition, sort_order, created_at, updated_at FROM category_definitions WHERE user_id = ? AND id = ?`, userID.String(), id.String())
+}
+
+func (r *Repository) getCategoryDefinition(ctx context.Context, query string, args ...any) (*driven.CategoryDefinitionRow, error) {
 	var row driven.CategoryDefinitionRow
-	var idStr string
-	err := r.db.QueryRowContext(ctx, `SELECT id, slug, display_name, sort_order FROM category_definitions WHERE slug = ?`, slug).Scan(
-		&idStr, &row.Slug, &row.DisplayName, &row.SortOrder,
+	var idStr, userIDStr, createdAt, updatedAt string
+	err := r.db.QueryRowContext(ctx, query, args...).Scan(
+		&idStr, &userIDStr, &row.Slug, &row.DisplayName, &row.Definition, &row.SortOrder, &createdAt, &updatedAt,
 	)
 	if errors.Is(err, sql.ErrNoRows) {
 		return nil, nil
@@ -379,7 +405,76 @@ func (r *Repository) GetCategoryDefinitionBySlug(ctx context.Context, slug strin
 		return nil, err
 	}
 	row.ID = uid
+	row.UserID, err = uuid.Parse(userIDStr)
+	if err != nil {
+		return nil, err
+	}
+	row.CreatedAt, err = parseTime(createdAt)
+	if err != nil {
+		return nil, err
+	}
+	row.UpdatedAt, err = parseTime(updatedAt)
+	if err != nil {
+		return nil, err
+	}
 	return &row, nil
+}
+
+func (r *Repository) CreateCategoryDefinition(ctx context.Context, row driven.CategoryDefinitionRow) error {
+	_, err := r.db.ExecContext(ctx, `
+		INSERT INTO category_definitions (id, user_id, slug, display_name, definition, sort_order, created_at, updated_at)
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+	`,
+		row.ID.String(), row.UserID.String(), row.Slug, row.DisplayName, row.Definition, row.SortOrder,
+		formatRFC3339(row.CreatedAt.UTC()), formatRFC3339(row.UpdatedAt.UTC()),
+	)
+	return err
+}
+
+func (r *Repository) UpdateCategoryDefinition(ctx context.Context, row driven.CategoryDefinitionRow) error {
+	_, err := r.db.ExecContext(ctx, `
+		UPDATE category_definitions
+		SET slug = ?, display_name = ?, definition = ?, sort_order = ?, updated_at = ?
+		WHERE id = ? AND user_id = ?
+	`,
+		row.Slug, row.DisplayName, row.Definition, row.SortOrder, formatRFC3339(row.UpdatedAt.UTC()), row.ID.String(), row.UserID.String(),
+	)
+	return err
+}
+
+func (r *Repository) ReassignMessageCategories(ctx context.Context, userID uuid.UUID, fromCategoryID, toCategoryID uuid.UUID) (int, error) {
+	res, err := r.db.ExecContext(ctx, `
+		UPDATE message_categories
+		SET category_id = ?, updated_at = ?
+		WHERE category_id = ?
+		  AND account_id IN (SELECT id FROM accounts WHERE user_id = ?)
+	`,
+		toCategoryID.String(), formatRFC3339(time.Now().UTC()), fromCategoryID.String(), userID.String(),
+	)
+	if err != nil {
+		return 0, err
+	}
+	n, err := res.RowsAffected()
+	if err != nil {
+		return 0, err
+	}
+	return int(n), nil
+}
+
+func (r *Repository) CountMessageCategoriesByCategory(ctx context.Context, userID uuid.UUID, categoryID uuid.UUID) (int, error) {
+	var n int
+	err := r.db.QueryRowContext(ctx, `
+		SELECT COUNT(1)
+		FROM message_categories mc
+		INNER JOIN accounts a ON a.id = mc.account_id
+		WHERE mc.category_id = ? AND a.user_id = ?
+	`, categoryID.String(), userID.String()).Scan(&n)
+	return n, err
+}
+
+func (r *Repository) DeleteCategoryDefinition(ctx context.Context, userID uuid.UUID, id uuid.UUID) error {
+	_, err := r.db.ExecContext(ctx, `DELETE FROM category_definitions WHERE id = ? AND user_id = ?`, id.String(), userID.String())
+	return err
 }
 
 func scanMessageRows(rows *sql.Rows) ([]driven.MessageRow, error) {
