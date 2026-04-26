@@ -2,7 +2,8 @@
 
 **Status:** Draft  
 **Companion PRD:** [docs/prds/initial.md](../prds/initial.md)  
-**Last updated:** 2026-04-24 (monorepo `svc/`/`web/`, Go backend, Phase 1 API-only)
+**Related addenda:** [Redis, Asynq, and the job runner](addendum-redis-asynq-jobs.md)  
+**Last updated:** 2026-04-25 (monorepo `svc/`/`web/`, Go backend, Phase 1 API-only)
 
 This document specifies architecture, data model, integrations, APIs, and operational behavior. The **PRD** remains the source of product intent; this document is the source of **implementation invariants** (especially **multi-account provenance**).
 
@@ -454,7 +455,7 @@ The **`svc/`** process exposes the routes below (for example via **chi**, **Echo
 
 ## 7. Scheduler and job runner
 
-- **In-process** scheduling in Go (for example `robfig/cron` or a simple **goroutine + ticker** for v1), **or** a **separate worker binary** under `svc/cmd/worker` with **Redis** / queue if isolation is required. Minimum behavior:
+- **In-process** scheduling in Go (for example `robfig/cron` or a simple **goroutine + ticker** for v1), **or** a **separate worker binary** under `svc/cmd/worker` with **Redis** / queue if isolation is required. For **Redis + [Asynq](https://github.com/hibiken/asynq)** (queues, concurrency, observability, real-time push pattern), see the **[addendum: Redis, Asynq, and the job runner](addendum-redis-asynq-jobs.md)**. Minimum behavior:
   - **Nightly (per account):** `sync` → `categorize` (if separate) → `summarize` → `forward_rules` (if enabled).
   - **Concurrency:** at most one **sync** per `account_id` at a time; **LLM** calls batched with concurrency limits to avoid OOM on LM Studio host.
 - **On-demand** endpoints enqueue the same `job_type` with `trigger=api`.
@@ -660,7 +661,7 @@ flowchart TB
 ## 13. Future extensions (non-blocking)
 
 - **Per-account** LLM and prompt profile in `accounts.llm_config_json`.
-- **Observability:** OpenTelemetry traces with `account_id` on spans (low cardinality).
+- **Observability:** OpenTelemetry traces with `account_id` on spans (low cardinality). When using the **Asynq** job runner, apply the same tracing and structured-log fields for **`run_id`** and **`job_type`** as described in **[addendum: Redis, Asynq, and the job runner](addendum-redis-asynq-jobs.md#8-logging-and-tracing)**.
 - Generic **IMAP** / other providers as further connectors (lower priority unless required).
 
 ### 13.1 Planned phase: Google Workspace (work mail)
