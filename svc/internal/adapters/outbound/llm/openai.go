@@ -51,7 +51,7 @@ func (c *OpenAIClient) ChatCompletion(ctx context.Context, messages []driven.LLM
 	}
 	client := c.HTTPClient
 	if client == nil {
-		client = &http.Client{Timeout: 20 * time.Second}
+		client = &http.Client{Timeout: 2 * time.Minute}
 	}
 	res, err := client.Do(req)
 	if err != nil {

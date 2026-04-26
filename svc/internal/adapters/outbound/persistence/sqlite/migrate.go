@@ -81,6 +81,9 @@ func migrateUserCategoryDefinitions(db *sql.DB) error {
 		if err := ensureDefaultCategories(tx); err != nil {
 			return err
 		}
+		if err := deleteOrphanedMessageCategories(tx); err != nil {
+			return err
+		}
 		if err := ensureUserCategoryIndexes(tx); err != nil {
 			return err
 		}
@@ -199,6 +202,9 @@ func migrateUserCategoryDefinitions(db *sql.DB) error {
 	if err := ensureUserCategoryIndexes(tx); err != nil {
 		return err
 	}
+	if err := deleteOrphanedMessageCategories(tx); err != nil {
+		return err
+	}
 	return tx.Commit()
 }
 
@@ -262,6 +268,14 @@ func ensureDefaultCategories(tx *sql.Tx) error {
 			UNION ALL SELECT 'spam', 'Spam', 'Unwanted, suspicious, deceptive, or low-value promotional email.', 50
 			UNION ALL SELECT 'other', 'Other', 'Anything that does not clearly fit another category.', 60
 		) defaults
+	`)
+	return err
+}
+
+func deleteOrphanedMessageCategories(tx *sql.Tx) error {
+	_, err := tx.Exec(`
+		DELETE FROM message_categories
+		WHERE category_id NOT IN (SELECT id FROM category_definitions)
 	`)
 	return err
 }

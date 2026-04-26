@@ -287,7 +287,7 @@ export default function InboxPage({ accountFilter }: Props) {
                 <p className="truncate text-sm text-foreground/85">{m.subject}</p>
                 <p className="mt-0.5 truncate text-xs text-muted-foreground">{m.preview}</p>
                 <div className="mt-2 flex items-center gap-2">
-                  <CategoryPill category={m.category_slug ?? "other"} />
+                  <CategoryPill category={m.category_slug ?? "uncategorized"} />
                   {m.has_attachments && (
                     <Paperclip className="h-3 w-3 text-muted-foreground" />
                   )}
@@ -313,7 +313,7 @@ export default function InboxPage({ accountFilter }: Props) {
                 <h2 className="font-display text-2xl font-medium leading-snug">
                   {selected.subject}
                 </h2>
-                <CategoryPill category={selected.category_slug ?? "other"} />
+                <CategoryPill category={selected.category_slug ?? "uncategorized"} />
               </div>
               <p className="mt-2 text-sm text-muted-foreground">
                 <span className="font-medium text-foreground/80">

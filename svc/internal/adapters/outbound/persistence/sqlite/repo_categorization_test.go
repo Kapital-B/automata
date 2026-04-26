@@ -149,4 +149,63 @@ func TestMigrateSeedsDefaultsWhenUserScopedCategoriesAreEmpty(t *testing.T) {
 	}
 }
 
+func TestMigrateDeletesOrphanedMessageCategories(t *testing.T) {
+	db, err := sql.Open("sqlite", "file::memory:?cache=shared")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer db.Close()
+	if err := Migrate(db); err != nil {
+		t.Fatal(err)
+	}
+	repo := NewRepository(db, 15*time.Minute)
+	ctx := context.Background()
+	userID := uuid.MustParse("a0000001-0000-4000-8000-000000000001")
+	accountID := uuid.New()
+	if err := repo.InsertAccount(ctx, driven.AccountRow{
+		UserID:           userID,
+		ID:               accountID,
+		Label:            "Work",
+		Provider:         "m365",
+		MsAccountKind:    domainacc.KindWork,
+		PrimaryEmail:     "work@example.com",
+		ConnectionStatus: "connected",
+	}, []byte("cipher")); err != nil {
+		t.Fatal(err)
+	}
+	msg := driven.MessageRow{
+		ID:                uuid.New(),
+		AccountID:         accountID,
+		ProviderMessageID: "provider-orphan",
+		ReceivedAt:        time.Now().UTC(),
+		Subject:           "Receipt",
+		FromJSON:          `{"name":"Store","address":"store@example.com"}`,
+		CreatedAt:         time.Now().UTC(),
+		UpdatedAt:         time.Now().UTC(),
+	}
+	if err := repo.UpsertMessage(ctx, msg); err != nil {
+		t.Fatal(err)
+	}
+	runID := uuid.New()
+	if err := repo.InsertJobRun(ctx, runID, accountID, "categorize", "api", "success", time.Now().UTC(), time.Now().UTC(), nil, `{}`); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := db.Exec(`
+		INSERT INTO message_categories (id, message_id, account_id, category_id, source, run_id, created_at, updated_at)
+		VALUES (?, ?, ?, ?, 'llm', ?, ?, ?)
+	`, uuid.New().String(), msg.ID.String(), accountID.String(), uuid.New().String(), runID.String(), formatRFC3339(time.Now().UTC()), formatRFC3339(time.Now().UTC())); err != nil {
+		t.Fatal(err)
+	}
+	if err := Migrate(db); err != nil {
+		t.Fatal(err)
+	}
+	var n int
+	if err := db.QueryRow(`SELECT COUNT(*) FROM message_categories`).Scan(&n); err != nil {
+		t.Fatal(err)
+	}
+	if n != 0 {
+		t.Fatalf("expected orphaned message category to be deleted, got %d", n)
+	}
+}
+
 func strPtr(s string) *string { return &s }
