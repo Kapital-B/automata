@@ -11,35 +11,36 @@ import (
 
 // Config holds environment-backed settings (spec §9).
 type Config struct {
-	ListenAddr         string
-	DatabaseURL        string
-	CORSOrigins        []string
-	DashboardBaseURL   string
-	OAuthSuccessPath   string
-	OAuthErrorPath     string
-	MSClientID         string
-	MSClientSecret     string
-	MSRedirectURI      string
-	EncryptionKey      []byte
-	OAuthStateTTL      time.Duration
-	JWTSecret          []byte
-	JWTTTL             time.Duration
-	RefreshTTL         time.Duration
-	MSAuthRedirectURI  string
-	GoogleClientID     string
-	GoogleClientSecret string
-	GoogleRedirectURI  string
-	AuthSuccessPath    string
-	AuthErrorPath      string
-	DefaultUserID      uuid.UUID
-	LLMBaseURL         string
-	LLMModel           string
-	LLMAPIKey          string
-	RedisAddr          string
-	AsynqPrefix        string
+	ListenAddr                 string
+	DatabaseURL                string
+	CORSOrigins                []string
+	DashboardBaseURL           string
+	OAuthSuccessPath           string
+	OAuthErrorPath             string
+	MSClientID                 string
+	MSClientSecret             string
+	MSRedirectURI              string
+	EncryptionKey              []byte
+	OAuthStateTTL              time.Duration
+	JWTSecret                  []byte
+	JWTTTL                     time.Duration
+	RefreshTTL                 time.Duration
+	MSAuthRedirectURI          string
+	GoogleClientID             string
+	GoogleClientSecret         string
+	GoogleRedirectURI          string
+	AuthSuccessPath            string
+	AuthErrorPath              string
+	DefaultUserID              uuid.UUID
+	LLMBaseURL                 string
+	LLMModel                   string
+	LLMAPIKey                  string
+	RedisAddr                  string
+	AsynqPrefix                string
 	QueueSyncConcurrency       int
 	QueueCategorizeConcurrency int
 	QueueSummarizeConcurrency  int
+	QueueDraftConcurrency      int
 	GlobalMaxConcurrentJobs    int
 }
 
@@ -124,6 +125,13 @@ func Load() (Config, error) {
 			queueSummarizeConcurrency = n
 		}
 	}
+	queueDraftConcurrency := 1
+	if v := os.Getenv("JOB_QUEUE_DRAFT_CONCURRENCY"); v != "" {
+		var n int
+		if _, err := fmt.Sscanf(v, "%d", &n); err == nil && n > 0 {
+			queueDraftConcurrency = n
+		}
+	}
 	globalMaxConcurrentJobs := 2
 	if v := os.Getenv("GLOBAL_MAX_CONCURRENT_JOBS"); v != "" {
 		var n int
@@ -140,35 +148,36 @@ func Load() (Config, error) {
 	publicAPI := strings.TrimRight(getenv("APP_PUBLIC_URL", "http://localhost:8080"), "/")
 
 	cfg := Config{
-		ListenAddr:       getenv("LISTEN_ADDR", ":8080"),
-		DatabaseURL:      getenv("DATABASE_URL", "file:./data.db?_foreign_keys=on"),
-		CORSOrigins:      splitComma(os.Getenv("CORS_ORIGINS")),
-		DashboardBaseURL: strings.TrimRight(getenv("DASHBOARD_BASE_URL", "http://localhost:5173"), "/"),
-		OAuthSuccessPath: getenv("OAUTH_SUCCESS_PATH", "/accounts/connected"),
-		OAuthErrorPath:   getenv("OAUTH_ERROR_PATH", "/accounts/error"),
-		MSClientID:       os.Getenv("MS_CLIENT_ID"),
-		MSClientSecret:   os.Getenv("MS_CLIENT_SECRET"),
-		MSRedirectURI:    os.Getenv("MS_REDIRECT_URI"),
-		EncryptionKey:    key,
-		OAuthStateTTL:    ttl,
-		JWTSecret:        jwtSecret,
-		JWTTTL:           jwtTTL,
-		RefreshTTL:       refreshTTL,
-		MSAuthRedirectURI: getenv("MS_AUTH_REDIRECT_URI", publicAPI+"/api/auth/microsoft/callback"),
-		GoogleClientID:    os.Getenv("GOOGLE_CLIENT_ID"),
-		GoogleClientSecret: os.Getenv("GOOGLE_CLIENT_SECRET"),
-		GoogleRedirectURI: getenv("GOOGLE_REDIRECT_URI", publicAPI+"/api/auth/google/callback"),
-		AuthSuccessPath:   getenv("AUTH_SUCCESS_PATH", "/auth/callback"),
-		AuthErrorPath:     getenv("AUTH_ERROR_PATH", "/auth/error"),
-		DefaultUserID:     defaultUID,
-		LLMBaseURL:        os.Getenv("LLM_BASE_URL"),
-		LLMModel:          os.Getenv("LLM_MODEL"),
-		LLMAPIKey:         os.Getenv("LLM_API_KEY"),
-		RedisAddr:         getenv("REDIS_ADDR", "localhost:6379"),
-		AsynqPrefix:       getenv("ASYNQ_PREFIX", "automata"),
+		ListenAddr:                 getenv("LISTEN_ADDR", ":8080"),
+		DatabaseURL:                getenv("DATABASE_URL", "file:./data.db?_foreign_keys=on"),
+		CORSOrigins:                splitComma(os.Getenv("CORS_ORIGINS")),
+		DashboardBaseURL:           strings.TrimRight(getenv("DASHBOARD_BASE_URL", "http://localhost:5173"), "/"),
+		OAuthSuccessPath:           getenv("OAUTH_SUCCESS_PATH", "/accounts/connected"),
+		OAuthErrorPath:             getenv("OAUTH_ERROR_PATH", "/accounts/error"),
+		MSClientID:                 os.Getenv("MS_CLIENT_ID"),
+		MSClientSecret:             os.Getenv("MS_CLIENT_SECRET"),
+		MSRedirectURI:              os.Getenv("MS_REDIRECT_URI"),
+		EncryptionKey:              key,
+		OAuthStateTTL:              ttl,
+		JWTSecret:                  jwtSecret,
+		JWTTTL:                     jwtTTL,
+		RefreshTTL:                 refreshTTL,
+		MSAuthRedirectURI:          getenv("MS_AUTH_REDIRECT_URI", publicAPI+"/api/auth/microsoft/callback"),
+		GoogleClientID:             os.Getenv("GOOGLE_CLIENT_ID"),
+		GoogleClientSecret:         os.Getenv("GOOGLE_CLIENT_SECRET"),
+		GoogleRedirectURI:          getenv("GOOGLE_REDIRECT_URI", publicAPI+"/api/auth/google/callback"),
+		AuthSuccessPath:            getenv("AUTH_SUCCESS_PATH", "/auth/callback"),
+		AuthErrorPath:              getenv("AUTH_ERROR_PATH", "/auth/error"),
+		DefaultUserID:              defaultUID,
+		LLMBaseURL:                 os.Getenv("LLM_BASE_URL"),
+		LLMModel:                   os.Getenv("LLM_MODEL"),
+		LLMAPIKey:                  os.Getenv("LLM_API_KEY"),
+		RedisAddr:                  getenv("REDIS_ADDR", "localhost:6379"),
+		AsynqPrefix:                getenv("ASYNQ_PREFIX", "automata"),
 		QueueSyncConcurrency:       queueSyncConcurrency,
 		QueueCategorizeConcurrency: queueCategorizeConcurrency,
 		QueueSummarizeConcurrency:  queueSummarizeConcurrency,
+		QueueDraftConcurrency:      queueDraftConcurrency,
 		GlobalMaxConcurrentJobs:    globalMaxConcurrentJobs,
 	}
 	if cfg.MSClientID == "" || cfg.MSClientSecret == "" || cfg.MSRedirectURI == "" {

@@ -48,7 +48,8 @@ func Migrate(db *sql.DB) error {
 func ignoreRepeatedMigrationError(err error) bool {
 	msg := strings.ToLower(err.Error())
 	return strings.Contains(msg, "duplicate column name: user_id") ||
-		strings.Contains(msg, "duplicate column name: chunk_size")
+		strings.Contains(msg, "duplicate column name: chunk_size") ||
+		strings.Contains(msg, "duplicate column name: auto_draft_seen_at")
 }
 
 func migrateUserCategoryDefinitions(db *sql.DB) error {

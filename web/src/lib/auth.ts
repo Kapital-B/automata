@@ -137,6 +137,20 @@ export type MessageItem = {
   category_confidence?: number;
 };
 
+export type DraftSuggestion = {
+  id: string;
+  account_id: string;
+  message_id: string;
+  action_item_id: string;
+  run_id: string;
+  subject: string;
+  body: string;
+  model: string;
+  to_name: string;
+  to_email: string;
+  created_at: string;
+};
+
 export type ListMessagesFilter = {
   accountId?: string;
   category?: string;
@@ -433,6 +447,13 @@ export async function listMessages(accessToken: string, filter: ListMessagesFilt
 
 export async function getMessage(accessToken: string, id: string) {
   return apiRequest<MessageItem>(`/api/messages/${id}`, {
+    headers: toAuthHeader(accessToken),
+  });
+}
+
+export async function listDraftSuggestions(accessToken: string, accountID?: string) {
+  const suffix = accountID ? `?account_id=${encodeURIComponent(accountID)}` : "";
+  return apiRequest<DraftSuggestion[]>(`/api/drafts${suffix}`, {
     headers: toAuthHeader(accessToken),
   });
 }

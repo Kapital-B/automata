@@ -120,17 +120,18 @@ type SummarySnapshotRow struct {
 }
 
 type ActionItemRow struct {
-	ID         uuid.UUID
-	UserID     uuid.UUID
-	AccountID  uuid.UUID
-	MessageID  uuid.UUID
-	RunID      uuid.UUID
-	Text       string
-	DueAt      *time.Time
-	Status     string
-	ActionedAt *time.Time
-	CreatedAt  time.Time
-	UpdatedAt  time.Time
+	ID              uuid.UUID
+	UserID          uuid.UUID
+	AccountID       uuid.UUID
+	MessageID       uuid.UUID
+	RunID           uuid.UUID
+	Text            string
+	DueAt           *time.Time
+	Status          string
+	ActionedAt      *time.Time
+	AutoDraftSeenAt *time.Time
+	CreatedAt       time.Time
+	UpdatedAt       time.Time
 }
 
 type FYIRow struct {
@@ -141,6 +142,20 @@ type FYIRow struct {
 	RunID     uuid.UUID
 	Text      string
 	CreatedAt time.Time
+}
+
+type DraftSuggestionRow struct {
+	ID           uuid.UUID
+	UserID       uuid.UUID
+	AccountID    uuid.UUID
+	MessageID    uuid.UUID
+	ActionItemID uuid.UUID
+	RunID        uuid.UUID
+	Subject      string
+	Body         string
+	Model        string
+	FromJSON     string
+	CreatedAt    time.Time
 }
 
 type ScheduleChainRow struct {
@@ -220,6 +235,10 @@ type SummaryRepository interface {
 	InsertFYI(ctx context.Context, rows []FYIRow) error
 	ListFYIByRun(ctx context.Context, userID uuid.UUID, runID uuid.UUID) ([]FYIRow, error)
 	DeleteFYI(ctx context.Context, userID uuid.UUID, id uuid.UUID) error
+	ListActionItemsForAutoDraft(ctx context.Context, userID uuid.UUID, accountID uuid.UUID, onlyUnseen bool, limit int) ([]ActionItemRow, error)
+	MarkActionItemsAutoDraftSeen(ctx context.Context, userID uuid.UUID, itemIDs []uuid.UUID, at time.Time) error
+	InsertDraftSuggestions(ctx context.Context, rows []DraftSuggestionRow) error
+	ListDraftSuggestions(ctx context.Context, userID uuid.UUID, accountID *uuid.UUID, limit int) ([]DraftSuggestionRow, error)
 }
 
 type ScheduleRepository interface {

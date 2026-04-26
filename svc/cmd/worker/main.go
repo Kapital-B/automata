@@ -57,6 +57,7 @@ func main() {
 	}
 	var categorizeSvc *appmessages.CategorizeService
 	var summarizeSvc *appmessages.SummarizeService
+	var autoDraftSvc *appmessages.AutoDraftService
 	if cfg.LLMBaseURL != "" && cfg.LLMModel != "" {
 		llm := &llmadapter.OpenAIClient{
 			BaseURL: cfg.LLMBaseURL,
@@ -74,6 +75,13 @@ func main() {
 			LLM:       llm,
 			JobRuns:   repo,
 		}
+		autoDraftSvc = &appmessages.AutoDraftService{
+			Messages:   repo,
+			Summaries:  repo,
+			LLM:        llm,
+			JobRuns:    repo,
+			ModelLabel: cfg.LLMModel,
+		}
 	}
 	srv := asynq.NewServer(
 		asynq.RedisClientOpt{Addr: cfg.RedisAddr},
@@ -83,6 +91,7 @@ func main() {
 				asynqadapter.QueueSync:       cfg.QueueSyncConcurrency,
 				asynqadapter.QueueCategorize: cfg.QueueCategorizeConcurrency,
 				asynqadapter.QueueSummarize:  cfg.QueueSummarizeConcurrency,
+				asynqadapter.QueueDraft:      cfg.QueueDraftConcurrency,
 			},
 		},
 	)
@@ -92,6 +101,7 @@ func main() {
 		SyncSvc:         syncSvc,
 		CategorizeSvc:   categorizeSvc,
 		SummarizeSvc:    summarizeSvc,
+		AutoDraftSvc:    autoDraftSvc,
 		JobRuns:         repo,
 		GlobalSemaphore: sem,
 		Queue:           queueClient,

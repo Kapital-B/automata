@@ -96,6 +96,7 @@ func main() {
 	}
 	var categorizeSvc *appmessages.CategorizeService
 	var summarizeSvc *appmessages.SummarizeService
+	var autoDraftSvc *appmessages.AutoDraftService
 	if cfg.LLMBaseURL != "" && cfg.LLMModel != "" {
 		llm := &llmadapter.OpenAIClient{
 			BaseURL: cfg.LLMBaseURL,
@@ -113,7 +114,15 @@ func main() {
 			LLM:       llm,
 			JobRuns:   repo,
 		}
+		autoDraftSvc = &appmessages.AutoDraftService{
+			Messages:   repo,
+			Summaries:  repo,
+			LLM:        llm,
+			JobRuns:    repo,
+			ModelLabel: cfg.LLMModel,
+		}
 	}
+	_ = autoDraftSvc
 
 	var googleClient *googleoauth.OAuth
 	if cfg.GoogleClientID != "" {

@@ -91,6 +91,7 @@ func (h *Handlers) Routes() http.Handler {
 	r.Patch("/api/settings/schedules", h.updateSchedules)
 	r.Get("/api/messages", h.listMessages)
 	r.Get("/api/messages/{id}", h.getMessage)
+	r.Get("/api/drafts", h.listDrafts)
 	return r
 }
 
@@ -470,6 +471,51 @@ func (h *Handlers) getMessage(w http.ResponseWriter, r *http.Request) {
 		"category_slug":       m.CategorySlug,
 		"category_confidence": m.CategoryConfidence,
 	})
+}
+
+func (h *Handlers) listDrafts(w http.ResponseWriter, r *http.Request) {
+	if h.Summaries == nil {
+		writeJSON(w, http.StatusServiceUnavailable, map[string]string{"error": "summaries not configured"})
+		return
+	}
+	uid := userIDOrEmpty(r)
+	var accountID *uuid.UUID
+	if aid := strings.TrimSpace(r.URL.Query().Get("account_id")); aid != "" {
+		id, err := uuid.Parse(aid)
+		if err != nil {
+			writeJSON(w, http.StatusBadRequest, map[string]string{"error": "bad account_id"})
+			return
+		}
+		accountID = &id
+	}
+	rows, err := h.Summaries.ListDraftSuggestions(r.Context(), uid, accountID, 200)
+	if err != nil {
+		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "internal"})
+		return
+	}
+	type fromPayload struct {
+		Name    string `json:"name"`
+		Address string `json:"address"`
+	}
+	out := make([]map[string]any, 0, len(rows))
+	for _, row := range rows {
+		var from fromPayload
+		_ = json.Unmarshal([]byte(row.FromJSON), &from)
+		out = append(out, map[string]any{
+			"id":             row.ID.String(),
+			"account_id":     row.AccountID.String(),
+			"message_id":     row.MessageID.String(),
+			"action_item_id": row.ActionItemID.String(),
+			"run_id":         row.RunID.String(),
+			"subject":        row.Subject,
+			"body":           row.Body,
+			"model":          row.Model,
+			"to_name":        from.Name,
+			"to_email":       from.Address,
+			"created_at":     row.CreatedAt.UTC().Format(time.RFC3339Nano),
+		})
+	}
+	writeJSON(w, http.StatusOK, out)
 }
 
 func (h *Handlers) listCategories(w http.ResponseWriter, r *http.Request) {

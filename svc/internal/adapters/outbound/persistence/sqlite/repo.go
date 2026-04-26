@@ -835,7 +835,7 @@ func (r *Repository) InsertActionItems(ctx context.Context, rows []driven.Action
 
 func (r *Repository) ListOpenActionItems(ctx context.Context, userID uuid.UUID, accountID *uuid.UUID) ([]driven.ActionItemRow, error) {
 	var b strings.Builder
-	b.WriteString(`SELECT id, user_id, account_id, message_id, run_id, text, due_at, status, actioned_at, created_at, updated_at FROM action_items WHERE user_id = ? AND status = 'open'`)
+	b.WriteString(`SELECT id, user_id, account_id, message_id, run_id, text, due_at, status, actioned_at, auto_draft_seen_at, created_at, updated_at FROM action_items WHERE user_id = ? AND status = 'open'`)
 	args := []any{userID.String()}
 	if accountID != nil {
 		b.WriteString(` AND account_id = ?`)
@@ -850,8 +850,8 @@ func (r *Repository) ListOpenActionItems(ctx context.Context, userID uuid.UUID, 
 	out := make([]driven.ActionItemRow, 0)
 	for rows.Next() {
 		var idStr, uidStr, accStr, msgStr, runStr, text, status, createdAt, updatedAt string
-		var dueAt, actioned sql.NullString
-		if err := rows.Scan(&idStr, &uidStr, &accStr, &msgStr, &runStr, &text, &dueAt, &status, &actioned, &createdAt, &updatedAt); err != nil {
+		var dueAt, actioned, autoDraftSeen sql.NullString
+		if err := rows.Scan(&idStr, &uidStr, &accStr, &msgStr, &runStr, &text, &dueAt, &status, &actioned, &autoDraftSeen, &createdAt, &updatedAt); err != nil {
 			return nil, err
 		}
 		id, _ := uuid.Parse(idStr)
@@ -869,6 +869,10 @@ func (r *Repository) ListOpenActionItems(ctx context.Context, userID uuid.UUID, 
 		if actioned.Valid {
 			t, _ := parseTime(actioned.String)
 			item.ActionedAt = &t
+		}
+		if autoDraftSeen.Valid {
+			t, _ := parseTime(autoDraftSeen.String)
+			item.AutoDraftSeenAt = &t
 		}
 		out = append(out, item)
 	}
@@ -933,6 +937,154 @@ func (r *Repository) DeleteFYI(ctx context.Context, userID uuid.UUID, id uuid.UU
 		WHERE id = ? AND user_id = ?
 	`, id.String(), userID.String())
 	return err
+}
+
+func (r *Repository) ListActionItemsForAutoDraft(ctx context.Context, userID uuid.UUID, accountID uuid.UUID, onlyUnseen bool, limit int) ([]driven.ActionItemRow, error) {
+	if limit <= 0 {
+		limit = 50
+	}
+	var b strings.Builder
+	b.WriteString(`SELECT id, user_id, account_id, message_id, run_id, text, due_at, status, actioned_at, auto_draft_seen_at, created_at, updated_at FROM action_items WHERE user_id = ? AND account_id = ? AND status = 'open'`)
+	args := []any{userID.String(), accountID.String()}
+	if onlyUnseen {
+		b.WriteString(` AND auto_draft_seen_at IS NULL`)
+	}
+	b.WriteString(` ORDER BY created_at ASC LIMIT ?`)
+	args = append(args, limit)
+	rows, err := r.db.QueryContext(ctx, b.String(), args...)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	out := make([]driven.ActionItemRow, 0)
+	for rows.Next() {
+		var idStr, uidStr, accStr, msgStr, runStr, text, status, createdAt, updatedAt string
+		var dueAt, actioned, autoDraftSeen sql.NullString
+		if err := rows.Scan(&idStr, &uidStr, &accStr, &msgStr, &runStr, &text, &dueAt, &status, &actioned, &autoDraftSeen, &createdAt, &updatedAt); err != nil {
+			return nil, err
+		}
+		id, _ := uuid.Parse(idStr)
+		uid, _ := uuid.Parse(uidStr)
+		acc, _ := uuid.Parse(accStr)
+		msg, _ := uuid.Parse(msgStr)
+		runID, _ := uuid.Parse(runStr)
+		cat, _ := parseTime(createdAt)
+		upd, _ := parseTime(updatedAt)
+		item := driven.ActionItemRow{ID: id, UserID: uid, AccountID: acc, MessageID: msg, RunID: runID, Text: text, Status: status, CreatedAt: cat, UpdatedAt: upd}
+		if dueAt.Valid {
+			t, _ := parseTime(dueAt.String)
+			item.DueAt = &t
+		}
+		if actioned.Valid {
+			t, _ := parseTime(actioned.String)
+			item.ActionedAt = &t
+		}
+		if autoDraftSeen.Valid {
+			t, _ := parseTime(autoDraftSeen.String)
+			item.AutoDraftSeenAt = &t
+		}
+		out = append(out, item)
+	}
+	return out, rows.Err()
+}
+
+func (r *Repository) MarkActionItemsAutoDraftSeen(ctx context.Context, userID uuid.UUID, itemIDs []uuid.UUID, at time.Time) error {
+	if len(itemIDs) == 0 {
+		return nil
+	}
+	tx, err := r.db.BeginTx(ctx, nil)
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback()
+	for _, id := range itemIDs {
+		_, err := tx.ExecContext(ctx, `
+			UPDATE action_items
+			SET auto_draft_seen_at = ?, updated_at = ?
+			WHERE id = ? AND user_id = ?
+		`, formatRFC3339(at.UTC()), formatRFC3339(at.UTC()), id.String(), userID.String())
+		if err != nil {
+			return err
+		}
+	}
+	return tx.Commit()
+}
+
+func (r *Repository) InsertDraftSuggestions(ctx context.Context, rows []driven.DraftSuggestionRow) error {
+	if len(rows) == 0 {
+		return nil
+	}
+	tx, err := r.db.BeginTx(ctx, nil)
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback()
+	for _, row := range rows {
+		_, err := tx.ExecContext(ctx, `
+			INSERT INTO draft_suggestions (id, user_id, account_id, message_id, action_item_id, run_id, subject, body, model, created_at)
+			VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+		`,
+			row.ID.String(), row.UserID.String(), row.AccountID.String(), row.MessageID.String(), row.ActionItemID.String(),
+			row.RunID.String(), row.Subject, row.Body, row.Model, formatRFC3339(row.CreatedAt.UTC()),
+		)
+		if err != nil {
+			return err
+		}
+	}
+	return tx.Commit()
+}
+
+func (r *Repository) ListDraftSuggestions(ctx context.Context, userID uuid.UUID, accountID *uuid.UUID, limit int) ([]driven.DraftSuggestionRow, error) {
+	if limit <= 0 {
+		limit = 100
+	}
+	var b strings.Builder
+	b.WriteString(`
+		SELECT ds.id, ds.user_id, ds.account_id, ds.message_id, ds.action_item_id, ds.run_id, ds.subject, ds.body, ds.model, m.from_json, ds.created_at
+		FROM draft_suggestions ds
+		INNER JOIN messages m ON m.id = ds.message_id
+		WHERE ds.user_id = ?
+	`)
+	args := []any{userID.String()}
+	if accountID != nil {
+		b.WriteString(` AND ds.account_id = ?`)
+		args = append(args, accountID.String())
+	}
+	b.WriteString(` ORDER BY ds.created_at DESC LIMIT ?`)
+	args = append(args, limit)
+	rows, err := r.db.QueryContext(ctx, b.String(), args...)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	out := make([]driven.DraftSuggestionRow, 0)
+	for rows.Next() {
+		var idStr, userStr, accStr, msgStr, actionStr, runStr, subject, body, model, fromJSON, createdAt string
+		if err := rows.Scan(&idStr, &userStr, &accStr, &msgStr, &actionStr, &runStr, &subject, &body, &model, &fromJSON, &createdAt); err != nil {
+			return nil, err
+		}
+		id, _ := uuid.Parse(idStr)
+		uid, _ := uuid.Parse(userStr)
+		acc, _ := uuid.Parse(accStr)
+		msg, _ := uuid.Parse(msgStr)
+		actionID, _ := uuid.Parse(actionStr)
+		runID, _ := uuid.Parse(runStr)
+		cat, _ := parseTime(createdAt)
+		out = append(out, driven.DraftSuggestionRow{
+			ID:           id,
+			UserID:       uid,
+			AccountID:    acc,
+			MessageID:    msg,
+			ActionItemID: actionID,
+			RunID:        runID,
+			Subject:      subject,
+			Body:         body,
+			Model:        model,
+			FromJSON:     fromJSON,
+			CreatedAt:    cat,
+		})
+	}
+	return out, rows.Err()
 }
 
 func (r *Repository) ListSchedulesByUser(ctx context.Context, userID uuid.UUID) ([]driven.ScheduleChainRow, error) {
