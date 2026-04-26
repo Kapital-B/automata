@@ -117,12 +117,16 @@ func (s *CategorizeService) classifyMessage(ctx context.Context, m driven.Messag
 		maxFromChars    = 280
 		maxBodyChars    = 1200
 	)
+	body := derefStr(m.BodyText)
+	if looksLikeHTML(body) {
+		body = stripHTML(body)
+	}
 	prompt := "Classify this email into one category slug from: important, finance, personal, newsletter, spam, other. " +
 		"Respond with a single JSON object only: {\"schema_version\":1,\"category_slug\":\"...\",\"confidence\":0..1}. " +
 		"Use category_slug as lowercase.\n\n" +
 		"Subject: " + clampText(m.Subject, maxSubjectChars) + "\n" +
 		"From: " + clampText(m.FromJSON, maxFromChars) + "\n" +
-		"Body: " + clampText(derefStr(m.BodyText), maxBodyChars)
+		"Body: " + clampText(body, maxBodyChars)
 
 	tryDecode := func(content string) (*categorizePayload, error) {
 		var out categorizePayload

@@ -3,6 +3,7 @@ package http
 import (
 	"encoding/json"
 	"errors"
+	"html"
 	"log/slog"
 	"net/http"
 	"net/url"
@@ -299,42 +300,92 @@ func (h *Handlers) listMessages(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	type item struct {
-		ID                string `json:"id"`
-		AccountID         string `json:"account_id"`
-		ProviderMessageID string `json:"provider_message_id"`
-		Subject           string `json:"subject"`
-		ReceivedAt        string `json:"received_at"`
-		HasAttachments    bool   `json:"has_attachments"`
-		FromJSON          json.RawMessage `json:"from_json"`
-		BodyText          *string `json:"body_text,omitempty"`
-		Preview           string `json:"preview"`
-		CategorySlug      *string `json:"category_slug,omitempty"`
-		CategoryConfidence *float64 `json:"category_confidence,omitempty"`
+		ID                 string          `json:"id"`
+		AccountID          string          `json:"account_id"`
+		ProviderMessageID  string          `json:"provider_message_id"`
+		Subject            string          `json:"subject"`
+		ReceivedAt         string          `json:"received_at"`
+		HasAttachments     bool            `json:"has_attachments"`
+		FromJSON           json.RawMessage `json:"from_json"`
+		BodyText           *string         `json:"body_text,omitempty"`
+		Preview            string          `json:"preview"`
+		CategorySlug       *string         `json:"category_slug,omitempty"`
+		CategoryConfidence *float64        `json:"category_confidence,omitempty"`
 	}
 	out := make([]item, 0, len(rows))
 	for _, m := range rows {
 		preview := ""
 		if m.BodyText != nil {
-			preview = *m.BodyText
-			if len(preview) > 160 {
-				preview = preview[:160]
-			}
+			preview = messagePreview(*m.BodyText, 160)
 		}
 		out = append(out, item{
-			ID:                m.ID.String(),
-			AccountID:         m.AccountID.String(),
-			ProviderMessageID: m.ProviderMessageID,
-			Subject:           m.Subject,
-			ReceivedAt:        m.ReceivedAt.UTC().Format(time.RFC3339Nano),
-			HasAttachments:    m.HasAttachments,
-			FromJSON:          json.RawMessage(m.FromJSON),
-			BodyText:          m.BodyText,
-			Preview:           preview,
-			CategorySlug:      m.CategorySlug,
+			ID:                 m.ID.String(),
+			AccountID:          m.AccountID.String(),
+			ProviderMessageID:  m.ProviderMessageID,
+			Subject:            m.Subject,
+			ReceivedAt:         m.ReceivedAt.UTC().Format(time.RFC3339Nano),
+			HasAttachments:     m.HasAttachments,
+			FromJSON:           json.RawMessage(m.FromJSON),
+			BodyText:           m.BodyText,
+			Preview:            preview,
+			CategorySlug:       m.CategorySlug,
 			CategoryConfidence: m.CategoryConfidence,
 		})
 	}
 	writeJSON(w, http.StatusOK, out)
+}
+
+func messagePreview(body string, maxChars int) string {
+	preview := body
+	if looksLikeHTML(preview) {
+		preview = stripHTML(preview)
+	}
+	preview = strings.Join(strings.Fields(preview), " ")
+	if maxChars > 0 && len(preview) > maxChars {
+		return preview[:maxChars]
+	}
+	return preview
+}
+
+func looksLikeHTML(s string) bool {
+	lower := strings.ToLower(s)
+	return strings.Contains(lower, "<!doctype") ||
+		strings.Contains(lower, "<html") ||
+		strings.Contains(lower, "<head") ||
+		strings.Contains(lower, "<body") ||
+		strings.Contains(lower, "<div") ||
+		strings.Contains(lower, "<span") ||
+		strings.Contains(lower, "<p") ||
+		strings.Contains(lower, "<a ") ||
+		strings.Contains(lower, "<img") ||
+		strings.Contains(lower, "<ul") ||
+		strings.Contains(lower, "<li") ||
+		strings.Contains(lower, "<table") ||
+		strings.Contains(lower, "<br")
+}
+
+func stripHTML(s string) string {
+	var b strings.Builder
+	inTag := false
+	for _, r := range s {
+		switch {
+		case r == '<':
+			if b.Len() > 0 {
+				b.WriteRune(' ')
+			}
+			inTag = true
+		case r == '>':
+			inTag = false
+			b.WriteRune(' ')
+		case !inTag:
+			b.WriteRune(r)
+		}
+	}
+	out := strings.TrimSpace(b.String())
+	if out == "" {
+		return s
+	}
+	return html.UnescapeString(out)
 }
 
 func (h *Handlers) getMessage(w http.ResponseWriter, r *http.Request) {

@@ -44,7 +44,7 @@ func (g *GraphClient) getJSON(ctx context.Context, accessToken, reqURL string, o
 		return err
 	}
 	req.Header.Set("Authorization", "Bearer "+accessToken)
-	req.Header.Set("Prefer", `outlook.body-content-type="text"`)
+	req.Header.Set("Prefer", `outlook.body-content-type="html"`)
 	resp, err := g.client().Do(req)
 	if err != nil {
 		return err
@@ -187,7 +187,7 @@ func (g *GraphClient) ListInboxMessages(ctx context.Context, accessToken string,
 	return out, nil
 }
 
-// GetMessageBody fetches full message for body text.
+// GetMessageBody fetches full message body content.
 func (g *GraphClient) GetMessageBody(ctx context.Context, accessToken string, providerMessageID string) (*driven.GraphMessage, error) {
 	u := g.apiRoot() + "/me/messages/" + url.PathEscape(providerMessageID) + "?$select=id,conversationId,receivedDateTime,subject,body,bodyPreview,from,hasAttachments,changeKey"
 	var m graphMessageJSON

@@ -1,9 +1,9 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useState, type SyntheticEvent } from "react";
 import { PageHeader } from "@/components/PageHeader";
 import { AccountBadge } from "@/components/AccountBadge";
 import { CategoryPill } from "@/components/CategoryPill";
 import { relativeTime } from "@/lib/accounts";
-import { categorizeAccount, listCategories, listMessages, type MessageItem } from "@/lib/auth";
+import { categorizeAccount, listCategories, listMessages, syncAccount, type MessageItem } from "@/lib/auth";
 import { Paperclip, Reply, Forward, Archive, Loader2 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { Button } from "@/components/ui/button";
@@ -17,12 +17,84 @@ interface Props {
   accountFilter: AccountFilter;
 }
 
+const HTML_TAG_RE = /<\/?[a-z][\s\S]*>/i;
+const HTML_DOCUMENT_RE = /<(?:!doctype|html|head|body)\b/i;
+const TEXT_BODY_URL_RE = /\[https?:\/\/[^\]]+\]/i;
+const EMAIL_CSP =
+  "default-src 'none'; img-src http: https: data: cid: blob:; style-src 'unsafe-inline' http: https:; font-src http: https: data:; connect-src 'none'; script-src 'none'; form-action 'none'; frame-ancestors 'none';";
+
+function isProbablyHtml(body: string) {
+  return HTML_TAG_RE.test(body);
+}
+
+function looksLikeTextConvertedHtml(body: string) {
+  return !isProbablyHtml(body) && TEXT_BODY_URL_RE.test(body);
+}
+
+function buildEmailSrcDoc(html: string) {
+  const securityHead = `<base target="_blank"><meta charset="utf-8"><meta http-equiv="Content-Security-Policy" content="${EMAIL_CSP}">`;
+
+  if (HTML_DOCUMENT_RE.test(html)) {
+    if (/<head\b[^>]*>/i.test(html)) {
+      return html.replace(/<head\b([^>]*)>/i, `<head$1>${securityHead}`);
+    }
+    if (/<html\b[^>]*>/i.test(html)) {
+      return html.replace(/<html\b([^>]*)>/i, `<html$1><head>${securityHead}</head>`);
+    }
+    return `<!doctype html><html><head>${securityHead}</head>${html}</html>`;
+  }
+
+  return `<!doctype html>
+<html>
+  <head>
+    ${securityHead}
+  </head>
+  <body>${html}</body>
+</html>`;
+}
+
+function EmailBody({ body }: { body: string }) {
+  const [height, setHeight] = useState(320);
+  const html = useMemo(() => isProbablyHtml(body), [body]);
+  const srcDoc = useMemo(() => buildEmailSrcDoc(body), [body]);
+
+  if (!html) {
+    return (
+      <div className="prose prose-sm max-w-none whitespace-pre-wrap px-6 py-5 text-foreground/90">
+        {body}
+      </div>
+    );
+  }
+
+  const resizeFrame = (event: SyntheticEvent<HTMLIFrameElement>) => {
+    const documentHeight = event.currentTarget.contentDocument?.documentElement.scrollHeight;
+    if (documentHeight) {
+      setHeight(Math.min(Math.max(documentHeight, 320), 6000));
+    }
+  };
+
+  return (
+    <div className="px-6 py-5">
+      <iframe
+        title="Email body"
+        srcDoc={srcDoc}
+        sandbox="allow-popups allow-popups-to-escape-sandbox allow-same-origin"
+        onLoad={resizeFrame}
+        className="w-full rounded-md border border-border bg-white"
+        style={{ height }}
+      />
+    </div>
+  );
+}
+
 export default function InboxPage({ accountFilter }: Props) {
   const { accessToken } = useAuth();
   const { accounts } = useAccountsData();
   const queryClient = useQueryClient();
   const [cat, setCat] = useState<string>("all");
   const [selectedId, setSelectedId] = useState<string>("");
+  const [htmlRefreshAttempts, setHtmlRefreshAttempts] = useState<Set<string>>(() => new Set());
+  const [refreshingHtmlMessageIds, setRefreshingHtmlMessageIds] = useState<Set<string>>(() => new Set());
 
   const categoriesQuery = useQuery({
     queryKey: ["categories", accessToken],
@@ -87,6 +159,36 @@ export default function InboxPage({ accountFilter }: Props) {
 
   const selected = filtered.find((m) => m.id === selectedId) ?? filtered[0];
   const selAccount = selected ? accounts.find((a) => a.id === selected.account_id) : undefined;
+
+  useEffect(() => {
+    if (!accessToken || !selected?.body_text || !looksLikeTextConvertedHtml(selected.body_text)) {
+      return;
+    }
+    if (htmlRefreshAttempts.has(selected.id)) {
+      return;
+    }
+
+    setHtmlRefreshAttempts((prev) => new Set(prev).add(selected.id));
+    setRefreshingHtmlMessageIds((prev) => new Set(prev).add(selected.id));
+    void syncAccount(accessToken, selected.account_id)
+      .then(() => queryClient.invalidateQueries({ queryKey: ["messages"] }))
+      .catch((err) => {
+        toast({
+          title: "Could not refresh HTML email",
+          description: err instanceof Error ? err.message : "Please try syncing this account again.",
+          variant: "destructive",
+        });
+      })
+      .finally(() => {
+        setRefreshingHtmlMessageIds((prev) => {
+          const next = new Set(prev);
+          next.delete(selected.id);
+          return next;
+        });
+      });
+  }, [accessToken, htmlRefreshAttempts, queryClient, selected]);
+
+  const isRefreshingSelectedHtml = selected ? refreshingHtmlMessageIds.has(selected.id) : false;
 
   return (
     <div className="space-y-6">
@@ -221,9 +323,12 @@ export default function InboxPage({ accountFilter }: Props) {
               </p>
             </div>
             <div className="hairline" />
-            <div className="prose prose-sm max-w-none whitespace-pre-wrap px-6 py-5 text-foreground/90">
-              {selected.body_text ?? ""}
-            </div>
+            {isRefreshingSelectedHtml && (
+              <div className="border-b border-border/70 bg-secondary/40 px-6 py-2 text-xs text-muted-foreground">
+                Refreshing the HTML version of this email...
+              </div>
+            )}
+            <EmailBody body={selected.body_text ?? ""} />
           </article>
         )}
       </div>
