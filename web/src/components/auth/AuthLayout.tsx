@@ -20,10 +20,10 @@ export function AuthLayout({ eyebrow, title, subtitle, children }: AuthLayoutPro
               className="grid h-8 w-8 place-items-center rounded-md text-primary-foreground"
               style={{ background: "var(--gradient-ink)" }}
             >
-              <span className="font-display text-sm font-semibold">P</span>
+              <span className="font-display text-sm font-semibold">A</span>
             </div>
             <div className="leading-tight">
-              <p className="font-display text-base font-semibold">Postern</p>
+              <p className="font-display text-base font-semibold">Automata</p>
               <p className="text-[10px] uppercase tracking-widest text-muted-foreground">
                 workspace intelligence
               </p>
@@ -49,7 +49,7 @@ export function AuthLayout({ eyebrow, title, subtitle, children }: AuthLayoutPro
         </main>
 
         <footer className="px-6 lg:px-12 py-6 text-xs text-muted-foreground">
-          © {new Date().getFullYear()} Postern · Privacy · Terms
+          © {new Date().getFullYear()} Automata · Privacy · Terms
         </footer>
       </div>
 

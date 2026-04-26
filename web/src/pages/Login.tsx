@@ -58,7 +58,7 @@ export default function LoginPage() {
   return (
     <AuthLayout
       eyebrow="Welcome back"
-      title="Sign in to Postern"
+      title="Sign in to Automata"
       subtitle="Your workspace intelligence, waiting."
     >
       <div className="space-y-3">
@@ -145,7 +145,7 @@ export default function LoginPage() {
       </form>
 
       <p className="mt-6 text-center text-sm text-muted-foreground">
-        New to Postern?{" "}
+        New to Automata?{" "}
         <Link to="/register" className="font-medium text-primary hover:underline">
           Create an account
         </Link>

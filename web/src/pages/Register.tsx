@@ -25,7 +25,7 @@ export default function RegisterPage() {
       await register(email, password);
       toast({
         title: "Account created",
-        description: `Welcome to Postern, ${name || email}.`,
+        description: `Welcome to Automata, ${name || email}.`,
       });
       navigate("/", { replace: true });
     } catch (error) {

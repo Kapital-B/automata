@@ -81,11 +81,11 @@ export function AppSidebar() {
             className="grid h-7 w-7 place-items-center rounded-md text-primary-foreground"
             style={{ background: "var(--gradient-ink)" }}
           >
-            <span className="font-display text-sm font-semibold">P</span>
+            <span className="font-display text-sm font-semibold">A</span>
           </div>
           {!collapsed && (
             <div className="leading-tight">
-              <p className="font-display text-base font-semibold">Postern</p>
+              <p className="font-display text-base font-semibold">Automata</p>
               <p className="text-[10px] uppercase tracking-widest text-muted-foreground">
                 workspace intelligence
               </p>
