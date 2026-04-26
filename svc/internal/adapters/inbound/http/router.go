@@ -13,8 +13,8 @@ import (
 	"strings"
 	"time"
 
-	appaccounts "github.com/Kapital-B/automata/svc/internal/application/accounts"
 	asynqadapter "github.com/Kapital-B/automata/svc/internal/adapters/inbound/asynq"
+	appaccounts "github.com/Kapital-B/automata/svc/internal/application/accounts"
 	"github.com/Kapital-B/automata/svc/internal/application/auth"
 	appmessages "github.com/Kapital-B/automata/svc/internal/application/messages"
 	"github.com/Kapital-B/automata/svc/internal/application/ports/driven"
@@ -35,6 +35,7 @@ type Handlers struct {
 	Messages        driven.MessageRepository
 	JobRuns         driven.JobRunRepository
 	Summaries       driven.SummaryRepository
+	Schedules       driven.ScheduleRepository
 	OAuthStates     driven.OAuthStateRepository
 	Users           driven.UserRepository
 	Dashboard       string
@@ -86,6 +87,8 @@ func (h *Handlers) Routes() http.Handler {
 	r.Post("/api/fyi/{id}/dismiss", h.dismissFYI)
 	r.Get("/api/settings/summaries", h.getSummarySettings)
 	r.Patch("/api/settings/summaries", h.updateSummarySettings)
+	r.Get("/api/settings/schedules", h.getSchedules)
+	r.Patch("/api/settings/schedules", h.updateSchedules)
 	r.Get("/api/messages", h.listMessages)
 	r.Get("/api/messages/{id}", h.getMessage)
 	return r
@@ -789,9 +792,9 @@ func (h *Handlers) listSummaries(w http.ResponseWriter, r *http.Request) {
 	}
 	if len(snaps) == 0 {
 		writeJSON(w, http.StatusOK, map[string]any{
-			"snapshot":      nil,
-			"action_items":  []any{},
-			"fyi":           []any{},
+			"snapshot":     nil,
+			"action_items": []any{},
+			"fyi":          []any{},
 		})
 		return
 	}
@@ -807,12 +810,12 @@ func (h *Handlers) listSummaries(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	type actionItem struct {
-		ID         string  `json:"id"`
-		AccountID  string  `json:"account_id"`
-		MessageID  string  `json:"message_id"`
-		Text       string  `json:"text"`
-		DueAt      *string `json:"due_at,omitempty"`
-		IsOverdue  bool    `json:"is_overdue"`
+		ID        string  `json:"id"`
+		AccountID string  `json:"account_id"`
+		MessageID string  `json:"message_id"`
+		Text      string  `json:"text"`
+		DueAt     *string `json:"due_at,omitempty"`
+		IsOverdue bool    `json:"is_overdue"`
 	}
 	outItems := make([]actionItem, 0, len(items))
 	now := time.Now().UTC()
@@ -924,9 +927,9 @@ func (h *Handlers) updateSummarySettings(w http.ResponseWriter, r *http.Request)
 		return
 	}
 	var body struct {
-		Include []string `json:"include_category_slugs"`
-		Exclude []string `json:"exclude_category_slugs"`
-		ChunkSize int `json:"chunk_size"`
+		Include   []string `json:"include_category_slugs"`
+		Exclude   []string `json:"exclude_category_slugs"`
+		ChunkSize int      `json:"chunk_size"`
 	}
 	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
 		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid json"})
@@ -943,6 +946,114 @@ func (h *Handlers) updateSummarySettings(w http.ResponseWriter, r *http.Request)
 		row.ChunkSize = 12
 	}
 	if err := h.Summaries.UpsertSummarySettings(r.Context(), row); err != nil {
+		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "internal"})
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"status": "success"})
+}
+
+func (h *Handlers) getSchedules(w http.ResponseWriter, r *http.Request) {
+	if h.Schedules == nil {
+		writeJSON(w, http.StatusServiceUnavailable, map[string]string{"error": "schedules not configured"})
+		return
+	}
+	rows, err := h.Schedules.ListSchedulesByUser(r.Context(), userIDOrEmpty(r))
+	if err != nil {
+		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "internal"})
+		return
+	}
+	out := make([]map[string]any, 0, len(rows))
+	for _, row := range rows {
+		var accountID *string
+		if row.AccountID != nil {
+			s := row.AccountID.String()
+			accountID = &s
+		}
+		out = append(out, map[string]any{
+			"id":               row.ID.String(),
+			"name":             row.Name,
+			"account_id":       accountID,
+			"jobs":             row.Jobs,
+			"interval_minutes": row.IntervalMinutes,
+			"enabled":          row.Enabled,
+		})
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"chains": out})
+}
+
+func (h *Handlers) updateSchedules(w http.ResponseWriter, r *http.Request) {
+	if h.Schedules == nil {
+		writeJSON(w, http.StatusServiceUnavailable, map[string]string{"error": "schedules not configured"})
+		return
+	}
+	var body struct {
+		Chains []struct {
+			ID              string   `json:"id"`
+			Name            string   `json:"name"`
+			AccountID       *string  `json:"account_id"`
+			Jobs            []string `json:"jobs"`
+			IntervalMinutes int      `json:"interval_minutes"`
+			Enabled         bool     `json:"enabled"`
+		} `json:"chains"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid json"})
+		return
+	}
+	now := time.Now().UTC()
+	rows := make([]driven.ScheduleChainRow, 0, len(body.Chains))
+	for _, in := range body.Chains {
+		id := uuid.New()
+		if strings.TrimSpace(in.ID) != "" {
+			parsed, err := uuid.Parse(in.ID)
+			if err == nil {
+				id = parsed
+			}
+		}
+		var accountID *uuid.UUID
+		if in.AccountID != nil && strings.TrimSpace(*in.AccountID) != "" {
+			aid, err := uuid.Parse(strings.TrimSpace(*in.AccountID))
+			if err != nil {
+				writeJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid account_id"})
+				return
+			}
+			accountID = &aid
+		}
+		if in.IntervalMinutes <= 0 {
+			in.IntervalMinutes = 10
+		}
+		if in.IntervalMinutes > 1440 {
+			in.IntervalMinutes = 1440
+		}
+		jobs := make([]string, 0, len(in.Jobs))
+		for _, j := range in.Jobs {
+			j = strings.TrimSpace(strings.ToLower(j))
+			if j != "" {
+				jobs = append(jobs, j)
+			}
+		}
+		if len(jobs) == 0 {
+			writeJSON(w, http.StatusBadRequest, map[string]string{"error": "schedule chains require at least one job"})
+			return
+		}
+		name := strings.TrimSpace(in.Name)
+		if name == "" {
+			name = "Scheduled chain"
+		}
+		rows = append(rows, driven.ScheduleChainRow{
+			ID:              id,
+			UserID:          userIDOrEmpty(r),
+			Name:            name,
+			AccountID:       accountID,
+			Jobs:            jobs,
+			IntervalMinutes: in.IntervalMinutes,
+			Enabled:         in.Enabled,
+			NextRunAt:       now.Add(time.Duration(in.IntervalMinutes) * time.Minute),
+			CreatedAt:       now,
+			UpdatedAt:       now,
+		})
+	}
+	if err := h.Schedules.ReplaceSchedulesByUser(r.Context(), userIDOrEmpty(r), rows); err != nil {
 		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "internal"})
 		return
 	}

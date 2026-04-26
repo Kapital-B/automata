@@ -114,6 +114,15 @@ export type SummarySettings = {
   updated_at?: string;
 };
 
+export type ScheduleChain = {
+  id: string;
+  name: string;
+  account_id?: string;
+  jobs: string[];
+  interval_minutes: number;
+  enabled: boolean;
+};
+
 export type MessageItem = {
   id: string;
   account_id: string;
@@ -351,6 +360,20 @@ export async function updateSummarySettings(accessToken: string, payload: Summar
     method: "PATCH",
     headers: toAuthHeader(accessToken),
     body: JSON.stringify(payload),
+  });
+}
+
+export async function getScheduleSettings(accessToken: string) {
+  return apiRequest<{ chains: ScheduleChain[] }>("/api/settings/schedules", {
+    headers: toAuthHeader(accessToken),
+  });
+}
+
+export async function updateScheduleSettings(accessToken: string, chains: ScheduleChain[]) {
+  return apiRequest<{ status: string }>("/api/settings/schedules", {
+    method: "PATCH",
+    headers: toAuthHeader(accessToken),
+    body: JSON.stringify({ chains }),
   });
 }
 

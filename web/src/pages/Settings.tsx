@@ -16,13 +16,17 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { Textarea } from "@/components/ui/textarea";
 import { useAuth } from "@/components/auth/AuthProvider";
+import { useAccountsData } from "@/hooks/useAccountsData";
 import {
   ApiError,
   createCategory,
   deleteCategory,
   getSummarySettings,
+  getScheduleSettings,
   listCategories,
+  type ScheduleChain,
   updateSummarySettings,
+  updateScheduleSettings,
   updateCategory,
   type UpsertCategoryInput,
 } from "@/lib/auth";
@@ -44,6 +48,7 @@ const noReplacementValue = "__none__";
 
 export default function SettingsPage() {
   const { accessToken } = useAuth();
+  const { accounts } = useAccountsData();
   const queryClient = useQueryClient();
   const [newCategory, setNewCategory] = useState<CategoryFormState>(blankCategory);
   const [addDialogOpen, setAddDialogOpen] = useState(false);
@@ -53,6 +58,7 @@ export default function SettingsPage() {
   const [includeSlugs, setIncludeSlugs] = useState<string[]>([]);
   const [excludeSlugs, setExcludeSlugs] = useState<string[]>([]);
   const [chunkSize, setChunkSize] = useState<number>(12);
+  const [scheduleChains, setScheduleChains] = useState<ScheduleChain[]>([]);
 
   const categoriesQuery = useQuery({
     queryKey: ["categories", accessToken],
@@ -63,6 +69,11 @@ export default function SettingsPage() {
   const summarySettingsQuery = useQuery({
     queryKey: ["summary-settings", accessToken],
     queryFn: () => getSummarySettings(accessToken!),
+    enabled: Boolean(accessToken),
+  });
+  const schedulesQuery = useQuery({
+    queryKey: ["schedule-settings", accessToken],
+    queryFn: () => getScheduleSettings(accessToken!),
     enabled: Boolean(accessToken),
   });
 
@@ -85,6 +96,9 @@ export default function SettingsPage() {
     setExcludeSlugs(row.exclude_category_slugs ?? []);
     setChunkSize(row.chunk_size || 12);
   }, [summarySettingsQuery.data]);
+  useEffect(() => {
+    setScheduleChains(schedulesQuery.data?.chains ?? []);
+  }, [schedulesQuery.data]);
 
   const saveMutation = useMutation({
     mutationFn: async (payload: { id: string; body: CategoryFormState }[]) => {
@@ -160,6 +174,16 @@ export default function SettingsPage() {
       toast({ title: "Summary settings updated" });
     },
   });
+  const scheduleSettingsMutation = useMutation({
+    mutationFn: async () => {
+      if (!accessToken) throw new Error("Not authenticated");
+      return updateScheduleSettings(accessToken, scheduleChains);
+    },
+    onSuccess: () => {
+      void queryClient.invalidateQueries({ queryKey: ["schedule-settings"] });
+      toast({ title: "Schedule settings updated" });
+    },
+  });
 
   return (
     <div className="space-y-6">
@@ -173,6 +197,7 @@ export default function SettingsPage() {
         <TabsList>
           <TabsTrigger value="categorization">Categorization</TabsTrigger>
           <TabsTrigger value="summarization">Summarization</TabsTrigger>
+          <TabsTrigger value="scheduling">Scheduling</TabsTrigger>
         </TabsList>
 
         <TabsContent value="categorization" className="space-y-4">
@@ -481,6 +506,139 @@ export default function SettingsPage() {
             <div>
               <Button onClick={() => summarySettingsMutation.mutate()} disabled={summarySettingsMutation.isPending}>
                 {summarySettingsMutation.isPending ? "Saving..." : "Save summary settings"}
+              </Button>
+            </div>
+          </div>
+        </TabsContent>
+        <TabsContent value="scheduling" className="space-y-4">
+          <div className="surface-card space-y-4 p-4">
+            <div className="flex items-center justify-between">
+              <div>
+                <h3 className="font-display text-lg">Job schedule chains</h3>
+                <p className="text-sm text-muted-foreground">Create recurring chains like sync -&gt; categorize -&gt; summarize.</p>
+              </div>
+              <Button
+                variant="outline"
+                onClick={() =>
+                  setScheduleChains((prev) => [
+                    ...prev,
+                    {
+                      id: crypto.randomUUID(),
+                      name: "New chain",
+                      jobs: ["sync", "categorize", "summarize"],
+                      interval_minutes: 10,
+                      enabled: true,
+                    },
+                  ])
+                }
+              >
+                <Plus className="mr-1.5 h-3.5 w-3.5" />
+                Add chain
+              </Button>
+            </div>
+            <div className="space-y-3">
+              {scheduleChains.map((chain) => (
+                <div key={chain.id} className="rounded-md border border-border p-3 space-y-3">
+                  <div className="grid gap-3 md:grid-cols-4">
+                    <div className="space-y-1">
+                      <Label>Name</Label>
+                      <Input
+                        value={chain.name}
+                        onChange={(e) =>
+                          setScheduleChains((prev) =>
+                            prev.map((c) => (c.id === chain.id ? { ...c, name: e.target.value } : c)),
+                          )
+                        }
+                      />
+                    </div>
+                    <div className="space-y-1">
+                      <Label>Account</Label>
+                      <Select
+                        value={chain.account_id ?? "__all__"}
+                        onValueChange={(value) =>
+                          setScheduleChains((prev) =>
+                            prev.map((c) => (c.id === chain.id ? { ...c, account_id: value === "__all__" ? undefined : value } : c)),
+                          )
+                        }
+                      >
+                        <SelectTrigger><SelectValue /></SelectTrigger>
+                        <SelectContent>
+                          <SelectItem value="__all__">All connected accounts</SelectItem>
+                          {accounts.map((a) => (
+                            <SelectItem key={a.id} value={a.id}>
+                              {a.label}
+                            </SelectItem>
+                          ))}
+                        </SelectContent>
+                      </Select>
+                    </div>
+                    <div className="space-y-1">
+                      <Label>Every (minutes)</Label>
+                      <Input
+                        type="number"
+                        min={1}
+                        value={chain.interval_minutes}
+                        onChange={(e) =>
+                          setScheduleChains((prev) =>
+                            prev.map((c) => (c.id === chain.id ? { ...c, interval_minutes: Number(e.target.value) || 10 } : c)),
+                          )
+                        }
+                      />
+                    </div>
+                    <div className="space-y-1">
+                      <Label>Enabled</Label>
+                      <Select
+                        value={chain.enabled ? "enabled" : "disabled"}
+                        onValueChange={(value) =>
+                          setScheduleChains((prev) =>
+                            prev.map((c) => (c.id === chain.id ? { ...c, enabled: value === "enabled" } : c)),
+                          )
+                        }
+                      >
+                        <SelectTrigger><SelectValue /></SelectTrigger>
+                        <SelectContent>
+                          <SelectItem value="enabled">Enabled</SelectItem>
+                          <SelectItem value="disabled">Disabled</SelectItem>
+                        </SelectContent>
+                      </Select>
+                    </div>
+                  </div>
+                  <div className="space-y-1">
+                    <Label>Jobs chain (comma separated)</Label>
+                    <Input
+                      value={chain.jobs.join(", ")}
+                      onChange={(e) =>
+                        setScheduleChains((prev) =>
+                          prev.map((c) =>
+                            c.id === chain.id
+                              ? { ...c, jobs: e.target.value.split(",").map((v) => v.trim()).filter(Boolean) }
+                              : c,
+                          ),
+                        )
+                      }
+                      placeholder="sync, categorize, summarize"
+                    />
+                    <p className="text-xs text-muted-foreground">Supported jobs: sync, categorize, summarize.</p>
+                  </div>
+                  <div>
+                    <Button
+                      variant="ghost"
+                      className="text-destructive"
+                      onClick={() => setScheduleChains((prev) => prev.filter((c) => c.id !== chain.id))}
+                    >
+                      <Trash2 className="mr-1.5 h-3.5 w-3.5" />
+                      Remove chain
+                    </Button>
+                  </div>
+                </div>
+              ))}
+              {scheduleChains.length === 0 && (
+                <p className="text-sm text-muted-foreground">No schedule chains configured.</p>
+              )}
+            </div>
+            <div>
+              <Button onClick={() => scheduleSettingsMutation.mutate()} disabled={scheduleSettingsMutation.isPending}>
+                {scheduleSettingsMutation.isPending ? "Saving..." : "Save schedules"}
               </Button>
             </div>
           </div>

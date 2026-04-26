@@ -15,8 +15,8 @@ import (
 
 // Repository implements account, message, and oauth state persistence.
 type Repository struct {
-	db              *sql.DB
-	OAuthStateTTL   time.Duration
+	db            *sql.DB
+	OAuthStateTTL time.Duration
 }
 
 func NewRepository(db *sql.DB, oauthStateTTL time.Duration) *Repository {
@@ -935,6 +935,88 @@ func (r *Repository) DeleteFYI(ctx context.Context, userID uuid.UUID, id uuid.UU
 	return err
 }
 
+func (r *Repository) ListSchedulesByUser(ctx context.Context, userID uuid.UUID) ([]driven.ScheduleChainRow, error) {
+	rows, err := r.db.QueryContext(ctx, `
+		SELECT id, user_id, name, account_id, jobs_json, interval_minutes, enabled, last_run_at, next_run_at, created_at, updated_at
+		FROM schedule_chains
+		WHERE user_id = ?
+		ORDER BY created_at ASC
+	`, userID.String())
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	out := make([]driven.ScheduleChainRow, 0)
+	for rows.Next() {
+		item, err := scanScheduleChainRow(rows)
+		if err != nil {
+			return nil, err
+		}
+		out = append(out, *item)
+	}
+	return out, rows.Err()
+}
+
+func (r *Repository) ReplaceSchedulesByUser(ctx context.Context, userID uuid.UUID, rows []driven.ScheduleChainRow) error {
+	tx, err := r.db.BeginTx(ctx, nil)
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback()
+	if _, err := tx.ExecContext(ctx, `DELETE FROM schedule_chains WHERE user_id = ?`, userID.String()); err != nil {
+		return err
+	}
+	for _, row := range rows {
+		jobsJSON, _ := json.Marshal(row.Jobs)
+		_, err := tx.ExecContext(ctx, `
+			INSERT INTO schedule_chains (id, user_id, name, account_id, jobs_json, interval_minutes, enabled, last_run_at, next_run_at, created_at, updated_at)
+			VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+		`,
+			row.ID.String(), userID.String(), row.Name, nullUUID(row.AccountID), string(jobsJSON), row.IntervalMinutes, boolInt(row.Enabled),
+			nullTimeStr(row.LastRunAt), formatRFC3339(row.NextRunAt.UTC()), formatRFC3339(row.CreatedAt.UTC()), formatRFC3339(row.UpdatedAt.UTC()),
+		)
+		if err != nil {
+			return err
+		}
+	}
+	return tx.Commit()
+}
+
+func (r *Repository) ListDueSchedules(ctx context.Context, now time.Time, limit int) ([]driven.ScheduleChainRow, error) {
+	if limit <= 0 {
+		limit = 20
+	}
+	rows, err := r.db.QueryContext(ctx, `
+		SELECT id, user_id, name, account_id, jobs_json, interval_minutes, enabled, last_run_at, next_run_at, created_at, updated_at
+		FROM schedule_chains
+		WHERE enabled = 1 AND next_run_at <= ?
+		ORDER BY next_run_at ASC
+		LIMIT ?
+	`, formatRFC3339(now.UTC()), limit)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	out := make([]driven.ScheduleChainRow, 0)
+	for rows.Next() {
+		item, err := scanScheduleChainRow(rows)
+		if err != nil {
+			return nil, err
+		}
+		out = append(out, *item)
+	}
+	return out, rows.Err()
+}
+
+func (r *Repository) MarkScheduleExecuted(ctx context.Context, id uuid.UUID, lastRunAt, nextRunAt time.Time) error {
+	_, err := r.db.ExecContext(ctx, `
+		UPDATE schedule_chains
+		SET last_run_at = ?, next_run_at = ?, updated_at = ?
+		WHERE id = ?
+	`, formatRFC3339(lastRunAt.UTC()), formatRFC3339(nextRunAt.UTC()), formatRFC3339(time.Now().UTC()), id.String())
+	return err
+}
+
 // --- helpers ---
 
 func nullStr(p *string) any {
@@ -1034,6 +1116,60 @@ func scanJobRunRow(s rowScanner) (*driven.JobRunRow, error) {
 			return nil, err
 		}
 		item.TimeWindowEnd = &t
+	}
+	return &item, nil
+}
+
+func scanScheduleChainRow(s rowScanner) (*driven.ScheduleChainRow, error) {
+	var item driven.ScheduleChainRow
+	var idStr, userStr, jobsJSON, nextRunAt, createdAt, updatedAt string
+	var accountID sql.NullString
+	var lastRunAt sql.NullString
+	var enabled int
+	if err := s.Scan(
+		&idStr, &userStr, &item.Name, &accountID, &jobsJSON, &item.IntervalMinutes, &enabled, &lastRunAt, &nextRunAt, &createdAt, &updatedAt,
+	); err != nil {
+		return nil, err
+	}
+	id, err := uuid.Parse(idStr)
+	if err != nil {
+		return nil, err
+	}
+	userID, err := uuid.Parse(userStr)
+	if err != nil {
+		return nil, err
+	}
+	item.ID = id
+	item.UserID = userID
+	item.Enabled = enabled == 1
+	if accountID.Valid {
+		acc, err := uuid.Parse(accountID.String)
+		if err != nil {
+			return nil, err
+		}
+		item.AccountID = &acc
+	}
+	if err := json.Unmarshal([]byte(jobsJSON), &item.Jobs); err != nil {
+		return nil, err
+	}
+	if lastRunAt.Valid {
+		t, err := parseTime(lastRunAt.String)
+		if err != nil {
+			return nil, err
+		}
+		item.LastRunAt = &t
+	}
+	item.NextRunAt, err = parseTime(nextRunAt)
+	if err != nil {
+		return nil, err
+	}
+	item.CreatedAt, err = parseTime(createdAt)
+	if err != nil {
+		return nil, err
+	}
+	item.UpdatedAt, err = parseTime(updatedAt)
+	if err != nil {
+		return nil, err
 	}
 	return &item, nil
 }

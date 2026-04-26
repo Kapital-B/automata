@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"log/slog"
+	"strings"
 	"time"
 
 	appmessages "github.com/Kapital-B/automata/svc/internal/application/messages"
@@ -24,12 +25,15 @@ const (
 )
 
 type TaskPayload struct {
-	SchemaVersion int       `json:"schema_version"`
-	RunID         uuid.UUID `json:"run_id"`
-	UserID        uuid.UUID `json:"user_id"`
-	AccountID     uuid.UUID `json:"account_id"`
-	TriggerKind   string    `json:"trigger_kind"`
-	Recategorize  bool      `json:"recategorize,omitempty"`
+	SchemaVersion  int        `json:"schema_version"`
+	RunID          uuid.UUID  `json:"run_id"`
+	UserID         uuid.UUID  `json:"user_id"`
+	AccountID      uuid.UUID  `json:"account_id"`
+	TriggerKind    string     `json:"trigger_kind"`
+	Recategorize   bool       `json:"recategorize,omitempty"`
+	RemainingJobs  []string   `json:"remaining_jobs,omitempty"`
+	ScheduleID     *uuid.UUID `json:"schedule_id,omitempty"`
+	ChainStartedAt *time.Time `json:"chain_started_at,omitempty"`
 }
 
 type QueueClient struct {
@@ -90,6 +94,7 @@ type WorkerDeps struct {
 	SummarizeSvc    *appmessages.SummarizeService
 	JobRuns         driven.JobRunRepository
 	GlobalSemaphore chan struct{}
+	Queue           *QueueClient
 }
 
 func NewWorkerMux(deps WorkerDeps) *asynq.ServeMux {
@@ -126,6 +131,7 @@ func handleSync(ctx context.Context, task *asynq.Task, deps WorkerDeps) error {
 		return err
 	}
 	deps.Log.Info("job success", "job_type", "sync", "run_id", p.RunID, "account_id", p.AccountID)
+	maybeEnqueueNext(ctx, deps, p)
 	return nil
 }
 
@@ -153,6 +159,7 @@ func handleCategorize(ctx context.Context, task *asynq.Task, deps WorkerDeps) er
 		return err
 	}
 	deps.Log.Info("job success", "job_type", "categorize", "run_id", p.RunID, "account_id", p.AccountID)
+	maybeEnqueueNext(ctx, deps, p)
 	return nil
 }
 
@@ -173,13 +180,58 @@ func handleSummarize(ctx context.Context, task *asynq.Task, deps WorkerDeps) err
 	_, err := deps.SummarizeSvc.SummarizeAccount(ctx, p.UserID, p.AccountID, appmessages.SummarizeOptions{
 		RunID:   &p.RunID,
 		Trigger: p.TriggerKind,
+		Since:   p.ChainStartedAt,
 	})
 	if err != nil {
 		deps.Log.Error("job failed", "job_type", "summarize", "run_id", p.RunID, "account_id", p.AccountID, "err", err)
 		return err
 	}
 	deps.Log.Info("job success", "job_type", "summarize", "run_id", p.RunID, "account_id", p.AccountID)
+	maybeEnqueueNext(ctx, deps, p)
 	return nil
+}
+
+func maybeEnqueueNext(ctx context.Context, deps WorkerDeps, p TaskPayload) {
+	if len(p.RemainingJobs) == 0 || deps.Queue == nil || deps.JobRuns == nil {
+		return
+	}
+	next := p.RemainingJobs[0]
+	rest := append([]string(nil), p.RemainingJobs[1:]...)
+	nextRunID := uuid.New()
+	meta := `{"queued":true,"schedule_chain":true}`
+	_ = deps.JobRuns.InsertJobRun(ctx, nextRunID, p.AccountID, next, "schedule", "pending", time.Now().UTC(), time.Time{}, nil, meta)
+	nextPayload := TaskPayload{
+		SchemaVersion:  1,
+		RunID:          nextRunID,
+		UserID:         p.UserID,
+		AccountID:      p.AccountID,
+		TriggerKind:    "schedule",
+		RemainingJobs:  rest,
+		ScheduleID:     p.ScheduleID,
+		ChainStartedAt: p.ChainStartedAt,
+	}
+	if err := EnqueueByJobType(ctx, deps.Queue, next, nextPayload); err != nil {
+		msg := err.Error()
+		_ = deps.JobRuns.UpdateJobRunStatus(ctx, nextRunID, "failed", timePtrAsynq(time.Now().UTC()), &msg, `{"queued":false}`)
+		deps.Log.Error("enqueue next chain job", "job_type", next, "err", err)
+	}
+}
+
+func EnqueueByJobType(ctx context.Context, queue *QueueClient, jobType string, payload TaskPayload) error {
+	switch strings.TrimSpace(strings.ToLower(jobType)) {
+	case "sync":
+		return queue.EnqueueSync(ctx, payload)
+	case "categorize":
+		return queue.EnqueueCategorize(ctx, payload)
+	case "summarize":
+		return queue.EnqueueSummarize(ctx, payload)
+	default:
+		return fmt.Errorf("unsupported job type: %s", jobType)
+	}
+}
+
+func timePtrAsynq(t time.Time) *time.Time {
+	return &t
 }
 
 func acquire(ch chan struct{}) error {

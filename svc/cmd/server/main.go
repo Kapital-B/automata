@@ -11,15 +11,15 @@ import (
 	"time"
 
 	asynqadapter "github.com/Kapital-B/automata/svc/internal/adapters/inbound/asynq"
-	appaccounts "github.com/Kapital-B/automata/svc/internal/application/accounts"
-	"github.com/Kapital-B/automata/svc/internal/application/auth"
-	appmessages "github.com/Kapital-B/automata/svc/internal/application/messages"
 	httphandler "github.com/Kapital-B/automata/svc/internal/adapters/inbound/http"
-	llmadapter "github.com/Kapital-B/automata/svc/internal/adapters/outbound/llm"
 	googleoauth "github.com/Kapital-B/automata/svc/internal/adapters/outbound/google"
+	llmadapter "github.com/Kapital-B/automata/svc/internal/adapters/outbound/llm"
 	"github.com/Kapital-B/automata/svc/internal/adapters/outbound/microsoft"
 	"github.com/Kapital-B/automata/svc/internal/adapters/outbound/persistence/sqlite"
 	"github.com/Kapital-B/automata/svc/internal/adapters/outbound/security"
+	appaccounts "github.com/Kapital-B/automata/svc/internal/application/accounts"
+	"github.com/Kapital-B/automata/svc/internal/application/auth"
+	appmessages "github.com/Kapital-B/automata/svc/internal/application/messages"
 	"github.com/Kapital-B/automata/svc/internal/configuration"
 	"github.com/go-chi/cors"
 	_ "modernc.org/sqlite"
@@ -105,7 +105,7 @@ func main() {
 		categorizeSvc = &appmessages.CategorizeService{
 			Messages: repo,
 			LLM:      llm,
-			JobRuns: repo,
+			JobRuns:  repo,
 		}
 		summarizeSvc = &appmessages.SummarizeService{
 			Messages:  repo,
@@ -137,6 +137,7 @@ func main() {
 		Messages:        repo,
 		JobRuns:         repo,
 		Summaries:       repo,
+		Schedules:       repo,
 		OAuthStates:     repo,
 		Users:           repo,
 		Dashboard:       cfg.DashboardBaseURL,
@@ -157,6 +158,24 @@ func main() {
 		for range t.C {
 			cutoff := time.Now().UTC().Add(-cfg.OAuthStateTTL)
 			_ = repo.DeleteExpiredStates(context.Background(), cutoff)
+		}
+	}()
+
+	go func() {
+		scheduler := &schedulerService{
+			log:       log,
+			schedules: repo,
+			accounts:  repo,
+			jobRuns:   repo,
+			queue:     queueClient,
+		}
+		t := time.NewTicker(30 * time.Second)
+		defer t.Stop()
+		for {
+			select {
+			case <-t.C:
+				_ = scheduler.Tick(context.Background(), time.Now().UTC())
+			}
 		}
 	}()
 

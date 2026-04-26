@@ -19,15 +19,16 @@ type SummarizeService struct {
 }
 
 type SummarizeOptions struct {
-	RunID    *uuid.UUID
-	Trigger  string
+	RunID     *uuid.UUID
+	Trigger   string
+	Since     *time.Time
 	AccountID *uuid.UUID
 }
 
 type SummarizeResult struct {
-	JobRunID      uuid.UUID
-	ActionItems   int
-	FYIItems      int
+	JobRunID    uuid.UUID
+	ActionItems int
+	FYIItems    int
 }
 
 type summarizePayload struct {
@@ -47,7 +48,7 @@ const (
 	defaultSummarizeChunkSize = 12
 	minSummarizeChunkSize     = 3
 	maxSummarizeChunkSize     = 30
-	maxCombinedSummaryLen = 2400
+	maxCombinedSummaryLen     = 2400
 	maxSubjectCharsDefault    = 120
 	maxFromCharsDefault       = 120
 	maxBodyCharsDefault       = 320
@@ -78,6 +79,9 @@ func (s *SummarizeService) SummarizeAccount(ctx context.Context, userID uuid.UUI
 	}
 
 	filter := driven.MessageListFilter{AccountID: &accountID, Limit: 200}
+	if opts.Since != nil {
+		filter.Since = opts.Since
+	}
 	msgs, err := s.Messages.ListMessages(ctx, userID, filter)
 	if err != nil {
 		return fail(err)
@@ -87,7 +91,8 @@ func (s *SummarizeService) SummarizeAccount(ctx context.Context, userID uuid.UUI
 		return fail(err)
 	}
 	filtered := applySummarySettings(msgs, settings)
-	_ = s.JobRuns.UpdateJobRunMeta(ctx, runID, fmt.Sprintf(`{"total_messages":%d,"processed_messages":0}`, len(filtered)))
+	chainMeta := summarizeChainMetaJSON(opts.Since)
+	_ = s.JobRuns.UpdateJobRunMeta(ctx, runID, fmt.Sprintf(`{"total_messages":%d,"processed_messages":0%s}`, len(filtered), chainMeta))
 
 	chunkSize := defaultSummarizeChunkSize
 	if settings != nil {
@@ -172,7 +177,7 @@ func (s *SummarizeService) SummarizeAccount(ctx context.Context, userID uuid.UUI
 			return fail(err)
 		}
 	}
-	meta := fmt.Sprintf(`{"total_messages":%d,"processed_messages":%d,"action_items":%d,"fyi_items":%d}`, len(filtered), len(filtered), len(toInsert), len(fyiRows))
+	meta := fmt.Sprintf(`{"total_messages":%d,"processed_messages":%d,"action_items":%d,"fyi_items":%d%s}`, len(filtered), len(filtered), len(toInsert), len(fyiRows), chainMeta)
 	_ = s.JobRuns.UpdateJobRunStatus(ctx, runID, "success", timePtrSummary(time.Now().UTC()), nil, meta)
 	return &SummarizeResult{JobRunID: runID, ActionItems: len(toInsert), FYIItems: len(fyiRows)}, nil
 }
@@ -363,4 +368,11 @@ func applySummarySettings(msgs []driven.MessageRow, settings *driven.SummarySett
 
 func timePtrSummary(t time.Time) *time.Time {
 	return &t
+}
+
+func summarizeChainMetaJSON(since *time.Time) string {
+	if since == nil {
+		return ""
+	}
+	return fmt.Sprintf(`,"chain_started_at":"%s"`, since.UTC().Format(time.RFC3339Nano))
 }

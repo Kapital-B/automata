@@ -39,6 +39,8 @@ func main() {
 		os.Exit(1)
 	}
 	repo := sqlite.NewRepository(db, cfg.OAuthStateTTL)
+	queueClient := asynqadapter.NewQueueClient(cfg.RedisAddr, cfg.AsynqPrefix)
+	defer queueClient.Close()
 	graph := &microsoft.GraphClient{}
 	oauth := &microsoft.OAuth{
 		ClientID:     cfg.MSClientID,
@@ -64,7 +66,7 @@ func main() {
 		categorizeSvc = &appmessages.CategorizeService{
 			Messages: repo,
 			LLM:      llm,
-			JobRuns: repo,
+			JobRuns:  repo,
 		}
 		summarizeSvc = &appmessages.SummarizeService{
 			Messages:  repo,
@@ -92,6 +94,7 @@ func main() {
 		SummarizeSvc:    summarizeSvc,
 		JobRuns:         repo,
 		GlobalSemaphore: sem,
+		Queue:           queueClient,
 	})
 	log.Info("worker listening", "redis", cfg.RedisAddr)
 	if err := srv.Run(mux); err != nil {

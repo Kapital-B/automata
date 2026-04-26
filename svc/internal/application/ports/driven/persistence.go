@@ -109,38 +109,52 @@ type SummarySettingsRow struct {
 }
 
 type SummarySnapshotRow struct {
-	ID              uuid.UUID
-	UserID          uuid.UUID
-	AccountID       *uuid.UUID
-	RunID           uuid.UUID
-	WindowStart     time.Time
-	WindowEnd       time.Time
-	GeneralSummary  string
-	CreatedAt       time.Time
+	ID             uuid.UUID
+	UserID         uuid.UUID
+	AccountID      *uuid.UUID
+	RunID          uuid.UUID
+	WindowStart    time.Time
+	WindowEnd      time.Time
+	GeneralSummary string
+	CreatedAt      time.Time
 }
 
 type ActionItemRow struct {
-	ID          uuid.UUID
-	UserID      uuid.UUID
-	AccountID   uuid.UUID
-	MessageID   uuid.UUID
-	RunID       uuid.UUID
-	Text        string
-	DueAt       *time.Time
-	Status      string
-	ActionedAt  *time.Time
-	CreatedAt   time.Time
-	UpdatedAt   time.Time
-}
-
-type FYIRow struct {
 	ID         uuid.UUID
 	UserID     uuid.UUID
 	AccountID  uuid.UUID
 	MessageID  uuid.UUID
 	RunID      uuid.UUID
 	Text       string
+	DueAt      *time.Time
+	Status     string
+	ActionedAt *time.Time
 	CreatedAt  time.Time
+	UpdatedAt  time.Time
+}
+
+type FYIRow struct {
+	ID        uuid.UUID
+	UserID    uuid.UUID
+	AccountID uuid.UUID
+	MessageID uuid.UUID
+	RunID     uuid.UUID
+	Text      string
+	CreatedAt time.Time
+}
+
+type ScheduleChainRow struct {
+	ID              uuid.UUID
+	UserID          uuid.UUID
+	Name            string
+	AccountID       *uuid.UUID
+	Jobs            []string
+	IntervalMinutes int
+	Enabled         bool
+	LastRunAt       *time.Time
+	NextRunAt       time.Time
+	CreatedAt       time.Time
+	UpdatedAt       time.Time
 }
 
 // AccountRepository persists accounts and OAuth tokens (ciphertext).
@@ -206,4 +220,11 @@ type SummaryRepository interface {
 	InsertFYI(ctx context.Context, rows []FYIRow) error
 	ListFYIByRun(ctx context.Context, userID uuid.UUID, runID uuid.UUID) ([]FYIRow, error)
 	DeleteFYI(ctx context.Context, userID uuid.UUID, id uuid.UUID) error
+}
+
+type ScheduleRepository interface {
+	ListSchedulesByUser(ctx context.Context, userID uuid.UUID) ([]ScheduleChainRow, error)
+	ReplaceSchedulesByUser(ctx context.Context, userID uuid.UUID, rows []ScheduleChainRow) error
+	ListDueSchedules(ctx context.Context, now time.Time, limit int) ([]ScheduleChainRow, error)
+	MarkScheduleExecuted(ctx context.Context, id uuid.UUID, lastRunAt, nextRunAt time.Time) error
 }
