@@ -19,11 +19,13 @@ const (
 	QueueCategorize = "categorize"
 	QueueSummarize  = "summarize"
 	QueueDraft      = "draft_suggest"
+	QueueForward    = "forward_rules"
 
 	TypeSyncV1       = "sync:v1"
 	TypeCategorizeV1 = "categorize:v1"
 	TypeSummarizeV1  = "summarize:v1"
 	TypeDraftV1      = "draft_suggest:v1"
+	TypeForwardV1    = "forward_rules:v1"
 )
 
 type TaskPayload struct {
@@ -73,6 +75,10 @@ func (q *QueueClient) EnqueueDraftSuggest(ctx context.Context, payload TaskPaylo
 	return q.enqueue(ctx, TypeDraftV1, QueueDraft, payload, false)
 }
 
+func (q *QueueClient) EnqueueForwardRules(ctx context.Context, payload TaskPayload) error {
+	return q.enqueue(ctx, TypeForwardV1, QueueForward, payload, false)
+}
+
 func (q *QueueClient) enqueue(ctx context.Context, taskType string, queue string, payload TaskPayload, uniqueSync bool) error {
 	if q == nil || q.client == nil {
 		return fmt.Errorf("queue client not configured")
@@ -99,6 +105,7 @@ type WorkerDeps struct {
 	CategorizeSvc   *appmessages.CategorizeService
 	SummarizeSvc    *appmessages.SummarizeService
 	AutoDraftSvc    *appmessages.AutoDraftService
+	ForwardRulesSvc *appmessages.ForwardRulesService
 	JobRuns         driven.JobRunRepository
 	GlobalSemaphore chan struct{}
 	Queue           *QueueClient
@@ -117,6 +124,9 @@ func NewWorkerMux(deps WorkerDeps) *asynq.ServeMux {
 	})
 	mux.HandleFunc(TypeDraftV1, func(ctx context.Context, task *asynq.Task) error {
 		return handleDraftSuggest(ctx, task, deps)
+	})
+	mux.HandleFunc(TypeForwardV1, func(ctx context.Context, task *asynq.Task) error {
+		return handleForwardRules(ctx, task, deps)
 	})
 	return mux
 }
@@ -229,6 +239,33 @@ func handleDraftSuggest(ctx context.Context, task *asynq.Task, deps WorkerDeps) 
 	return nil
 }
 
+func handleForwardRules(ctx context.Context, task *asynq.Task, deps WorkerDeps) error {
+	if deps.ForwardRulesSvc == nil {
+		return fmt.Errorf("forward-rules service not configured")
+	}
+	var p TaskPayload
+	if err := json.Unmarshal(task.Payload(), &p); err != nil {
+		return err
+	}
+	if err := acquire(deps.GlobalSemaphore); err != nil {
+		return err
+	}
+	defer release(deps.GlobalSemaphore)
+	deps.Log.Info("job start", "job_type", "forward_rules", "run_id", p.RunID, "account_id", p.AccountID, "trigger_kind", p.TriggerKind)
+	_, err := deps.ForwardRulesSvc.RunAccount(ctx, p.UserID, p.AccountID, appmessages.ForwardRulesOptions{
+		RunID:   &p.RunID,
+		Trigger: p.TriggerKind,
+		Since:   p.ChainStartedAt,
+	})
+	if err != nil {
+		deps.Log.Error("job failed", "job_type", "forward_rules", "run_id", p.RunID, "account_id", p.AccountID, "err", err)
+		return err
+	}
+	deps.Log.Info("job success", "job_type", "forward_rules", "run_id", p.RunID, "account_id", p.AccountID)
+	maybeEnqueueNext(ctx, deps, p)
+	return nil
+}
+
 func maybeEnqueueNext(ctx context.Context, deps WorkerDeps, p TaskPayload) {
 	if len(p.RemainingJobs) == 0 || deps.Queue == nil || deps.JobRuns == nil {
 		return
@@ -265,6 +302,8 @@ func EnqueueByJobType(ctx context.Context, queue *QueueClient, jobType string, p
 		return queue.EnqueueSummarize(ctx, payload)
 	case "auto-draft", "draft_suggest":
 		return queue.EnqueueDraftSuggest(ctx, payload)
+	case "forward", "forward_rules":
+		return queue.EnqueueForwardRules(ctx, payload)
 	default:
 		return fmt.Errorf("unsupported job type: %s", jobType)
 	}

@@ -41,6 +41,7 @@ type Config struct {
 	QueueCategorizeConcurrency int
 	QueueSummarizeConcurrency  int
 	QueueDraftConcurrency      int
+	QueueForwardConcurrency    int
 	GlobalMaxConcurrentJobs    int
 }
 
@@ -132,6 +133,13 @@ func Load() (Config, error) {
 			queueDraftConcurrency = n
 		}
 	}
+	queueForwardConcurrency := 1
+	if v := os.Getenv("JOB_QUEUE_FORWARD_CONCURRENCY"); v != "" {
+		var n int
+		if _, err := fmt.Sscanf(v, "%d", &n); err == nil && n > 0 {
+			queueForwardConcurrency = n
+		}
+	}
 	globalMaxConcurrentJobs := 2
 	if v := os.Getenv("GLOBAL_MAX_CONCURRENT_JOBS"); v != "" {
 		var n int
@@ -178,6 +186,7 @@ func Load() (Config, error) {
 		QueueCategorizeConcurrency: queueCategorizeConcurrency,
 		QueueSummarizeConcurrency:  queueSummarizeConcurrency,
 		QueueDraftConcurrency:      queueDraftConcurrency,
+		QueueForwardConcurrency:    queueForwardConcurrency,
 		GlobalMaxConcurrentJobs:    globalMaxConcurrentJobs,
 	}
 	if cfg.MSClientID == "" || cfg.MSClientSecret == "" || cfg.MSRedirectURI == "" {

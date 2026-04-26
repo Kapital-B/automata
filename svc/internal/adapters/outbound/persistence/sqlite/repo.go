@@ -1235,6 +1235,151 @@ func (r *Repository) ListSendAttemptsByDraft(ctx context.Context, userID uuid.UU
 	return out, rows.Err()
 }
 
+func (r *Repository) ListForwardAllowlist(ctx context.Context, userID uuid.UUID) ([]driven.ForwardAllowlistRow, error) {
+	rows, err := r.db.QueryContext(ctx, `
+		SELECT id, user_id, email, created_at
+		FROM forward_allowlist
+		WHERE user_id = ?
+		ORDER BY email ASC
+	`, userID.String())
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	out := make([]driven.ForwardAllowlistRow, 0)
+	for rows.Next() {
+		var idStr, userStr, email, createdAt string
+		if err := rows.Scan(&idStr, &userStr, &email, &createdAt); err != nil {
+			return nil, err
+		}
+		id, _ := uuid.Parse(idStr)
+		uid, _ := uuid.Parse(userStr)
+		cat, _ := parseTime(createdAt)
+		out = append(out, driven.ForwardAllowlistRow{ID: id, UserID: uid, Email: email, CreatedAt: cat})
+	}
+	return out, rows.Err()
+}
+
+func (r *Repository) ReplaceForwardAllowlist(ctx context.Context, userID uuid.UUID, emails []string) error {
+	tx, err := r.db.BeginTx(ctx, nil)
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback()
+	if _, err := tx.ExecContext(ctx, `DELETE FROM forward_allowlist WHERE user_id = ?`, userID.String()); err != nil {
+		return err
+	}
+	now := time.Now().UTC()
+	for _, email := range emails {
+		trimmed := strings.ToLower(strings.TrimSpace(email))
+		if trimmed == "" {
+			continue
+		}
+		_, err := tx.ExecContext(ctx, `
+			INSERT INTO forward_allowlist (id, user_id, email, created_at)
+			VALUES (?, ?, ?, ?)
+		`, uuid.New().String(), userID.String(), trimmed, formatRFC3339(now))
+		if err != nil {
+			return err
+		}
+	}
+	return tx.Commit()
+}
+
+func (r *Repository) ListForwardRules(ctx context.Context, userID, accountID uuid.UUID) ([]driven.ForwardRuleRow, error) {
+	rows, err := r.db.QueryContext(ctx, `
+		SELECT id, user_id, account_id, name, mode, condition_json, forward_to, enabled, created_at, updated_at
+		FROM forward_rules
+		WHERE user_id = ? AND account_id = ?
+		ORDER BY created_at DESC
+	`, userID.String(), accountID.String())
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	out := make([]driven.ForwardRuleRow, 0)
+	for rows.Next() {
+		var idStr, userStr, accountStr, name, mode, conditionJSON, forwardTo, createdAt, updatedAt string
+		var enabled bool
+		if err := rows.Scan(&idStr, &userStr, &accountStr, &name, &mode, &conditionJSON, &forwardTo, &enabled, &createdAt, &updatedAt); err != nil {
+			return nil, err
+		}
+		id, _ := uuid.Parse(idStr)
+		uid, _ := uuid.Parse(userStr)
+		acc, _ := uuid.Parse(accountStr)
+		cat, _ := parseTime(createdAt)
+		uat, _ := parseTime(updatedAt)
+		out = append(out, driven.ForwardRuleRow{
+			ID: id, UserID: uid, AccountID: acc, Name: name, Mode: mode, ConditionJSON: conditionJSON,
+			ForwardTo: forwardTo, Enabled: enabled, CreatedAt: cat, UpdatedAt: uat,
+		})
+	}
+	return out, rows.Err()
+}
+
+func (r *Repository) CreateForwardRule(ctx context.Context, row driven.ForwardRuleRow) error {
+	_, err := r.db.ExecContext(ctx, `
+		INSERT INTO forward_rules (id, user_id, account_id, name, mode, condition_json, forward_to, enabled, created_at, updated_at)
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+	`, row.ID.String(), row.UserID.String(), row.AccountID.String(), row.Name, row.Mode, row.ConditionJSON, row.ForwardTo, row.Enabled, formatRFC3339(row.CreatedAt), formatRFC3339(row.UpdatedAt))
+	return err
+}
+
+func (r *Repository) UpdateForwardRule(ctx context.Context, row driven.ForwardRuleRow) error {
+	_, err := r.db.ExecContext(ctx, `
+		UPDATE forward_rules
+		SET name = ?, mode = ?, condition_json = ?, forward_to = ?, enabled = ?, updated_at = ?
+		WHERE id = ? AND user_id = ?
+	`, row.Name, row.Mode, row.ConditionJSON, row.ForwardTo, row.Enabled, formatRFC3339(row.UpdatedAt), row.ID.String(), row.UserID.String())
+	return err
+}
+
+func (r *Repository) DeleteForwardRule(ctx context.Context, userID, ruleID uuid.UUID) error {
+	_, err := r.db.ExecContext(ctx, `DELETE FROM forward_rules WHERE id = ? AND user_id = ?`, ruleID.String(), userID.String())
+	return err
+}
+
+func (r *Repository) ListForwardAuditByRun(ctx context.Context, userID, runID uuid.UUID) ([]driven.ForwardAuditRow, error) {
+	rows, err := r.db.QueryContext(ctx, `
+		SELECT id, user_id, account_id, message_id, rule_id, run_id, status, reason, created_at
+		FROM forward_audit
+		WHERE user_id = ? AND run_id = ?
+		ORDER BY created_at DESC
+	`, userID.String(), runID.String())
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	out := make([]driven.ForwardAuditRow, 0)
+	for rows.Next() {
+		var idStr, userStr, accountStr, messageStr, ruleStr, runStr, status, createdAt string
+		var reason sql.NullString
+		if err := rows.Scan(&idStr, &userStr, &accountStr, &messageStr, &ruleStr, &runStr, &status, &reason, &createdAt); err != nil {
+			return nil, err
+		}
+		id, _ := uuid.Parse(idStr)
+		uid, _ := uuid.Parse(userStr)
+		acc, _ := uuid.Parse(accountStr)
+		msg, _ := uuid.Parse(messageStr)
+		rid, _ := uuid.Parse(ruleStr)
+		jid, _ := uuid.Parse(runStr)
+		cat, _ := parseTime(createdAt)
+		out = append(out, driven.ForwardAuditRow{
+			ID: id, UserID: uid, AccountID: acc, MessageID: msg, RuleID: rid, RunID: jid,
+			Status: status, Reason: nullStringPtr(reason), CreatedAt: cat,
+		})
+	}
+	return out, rows.Err()
+}
+
+func (r *Repository) InsertForwardAudit(ctx context.Context, row driven.ForwardAuditRow) error {
+	_, err := r.db.ExecContext(ctx, `
+		INSERT INTO forward_audit (id, user_id, account_id, message_id, rule_id, run_id, status, reason, created_at)
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+	`, row.ID.String(), row.UserID.String(), row.AccountID.String(), row.MessageID.String(), row.RuleID.String(), row.RunID.String(), row.Status, nullStr(row.Reason), formatRFC3339(row.CreatedAt))
+	return err
+}
+
 func (r *Repository) ListSchedulesByUser(ctx context.Context, userID uuid.UUID) ([]driven.ScheduleChainRow, error) {
 	rows, err := r.db.QueryContext(ctx, `
 		SELECT id, user_id, name, account_id, jobs_json, interval_minutes, enabled, last_run_at, next_run_at, created_at, updated_at

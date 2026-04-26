@@ -31,11 +31,13 @@ type Handlers struct {
 	CategorizeSvc   *appmessages.CategorizeService
 	SummarizeSvc    *appmessages.SummarizeService
 	DraftsSvc       *appmessages.DraftLifecycleService
+	ForwardRulesSvc *appmessages.ForwardRulesService
 	AuthSvc         *auth.Service
 	Accounts        driven.AccountRepository
 	Messages        driven.MessageRepository
 	JobRuns         driven.JobRunRepository
 	Summaries       driven.SummaryRepository
+	Forwards        driven.ForwardRepository
 	Schedules       driven.ScheduleRepository
 	OAuthStates     driven.OAuthStateRepository
 	Users           driven.UserRepository
@@ -92,6 +94,13 @@ func (h *Handlers) Routes() http.Handler {
 	r.Patch("/api/settings/schedules", h.updateSchedules)
 	r.Get("/api/messages", h.listMessages)
 	r.Get("/api/messages/{id}", h.getMessage)
+	r.Get("/api/forward-allowlist", h.getForwardAllowlist)
+	r.Put("/api/forward-allowlist", h.putForwardAllowlist)
+	r.Get("/api/accounts/{id}/forward-rules", h.listForwardRules)
+	r.Post("/api/accounts/{id}/forward-rules", h.createForwardRule)
+	r.Patch("/api/forward-rules/{id}", h.updateForwardRule)
+	r.Delete("/api/forward-rules/{id}", h.deleteForwardRule)
+	r.Post("/api/accounts/{id}/forward-rules/run", h.runForwardRules)
 	r.Get("/api/drafts", h.listDrafts)
 	r.Get("/api/drafts/{id}/attempts", h.listDraftAttempts)
 	r.Patch("/api/drafts/{id}", h.saveDraft)
@@ -521,6 +530,177 @@ func (h *Handlers) listDrafts(w http.ResponseWriter, r *http.Request) {
 		})
 	}
 	writeJSON(w, http.StatusOK, out)
+}
+
+type forwardRuleUpsertBody struct {
+	Name          string          `json:"name"`
+	Mode          string          `json:"mode"`
+	ConditionJSON json.RawMessage `json:"condition_json"`
+	ForwardTo     string          `json:"forward_to"`
+	Enabled       bool            `json:"enabled"`
+}
+
+func (h *Handlers) getForwardAllowlist(w http.ResponseWriter, r *http.Request) {
+	if h.Forwards == nil {
+		writeJSON(w, http.StatusServiceUnavailable, map[string]string{"error": "persistence not configured"})
+		return
+	}
+	rows, err := h.Forwards.ListForwardAllowlist(r.Context(), userIDOrEmpty(r))
+	if err != nil {
+		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "internal"})
+		return
+	}
+	out := make([]string, 0, len(rows))
+	for _, row := range rows {
+		out = append(out, row.Email)
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"emails": out})
+}
+
+func (h *Handlers) putForwardAllowlist(w http.ResponseWriter, r *http.Request) {
+	var body struct {
+		Emails []string `json:"emails"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid json"})
+		return
+	}
+	if err := h.Forwards.ReplaceForwardAllowlist(r.Context(), userIDOrEmpty(r), body.Emails); err != nil {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": err.Error()})
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"status": "ok"})
+}
+
+func (h *Handlers) listForwardRules(w http.ResponseWriter, r *http.Request) {
+	accountID, err := uuid.Parse(chi.URLParam(r, "id"))
+	if err != nil {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "bad id"})
+		return
+	}
+	rows, err := h.Forwards.ListForwardRules(r.Context(), userIDOrEmpty(r), accountID)
+	if err != nil {
+		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "internal"})
+		return
+	}
+	out := make([]map[string]any, 0, len(rows))
+	for _, row := range rows {
+		out = append(out, map[string]any{
+			"id":             row.ID.String(),
+			"account_id":     row.AccountID.String(),
+			"name":           row.Name,
+			"mode":           row.Mode,
+			"condition_json": json.RawMessage(row.ConditionJSON),
+			"forward_to":     row.ForwardTo,
+			"enabled":        row.Enabled,
+		})
+	}
+	writeJSON(w, http.StatusOK, out)
+}
+
+func (h *Handlers) createForwardRule(w http.ResponseWriter, r *http.Request) {
+	accountID, err := uuid.Parse(chi.URLParam(r, "id"))
+	if err != nil {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "bad id"})
+		return
+	}
+	var body forwardRuleUpsertBody
+	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid json"})
+		return
+	}
+	row := driven.ForwardRuleRow{
+		ID:            uuid.New(),
+		UserID:        userIDOrEmpty(r),
+		AccountID:     accountID,
+		Name:          strings.TrimSpace(body.Name),
+		Mode:          strings.ToLower(strings.TrimSpace(body.Mode)),
+		ConditionJSON: string(body.ConditionJSON),
+		ForwardTo:     strings.ToLower(strings.TrimSpace(body.ForwardTo)),
+		Enabled:       body.Enabled,
+		CreatedAt:     time.Now().UTC(),
+		UpdatedAt:     time.Now().UTC(),
+	}
+	if err := h.Forwards.CreateForwardRule(r.Context(), row); err != nil {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": err.Error()})
+		return
+	}
+	writeJSON(w, http.StatusCreated, map[string]any{"id": row.ID.String()})
+}
+
+func (h *Handlers) updateForwardRule(w http.ResponseWriter, r *http.Request) {
+	ruleID, err := uuid.Parse(chi.URLParam(r, "id"))
+	if err != nil {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "bad id"})
+		return
+	}
+	var body forwardRuleUpsertBody
+	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid json"})
+		return
+	}
+	row := driven.ForwardRuleRow{
+		ID:            ruleID,
+		UserID:        userIDOrEmpty(r),
+		Name:          strings.TrimSpace(body.Name),
+		Mode:          strings.ToLower(strings.TrimSpace(body.Mode)),
+		ConditionJSON: string(body.ConditionJSON),
+		ForwardTo:     strings.ToLower(strings.TrimSpace(body.ForwardTo)),
+		Enabled:       body.Enabled,
+		UpdatedAt:     time.Now().UTC(),
+	}
+	if err := h.Forwards.UpdateForwardRule(r.Context(), row); err != nil {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": err.Error()})
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"status": "ok"})
+}
+
+func (h *Handlers) deleteForwardRule(w http.ResponseWriter, r *http.Request) {
+	ruleID, err := uuid.Parse(chi.URLParam(r, "id"))
+	if err != nil {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "bad id"})
+		return
+	}
+	if err := h.Forwards.DeleteForwardRule(r.Context(), userIDOrEmpty(r), ruleID); err != nil {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": err.Error()})
+		return
+	}
+	w.WriteHeader(http.StatusNoContent)
+}
+
+func (h *Handlers) runForwardRules(w http.ResponseWriter, r *http.Request) {
+	accountID, err := uuid.Parse(chi.URLParam(r, "id"))
+	if err != nil {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "bad id"})
+		return
+	}
+	uid := userIDOrEmpty(r)
+	if h.JobQueue != nil {
+		runID := uuid.New()
+		_ = h.JobRuns.InsertJobRun(r.Context(), runID, accountID, "forward_rules", "api", "pending", time.Now().UTC(), time.Time{}, nil, `{"queued":true}`)
+		err := h.JobQueue.EnqueueForwardRules(r.Context(), asynqadapter.TaskPayload{
+			SchemaVersion: 1, RunID: runID, UserID: uid, AccountID: accountID, TriggerKind: "api",
+		})
+		if err != nil {
+			msg := err.Error()
+			_ = h.JobRuns.UpdateJobRunStatus(r.Context(), runID, "failed", timePtrHTTP(time.Now().UTC()), &msg, `{"queued":false}`)
+			writeJSON(w, http.StatusBadRequest, map[string]string{"error": err.Error()})
+			return
+		}
+		writeJSON(w, http.StatusAccepted, map[string]any{"job_run_id": runID.String(), "status": "queued"})
+		return
+	}
+	if h.ForwardRulesSvc == nil {
+		writeJSON(w, http.StatusServiceUnavailable, map[string]string{"error": "forward-rules service not configured"})
+		return
+	}
+	runID, err := h.ForwardRulesSvc.RunAccount(r.Context(), uid, accountID, appmessages.ForwardRulesOptions{Trigger: "api"})
+	if err != nil {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": err.Error()})
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"job_run_id": runID.String(), "status": "success"})
 }
 
 func (h *Handlers) listDraftAttempts(w http.ResponseWriter, r *http.Request) {

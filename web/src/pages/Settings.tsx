@@ -616,9 +616,9 @@ export default function SettingsPage() {
                           ),
                         )
                       }
-                      placeholder="sync, categorize, summarize, auto-draft"
+                      placeholder="sync, categorize, summarize, forward_rules, auto-draft"
                     />
-                    <p className="text-xs text-muted-foreground">Supported jobs: sync, categorize, summarize, auto-draft.</p>
+                    <p className="text-xs text-muted-foreground">Supported jobs: sync, categorize, summarize, forward_rules, auto-draft.</p>
                   </div>
                   <div>
                     <Button

@@ -97,6 +97,7 @@ func main() {
 	var categorizeSvc *appmessages.CategorizeService
 	var summarizeSvc *appmessages.SummarizeService
 	var autoDraftSvc *appmessages.AutoDraftService
+	var forwardRulesSvc *appmessages.ForwardRulesService
 	draftsSvc := &appmessages.DraftLifecycleService{
 		Summaries: repo,
 		Accounts:  repo,
@@ -128,6 +129,27 @@ func main() {
 			JobRuns:    repo,
 			ModelLabel: cfg.LLMModel,
 		}
+		forwardRulesSvc = &appmessages.ForwardRulesService{
+			Messages:  repo,
+			Forwards:  repo,
+			Accounts:  repo,
+			OAuth:     msMailOAuth,
+			Graph:     graph,
+			Vault:     vault,
+			LLM:       llm,
+			JobRuns:   repo,
+			ModelName: cfg.LLMModel,
+		}
+	} else {
+		forwardRulesSvc = &appmessages.ForwardRulesService{
+			Messages: repo,
+			Forwards: repo,
+			Accounts: repo,
+			OAuth:    msMailOAuth,
+			Graph:    graph,
+			Vault:    vault,
+			JobRuns:  repo,
+		}
 	}
 	_ = autoDraftSvc
 	var googleClient *googleoauth.OAuth
@@ -148,11 +170,13 @@ func main() {
 		CategorizeSvc:   categorizeSvc,
 		SummarizeSvc:    summarizeSvc,
 		DraftsSvc:       draftsSvc,
+		ForwardRulesSvc: forwardRulesSvc,
 		AuthSvc:         authSvc,
 		Accounts:        repo,
 		Messages:        repo,
 		JobRuns:         repo,
 		Summaries:       repo,
+		Forwards:        repo,
 		Schedules:       repo,
 		OAuthStates:     repo,
 		Users:           repo,
@@ -199,7 +223,7 @@ func main() {
 	if len(cfg.CORSOrigins) > 0 {
 		r = cors.New(cors.Options{
 			AllowedOrigins:   cfg.CORSOrigins,
-			AllowedMethods:   []string{"GET", "POST", "PATCH", "DELETE", "OPTIONS"},
+			AllowedMethods:   []string{"GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"},
 			AllowedHeaders:   []string{"Accept", "Content-Type", "X-Request-ID", "Authorization"},
 			AllowCredentials: false,
 		}).Handler(r)

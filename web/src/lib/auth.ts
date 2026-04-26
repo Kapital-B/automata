@@ -163,6 +163,16 @@ export type DraftSendAttempt = {
   created_at: string;
 };
 
+export type ForwardRule = {
+  id: string;
+  account_id: string;
+  name: string;
+  mode: "logic" | "llm";
+  condition_json: Record<string, unknown>;
+  forward_to: string;
+  enabled: boolean;
+};
+
 export type ListMessagesFilter = {
   accountId?: string;
   category?: string;
@@ -518,6 +528,67 @@ export async function categorizeAccount(
       body: JSON.stringify({ recategorize: Boolean(options.recategorize) }),
     },
   );
+}
+
+export async function getForwardAllowlist(accessToken: string) {
+  return apiRequest<{ emails: string[] }>("/api/forward-allowlist", {
+    headers: toAuthHeader(accessToken),
+  });
+}
+
+export async function putForwardAllowlist(accessToken: string, emails: string[]) {
+  return apiRequest<{ status: string }>("/api/forward-allowlist", {
+    method: "PUT",
+    headers: toAuthHeader(accessToken),
+    body: JSON.stringify({ emails }),
+  });
+}
+
+export async function listForwardRules(accessToken: string, accountID: string) {
+  return apiRequest<ForwardRule[]>(`/api/accounts/${accountID}/forward-rules`, {
+    headers: toAuthHeader(accessToken),
+  });
+}
+
+export async function createForwardRule(
+  accessToken: string,
+  accountID: string,
+  payload: Omit<ForwardRule, "id" | "account_id">,
+) {
+  return apiRequest<{ id: string }>(`/api/accounts/${accountID}/forward-rules`, {
+    method: "POST",
+    headers: toAuthHeader(accessToken),
+    body: JSON.stringify(payload),
+  });
+}
+
+export async function updateForwardRule(
+  accessToken: string,
+  ruleID: string,
+  payload: Omit<ForwardRule, "id" | "account_id">,
+) {
+  return apiRequest<{ status: string }>(`/api/forward-rules/${ruleID}`, {
+    method: "PATCH",
+    headers: toAuthHeader(accessToken),
+    body: JSON.stringify(payload),
+  });
+}
+
+export async function deleteForwardRule(accessToken: string, ruleID: string) {
+  const response = await fetch(`${API_BASE_URL}/api/forward-rules/${ruleID}`, {
+    method: "DELETE",
+    headers: toAuthHeader(accessToken),
+  });
+  if (!response.ok) {
+    await parseApiError(response);
+  }
+}
+
+export async function runForwardRules(accessToken: string, accountID: string) {
+  return apiRequest<{ job_run_id: string; status: string }>(`/api/accounts/${accountID}/forward-rules/run`, {
+    method: "POST",
+    headers: toAuthHeader(accessToken),
+  });
 }
 
 export function readTokensFromFragment(hash: string): AuthTokens | null {

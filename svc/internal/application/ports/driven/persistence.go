@@ -188,6 +188,38 @@ type ScheduleChainRow struct {
 	UpdatedAt       time.Time
 }
 
+type ForwardAllowlistRow struct {
+	ID        uuid.UUID
+	UserID    uuid.UUID
+	Email     string
+	CreatedAt time.Time
+}
+
+type ForwardRuleRow struct {
+	ID            uuid.UUID
+	UserID        uuid.UUID
+	AccountID     uuid.UUID
+	Name          string
+	Mode          string
+	ConditionJSON string
+	ForwardTo     string
+	Enabled       bool
+	CreatedAt     time.Time
+	UpdatedAt     time.Time
+}
+
+type ForwardAuditRow struct {
+	ID        uuid.UUID
+	UserID    uuid.UUID
+	AccountID uuid.UUID
+	MessageID uuid.UUID
+	RuleID    uuid.UUID
+	RunID     uuid.UUID
+	Status    string
+	Reason    *string
+	CreatedAt time.Time
+}
+
 // AccountRepository persists accounts and OAuth tokens (ciphertext).
 type AccountRepository interface {
 	InsertAccount(ctx context.Context, a AccountRow, tokenCiphertext []byte) error
@@ -267,4 +299,15 @@ type ScheduleRepository interface {
 	ReplaceSchedulesByUser(ctx context.Context, userID uuid.UUID, rows []ScheduleChainRow) error
 	ListDueSchedules(ctx context.Context, now time.Time, limit int) ([]ScheduleChainRow, error)
 	MarkScheduleExecuted(ctx context.Context, id uuid.UUID, lastRunAt, nextRunAt time.Time) error
+}
+
+type ForwardRepository interface {
+	ListForwardAllowlist(ctx context.Context, userID uuid.UUID) ([]ForwardAllowlistRow, error)
+	ReplaceForwardAllowlist(ctx context.Context, userID uuid.UUID, emails []string) error
+	ListForwardRules(ctx context.Context, userID, accountID uuid.UUID) ([]ForwardRuleRow, error)
+	CreateForwardRule(ctx context.Context, row ForwardRuleRow) error
+	UpdateForwardRule(ctx context.Context, row ForwardRuleRow) error
+	DeleteForwardRule(ctx context.Context, userID, ruleID uuid.UUID) error
+	ListForwardAuditByRun(ctx context.Context, userID, runID uuid.UUID) ([]ForwardAuditRow, error)
+	InsertForwardAudit(ctx context.Context, row ForwardAuditRow) error
 }
