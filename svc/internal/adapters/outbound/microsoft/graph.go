@@ -252,3 +252,22 @@ func (g *GraphClient) SendMail(ctx context.Context, accessToken string, toEmail,
 	}
 	return g.postJSON(ctx, accessToken, g.apiRoot()+"/me/sendMail", payload)
 }
+
+// ForwardMessage implements POST /me/messages/{id}/forward (Graph preserves MIME body and attachments).
+func (g *GraphClient) ForwardMessage(ctx context.Context, accessToken string, providerMessageID string, toEmail string, comment string) error {
+	if strings.TrimSpace(providerMessageID) == "" {
+		return fmt.Errorf("empty provider message id")
+	}
+	toEmail = strings.TrimSpace(toEmail)
+	if toEmail == "" {
+		return fmt.Errorf("empty forward recipient")
+	}
+	u := g.apiRoot() + "/me/messages/" + url.PathEscape(providerMessageID) + "/forward"
+	payload := map[string]any{
+		"comment": comment,
+		"toRecipients": []map[string]any{
+			{"emailAddress": map[string]any{"address": toEmail}},
+		},
+	}
+	return g.postJSON(ctx, accessToken, u, payload)
+}

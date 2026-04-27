@@ -114,7 +114,7 @@ func (s *ForwardRulesService) RunAccount(ctx context.Context, userID, accountID 
 				skipped++
 				continue
 			}
-			if err := s.Graph.SendMail(ctx, accessToken, rule.ForwardTo, "FWD: "+strings.TrimSpace(msg.Subject), buildForwardBody(msg)); err != nil {
+			if err := s.Graph.ForwardMessage(ctx, accessToken, msg.ProviderMessageID, rule.ForwardTo, ""); err != nil {
 				e := err.Error()
 				_ = s.insertAudit(ctx, userID, accountID, msg.ID, rule.ID, jobID, "failed", &e)
 				failed++
@@ -216,10 +216,6 @@ func predicateMatches(msg driven.MessageRow, p forwardPredicate) bool {
 		return (op == "equals" || op == "eq") && got == want
 	}
 	return false
-}
-
-func buildForwardBody(msg driven.MessageRow) string {
-	return "Automata forwarded message\n\nFrom: " + msg.FromJSON + "\nSubject: " + msg.Subject + "\nReceived: " + msg.ReceivedAt.UTC().Format(time.RFC3339) + "\n\n---\n" + deref(msg.BodyText)
 }
 
 func (s *ForwardRulesService) refreshToken(ctx context.Context, userID, accountID uuid.UUID, account *driven.AccountRow, cipher []byte) (string, error) {
