@@ -42,10 +42,16 @@ type GraphMessage struct {
 	ChangeKey        string
 }
 
+type GraphDeltaResult struct {
+	Messages  []GraphMessage
+	DeltaLink string
+}
+
 // MicrosoftGraph reads mailbox data.
 type MicrosoftGraph interface {
 	GetMe(ctx context.Context, accessToken string) (*GraphProfile, error)
 	ListInboxMessages(ctx context.Context, accessToken string, top int) ([]GraphMessage, error)
+	ListInboxDelta(ctx context.Context, accessToken string, deltaLink string, pageSize int) (*GraphDeltaResult, error)
 	GetMessageBody(ctx context.Context, accessToken string, providerMessageID string) (*GraphMessage, error)
 	SendMail(ctx context.Context, accessToken string, toEmail, subject, body string) error
 	// ForwardMessage forwards an existing mailbox message by Graph message id (server preserves body and attachments).

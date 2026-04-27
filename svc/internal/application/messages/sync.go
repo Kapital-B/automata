@@ -89,7 +89,7 @@ func (s *SyncService) SyncInboxWithOptions(ctx context.Context, userID uuid.UUID
 		_ = s.JobRuns.InsertJobRun(ctx, jobID, accountID, "sync", trigger, "running", started, time.Time{}, nil, `{}`)
 	}
 
-	list, err := s.Graph.ListInboxMessages(ctx, tok.AccessToken, 50)
+	prevDeltaLink, err := s.Accounts.GetSyncDeltaLink(ctx, userID, accountID)
 	if err != nil {
 		if s.JobRuns != nil {
 			msg := err.Error()
@@ -97,6 +97,15 @@ func (s *SyncService) SyncInboxWithOptions(ctx context.Context, userID uuid.UUID
 		}
 		return nil, err
 	}
+	deltaRes, err := s.Graph.ListInboxDelta(ctx, tok.AccessToken, strOrEmpty(prevDeltaLink), 50)
+	if err != nil {
+		if s.JobRuns != nil {
+			msg := err.Error()
+			_ = s.JobRuns.UpdateJobRunStatus(ctx, jobID, "failed", timePtrSync(time.Now().UTC()), &msg, `{}`)
+		}
+		return nil, err
+	}
+	list := deltaRes.Messages
 	if s.JobRuns != nil {
 		_ = s.JobRuns.UpdateJobRunMeta(ctx, jobID, fmt.Sprintf(`{"total_messages":%d,"processed_messages":0,"messages_upserted":0}`, len(list)))
 	}
@@ -147,7 +156,7 @@ func (s *SyncService) SyncInboxWithOptions(ctx context.Context, userID uuid.UUID
 			_ = s.JobRuns.UpdateJobRunMeta(ctx, jobID, fmt.Sprintf(`{"total_messages":%d,"processed_messages":%d,"messages_upserted":%d}`, len(list), n, n))
 		}
 	}
-	if err := s.Accounts.UpsertSyncStateTime(ctx, userID, accountID, time.Now().UTC()); err != nil {
+	if err := s.Accounts.UpsertSyncState(ctx, userID, accountID, &deltaRes.DeltaLink, time.Now().UTC()); err != nil {
 		return nil, err
 	}
 	finished := time.Now().UTC()
@@ -219,6 +228,13 @@ func nullIfEmpty(s string) *string {
 		return nil
 	}
 	return &s
+}
+
+func strOrEmpty(v *string) string {
+	if v == nil {
+		return ""
+	}
+	return *v
 }
 
 func timePtrSync(t time.Time) *time.Time {

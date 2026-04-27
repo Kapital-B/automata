@@ -227,6 +227,8 @@ type AccountRepository interface {
 	GetAccount(ctx context.Context, userID uuid.UUID, id uuid.UUID) (*AccountRow, []byte, error)
 	ListAccounts(ctx context.Context, userID uuid.UUID) ([]AccountRow, error)
 	DeleteAccount(ctx context.Context, userID uuid.UUID, id uuid.UUID) error
+	GetSyncDeltaLink(ctx context.Context, userID uuid.UUID, accountID uuid.UUID) (*string, error)
+	UpsertSyncState(ctx context.Context, userID uuid.UUID, accountID uuid.UUID, deltaLink *string, at time.Time) error
 	UpsertSyncStateTime(ctx context.Context, userID uuid.UUID, accountID uuid.UUID, at time.Time) error
 }
 

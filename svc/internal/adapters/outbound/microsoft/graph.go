@@ -7,8 +7,10 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"math"
 	"net/http"
 	"net/url"
+	"strconv"
 	"strings"
 	"time"
 
@@ -46,17 +48,9 @@ func (g *GraphClient) getJSON(ctx context.Context, accessToken, reqURL string, o
 	}
 	req.Header.Set("Authorization", "Bearer "+accessToken)
 	req.Header.Set("Prefer", `outlook.body-content-type="html"`)
-	resp, err := g.client().Do(req)
+	body, err := g.doJSONWithRetry(ctx, req)
 	if err != nil {
 		return err
-	}
-	defer resp.Body.Close()
-	body, err := io.ReadAll(io.LimitReader(resp.Body, 4<<20))
-	if err != nil {
-		return err
-	}
-	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
-		return fmt.Errorf("graph %s: %s", resp.Status, truncate(string(body), 300))
 	}
 	if out != nil {
 		return json.Unmarshal(body, out)
@@ -75,19 +69,82 @@ func (g *GraphClient) postJSON(ctx context.Context, accessToken, reqURL string, 
 	}
 	req.Header.Set("Authorization", "Bearer "+accessToken)
 	req.Header.Set("Content-Type", "application/json")
-	resp, err := g.client().Do(req)
-	if err != nil {
-		return err
+	_, err = g.doJSONWithRetry(ctx, req)
+	return err
+}
+
+func (g *GraphClient) doJSONWithRetry(ctx context.Context, req *http.Request) ([]byte, error) {
+	maxAttempts := 3
+	for attempt := 1; attempt <= maxAttempts; attempt++ {
+		if attempt > 1 && req.GetBody != nil {
+			body, err := req.GetBody()
+			if err != nil {
+				return nil, err
+			}
+			req.Body = body
+		}
+		resp, err := g.client().Do(req)
+		if err != nil {
+			return nil, err
+		}
+		body, readErr := io.ReadAll(io.LimitReader(resp.Body, 4<<20))
+		_ = resp.Body.Close()
+		if readErr != nil {
+			return nil, readErr
+		}
+		if resp.StatusCode >= 200 && resp.StatusCode < 300 {
+			return body, nil
+		}
+		if resp.StatusCode == http.StatusTooManyRequests && attempt < maxAttempts {
+			wait := retryAfterDelay(resp.Header.Get("Retry-After"), attempt)
+			select {
+			case <-ctx.Done():
+				return nil, ctx.Err()
+			case <-time.After(wait):
+				continue
+			}
+		}
+		return nil, fmt.Errorf("graph %s: %s", resp.Status, truncate(string(body), 300))
 	}
-	defer resp.Body.Close()
-	b, err := io.ReadAll(io.LimitReader(resp.Body, 4<<20))
-	if err != nil {
-		return err
+	return nil, fmt.Errorf("graph request retries exhausted")
+}
+
+func retryAfterDelay(retryAfter string, attempt int) time.Duration {
+	const (
+		minDelay = 1 * time.Second
+		maxDelay = 10 * time.Second
+	)
+	retryAfter = strings.TrimSpace(retryAfter)
+	if retryAfter != "" {
+		if secs, err := strconv.Atoi(retryAfter); err == nil && secs >= 0 {
+			d := time.Duration(secs) * time.Second
+			if d < minDelay {
+				return minDelay
+			}
+			if d > maxDelay {
+				return maxDelay
+			}
+			return d
+		}
+		if when, err := http.ParseTime(retryAfter); err == nil {
+			d := time.Until(when)
+			if d < minDelay {
+				return minDelay
+			}
+			if d > maxDelay {
+				return maxDelay
+			}
+			return d
+		}
 	}
-	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
-		return fmt.Errorf("graph %s: %s", resp.Status, truncate(string(b), 300))
+	backoff := time.Duration(math.Pow(2, float64(attempt-1))) * time.Second
+	if backoff > maxDelay {
+		return maxDelay
 	}
-	return nil
+	if backoff < minDelay {
+		return minDelay
+	}
+	return backoff
 }
 
 func truncate(s string, n int) string {
@@ -151,6 +208,12 @@ type listMessagesResponse struct {
 	Value []graphMessageJSON `json:"value"`
 }
 
+type deltaMessagesResponse struct {
+	Value     []graphMessageJSON `json:"value"`
+	NextLink  string             `json:"@odata.nextLink"`
+	DeltaLink string             `json:"@odata.deltaLink"`
+}
+
 type graphMessageJSON struct {
 	ID               string `json:"id"`
 	ConversationID   string `json:"conversationId"`
@@ -212,6 +275,63 @@ func (g *GraphClient) ListInboxMessages(ctx context.Context, accessToken string,
 		out = append(out, gm)
 	}
 	return out, nil
+}
+
+// ListInboxDelta lists mailbox changes via Graph delta query and returns a new delta link.
+func (g *GraphClient) ListInboxDelta(ctx context.Context, accessToken string, deltaLink string, pageSize int) (*driven.GraphDeltaResult, error) {
+	if pageSize <= 0 {
+		pageSize = 50
+	}
+	if pageSize > 100 {
+		pageSize = 100
+	}
+	nextURL := strings.TrimSpace(deltaLink)
+	if nextURL == "" {
+		u, _ := url.Parse(g.apiRoot() + "/me/mailFolders/inbox/messages/delta")
+		q := u.Query()
+		q.Set("$top", fmt.Sprintf("%d", pageSize))
+		q.Set("$select", "id,conversationId,receivedDateTime,subject,body,bodyPreview,from,hasAttachments,changeKey")
+		u.RawQuery = q.Encode()
+		nextURL = u.String()
+	}
+	out := make([]driven.GraphMessage, 0, pageSize)
+	finalDelta := ""
+	for nextURL != "" {
+		var res deltaMessagesResponse
+		if err := g.getJSON(ctx, accessToken, nextURL, &res); err != nil {
+			return nil, err
+		}
+		for _, m := range res.Value {
+			// Graph delta may include tombstones; skip rows without id.
+			if strings.TrimSpace(m.ID) == "" {
+				continue
+			}
+			out = append(out, driven.GraphMessage{
+				ID:               m.ID,
+				ConversationID:   m.ConversationID,
+				ReceivedDateTime: m.ReceivedDateTime,
+				Subject:          m.Subject,
+				FromName:         m.From.EmailAddress.Name,
+				FromAddress:      m.From.EmailAddress.Address,
+				BodyPreview:      m.BodyPreview,
+				BodyContent:      m.Body.Content,
+				BodyContentType:  m.Body.ContentType,
+				HasAttachments:   m.HasAttachments,
+				ChangeKey:        m.ChangeKey,
+			})
+		}
+		if strings.TrimSpace(res.DeltaLink) != "" {
+			finalDelta = strings.TrimSpace(res.DeltaLink)
+		}
+		nextURL = strings.TrimSpace(res.NextLink)
+	}
+	if finalDelta == "" {
+		return nil, fmt.Errorf("graph delta response missing delta link")
+	}
+	return &driven.GraphDeltaResult{
+		Messages:  out,
+		DeltaLink: finalDelta,
+	}, nil
 }
 
 // GetMessageBody fetches full message body content.

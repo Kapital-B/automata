@@ -208,6 +208,43 @@ func (r *Repository) DeleteAccount(ctx context.Context, userID uuid.UUID, id uui
 	return tx.Commit()
 }
 
+func (r *Repository) GetSyncDeltaLink(ctx context.Context, userID uuid.UUID, accountID uuid.UUID) (*string, error) {
+	var delta sql.NullString
+	err := r.db.QueryRowContext(ctx, `
+		SELECT s.delta_link
+		FROM account_sync_state s
+		INNER JOIN accounts a ON a.id = s.account_id
+		WHERE s.account_id = ? AND a.user_id = ?`,
+		accountID.String(), userID.String(),
+	).Scan(&delta)
+	if errors.Is(err, sql.ErrNoRows) {
+		return nil, nil
+	}
+	if err != nil {
+		return nil, err
+	}
+	if !delta.Valid || strings.TrimSpace(delta.String) == "" {
+		return nil, nil
+	}
+	v := delta.String
+	return &v, nil
+}
+
+func (r *Repository) UpsertSyncState(ctx context.Context, userID uuid.UUID, accountID uuid.UUID, deltaLink *string, at time.Time) error {
+	now := formatRFC3339(at.UTC())
+	var link any
+	if deltaLink != nil && strings.TrimSpace(*deltaLink) != "" {
+		link = strings.TrimSpace(*deltaLink)
+	}
+	_, err := r.db.ExecContext(ctx, `
+		UPDATE account_sync_state
+		SET delta_link = ?, last_synced_at = ?
+		WHERE account_id = ? AND EXISTS (SELECT 1 FROM accounts WHERE id = ? AND user_id = ?)`,
+		link, now, accountID.String(), accountID.String(), userID.String(),
+	)
+	return err
+}
+
 func (r *Repository) UpsertSyncStateTime(ctx context.Context, userID uuid.UUID, accountID uuid.UUID, at time.Time) error {
 	now := formatRFC3339(at.UTC())
 	_, err := r.db.ExecContext(ctx, `
