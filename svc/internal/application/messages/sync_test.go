@@ -3,6 +3,7 @@ package messages
 import (
 	"context"
 	"database/sql"
+	"encoding/json"
 	"errors"
 	"testing"
 	"time"
@@ -35,7 +36,7 @@ func (v *passthroughVault) Decrypt(ciphertext []byte) ([]byte, error) { return c
 type fakeDeltaGraph struct {
 	calls      []string
 	results    []*driven.GraphDeltaResult
-	err        error
+	errByCall  map[int]error
 	resultIdx  int
 }
 
@@ -47,8 +48,11 @@ func (f *fakeDeltaGraph) ListInboxMessages(ctx context.Context, accessToken stri
 }
 func (f *fakeDeltaGraph) ListInboxDelta(ctx context.Context, accessToken string, deltaLink string, pageSize int) (*driven.GraphDeltaResult, error) {
 	f.calls = append(f.calls, deltaLink)
-	if f.err != nil {
-		return nil, f.err
+	call := len(f.calls) - 1
+	if f.errByCall != nil {
+		if err, ok := f.errByCall[call]; ok {
+			return nil, err
+		}
 	}
 	if f.resultIdx >= len(f.results) {
 		return &driven.GraphDeltaResult{Messages: nil, DeltaLink: "delta-empty"}, nil
@@ -170,7 +174,7 @@ func TestSyncInboxFailsAndDoesNotOverwriteDeltaLink(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	graph.err = errors.New("graph failure")
+	graph.errByCall = map[int]error{1: errors.New("graph failure")}
 	if _, err := svc.SyncInbox(context.Background(), userID, accountID); err == nil {
 		t.Fatal("expected sync failure")
 	}
@@ -180,5 +184,99 @@ func TestSyncInboxFailsAndDoesNotOverwriteDeltaLink(t *testing.T) {
 	}
 	if stored == nil || *stored != "delta-1" {
 		t.Fatalf("expected old delta link to be preserved, got %v", stored)
+	}
+}
+
+func TestSyncInboxResetsInvalidDeltaAndContinues(t *testing.T) {
+	graph := &fakeDeltaGraph{
+		results: []*driven.GraphDeltaResult{
+			{
+				Messages:  []driven.GraphMessage{{ID: "provider-1", Subject: "one", ReceivedDateTime: time.Now().UTC().Format(time.RFC3339), FromAddress: "a@example.com"}},
+				DeltaLink: "delta-1",
+			},
+			{
+				Messages:  []driven.GraphMessage{{ID: "provider-2", Subject: "two", ReceivedDateTime: time.Now().UTC().Format(time.RFC3339), FromAddress: "b@example.com"}},
+				DeltaLink: "delta-2",
+			},
+		},
+	}
+	svc, repo, userID, accountID := setupSyncService(t, graph)
+	if _, err := svc.SyncInbox(context.Background(), userID, accountID); err != nil {
+		t.Fatal(err)
+	}
+	graph.errByCall = map[int]error{1: errors.New("graph 410 Gone: SyncStateNotFound")}
+
+	res, err := svc.SyncInbox(context.Background(), userID, accountID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := len(graph.calls); got != 3 {
+		t.Fatalf("expected fallback to bootstrap delta after invalid cursor; got %d calls (%#v)", got, graph.calls)
+	}
+	if graph.calls[1] != "delta-1" || graph.calls[2] != "" {
+		t.Fatalf("unexpected delta sequence: %#v", graph.calls)
+	}
+	stored, err := repo.GetSyncDeltaLink(context.Background(), userID, accountID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if stored == nil || *stored != "delta-2" {
+		t.Fatalf("expected updated delta-2 after fallback, got %v", stored)
+	}
+	run, err := repo.GetJobRun(context.Background(), userID, res.JobRunID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if run == nil {
+		t.Fatal("expected job run")
+	}
+	var meta map[string]any
+	if err := json.Unmarshal([]byte(run.MetaJSON), &meta); err != nil {
+		t.Fatal(err)
+	}
+	if got, _ := meta["delta_reused"].(bool); got {
+		t.Fatalf("expected delta_reused=false after fallback, got %+v", meta["delta_reused"])
+	}
+	if got, _ := meta["delta_reset_reason"].(string); got != "invalid_delta_link" {
+		t.Fatalf("expected delta_reset_reason=invalid_delta_link, got %q", got)
+	}
+}
+
+func TestSyncInboxWritesObservabilityMeta(t *testing.T) {
+	graph := &fakeDeltaGraph{
+		results: []*driven.GraphDeltaResult{
+			{
+				Messages: []driven.GraphMessage{
+					{ID: "provider-1", Subject: "one", ReceivedDateTime: time.Now().UTC().Format(time.RFC3339), FromAddress: "a@example.com"},
+					{ID: "provider-2", Subject: "two", ReceivedDateTime: time.Now().UTC().Format(time.RFC3339), FromAddress: "b@example.com"},
+				},
+				DeltaLink: "delta-1",
+			},
+		},
+	}
+	svc, repo, userID, accountID := setupSyncService(t, graph)
+	res, err := svc.SyncInbox(context.Background(), userID, accountID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	run, err := repo.GetJobRun(context.Background(), userID, res.JobRunID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if run == nil {
+		t.Fatal("expected job run")
+	}
+	var meta map[string]any
+	if err := json.Unmarshal([]byte(run.MetaJSON), &meta); err != nil {
+		t.Fatal(err)
+	}
+	if got, _ := meta["fetched"].(float64); got != 2 {
+		t.Fatalf("expected fetched=2, got %v", got)
+	}
+	if got, _ := meta["upserted"].(float64); got != 2 {
+		t.Fatalf("expected upserted=2, got %v", got)
+	}
+	if got, _ := meta["delta_reused"].(bool); got {
+		t.Fatalf("expected delta_reused=false on initial sync, got %v", got)
 	}
 }

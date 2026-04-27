@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"html"
+	"strconv"
 	"strings"
 	"time"
 
@@ -97,17 +98,24 @@ func (s *SyncService) SyncInboxWithOptions(ctx context.Context, userID uuid.UUID
 		}
 		return nil, err
 	}
+	deltaUsed := strings.TrimSpace(strOrEmpty(prevDeltaLink)) != ""
+	deltaResetReason := ""
 	deltaRes, err := s.Graph.ListInboxDelta(ctx, tok.AccessToken, strOrEmpty(prevDeltaLink), 50)
+	if err != nil && deltaUsed && isInvalidDeltaError(err) {
+		deltaResetReason = "invalid_delta_link"
+		deltaRes, err = s.Graph.ListInboxDelta(ctx, tok.AccessToken, "", 50)
+		deltaUsed = false
+	}
 	if err != nil {
 		if s.JobRuns != nil {
 			msg := err.Error()
-			_ = s.JobRuns.UpdateJobRunStatus(ctx, jobID, "failed", timePtrSync(time.Now().UTC()), &msg, `{}`)
+			_ = s.JobRuns.UpdateJobRunStatus(ctx, jobID, "failed", timePtrSync(time.Now().UTC()), &msg, syncMetaJSON(0, 0, deltaUsed, deltaResetReason))
 		}
 		return nil, err
 	}
 	list := deltaRes.Messages
 	if s.JobRuns != nil {
-		_ = s.JobRuns.UpdateJobRunMeta(ctx, jobID, fmt.Sprintf(`{"total_messages":%d,"processed_messages":0,"messages_upserted":0}`, len(list)))
+		_ = s.JobRuns.UpdateJobRunMeta(ctx, jobID, syncProgressMetaJSON(len(list), 0, 0, deltaUsed, deltaResetReason))
 	}
 
 	n := 0
@@ -153,7 +161,7 @@ func (s *SyncService) SyncInboxWithOptions(ctx context.Context, userID uuid.UUID
 		}
 		n++
 		if s.JobRuns != nil {
-			_ = s.JobRuns.UpdateJobRunMeta(ctx, jobID, fmt.Sprintf(`{"total_messages":%d,"processed_messages":%d,"messages_upserted":%d}`, len(list), n, n))
+			_ = s.JobRuns.UpdateJobRunMeta(ctx, jobID, syncProgressMetaJSON(len(list), n, n, deltaUsed, deltaResetReason))
 		}
 	}
 	if err := s.Accounts.UpsertSyncState(ctx, userID, accountID, &deltaRes.DeltaLink, time.Now().UTC()); err != nil {
@@ -161,7 +169,7 @@ func (s *SyncService) SyncInboxWithOptions(ctx context.Context, userID uuid.UUID
 	}
 	finished := time.Now().UTC()
 	if s.JobRuns != nil {
-		meta := fmt.Sprintf(`{"messages_upserted":%d}`, n)
+		meta := syncMetaJSON(len(list), n, deltaUsed, deltaResetReason)
 		_ = s.JobRuns.UpdateJobRunStatus(ctx, jobID, "success", timePtrSync(finished), nil, meta)
 	}
 	return &SyncResult{JobRunID: jobID, MessagesUpserted: n}, nil
@@ -235,6 +243,45 @@ func strOrEmpty(v *string) string {
 		return ""
 	}
 	return *v
+}
+
+func isInvalidDeltaError(err error) bool {
+	if err == nil {
+		return false
+	}
+	msg := strings.ToLower(err.Error())
+	return strings.Contains(msg, "syncstatenotfound") ||
+		strings.Contains(msg, "invaliddeltatoken") ||
+		strings.Contains(msg, "invalid delta token") ||
+		strings.Contains(msg, "resyncrequired") ||
+		strings.Contains(msg, "410 gone")
+}
+
+func syncProgressMetaJSON(total, processed, upserted int, deltaReused bool, deltaResetReason string) string {
+	return "{" +
+		`"total_messages":` + strconv.Itoa(total) + "," +
+		`"processed_messages":` + strconv.Itoa(processed) + "," +
+		`"messages_upserted":` + strconv.Itoa(upserted) + "," +
+		`"delta_reused":` + strconv.FormatBool(deltaReused) + "," +
+		`"delta_reset_reason":"` + jsonEscape(deltaResetReason) + `"` +
+		"}"
+}
+
+func syncMetaJSON(fetched, upserted int, deltaReused bool, deltaResetReason string) string {
+	return "{" +
+		`"fetched":` + strconv.Itoa(fetched) + "," +
+		`"upserted":` + strconv.Itoa(upserted) + "," +
+		`"delta_reused":` + strconv.FormatBool(deltaReused) + "," +
+		`"delta_reset_reason":"` + jsonEscape(deltaResetReason) + `"` +
+		"}"
+}
+
+func jsonEscape(s string) string {
+	b, _ := json.Marshal(s)
+	if len(b) >= 2 && b[0] == '"' && b[len(b)-1] == '"' {
+		return string(b[1 : len(b)-1])
+	}
+	return s
 }
 
 func timePtrSync(t time.Time) *time.Time {
