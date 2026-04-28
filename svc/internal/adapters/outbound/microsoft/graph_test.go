@@ -3,6 +3,7 @@ package microsoft
 import (
 	"context"
 	"encoding/json"
+	"io"
 	"net/http"
 	"net/http/httptest"
 	"sync/atomic"
@@ -97,5 +98,40 @@ func TestListInboxDeltaFailsWithoutDeltaLink(t *testing.T) {
 	client := &GraphClient{APIRoot: server.URL + "/v1.0"}
 	if _, err := client.ListInboxDelta(context.Background(), "token", "", 10); err == nil {
 		t.Fatal("expected error when delta link is missing")
+	}
+}
+
+func TestReplyToMessagePreservesLineBreaksAsHTML(t *testing.T) {
+	var gotContentType string
+	var gotContent string
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodPost || r.URL.Path != "/v1.0/me/messages/msg-123/reply" {
+			http.NotFound(w, r)
+			return
+		}
+		raw, _ := io.ReadAll(r.Body)
+		var payload map[string]any
+		if err := json.Unmarshal(raw, &payload); err != nil {
+			t.Fatalf("decode payload: %v", err)
+		}
+		message := payload["message"].(map[string]any)
+		body := message["body"].(map[string]any)
+		gotContentType, _ = body["contentType"].(string)
+		gotContent, _ = body["content"].(string)
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusAccepted)
+	}))
+	defer server.Close()
+
+	client := &GraphClient{APIRoot: server.URL + "/v1.0"}
+	if err := client.ReplyToMessage(context.Background(), "token", "msg-123", "Hi David,\n\nLine two & three"); err != nil {
+		t.Fatal(err)
+	}
+	if gotContentType != "HTML" {
+		t.Fatalf("expected HTML content type, got %q", gotContentType)
+	}
+	const want = "Hi David,<br><br>Line two &amp; three"
+	if gotContent != want {
+		t.Fatalf("unexpected reply body: got %q want %q", gotContent, want)
 	}
 }

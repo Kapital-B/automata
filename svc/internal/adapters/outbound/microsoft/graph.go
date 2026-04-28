@@ -6,6 +6,7 @@ import (
 	"encoding/base64"
 	"encoding/json"
 	"fmt"
+	"html"
 	"io"
 	"math"
 	"net/http"
@@ -383,11 +384,18 @@ func (g *GraphClient) ReplyToMessage(ctx context.Context, accessToken string, pr
 		"message": map[string]any{
 			"body": map[string]any{
 				"contentType": "HTML",
-				"content":     body,
+				"content":     plainTextToHTML(body),
 			},
 		},
 	}
 	return g.postJSON(ctx, accessToken, u, payload)
+}
+
+func plainTextToHTML(s string) string {
+	normalized := strings.ReplaceAll(s, "\r\n", "\n")
+	normalized = strings.ReplaceAll(normalized, "\r", "\n")
+	escaped := html.EscapeString(normalized)
+	return strings.ReplaceAll(escaped, "\n", "<br>")
 }
 
 // ForwardMessage implements POST /me/messages/{id}/forward (Graph preserves MIME body and attachments).
