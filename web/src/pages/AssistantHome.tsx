@@ -36,6 +36,8 @@ export default function AssistantHomePage({ accountFilter }: Props) {
     isLoading,
     accountsError,
     summaryError,
+    draftsError,
+    runsError,
   } = useAssistantHomeData(accountFilter);
 
   const refreshMutation = useMutation({
@@ -98,8 +100,17 @@ export default function AssistantHomePage({ accountFilter }: Props) {
 
   if (accountsError) {
     return (
-      <div className="surface-card px-4 py-5 text-sm text-destructive">
-        Could not load accounts. Please retry.
+      <div className="surface-card space-y-3 px-4 py-5 text-sm text-destructive">
+        <p>Could not load accounts.</p>
+        <Button
+          size="sm"
+          variant="outline"
+          onClick={() => {
+            void queryClient.invalidateQueries({ queryKey: ["accounts"] });
+          }}
+        >
+          Retry
+        </Button>
       </div>
     );
   }
@@ -143,9 +154,44 @@ export default function AssistantHomePage({ accountFilter }: Props) {
       </section>
 
       {summaryError && (
-        <div className="surface-card flex items-center gap-2 px-4 py-3 text-sm text-destructive">
-          <AlertCircle className="h-4 w-4" />
-          Could not load today's intelligence.
+        <div className="surface-card flex flex-wrap items-center justify-between gap-3 px-4 py-3 text-sm text-destructive">
+          <span className="inline-flex items-center gap-2">
+            <AlertCircle className="h-4 w-4" />
+            Could not load today's intelligence.
+          </span>
+          <Button
+            size="sm"
+            variant="outline"
+            onClick={() => {
+              void queryClient.invalidateQueries({ queryKey: ["summary"] });
+            }}
+          >
+            Retry
+          </Button>
+        </div>
+      )}
+
+      {!summaryError && !summary?.snapshot && (
+        <div className="surface-card flex flex-wrap items-center justify-between gap-3 px-4 py-3 text-sm">
+          <span className="text-muted-foreground">
+            No summary generated yet for this scope.
+          </span>
+          <Button
+            variant="outline"
+            size="sm"
+            onClick={() => refreshMutation.mutate()}
+            disabled={refreshMutation.isPending}
+          >
+            <RefreshCw className="mr-1.5 h-3.5 w-3.5" />
+            Refresh summary
+          </Button>
+        </div>
+      )}
+
+      {(draftsError || runsError) && (
+        <div className="surface-card flex items-center gap-2 px-4 py-3 text-xs text-muted-foreground">
+          <AlertCircle className="h-3.5 w-3.5" />
+          Some secondary assistant signals are unavailable right now.
         </div>
       )}
 
@@ -294,7 +340,17 @@ export default function AssistantHomePage({ accountFilter }: Props) {
               >
                 <connector.icon className="h-3 w-3" />
                 {connector.name}
-                <span className="uppercase tracking-wider text-muted-foreground">{label}</span>
+                <span
+                  className={
+                    label === "connected"
+                      ? "uppercase tracking-wider text-success"
+                      : label === "attention"
+                        ? "uppercase tracking-wider text-destructive"
+                        : "uppercase tracking-wider text-muted-foreground"
+                  }
+                >
+                  {label === "soon" ? "coming soon" : label}
+                </span>
               </span>
             );
           })}

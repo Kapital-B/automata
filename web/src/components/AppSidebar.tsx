@@ -1,4 +1,5 @@
 import { NavLink, useLocation } from "react-router-dom";
+import { useQuery } from "@tanstack/react-query";
 import {
   Sparkles,
   Inbox,
@@ -30,6 +31,7 @@ import {
 import { cn } from "@/lib/utils";
 import { useAuth } from "@/components/auth/AuthProvider";
 import { useAccountsData } from "@/hooks/useAccountsData";
+import { getSummary, listDraftSuggestions } from "@/lib/auth";
 
 const assistantNav = [
   { title: "Assistant", url: "/", icon: MessageSquare, end: true },
@@ -59,8 +61,22 @@ export function AppSidebar() {
   const { state } = useSidebar();
   const collapsed = state === "collapsed";
   const location = useLocation();
-  const { user, signOut } = useAuth();
+  const { user, signOut, accessToken } = useAuth();
   const { accounts } = useAccountsData();
+  const connectedAccounts = accounts.filter((a) => a.status === "connected");
+
+  const summaryBadgeQuery = useQuery({
+    queryKey: ["sidebar", "summary-badge", accessToken],
+    queryFn: () => getSummary(accessToken!),
+    enabled: Boolean(accessToken) && connectedAccounts.length > 0,
+  });
+  const draftsBadgeQuery = useQuery({
+    queryKey: ["sidebar", "drafts-badge", accessToken],
+    queryFn: () => listDraftSuggestions(accessToken!),
+    enabled: Boolean(accessToken) && connectedAccounts.length > 0,
+  });
+  const todayBadge = summaryBadgeQuery.data?.action_items?.length ?? 0;
+  const draftsBadge = draftsBadgeQuery.data?.length ?? 0;
 
   const isActive = (url: string, end?: boolean) =>
     end ? location.pathname === url : location.pathname.startsWith(url) && url !== "/";
@@ -136,7 +152,21 @@ export function AppSidebar() {
                       {({ isActive: a }) => (
                         <span className={linkClass(a)}>
                           <item.icon className="h-4 w-4 shrink-0" />
-                          {!collapsed && <span>{item.title}</span>}
+                          {!collapsed && (
+                            <>
+                              <span className="flex-1">{item.title}</span>
+                              {item.title === "Today" && (
+                                <span className="rounded-full border border-sidebar-border px-1.5 py-0.5 text-[10px] font-medium leading-none">
+                                  {todayBadge}
+                                </span>
+                              )}
+                              {item.title === "Drafts" && (
+                                <span className="rounded-full border border-sidebar-border px-1.5 py-0.5 text-[10px] font-medium leading-none">
+                                  {draftsBadge}
+                                </span>
+                              )}
+                            </>
+                          )}
                         </span>
                       )}
                     </NavLink>
