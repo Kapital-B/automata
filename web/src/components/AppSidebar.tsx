@@ -93,11 +93,12 @@ export function AppSidebar() {
     <Sidebar collapsible="icon" className="border-r border-sidebar-border">
       <SidebarHeader className="px-3 pt-4 pb-2">
         <div className="flex items-center gap-2">
-          <div
-            className="grid h-7 w-7 place-items-center rounded-md text-primary-foreground"
-            style={{ background: "var(--gradient-ink)" }}
-          >
-            <span className="font-display text-sm font-semibold">A</span>
+          <div className="h-full w-9 overflow-hidden rounded-md">
+            <img
+              src="/logo.png"
+              alt="Automata"
+              className="h-full w-auto object-contain"
+            />
           </div>
           {!collapsed && (
             <div className="leading-tight">

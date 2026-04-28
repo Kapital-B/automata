@@ -16,11 +16,12 @@ export function AuthLayout({ eyebrow, title, subtitle, children }: AuthLayoutPro
       <div className="flex flex-col">
         <header className="px-6 lg:px-12 py-6">
           <Link to="/" className="inline-flex items-center gap-2">
-            <div
-              className="grid h-8 w-8 place-items-center rounded-md text-primary-foreground"
-              style={{ background: "var(--gradient-ink)" }}
-            >
-              <span className="font-display text-sm font-semibold">A</span>
+            <div className="h-full w-9 overflow-hidden rounded-md">
+              <img
+                src="/logo.png"
+                alt="Automata"
+                className="h-full w-auto object-contain"
+              />
             </div>
             <div className="leading-tight">
               <p className="font-display text-base font-semibold">Automata</p>
