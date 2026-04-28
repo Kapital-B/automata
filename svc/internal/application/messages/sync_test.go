@@ -67,6 +67,9 @@ func (f *fakeDeltaGraph) GetMessageBody(ctx context.Context, accessToken string,
 func (f *fakeDeltaGraph) SendMail(ctx context.Context, accessToken string, toEmail, subject, body string) error {
 	return errors.New("not implemented")
 }
+func (f *fakeDeltaGraph) ReplyToMessage(ctx context.Context, accessToken string, providerMessageID string, body string) error {
+	return errors.New("not implemented")
+}
 func (f *fakeDeltaGraph) ForwardMessage(ctx context.Context, accessToken string, providerMessageID string, toEmail string, comment string) error {
 	return errors.New("not implemented")
 }

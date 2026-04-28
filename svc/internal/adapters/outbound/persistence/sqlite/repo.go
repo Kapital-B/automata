@@ -277,6 +277,7 @@ func (r *Repository) UpsertMessage(ctx context.Context, m driven.MessageRow) err
 			body_fetched_at = COALESCE(excluded.body_fetched_at, messages.body_fetched_at),
 			has_attachments = excluded.has_attachments,
 			raw_etag = excluded.raw_etag,
+			summary_seen_at = messages.summary_seen_at,
 			updated_at = excluded.updated_at`,
 		m.ID.String(), m.AccountID.String(), m.ProviderMessageID, nullStr(m.ConversationID),
 		formatRFC3339(m.ReceivedAt.UTC()), m.Subject, fromJSON,
@@ -299,7 +300,7 @@ func (r *Repository) GetMessage(ctx context.Context, userID uuid.UUID, id uuid.U
 	row := r.db.QueryRowContext(ctx, `
 		SELECT m.id, m.account_id, m.provider_message_id, m.conversation_id, m.received_at, m.subject, m.from_json,
 			m.to_cc_preview, m.body_text, m.body_fetched_at, m.has_attachments, m.raw_etag,
-			cd.slug, mc.confidence, m.created_at, m.updated_at
+			cd.slug, mc.confidence, m.created_at, m.updated_at, m.summary_seen_at
 		FROM messages m
 		INNER JOIN accounts a ON a.id = m.account_id AND a.user_id = ?
 		LEFT JOIN message_categories mc ON mc.message_id = m.id AND mc.source = 'llm'
@@ -332,7 +333,7 @@ func (r *Repository) ListMessages(ctx context.Context, userID uuid.UUID, filter 
 	b.WriteString(`
 		SELECT m.id, m.account_id, m.provider_message_id, m.conversation_id, m.received_at, m.subject, m.from_json,
 			m.to_cc_preview, m.body_text, m.body_fetched_at, m.has_attachments, m.raw_etag,
-			cd.slug, mc.confidence, m.created_at, m.updated_at
+			cd.slug, mc.confidence, m.created_at, m.updated_at, m.summary_seen_at
 		FROM messages m
 		INNER JOIN accounts a ON a.id = m.account_id AND a.user_id = ?
 		LEFT JOIN message_categories mc ON mc.message_id = m.id AND mc.source = 'llm'
@@ -351,6 +352,9 @@ func (r *Repository) ListMessages(ctx context.Context, userID uuid.UUID, filter 
 		b.WriteString(` AND m.received_at >= ?`)
 		args = append(args, formatRFC3339(filter.Since.UTC()))
 	}
+	if filter.OnlySummaryUnseen {
+		b.WriteString(` AND m.summary_seen_at IS NULL`)
+	}
 	b.WriteString(` ORDER BY m.received_at DESC LIMIT ? OFFSET ?`)
 	args = append(args, limit, offset)
 	rows, err := r.db.QueryContext(ctx, b.String(), args...)
@@ -359,6 +363,36 @@ func (r *Repository) ListMessages(ctx context.Context, userID uuid.UUID, filter 
 	}
 	defer rows.Close()
 	return scanMessageRows(rows)
+}
+
+func (r *Repository) MarkMessagesSummarySeen(ctx context.Context, userID uuid.UUID, messageIDs []uuid.UUID, at time.Time) error {
+	if len(messageIDs) == 0 {
+		return nil
+	}
+	seen := formatRFC3339(at.UTC())
+	const batch = 80
+	for i := 0; i < len(messageIDs); i += batch {
+		j := i + batch
+		if j > len(messageIDs) {
+			j = len(messageIDs)
+		}
+		chunk := messageIDs[i:j]
+		var b strings.Builder
+		b.WriteString(`UPDATE messages SET summary_seen_at = ?, updated_at = ? WHERE account_id IN (SELECT id FROM accounts WHERE user_id = ?) AND id IN (`)
+		args := []any{seen, seen, userID.String()}
+		for k, id := range chunk {
+			if k > 0 {
+				b.WriteString(`,`)
+			}
+			b.WriteString(`?`)
+			args = append(args, id.String())
+		}
+		b.WriteString(`)`)
+		if _, err := r.db.ExecContext(ctx, b.String(), args...); err != nil {
+			return err
+		}
+	}
+	return nil
 }
 
 func (r *Repository) UpsertMessageCategory(ctx context.Context, row driven.MessageCategoryRow) error {
@@ -543,9 +577,10 @@ func scanMessageScanner(s rowScanner) (*driven.MessageRow, error) {
 	var categorySlug sql.NullString
 	var confidence sql.NullFloat64
 	var hasAtt int
+	var summarySeen sql.NullString
 	if err := s.Scan(
 		&idStr, &accStr, &m.ProviderMessageID, &conv, &receivedAt, &m.Subject, &m.FromJSON,
-		&preview, &body, &bodyAt, &hasAtt, &etag, &categorySlug, &confidence, &createdAt, &updatedAt,
+		&preview, &body, &bodyAt, &hasAtt, &etag, &categorySlug, &confidence, &createdAt, &updatedAt, &summarySeen,
 	); err != nil {
 		return nil, err
 	}
@@ -586,6 +621,13 @@ func scanMessageScanner(s rowScanner) (*driven.MessageRow, error) {
 	m.UpdatedAt, err = parseTime(updatedAt)
 	if err != nil {
 		return nil, err
+	}
+	if summarySeen.Valid && strings.TrimSpace(summarySeen.String) != "" {
+		t, err := parseTime(summarySeen.String)
+		if err != nil {
+			return nil, err
+		}
+		m.SummarySeenAt = &t
 	}
 	return &m, nil
 }
@@ -947,6 +989,48 @@ func (r *Repository) ListFYIByRun(ctx context.Context, userID uuid.UUID, runID u
 		SELECT id, user_id, account_id, message_id, run_id, text, created_at
 		FROM fyi_items WHERE user_id = ? AND run_id = ? ORDER BY created_at DESC
 	`, userID.String(), runID.String())
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	out := make([]driven.FYIRow, 0)
+	for rows.Next() {
+		var idStr, uidStr, accStr, msgStr, runStr, text, createdAt string
+		if err := rows.Scan(&idStr, &uidStr, &accStr, &msgStr, &runStr, &text, &createdAt); err != nil {
+			return nil, err
+		}
+		id, _ := uuid.Parse(idStr)
+		uid, _ := uuid.Parse(uidStr)
+		acc, _ := uuid.Parse(accStr)
+		msg, _ := uuid.Parse(msgStr)
+		rid, _ := uuid.Parse(runStr)
+		cat, _ := parseTime(createdAt)
+		out = append(out, driven.FYIRow{ID: id, UserID: uid, AccountID: acc, MessageID: msg, RunID: rid, Text: text, CreatedAt: cat})
+	}
+	return out, rows.Err()
+}
+
+func (r *Repository) ListOpenFYI(ctx context.Context, userID uuid.UUID, accountID *uuid.UUID, limit int) ([]driven.FYIRow, error) {
+	if limit <= 0 {
+		limit = 200
+	}
+	if limit > 500 {
+		limit = 500
+	}
+	var b strings.Builder
+	b.WriteString(`
+		SELECT id, user_id, account_id, message_id, run_id, text, created_at
+		FROM fyi_items
+		WHERE user_id = ?
+	`)
+	args := []any{userID.String()}
+	if accountID != nil {
+		b.WriteString(` AND account_id = ?`)
+		args = append(args, accountID.String())
+	}
+	b.WriteString(` ORDER BY created_at DESC LIMIT ?`)
+	args = append(args, limit)
+	rows, err := r.db.QueryContext(ctx, b.String(), args...)
 	if err != nil {
 		return nil, err
 	}

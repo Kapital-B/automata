@@ -3,7 +3,15 @@ import { PageHeader } from "@/components/PageHeader";
 import { AccountBadge } from "@/components/AccountBadge";
 import { CategoryPill } from "@/components/CategoryPill";
 import { relativeTime } from "@/lib/accounts";
-import { categorizeAccount, listCategories, listMessages, syncAccount, type MessageItem } from "@/lib/auth";
+import {
+  categorizeAccount,
+  generateDraftSuggestions,
+  listCategories,
+  listDraftSuggestions,
+  listMessages,
+  syncAccount,
+  type MessageItem,
+} from "@/lib/auth";
 import { Paperclip, Reply, Forward, Archive, Loader2 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { Button } from "@/components/ui/button";
@@ -12,7 +20,7 @@ import { useAuth } from "@/components/auth/AuthProvider";
 import { useAccountsData } from "@/hooks/useAccountsData";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { toast } from "@/hooks/use-toast";
-import { useSearchParams } from "react-router-dom";
+import { Link, useSearchParams } from "react-router-dom";
 
 interface Props {
   accountFilter: AccountFilter;
@@ -96,6 +104,7 @@ export default function InboxPage({ accountFilter }: Props) {
   const [selectedId, setSelectedId] = useState<string>("");
   const [htmlRefreshAttempts, setHtmlRefreshAttempts] = useState<Set<string>>(() => new Set());
   const [refreshingHtmlMessageIds, setRefreshingHtmlMessageIds] = useState<Set<string>>(() => new Set());
+  const [pendingDraftMessageKeys, setPendingDraftMessageKeys] = useState<Set<string>>(() => new Set());
   const [searchParams, setSearchParams] = useSearchParams();
   const deepLinkedMessageID = searchParams.get("message_id");
 
@@ -115,6 +124,12 @@ export default function InboxPage({ accountFilter }: Props) {
       }),
     enabled: Boolean(accessToken),
   });
+  const draftsQuery = useQuery({
+    queryKey: ["draft-suggestions", accessToken, accountFilter],
+    queryFn: () => listDraftSuggestions(accessToken!, accountFilter === "all" ? undefined : accountFilter),
+    enabled: Boolean(accessToken),
+    refetchInterval: 3000,
+  });
 
   const categorizeMutation = useMutation({
     mutationFn: async ({ recategorize }: { recategorize: boolean }) => {
@@ -132,6 +147,24 @@ export default function InboxPage({ accountFilter }: Props) {
     onError: (err) => {
       toast({
         title: "Categorization failed",
+        description: err instanceof Error ? err.message : "Please try again.",
+        variant: "destructive",
+      });
+    },
+  });
+  const createDraftMutation = useMutation({
+    mutationFn: async ({ accountID, messageID }: { accountID: string; messageID: string }) => {
+      if (!accessToken) throw new Error("Not authenticated");
+      return generateDraftSuggestions(accessToken, accountID, { messageId: messageID });
+    },
+    onSuccess: () => {
+      void queryClient.invalidateQueries({ queryKey: ["draft-suggestions"] });
+      void queryClient.invalidateQueries({ queryKey: ["runs"] });
+      toast({ title: "Draft generation queued" });
+    },
+    onError: (err) => {
+      toast({
+        title: "Could not queue draft generation",
         description: err instanceof Error ? err.message : "Please try again.",
         variant: "destructive",
       });
@@ -215,6 +248,28 @@ export default function InboxPage({ accountFilter }: Props) {
   }, [accessToken, htmlRefreshAttempts, queryClient, selected]);
 
   const isRefreshingSelectedHtml = selected ? refreshingHtmlMessageIds.has(selected.id) : false;
+  const draftByMessageKey = useMemo(() => {
+    const map = new Map<string, string>();
+    for (const d of draftsQuery.data ?? []) {
+      const key = `${d.account_id}:${d.message_id}`;
+      if (!map.has(key)) map.set(key, d.id);
+    }
+    return map;
+  }, [draftsQuery.data]);
+  useEffect(() => {
+    setPendingDraftMessageKeys((prev) => {
+      if (prev.size === 0) return prev;
+      const next = new Set(prev);
+      for (const key of prev) {
+        if (draftByMessageKey.has(key)) next.delete(key);
+      }
+      return next;
+    });
+  }, [draftByMessageKey]);
+
+  const selectedMessageKey = selected ? `${selected.account_id}:${selected.id}` : "";
+  const selectedDraftID = selectedMessageKey ? draftByMessageKey.get(selectedMessageKey) : undefined;
+  const selectedDraftPending = selectedMessageKey !== "" && pendingDraftMessageKeys.has(selectedMessageKey);
 
   return (
     <div className="space-y-6">
@@ -329,7 +384,30 @@ export default function InboxPage({ accountFilter }: Props) {
             <div className="flex items-center justify-between border-b border-border/70 px-5 py-3">
               <AccountBadge account={selAccount} showEmail />
               <div className="flex items-center gap-1">
-                <Button size="sm" variant="ghost"><Reply className="mr-1.5 h-3.5 w-3.5" />Reply</Button>
+                {selectedDraftID && (
+                  <Button asChild size="sm" variant="ghost">
+                    <Link to={`/drafts?draft_id=${encodeURIComponent(selectedDraftID)}`}>
+                      <Reply className="mr-1.5 h-3.5 w-3.5" />
+                      Open draft
+                    </Link>
+                  </Button>
+                )}
+                {!selectedDraftID && (
+                  <Button
+                    size="sm"
+                    variant="ghost"
+                    disabled={selectedDraftPending || createDraftMutation.isPending}
+                    onClick={() => {
+                      if (!selected) return;
+                      const key = `${selected.account_id}:${selected.id}`;
+                      setPendingDraftMessageKeys((prev) => new Set(prev).add(key));
+                      createDraftMutation.mutate({ accountID: selected.account_id, messageID: selected.id });
+                    }}
+                  >
+                    <Reply className="mr-1.5 h-3.5 w-3.5" />
+                    {selectedDraftPending ? "Draft queued..." : "Create draft"}
+                  </Button>
+                )}
                 <Button size="sm" variant="ghost"><Forward className="mr-1.5 h-3.5 w-3.5" />Forward</Button>
                 <Button size="sm" variant="ghost"><Archive className="h-3.5 w-3.5" /></Button>
               </div>

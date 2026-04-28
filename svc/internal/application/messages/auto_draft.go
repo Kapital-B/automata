@@ -23,6 +23,8 @@ type AutoDraftOptions struct {
 	RunID      *uuid.UUID
 	Trigger    string
 	OnlyUnseen bool
+	MessageID  *uuid.UUID
+	Force      bool
 }
 
 type AutoDraftResult struct {
@@ -72,8 +74,11 @@ func (s *AutoDraftService) GenerateForAccount(ctx context.Context, userID, accou
 	drafts := make([]driven.DraftSuggestionRow, 0, len(items))
 	replyCandidates := 0
 	for idx, item := range items {
+		if opts.MessageID != nil && item.MessageID != *opts.MessageID {
+			continue
+		}
 		seenIDs = append(seenIDs, item.ID)
-		if !actionItemNeedsReply(item.Text) {
+		if !opts.Force && !actionItemNeedsReply(item.Text) {
 			_ = s.JobRuns.UpdateJobRunMeta(ctx, runID, fmt.Sprintf(`{"total_action_items":%d,"processed_action_items":%d,"reply_candidates":%d,"drafts_generated":%d,"only_unseen":%t}`, len(items), idx+1, replyCandidates, len(drafts), onlyUnseen))
 			continue
 		}

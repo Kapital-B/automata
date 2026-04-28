@@ -30,6 +30,7 @@ type Handlers struct {
 	SyncSvc         *appmessages.SyncService
 	CategorizeSvc   *appmessages.CategorizeService
 	SummarizeSvc    *appmessages.SummarizeService
+	AutoDraftSvc    *appmessages.AutoDraftService
 	DraftsSvc       *appmessages.DraftLifecycleService
 	ForwardRulesSvc *appmessages.ForwardRulesService
 	AuthSvc         *auth.Service
@@ -79,6 +80,7 @@ func (h *Handlers) Routes() http.Handler {
 	r.Post("/api/accounts/{id}/sync", h.syncAccount)
 	r.Post("/api/accounts/{id}/categorize", h.categorizeAccount)
 	r.Post("/api/accounts/{id}/summaries/refresh", h.refreshSummary)
+	r.Post("/api/accounts/{id}/drafts/generate", h.generateDrafts)
 	r.Get("/api/categories", h.listCategories)
 	r.Post("/api/categories", h.createCategory)
 	r.Patch("/api/categories/{id}", h.updateCategory)
@@ -1093,6 +1095,79 @@ func (h *Handlers) refreshSummary(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusAccepted, map[string]any{"job_run_id": jobID.String(), "status": "queued"})
 }
 
+func (h *Handlers) generateDrafts(w http.ResponseWriter, r *http.Request) {
+	if h.AutoDraftSvc == nil || h.JobRuns == nil {
+		writeJSON(w, http.StatusServiceUnavailable, map[string]string{"error": "auto-draft service not configured"})
+		return
+	}
+	id, err := uuid.Parse(chi.URLParam(r, "id"))
+	if err != nil {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "bad id"})
+		return
+	}
+	uid := userIDOrEmpty(r)
+	var body struct {
+		MessageID string `json:"message_id"`
+	}
+	if r.ContentLength > 0 {
+		if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+			writeJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid json"})
+			return
+		}
+	}
+	var messageID *uuid.UUID
+	if strings.TrimSpace(body.MessageID) != "" {
+		parsed, err := uuid.Parse(strings.TrimSpace(body.MessageID))
+		if err != nil {
+			writeJSON(w, http.StatusBadRequest, map[string]string{"error": "bad message_id"})
+			return
+		}
+		messageID = &parsed
+	}
+	if h.JobQueue == nil {
+		res, err := h.AutoDraftSvc.GenerateForAccount(r.Context(), uid, id, appmessages.AutoDraftOptions{
+			OnlyUnseen: false,
+			MessageID:  messageID,
+			Force:      messageID != nil,
+		})
+		if err != nil {
+			h.Log.Error("auto-draft", "err", err)
+			writeJSON(w, http.StatusBadRequest, map[string]string{"error": err.Error()})
+			return
+		}
+		writeJSON(w, http.StatusOK, map[string]any{
+			"job_run_id":        res.JobRunID.String(),
+			"drafts_generated":  res.DraftsGenerated,
+			"action_items_seen": res.ActionItemsSeen,
+			"status":            "success",
+		})
+		return
+	}
+	jobID := uuid.New()
+	started := time.Now().UTC()
+	if err := h.JobRuns.InsertJobRun(r.Context(), jobID, id, "draft_suggest", "api", "pending", started, time.Time{}, nil, `{"queued":true,"only_unseen":false}`); err != nil {
+		h.Log.Error("create draft_suggest run", "err", err)
+		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "internal"})
+		return
+	}
+	err = h.JobQueue.EnqueueDraftSuggest(r.Context(), asynqadapter.TaskPayload{
+		SchemaVersion: 1,
+		RunID:         jobID,
+		UserID:        uid,
+		AccountID:     id,
+		TriggerKind:   "api",
+		MessageID:     messageID,
+		Force:         messageID != nil,
+	})
+	if err != nil {
+		msg := err.Error()
+		_ = h.JobRuns.UpdateJobRunStatus(r.Context(), jobID, "failed", timePtrHTTP(time.Now().UTC()), &msg, `{"queued":false,"only_unseen":false}`)
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": err.Error()})
+		return
+	}
+	writeJSON(w, http.StatusAccepted, map[string]any{"job_run_id": jobID.String(), "status": "queued"})
+}
+
 func (h *Handlers) listSummaries(w http.ResponseWriter, r *http.Request) {
 	if h.Summaries == nil {
 		writeJSON(w, http.StatusServiceUnavailable, map[string]string{"error": "summaries not configured"})
@@ -1127,7 +1202,7 @@ func (h *Handlers) listSummaries(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "internal"})
 		return
 	}
-	fyiRows, err := h.Summaries.ListFYIByRun(r.Context(), uid, snap.RunID)
+	fyiRows, err := h.Summaries.ListOpenFYI(r.Context(), uid, accountID, 200)
 	if err != nil {
 		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "internal"})
 		return
@@ -1137,6 +1212,7 @@ func (h *Handlers) listSummaries(w http.ResponseWriter, r *http.Request) {
 		AccountID string  `json:"account_id"`
 		MessageID string  `json:"message_id"`
 		Text      string  `json:"text"`
+		CreatedAt string  `json:"created_at"`
 		DueAt     *string `json:"due_at,omitempty"`
 		IsOverdue bool    `json:"is_overdue"`
 	}
@@ -1151,7 +1227,7 @@ func (h *Handlers) listSummaries(w http.ResponseWriter, r *http.Request) {
 			overdue = it.DueAt.Before(now)
 		}
 		outItems = append(outItems, actionItem{
-			ID: it.ID.String(), AccountID: it.AccountID.String(), MessageID: it.MessageID.String(), Text: it.Text, DueAt: dueAt, IsOverdue: overdue,
+			ID: it.ID.String(), AccountID: it.AccountID.String(), MessageID: it.MessageID.String(), Text: it.Text, CreatedAt: it.CreatedAt.UTC().Format(time.RFC3339Nano), DueAt: dueAt, IsOverdue: overdue,
 		})
 	}
 	type fyiItem struct {
@@ -1159,10 +1235,11 @@ func (h *Handlers) listSummaries(w http.ResponseWriter, r *http.Request) {
 		AccountID string `json:"account_id"`
 		MessageID string `json:"message_id"`
 		Text      string `json:"text"`
+		CreatedAt string `json:"created_at"`
 	}
 	outFYI := make([]fyiItem, 0, len(fyiRows))
 	for _, it := range fyiRows {
-		outFYI = append(outFYI, fyiItem{ID: it.ID.String(), AccountID: it.AccountID.String(), MessageID: it.MessageID.String(), Text: it.Text})
+		outFYI = append(outFYI, fyiItem{ID: it.ID.String(), AccountID: it.AccountID.String(), MessageID: it.MessageID.String(), Text: it.Text, CreatedAt: it.CreatedAt.UTC().Format(time.RFC3339Nano)})
 	}
 	var snapAccountID *string
 	if snap.AccountID != nil {

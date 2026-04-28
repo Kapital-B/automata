@@ -266,6 +266,7 @@ export default function AssistantHomePage({ accountFilter }: Props) {
                         >
                           Message {item.message_id.slice(0, 8)}
                         </Link>
+                        <span className="text-xs text-muted-foreground">Created {relativeTime(item.created_at)}</span>
                       </div>
                     </div>
                     <Button size="sm" variant="outline" onClick={() => doneMutation.mutate(item.id)}>
@@ -303,6 +304,7 @@ export default function AssistantHomePage({ accountFilter }: Props) {
                         >
                           Message {item.message_id.slice(0, 8)}
                         </Link>
+                        <span className="text-xs text-muted-foreground">Created {relativeTime(item.created_at)}</span>
                       </div>
                     </div>
                     <Button size="sm" variant="outline" onClick={() => dismissMutation.mutate(item.id)}>

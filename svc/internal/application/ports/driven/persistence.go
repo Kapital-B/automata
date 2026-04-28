@@ -41,6 +41,7 @@ type MessageRow struct {
 	RawEtag            *string
 	CategorySlug       *string
 	CategoryConfidence *float64
+	SummarySeenAt      *time.Time
 	CreatedAt          time.Time
 	UpdatedAt          time.Time
 }
@@ -69,11 +70,12 @@ type MessageCategoryRow struct {
 }
 
 type MessageListFilter struct {
-	AccountID *uuid.UUID
-	Category  string
-	Since     *time.Time
-	Limit     int
-	Offset    int
+	AccountID           *uuid.UUID
+	Category            string
+	Since               *time.Time
+	OnlySummaryUnseen   bool
+	Limit               int
+	Offset              int
 }
 
 // JobRunRow is the persisted job run shape for API responses and auditing.
@@ -238,6 +240,7 @@ type MessageRepository interface {
 	ListMessagesByAccount(ctx context.Context, userID uuid.UUID, accountID uuid.UUID, limit, offset int) ([]MessageRow, error)
 	ListMessages(ctx context.Context, userID uuid.UUID, filter MessageListFilter) ([]MessageRow, error)
 	GetMessage(ctx context.Context, userID uuid.UUID, id uuid.UUID) (*MessageRow, error)
+	MarkMessagesSummarySeen(ctx context.Context, userID uuid.UUID, messageIDs []uuid.UUID, at time.Time) error
 	UpsertMessageCategory(ctx context.Context, row MessageCategoryRow) error
 	ListCategoryDefinitions(ctx context.Context, userID uuid.UUID) ([]CategoryDefinitionRow, error)
 	GetCategoryDefinitionBySlug(ctx context.Context, userID uuid.UUID, slug string) (*CategoryDefinitionRow, error)
@@ -284,6 +287,7 @@ type SummaryRepository interface {
 	MarkActionItemDone(ctx context.Context, userID uuid.UUID, itemID uuid.UUID, at time.Time) error
 	InsertFYI(ctx context.Context, rows []FYIRow) error
 	ListFYIByRun(ctx context.Context, userID uuid.UUID, runID uuid.UUID) ([]FYIRow, error)
+	ListOpenFYI(ctx context.Context, userID uuid.UUID, accountID *uuid.UUID, limit int) ([]FYIRow, error)
 	DeleteFYI(ctx context.Context, userID uuid.UUID, id uuid.UUID) error
 	ListActionItemsForAutoDraft(ctx context.Context, userID uuid.UUID, accountID uuid.UUID, onlyUnseen bool, limit int) ([]ActionItemRow, error)
 	MarkActionItemsAutoDraftSeen(ctx context.Context, userID uuid.UUID, itemIDs []uuid.UUID, at time.Time) error

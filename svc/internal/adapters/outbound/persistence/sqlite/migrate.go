@@ -50,6 +50,7 @@ func ignoreRepeatedMigrationError(err error) bool {
 	return strings.Contains(msg, "duplicate column name: user_id") ||
 		strings.Contains(msg, "duplicate column name: chunk_size") ||
 		strings.Contains(msg, "duplicate column name: auto_draft_seen_at") ||
+		strings.Contains(msg, "duplicate column name: summary_seen_at") ||
 		strings.Contains(msg, "duplicate column name: status") ||
 		strings.Contains(msg, "duplicate column name: sent_at") ||
 		strings.Contains(msg, "duplicate column name: discarded_at") ||

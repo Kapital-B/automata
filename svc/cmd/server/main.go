@@ -100,6 +100,7 @@ func main() {
 	var forwardRulesSvc *appmessages.ForwardRulesService
 	draftsSvc := &appmessages.DraftLifecycleService{
 		Summaries: repo,
+		Messages:  repo,
 		Accounts:  repo,
 		OAuth:     msMailOAuth,
 		Graph:     graph,
@@ -169,6 +170,7 @@ func main() {
 		SyncSvc:         syncSvc,
 		CategorizeSvc:   categorizeSvc,
 		SummarizeSvc:    summarizeSvc,
+		AutoDraftSvc:    autoDraftSvc,
 		DraftsSvc:       draftsSvc,
 		ForwardRulesSvc: forwardRulesSvc,
 		AuthSvc:         authSvc,
@@ -211,11 +213,8 @@ func main() {
 		}
 		t := time.NewTicker(30 * time.Second)
 		defer t.Stop()
-		for {
-			select {
-			case <-t.C:
-				_ = scheduler.Tick(context.Background(), time.Now().UTC())
-			}
+		for range t.C {
+			_ = scheduler.Tick(context.Background(), time.Now().UTC())
 		}
 	}()
 

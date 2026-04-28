@@ -373,6 +373,23 @@ func (g *GraphClient) SendMail(ctx context.Context, accessToken string, toEmail,
 	return g.postJSON(ctx, accessToken, g.apiRoot()+"/me/sendMail", payload)
 }
 
+// ReplyToMessage implements POST /me/messages/{id}/reply to keep thread context.
+func (g *GraphClient) ReplyToMessage(ctx context.Context, accessToken string, providerMessageID string, body string) error {
+	if strings.TrimSpace(providerMessageID) == "" {
+		return fmt.Errorf("empty provider message id")
+	}
+	u := g.apiRoot() + "/me/messages/" + url.PathEscape(providerMessageID) + "/reply"
+	payload := map[string]any{
+		"message": map[string]any{
+			"body": map[string]any{
+				"contentType": "HTML",
+				"content":     body,
+			},
+		},
+	}
+	return g.postJSON(ctx, accessToken, u, payload)
+}
+
 // ForwardMessage implements POST /me/messages/{id}/forward (Graph preserves MIME body and attachments).
 func (g *GraphClient) ForwardMessage(ctx context.Context, accessToken string, providerMessageID string, toEmail string, comment string) error {
 	if strings.TrimSpace(providerMessageID) == "" {

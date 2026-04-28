@@ -34,6 +34,8 @@ type TaskPayload struct {
 	UserID         uuid.UUID  `json:"user_id"`
 	AccountID      uuid.UUID  `json:"account_id"`
 	TriggerKind    string     `json:"trigger_kind"`
+	MessageID      *uuid.UUID `json:"message_id,omitempty"`
+	Force          bool       `json:"force,omitempty"`
 	Recategorize   bool       `json:"recategorize,omitempty"`
 	RemainingJobs  []string   `json:"remaining_jobs,omitempty"`
 	ScheduleID     *uuid.UUID `json:"schedule_id,omitempty"`
@@ -148,6 +150,8 @@ func handleSync(ctx context.Context, task *asynq.Task, deps WorkerDeps) error {
 	})
 	if err != nil {
 		deps.Log.Error("job failed", "job_type", "sync", "run_id", p.RunID, "account_id", p.AccountID, "err", err)
+		msg := err.Error()
+		_ = deps.JobRuns.UpdateJobRunStatus(ctx, p.RunID, "failed", timePtrAsynq(time.Now().UTC()), &msg, `{}`)
 		return err
 	}
 	deps.Log.Info("job success", "job_type", "sync", "run_id", p.RunID, "account_id", p.AccountID)
@@ -176,6 +180,8 @@ func handleCategorize(ctx context.Context, task *asynq.Task, deps WorkerDeps) er
 	})
 	if err != nil {
 		deps.Log.Error("job failed", "job_type", "categorize", "run_id", p.RunID, "account_id", p.AccountID, "err", err)
+		msg := err.Error()
+		_ = deps.JobRuns.UpdateJobRunStatus(ctx, p.RunID, "failed", timePtrAsynq(time.Now().UTC()), &msg, `{}`)
 		return err
 	}
 	deps.Log.Info("job success", "job_type", "categorize", "run_id", p.RunID, "account_id", p.AccountID)
@@ -204,6 +210,8 @@ func handleSummarize(ctx context.Context, task *asynq.Task, deps WorkerDeps) err
 	})
 	if err != nil {
 		deps.Log.Error("job failed", "job_type", "summarize", "run_id", p.RunID, "account_id", p.AccountID, "err", err)
+		msg := err.Error()
+		_ = deps.JobRuns.UpdateJobRunStatus(ctx, p.RunID, "failed", timePtrAsynq(time.Now().UTC()), &msg, `{}`)
 		return err
 	}
 	deps.Log.Info("job success", "job_type", "summarize", "run_id", p.RunID, "account_id", p.AccountID)
@@ -225,13 +233,22 @@ func handleDraftSuggest(ctx context.Context, task *asynq.Task, deps WorkerDeps) 
 	defer release(deps.GlobalSemaphore)
 
 	deps.Log.Info("job start", "job_type", "draft_suggest", "run_id", p.RunID, "account_id", p.AccountID, "trigger_kind", p.TriggerKind)
+	onlyUnseen := true
+	if strings.EqualFold(strings.TrimSpace(p.TriggerKind), "api") {
+		// Manual API-triggered drafts should always attempt generation.
+		onlyUnseen = false
+	}
 	_, err := deps.AutoDraftSvc.GenerateForAccount(ctx, p.UserID, p.AccountID, appmessages.AutoDraftOptions{
 		RunID:      &p.RunID,
 		Trigger:    p.TriggerKind,
-		OnlyUnseen: true,
+		OnlyUnseen: onlyUnseen,
+		MessageID:  p.MessageID,
+		Force:      p.Force,
 	})
 	if err != nil {
 		deps.Log.Error("job failed", "job_type", "draft_suggest", "run_id", p.RunID, "account_id", p.AccountID, "err", err)
+		msg := err.Error()
+		_ = deps.JobRuns.UpdateJobRunStatus(ctx, p.RunID, "failed", timePtrAsynq(time.Now().UTC()), &msg, `{}`)
 		return err
 	}
 	deps.Log.Info("job success", "job_type", "draft_suggest", "run_id", p.RunID, "account_id", p.AccountID)
@@ -259,6 +276,8 @@ func handleForwardRules(ctx context.Context, task *asynq.Task, deps WorkerDeps) 
 	})
 	if err != nil {
 		deps.Log.Error("job failed", "job_type", "forward_rules", "run_id", p.RunID, "account_id", p.AccountID, "err", err)
+		msg := err.Error()
+		_ = deps.JobRuns.UpdateJobRunStatus(ctx, p.RunID, "failed", timePtrAsynq(time.Now().UTC()), &msg, `{}`)
 		return err
 	}
 	deps.Log.Info("job success", "job_type", "forward_rules", "run_id", p.RunID, "account_id", p.AccountID)

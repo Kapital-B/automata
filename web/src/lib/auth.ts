@@ -90,6 +90,7 @@ export type SummaryActionItem = {
   account_id: string;
   message_id: string;
   text: string;
+  created_at: string;
   due_at?: string;
   is_overdue: boolean;
 };
@@ -99,6 +100,7 @@ export type SummaryFYI = {
   account_id: string;
   message_id: string;
   text: string;
+  created_at: string;
 };
 
 export type SummaryPayload = {
@@ -369,6 +371,22 @@ export async function refreshSummary(accessToken: string, accountID: string) {
     method: "POST",
     headers: toAuthHeader(accessToken),
   });
+}
+
+export async function generateDraftSuggestions(
+  accessToken: string,
+  accountID: string,
+  options?: { messageId?: string },
+) {
+  const body = options?.messageId ? JSON.stringify({ message_id: options.messageId }) : undefined;
+  return apiRequest<{ job_run_id: string; status: string; drafts_generated?: number; action_items_seen?: number }>(
+    `/api/accounts/${accountID}/drafts/generate`,
+    {
+      method: "POST",
+      headers: toAuthHeader(accessToken),
+      body,
+    },
+  );
 }
 
 export async function markActionItemDone(accessToken: string, itemID: string) {

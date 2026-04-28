@@ -10,7 +10,7 @@ import { useAuth } from "@/components/auth/AuthProvider";
 import { useAccountsData } from "@/hooks/useAccountsData";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { relativeTime } from "@/lib/accounts";
-import { Link } from "react-router-dom";
+import { Link, useSearchParams } from "react-router-dom";
 import { toast } from "@/hooks/use-toast";
 
 interface Props {
@@ -22,6 +22,8 @@ export default function DraftsPage({ accountFilter }: Props) {
   const { accounts } = useAccountsData();
   const queryClient = useQueryClient();
   const [selectedId, setSelectedId] = useState<string>("");
+  const [searchParams, setSearchParams] = useSearchParams();
+  const deepLinkedDraftID = searchParams.get("draft_id");
   const [editableSubject, setEditableSubject] = useState("");
   const [editableBody, setEditableBody] = useState("");
   const draftsQuery = useQuery({
@@ -44,6 +46,13 @@ export default function DraftsPage({ accountFilter }: Props) {
     setEditableBody(draft.body);
   }, [draft]);
   useEffect(() => {
+    if (deepLinkedDraftID && visible.find((d) => d.id === deepLinkedDraftID)) {
+      setSelectedId(deepLinkedDraftID);
+      const next = new URLSearchParams(searchParams);
+      next.delete("draft_id");
+      setSearchParams(next, { replace: true });
+      return;
+    }
     if (visible.length === 0) {
       setSelectedId("");
       return;
@@ -51,7 +60,7 @@ export default function DraftsPage({ accountFilter }: Props) {
     if (!selectedId || !visible.find((d) => d.id === selectedId)) {
       setSelectedId(visible[0].id);
     }
-  }, [visible, selectedId]);
+  }, [deepLinkedDraftID, searchParams, setSearchParams, visible, selectedId]);
   const getAccount = (id: string) => accounts.find((a) => a.id === id);
   const saveMutation = useMutation({
     mutationFn: async () => {
@@ -84,6 +93,8 @@ export default function DraftsPage({ accountFilter }: Props) {
   const sendMutation = useMutation({
     mutationFn: async () => {
       if (!accessToken || !draft) return;
+      // Persist local edits first so send uses exactly what the user sees.
+      await saveDraftSuggestion(accessToken, draft.id, { subject: editableSubject, body: editableBody });
       await sendDraftSuggestion(accessToken, draft.id);
     },
     onSuccess: () => {

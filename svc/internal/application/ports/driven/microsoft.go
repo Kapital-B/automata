@@ -54,6 +54,7 @@ type MicrosoftGraph interface {
 	ListInboxDelta(ctx context.Context, accessToken string, deltaLink string, pageSize int) (*GraphDeltaResult, error)
 	GetMessageBody(ctx context.Context, accessToken string, providerMessageID string) (*GraphMessage, error)
 	SendMail(ctx context.Context, accessToken string, toEmail, subject, body string) error
+	ReplyToMessage(ctx context.Context, accessToken string, providerMessageID string, body string) error
 	// ForwardMessage forwards an existing mailbox message by Graph message id (server preserves body and attachments).
 	// comment is optional introductory text above the forwarded content; use empty string for none.
 	ForwardMessage(ctx context.Context, accessToken string, providerMessageID string, toEmail string, comment string) error

@@ -78,21 +78,43 @@ func (s *SummarizeService) SummarizeAccount(ctx context.Context, userID uuid.UUI
 		return nil, err
 	}
 
-	filter := driven.MessageListFilter{AccountID: &accountID, Limit: 200}
-	if opts.Since != nil {
-		filter.Since = opts.Since
+	chainMeta := summarizeChainMetaJSON(opts.Since)
+
+	filter := driven.MessageListFilter{
+		AccountID:         &accountID,
+		Limit:             200,
+		OnlySummaryUnseen: true,
 	}
 	msgs, err := s.Messages.ListMessages(ctx, userID, filter)
 	if err != nil {
 		return fail(err)
 	}
+	if len(msgs) == 0 {
+		now := time.Now().UTC()
+		snapshot := driven.SummarySnapshotRow{
+			ID:             uuid.New(),
+			UserID:         userID,
+			AccountID:      &accountID,
+			RunID:          runID,
+			WindowStart:    now.Add(-24 * time.Hour),
+			WindowEnd:      now,
+			GeneralSummary: "No messages pending summarization.",
+			CreatedAt:      now,
+		}
+		if err := s.Summaries.InsertSummarySnapshot(ctx, snapshot); err != nil {
+			return fail(err)
+		}
+		meta := fmt.Sprintf(`{"total_messages":0,"summarize_candidates":0,"processed_messages":0,"action_items":0,"fyi_items":0%s}`, chainMeta)
+		_ = s.JobRuns.UpdateJobRunStatus(ctx, runID, "success", timePtrSummary(time.Now().UTC()), nil, meta)
+		return &SummarizeResult{JobRunID: runID, ActionItems: 0, FYIItems: 0}, nil
+	}
+
 	settings, err := s.Summaries.GetSummarySettings(ctx, userID)
 	if err != nil {
 		return fail(err)
 	}
 	filtered := applySummarySettings(msgs, settings)
-	chainMeta := summarizeChainMetaJSON(opts.Since)
-	_ = s.JobRuns.UpdateJobRunMeta(ctx, runID, fmt.Sprintf(`{"total_messages":%d,"processed_messages":0%s}`, len(filtered), chainMeta))
+	_ = s.JobRuns.UpdateJobRunMeta(ctx, runID, fmt.Sprintf(`{"total_messages":%d,"summarize_candidates":%d,"processed_messages":0%s}`, len(filtered), len(msgs), chainMeta))
 
 	chunkSize := defaultSummarizeChunkSize
 	if settings != nil {
@@ -177,7 +199,14 @@ func (s *SummarizeService) SummarizeAccount(ctx context.Context, userID uuid.UUI
 			return fail(err)
 		}
 	}
-	meta := fmt.Sprintf(`{"total_messages":%d,"processed_messages":%d,"action_items":%d,"fyi_items":%d%s}`, len(filtered), len(filtered), len(toInsert), len(fyiRows), chainMeta)
+	markSeen := make([]uuid.UUID, 0, len(msgs))
+	for _, m := range msgs {
+		markSeen = append(markSeen, m.ID)
+	}
+	if err := s.Messages.MarkMessagesSummarySeen(ctx, userID, markSeen, now); err != nil {
+		return fail(err)
+	}
+	meta := fmt.Sprintf(`{"total_messages":%d,"summarize_candidates":%d,"processed_messages":%d,"action_items":%d,"fyi_items":%d%s}`, len(filtered), len(msgs), len(filtered), len(toInsert), len(fyiRows), chainMeta)
 	_ = s.JobRuns.UpdateJobRunStatus(ctx, runID, "success", timePtrSummary(time.Now().UTC()), nil, meta)
 	return &SummarizeResult{JobRunID: runID, ActionItems: len(toInsert), FYIItems: len(fyiRows)}, nil
 }

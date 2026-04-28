@@ -4,6 +4,7 @@ import (
 	"database/sql"
 	"log/slog"
 	"os"
+	"time"
 
 	asynqadapter "github.com/Kapital-B/automata/svc/internal/adapters/inbound/asynq"
 	llmadapter "github.com/Kapital-B/automata/svc/internal/adapters/outbound/llm"
@@ -29,6 +30,8 @@ func main() {
 		os.Exit(1)
 	}
 	defer db.Close()
+	db.SetMaxOpenConns(1)
+	db.SetConnMaxLifetime(time.Hour)
 	if err := sqlite.Migrate(db); err != nil {
 		log.Error("migrate", "err", err)
 		os.Exit(1)

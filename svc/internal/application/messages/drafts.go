@@ -2,7 +2,6 @@ package messages
 
 import (
 	"context"
-	"encoding/json"
 	"fmt"
 	"strings"
 	"time"
@@ -14,6 +13,7 @@ import (
 
 type DraftLifecycleService struct {
 	Summaries driven.SummaryRepository
+	Messages  driven.MessageRepository
 	Accounts  driven.AccountRepository
 	OAuth     driven.MicrosoftOAuth
 	Graph     driven.MicrosoftGraph
@@ -35,7 +35,7 @@ func (s *DraftLifecycleService) DiscardDraft(ctx context.Context, userID, draftI
 }
 
 func (s *DraftLifecycleService) SendDraft(ctx context.Context, userID, draftID uuid.UUID) error {
-	if s == nil || s.Summaries == nil || s.Accounts == nil || s.OAuth == nil || s.Graph == nil || s.Vault == nil {
+	if s == nil || s.Summaries == nil || s.Messages == nil || s.Accounts == nil || s.OAuth == nil || s.Graph == nil || s.Vault == nil {
 		return fmt.Errorf("draft send service not configured")
 	}
 	draft, err := s.Summaries.GetDraftSuggestion(ctx, userID, draftID)
@@ -82,9 +82,12 @@ func (s *DraftLifecycleService) SendDraft(ctx context.Context, userID, draftID u
 	if err := s.Accounts.UpdateAccountTokens(ctx, userID, draft.AccountID, newCipher, account.PrimaryEmail, account.GraphTenantID, account.MsalHomeAccountID, "connected", nil); err != nil {
 		return err
 	}
-	toEmail, err := recipientFromJSON(draft.FromJSON)
-	if err != nil || toEmail == "" {
-		return fmt.Errorf("draft recipient unavailable")
+	msg, err := s.Messages.GetMessage(ctx, userID, draft.MessageID)
+	if err != nil {
+		return err
+	}
+	if msg == nil || strings.TrimSpace(msg.ProviderMessageID) == "" {
+		return fmt.Errorf("source message unavailable")
 	}
 	now := time.Now().UTC()
 	attempt := driven.SendAttemptRow{
@@ -96,7 +99,7 @@ func (s *DraftLifecycleService) SendDraft(ctx context.Context, userID, draftID u
 		Status:    "failed",
 		CreatedAt: now,
 	}
-	if err := s.Graph.SendMail(ctx, tok.AccessToken, toEmail, draft.Subject, draft.Body); err != nil {
+	if err := s.Graph.ReplyToMessage(ctx, tok.AccessToken, msg.ProviderMessageID, draft.Body); err != nil {
 		msg := err.Error()
 		attempt.ErrorMessage = &msg
 		_ = s.Summaries.InsertSendAttempt(ctx, attempt)
@@ -107,17 +110,4 @@ func (s *DraftLifecycleService) SendDraft(ctx context.Context, userID, draftID u
 		return err
 	}
 	return s.Summaries.MarkDraftSuggestionStatus(ctx, userID, draftID, "sent", now)
-}
-
-func recipientFromJSON(raw string) (string, error) {
-	var payload struct {
-		Address string `json:"address"`
-	}
-	if raw == "" {
-		return "", nil
-	}
-	if err := json.Unmarshal([]byte(raw), &payload); err != nil {
-		return "", err
-	}
-	return strings.TrimSpace(payload.Address), nil
 }

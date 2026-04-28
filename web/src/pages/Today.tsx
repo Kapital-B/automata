@@ -1,7 +1,7 @@
 import { PageHeader } from "@/components/PageHeader";
 import { AccountBadge } from "@/components/AccountBadge";
 import { Button } from "@/components/ui/button";
-import { dismissFYI, getSummary, markActionItemDone, refreshSummary } from "@/lib/auth";
+import { dismissFYI, generateDraftSuggestions, getSummary, listDraftSuggestions, markActionItemDone, refreshSummary } from "@/lib/auth";
 import { RefreshCw, CheckCircle2, Info } from "lucide-react";
 import { Link } from "react-router-dom";
 import type { AccountFilter } from "@/components/AppShell";
@@ -10,6 +10,7 @@ import { useAccountsData } from "@/hooks/useAccountsData";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { toast } from "@/hooks/use-toast";
 import { relativeTime } from "@/lib/accounts";
+import { useEffect, useMemo, useState } from "react";
 
 interface Props {
   accountFilter: AccountFilter;
@@ -29,6 +30,7 @@ export default function TodayPage({ accountFilter }: Props) {
   const actionItems = summaryQuery.data?.action_items ?? [];
   const fyi = summaryQuery.data?.fyi ?? [];
   const snapshot = summaryQuery.data?.snapshot;
+  const [pendingDraftMessageKeys, setPendingDraftMessageKeys] = useState<Set<string>>(() => new Set());
 
   const refreshMutation = useMutation({
     mutationFn: async () => {
@@ -78,6 +80,51 @@ export default function TodayPage({ accountFilter }: Props) {
       void queryClient.invalidateQueries({ queryKey: ["summary"] });
     },
   });
+  const draftsQuery = useQuery({
+    queryKey: ["draft-suggestions", accessToken, activeAccountID ?? "all"],
+    queryFn: () => listDraftSuggestions(accessToken!, activeAccountID),
+    enabled: Boolean(accessToken),
+    refetchInterval: 3000,
+  });
+  const draftByMessageKey = useMemo(() => {
+    const m = new Map<string, string>();
+    for (const d of draftsQuery.data ?? []) {
+      const key = `${d.account_id}:${d.message_id}`;
+      if (!m.has(key)) m.set(key, d.id);
+    }
+    return m;
+  }, [draftsQuery.data]);
+  const createDraftMutation = useMutation({
+    mutationFn: async ({ accountID, messageID }: { accountID: string; messageID: string }) => {
+      if (!accessToken) throw new Error("Not authenticated");
+      return generateDraftSuggestions(accessToken, accountID, { messageId: messageID });
+    },
+    onSuccess: () => {
+      void queryClient.invalidateQueries({ queryKey: ["draft-suggestions"] });
+      void queryClient.invalidateQueries({ queryKey: ["runs"] });
+    },
+    onError: (error) => {
+      toast({
+        title: "Could not queue draft generation",
+        description: error instanceof Error ? error.message : "Please try again.",
+        variant: "destructive",
+      });
+    },
+  });
+
+  const makeMessageKey = (accountID: string, messageID: string) => `${accountID}:${messageID}`;
+  useEffect(() => {
+    setPendingDraftMessageKeys((prev) => {
+      if (prev.size === 0) return prev;
+      const next = new Set(prev);
+      for (const key of prev) {
+        if (draftByMessageKey.has(key)) {
+          next.delete(key);
+        }
+      }
+      return next;
+    });
+  }, [draftByMessageKey]);
 
   // Group action items by account for clear provenance
   const grouped = accounts
@@ -157,6 +204,9 @@ export default function TodayPage({ accountFilter }: Props) {
               <AccountBadge account={account} showEmail size="sm" />
               <ul className="surface-card divide-y divide-border/70 overflow-hidden">
                 {items.map((item) => {
+                  const key = makeMessageKey(item.account_id, item.message_id);
+                  const draftID = draftByMessageKey.get(key);
+                  const isPendingDraft = pendingDraftMessageKeys.has(key);
                   return (
                     <li key={item.id} className="group flex items-start gap-4 px-5 py-4 transition hover:bg-secondary/40">
                       <div className="mt-1.5 h-1.5 w-1.5 shrink-0 rounded-full bg-foreground/70" />
@@ -168,13 +218,37 @@ export default function TodayPage({ accountFilter }: Props) {
                         >
                           Message {item.message_id.slice(0, 8)}
                         </Link>
+                        <p className="mt-1 text-xs text-muted-foreground">Created {relativeTime(item.created_at)}</p>
                       </div>
                       {item.due_at && (
                         <span className="rounded-full border border-border bg-background px-2 py-0.5 text-[10px] font-medium uppercase tracking-wider text-foreground/80">
                           {item.is_overdue ? "Overdue" : new Date(item.due_at).toLocaleDateString()}
                         </span>
                       )}
-                      <Button size="sm" variant="outline" onClick={() => doneMutation.mutate(item.id)}>Done</Button>
+                      <div className="flex items-center gap-2">
+                        {draftID ? (
+                          <Button asChild size="sm" variant="outline">
+                            <Link to={`/drafts?draft_id=${encodeURIComponent(draftID)}`}>Open draft</Link>
+                          </Button>
+                        ) : (
+                          <Button
+                            size="sm"
+                            variant="outline"
+                            disabled={isPendingDraft || createDraftMutation.isPending}
+                            onClick={() => {
+                              setPendingDraftMessageKeys((prev) => new Set(prev).add(key));
+                              createDraftMutation.mutate({ accountID: item.account_id, messageID: item.message_id }, {
+                                onSuccess: () => {
+                                  toast({ title: "Draft generation queued" });
+                                },
+                              });
+                            }}
+                          >
+                            {isPendingDraft ? "Draft queued..." : "Create draft"}
+                          </Button>
+                        )}
+                        <Button size="sm" variant="outline" onClick={() => doneMutation.mutate(item.id)}>Done</Button>
+                      </div>
                     </li>
                   );
                 })}
@@ -204,6 +278,7 @@ export default function TodayPage({ accountFilter }: Props) {
                 >
                   Message {item.message_id.slice(0, 8)}
                 </Link>
+                <p className="mt-1 text-xs text-muted-foreground">Created {relativeTime(item.created_at)}</p>
                 <div className="mt-2">
                   <AccountBadge account={accounts.find((a) => a.id === item.account_id)} />
                 </div>

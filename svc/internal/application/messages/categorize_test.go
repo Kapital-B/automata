@@ -16,9 +16,13 @@ import (
 type fakeLLM struct {
 	responses []string
 	idx       int
+	onCall    func()
 }
 
 func (f *fakeLLM) ChatCompletion(ctx context.Context, messages []driven.LLMMessage) (*driven.LLMResponse, error) {
+	if f.onCall != nil {
+		f.onCall()
+	}
 	if f.idx >= len(f.responses) {
 		return &driven.LLMResponse{Content: `{"schema_version":1,"category_slug":"other"}`}, nil
 	}
