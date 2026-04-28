@@ -1,9 +1,9 @@
 import { AppShell } from "@/components/AppShell";
-import ChatPage from "./Chat";
+import AssistantHomePage from "./AssistantHome";
 
 const Index = () => (
   <AppShell>
-    {({ accountFilter }) => <ChatPage accountFilter={accountFilter} />}
+    {({ accountFilter }) => <AssistantHomePage accountFilter={accountFilter} />}
   </AppShell>
 );
 
