@@ -42,6 +42,7 @@ type MessageRow struct {
 	CategorySlug       *string
 	CategoryConfidence *float64
 	SummarySeenAt      *time.Time
+	ForwardSeenAt      *time.Time
 	CreatedAt          time.Time
 	UpdatedAt          time.Time
 }
@@ -74,6 +75,7 @@ type MessageListFilter struct {
 	Category            string
 	Since               *time.Time
 	OnlySummaryUnseen   bool
+	OnlyForwardUnseen   bool
 	Limit               int
 	Offset              int
 }
@@ -241,6 +243,7 @@ type MessageRepository interface {
 	ListMessages(ctx context.Context, userID uuid.UUID, filter MessageListFilter) ([]MessageRow, error)
 	GetMessage(ctx context.Context, userID uuid.UUID, id uuid.UUID) (*MessageRow, error)
 	MarkMessagesSummarySeen(ctx context.Context, userID uuid.UUID, messageIDs []uuid.UUID, at time.Time) error
+	MarkMessagesForwardSeen(ctx context.Context, userID uuid.UUID, messageIDs []uuid.UUID, at time.Time) error
 	UpsertMessageCategory(ctx context.Context, row MessageCategoryRow) error
 	ListCategoryDefinitions(ctx context.Context, userID uuid.UUID) ([]CategoryDefinitionRow, error)
 	GetCategoryDefinitionBySlug(ctx context.Context, userID uuid.UUID, slug string) (*CategoryDefinitionRow, error)

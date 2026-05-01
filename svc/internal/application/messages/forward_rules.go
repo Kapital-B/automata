@@ -70,13 +70,19 @@ func (s *ForwardRulesService) RunAccount(ctx context.Context, userID, accountID 
 	if err != nil {
 		return s.failRun(ctx, jobID, err)
 	}
-	msgFilter := driven.MessageListFilter{AccountID: &accountID, Limit: 200}
-	if opts.Since != nil {
-		msgFilter.Since = opts.Since
+	msgFilter := driven.MessageListFilter{
+		AccountID:         &accountID,
+		Limit:             200,
+		OnlyForwardUnseen: true,
 	}
 	rows, err := s.Messages.ListMessages(ctx, userID, msgFilter)
 	if err != nil {
 		return s.failRun(ctx, jobID, err)
+	}
+	if len(rows) == 0 {
+		meta := fmt.Sprintf(`{"total_messages":0,"forward_candidates":0,"total_rules":%d,"forwarded":0,"skipped":0,"failed":0}`, len(rules))
+		_ = s.JobRuns.UpdateJobRunStatus(ctx, jobID, "success", timePtrForward(time.Now().UTC()), nil, meta)
+		return jobID, nil
 	}
 	account, cipher, err := s.Accounts.GetAccount(ctx, userID, accountID)
 	if err != nil || account == nil {
@@ -91,7 +97,10 @@ func (s *ForwardRulesService) RunAccount(ctx context.Context, userID, accountID 
 	}
 
 	forwarded, skipped, failed := 0, 0, 0
+	seenMessageIDs := make([]uuid.UUID, 0, len(rows))
 	for _, msg := range rows {
+		messageForwarded := false
+		messageHadFailure := false
 		for _, rule := range rules {
 			if !rule.Enabled {
 				continue
@@ -100,6 +109,7 @@ func (s *ForwardRulesService) RunAccount(ctx context.Context, userID, accountID 
 				reason := "forward_to not in allowlist"
 				_ = s.insertAudit(ctx, userID, accountID, msg.ID, rule.ID, jobID, "failed", &reason)
 				failed++
+				messageHadFailure = true
 				continue
 			}
 			match, reason, err := s.ruleMatches(ctx, rule, msg)
@@ -107,6 +117,7 @@ func (s *ForwardRulesService) RunAccount(ctx context.Context, userID, accountID 
 				msgErr := err.Error()
 				_ = s.insertAudit(ctx, userID, accountID, msg.ID, rule.ID, jobID, "failed", &msgErr)
 				failed++
+				messageHadFailure = true
 				continue
 			}
 			if !match {
@@ -118,14 +129,22 @@ func (s *ForwardRulesService) RunAccount(ctx context.Context, userID, accountID 
 				e := err.Error()
 				_ = s.insertAudit(ctx, userID, accountID, msg.ID, rule.ID, jobID, "failed", &e)
 				failed++
+				messageHadFailure = true
 				continue
 			}
 			okReason := "rule matched and message forwarded"
 			_ = s.insertAudit(ctx, userID, accountID, msg.ID, rule.ID, jobID, "forwarded", &okReason)
 			forwarded++
+			messageForwarded = true
+		}
+		if messageForwarded || !messageHadFailure {
+			seenMessageIDs = append(seenMessageIDs, msg.ID)
 		}
 	}
-	meta := fmt.Sprintf(`{"total_messages":%d,"total_rules":%d,"forwarded":%d,"skipped":%d,"failed":%d}`, len(rows), len(rules), forwarded, skipped, failed)
+	if err := s.Messages.MarkMessagesForwardSeen(ctx, userID, seenMessageIDs, time.Now().UTC()); err != nil {
+		return s.failRun(ctx, jobID, err)
+	}
+	meta := fmt.Sprintf(`{"total_messages":%d,"forward_candidates":%d,"total_rules":%d,"forwarded":%d,"skipped":%d,"failed":%d,"marked_seen":%d}`, len(rows), len(rows), len(rules), forwarded, skipped, failed, len(seenMessageIDs))
 	_ = s.JobRuns.UpdateJobRunStatus(ctx, jobID, "success", timePtrForward(time.Now().UTC()), nil, meta)
 	return jobID, nil
 }
