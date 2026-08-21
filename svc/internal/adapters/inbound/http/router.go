@@ -16,6 +16,7 @@ import (
 	asynqadapter "github.com/Kapital-B/automata/svc/internal/adapters/inbound/asynq"
 	appaccounts "github.com/Kapital-B/automata/svc/internal/application/accounts"
 	"github.com/Kapital-B/automata/svc/internal/application/auth"
+	appcontacts "github.com/Kapital-B/automata/svc/internal/application/contacts"
 	appmessages "github.com/Kapital-B/automata/svc/internal/application/messages"
 	"github.com/Kapital-B/automata/svc/internal/application/ports/driven"
 	domainacc "github.com/Kapital-B/automata/svc/internal/domain/accounts"
@@ -34,6 +35,7 @@ type Handlers struct {
 	DraftsSvc       *appmessages.DraftLifecycleService
 	ForwardRulesSvc *appmessages.ForwardRulesService
 	AuthSvc         *auth.Service
+	ContactSvc      *appcontacts.Service
 	Accounts        driven.AccountRepository
 	Messages        driven.MessageRepository
 	JobRuns         driven.JobRunRepository
@@ -42,6 +44,7 @@ type Handlers struct {
 	Schedules       driven.ScheduleRepository
 	OAuthStates     driven.OAuthStateRepository
 	Users           driven.UserRepository
+	Contacts        driven.ContactRepository
 	Dashboard       string
 	SuccessPath     string
 	ErrorPath       string
@@ -72,6 +75,12 @@ func (h *Handlers) Routes() http.Handler {
 	r.Get("/api/auth/google/callback", h.authGoogleCallback)
 	r.Get("/api/me", h.me)
 
+	r.Get("/api/contacts", h.listContacts)
+	r.Post("/api/contacts", h.createContact)
+	r.Get("/api/contacts/{id}", h.getContact)
+	r.Post("/api/contacts/{id}/identities", h.addContactIdentity)
+	r.Post("/api/contacts/{id}/merge", h.mergeContacts)
+
 	r.Get("/api/accounts", h.listAccounts)
 	r.Post("/api/accounts", h.startConnect)
 	r.Get("/api/accounts/callback", h.oauthCallback)
@@ -96,6 +105,7 @@ func (h *Handlers) Routes() http.Handler {
 	r.Patch("/api/settings/schedules", h.updateSchedules)
 	r.Get("/api/messages", h.listMessages)
 	r.Get("/api/messages/{id}", h.getMessage)
+	r.Post("/api/messages/{id}/forward", h.forwardMessage)
 	r.Get("/api/forward-allowlist", h.getForwardAllowlist)
 	r.Put("/api/forward-allowlist", h.putForwardAllowlist)
 	r.Get("/api/accounts/{id}/forward-rules", h.listForwardRules)
@@ -489,6 +499,47 @@ func (h *Handlers) getMessage(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
+type forwardMessageBody struct {
+	ToEmail string `json:"to_email"`
+	Comment string `json:"comment"`
+}
+
+func (h *Handlers) forwardMessage(w http.ResponseWriter, r *http.Request) {
+	if h.ForwardRulesSvc == nil {
+		writeJSON(w, http.StatusServiceUnavailable, map[string]string{"error": "forward service not configured"})
+		return
+	}
+	id, err := uuid.Parse(chi.URLParam(r, "id"))
+	if err != nil {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "bad id"})
+		return
+	}
+	var body forwardMessageBody
+	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid json"})
+		return
+	}
+	uid := userIDOrEmpty(r)
+	err = h.ForwardRulesSvc.ManualForwardMessage(r.Context(), uid, id, body.ToEmail, body.Comment)
+	if err != nil {
+		msg := err.Error()
+		switch {
+		case msg == "to_email required" || msg == "invalid to_email" || msg == "forward_to not in allowlist":
+			writeJSON(w, http.StatusBadRequest, map[string]string{"error": msg})
+			return
+		case msg == "message not found" || msg == "account not found":
+			writeJSON(w, http.StatusNotFound, map[string]string{"error": msg})
+			return
+		}
+		if h.Log != nil {
+			h.Log.Warn("manual forward", "err", err)
+		}
+		writeJSON(w, http.StatusBadGateway, map[string]string{"error": "forward failed"})
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]string{"status": "ok"})
+}
+
 func (h *Handlers) listDrafts(w http.ResponseWriter, r *http.Request) {
 	if h.Summaries == nil {
 		writeJSON(w, http.StatusServiceUnavailable, map[string]string{"error": "summaries not configured"})
@@ -540,6 +591,28 @@ type forwardRuleUpsertBody struct {
 	ConditionJSON json.RawMessage `json:"condition_json"`
 	ForwardTo     string          `json:"forward_to"`
 	Enabled       bool            `json:"enabled"`
+}
+
+// forwardRuleCreateBody defaults enabled to false when JSON omits "enabled".
+type forwardRuleCreateBody struct {
+	Name          string          `json:"name"`
+	Mode          string          `json:"mode"`
+	ConditionJSON json.RawMessage `json:"condition_json"`
+	ForwardTo     string          `json:"forward_to"`
+	Enabled       *bool           `json:"enabled"`
+}
+
+func forwardDestInAllowlist(dest string, rows []driven.ForwardAllowlistRow) bool {
+	d := strings.ToLower(strings.TrimSpace(dest))
+	if d == "" {
+		return false
+	}
+	for _, r := range rows {
+		if strings.ToLower(strings.TrimSpace(r.Email)) == d {
+			return true
+		}
+	}
+	return false
 }
 
 func (h *Handlers) getForwardAllowlist(w http.ResponseWriter, r *http.Request) {
@@ -606,20 +679,35 @@ func (h *Handlers) createForwardRule(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "bad id"})
 		return
 	}
-	var body forwardRuleUpsertBody
+	var body forwardRuleCreateBody
 	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
 		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid json"})
 		return
 	}
+	uid := userIDOrEmpty(r)
+	allowRows, err := h.Forwards.ListForwardAllowlist(r.Context(), uid)
+	if err != nil {
+		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "internal"})
+		return
+	}
+	forwardTo := strings.ToLower(strings.TrimSpace(body.ForwardTo))
+	if !forwardDestInAllowlist(forwardTo, allowRows) {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "forward_to not in allowlist"})
+		return
+	}
+	enabled := false
+	if body.Enabled != nil {
+		enabled = *body.Enabled
+	}
 	row := driven.ForwardRuleRow{
 		ID:            uuid.New(),
-		UserID:        userIDOrEmpty(r),
+		UserID:        uid,
 		AccountID:     accountID,
 		Name:          strings.TrimSpace(body.Name),
 		Mode:          strings.ToLower(strings.TrimSpace(body.Mode)),
 		ConditionJSON: string(body.ConditionJSON),
-		ForwardTo:     strings.ToLower(strings.TrimSpace(body.ForwardTo)),
-		Enabled:       body.Enabled,
+		ForwardTo:     forwardTo,
+		Enabled:       enabled,
 		CreatedAt:     time.Now().UTC(),
 		UpdatedAt:     time.Now().UTC(),
 	}
@@ -641,13 +729,24 @@ func (h *Handlers) updateForwardRule(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid json"})
 		return
 	}
+	uid := userIDOrEmpty(r)
+	allowRows, err := h.Forwards.ListForwardAllowlist(r.Context(), uid)
+	if err != nil {
+		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "internal"})
+		return
+	}
+	forwardTo := strings.ToLower(strings.TrimSpace(body.ForwardTo))
+	if !forwardDestInAllowlist(forwardTo, allowRows) {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "forward_to not in allowlist"})
+		return
+	}
 	row := driven.ForwardRuleRow{
 		ID:            ruleID,
-		UserID:        userIDOrEmpty(r),
+		UserID:        uid,
 		Name:          strings.TrimSpace(body.Name),
 		Mode:          strings.ToLower(strings.TrimSpace(body.Mode)),
 		ConditionJSON: string(body.ConditionJSON),
-		ForwardTo:     strings.ToLower(strings.TrimSpace(body.ForwardTo)),
+		ForwardTo:     forwardTo,
 		Enabled:       body.Enabled,
 		UpdatedAt:     time.Now().UTC(),
 	}

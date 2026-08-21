@@ -23,18 +23,26 @@ export function AccountBadge({ account, size = "sm", showEmail = false, classNam
     );
   }
   const dotColor = `hsl(var(--${account.colorVar}))`;
+  const email = (account.primaryEmail ?? "").trim();
+  const label = (account.label ?? "").trim();
+  const emailLower = email.toLowerCase();
+  const labelLower = label.toLowerCase();
+  const labelMatchesEmail = labelLower !== "" && emailLower !== "" && labelLower === emailLower;
+
+  const primaryText = labelMatchesEmail ? email : label || email;
+
   return (
     <span
       className={cn(
-        "inline-flex items-center gap-1.5 font-medium text-foreground/80",
+        "inline-flex min-w-0 max-w-full items-center gap-1.5 font-medium text-foreground/80",
         size === "sm" ? "text-xs" : "text-sm",
         className
       )}
     >
-      <span className="acct-dot" style={{ background: dotColor }} />
-      <span>{account.label}</span>
-      {showEmail && (
-        <span className="text-muted-foreground font-normal">· {account.primaryEmail}</span>
+      <span className="acct-dot shrink-0" style={{ background: dotColor }} />
+      <span className="min-w-0 truncate">{primaryText || "Account"}</span>
+      {showEmail && email && !labelMatchesEmail && label !== "" && (
+        <span className="shrink-0 font-normal text-muted-foreground">· {email}</span>
       )}
     </span>
   );

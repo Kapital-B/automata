@@ -1,23 +1,42 @@
-import { useEffect, useMemo, useState, type SyntheticEvent } from "react";
+import { useEffect, useMemo, useRef, useState, type SyntheticEvent } from "react";
 import { PageHeader } from "@/components/PageHeader";
 import { AccountBadge } from "@/components/AccountBadge";
 import { CategoryPill } from "@/components/CategoryPill";
 import { relativeTime } from "@/lib/accounts";
 import {
   categorizeAccount,
+  forwardMessage,
   generateDraftSuggestions,
+  getForwardAllowlist,
   listCategories,
   listDraftSuggestions,
   listMessages,
   syncAccount,
   type MessageItem,
 } from "@/lib/auth";
-import { Paperclip, Reply, Forward, Archive, Loader2 } from "lucide-react";
+import { Paperclip, Reply, Forward, Loader2, ChevronDown, ChevronLeft } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { Button } from "@/components/ui/button";
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuTrigger,
+} from "@/components/ui/dropdown-menu";
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from "@/components/ui/dialog";
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
+import { Textarea } from "@/components/ui/textarea";
 import type { AccountFilter } from "@/components/AppShell";
 import { useAuth } from "@/components/auth/AuthProvider";
 import { useAccountsData } from "@/hooks/useAccountsData";
+import { useIsBelowLg } from "@/hooks/use-mobile";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { toast } from "@/hooks/use-toast";
 import { Link, useSearchParams } from "react-router-dom";
@@ -31,6 +50,21 @@ const HTML_DOCUMENT_RE = /<(?:!doctype|html|head|body)\b/i;
 const TEXT_BODY_URL_RE = /\[https?:\/\/[^\]]+\]/i;
 const EMAIL_CSP =
   "default-src 'none'; img-src http: https: data: cid: blob:; style-src 'unsafe-inline' http: https:; font-src http: https: data:; connect-src 'none'; script-src 'none'; form-action 'none'; frame-ancestors 'none';";
+
+/** Primary line is display name or address; secondary is the other part when both exist. */
+function senderLines(from: MessageItem["from_json"]): { primary: string; secondary?: string } {
+  const name = from?.name?.trim() ?? "";
+  const addr = from?.address?.trim() ?? "";
+  if (name && addr) {
+    const same =
+      name.toLowerCase().replace(/^mailto:/i, "") === addr.toLowerCase().replace(/^mailto:/i, "");
+    if (same) return { primary: name };
+    return { primary: name, secondary: addr };
+  }
+  if (addr) return { primary: addr };
+  if (name) return { primary: name };
+  return { primary: "Unknown sender" };
+}
 
 function isProbablyHtml(body: string) {
   return HTML_TAG_RE.test(body);
@@ -105,7 +139,14 @@ export default function InboxPage({ accountFilter }: Props) {
   const [htmlRefreshAttempts, setHtmlRefreshAttempts] = useState<Set<string>>(() => new Set());
   const [refreshingHtmlMessageIds, setRefreshingHtmlMessageIds] = useState<Set<string>>(() => new Set());
   const [pendingDraftMessageKeys, setPendingDraftMessageKeys] = useState<Set<string>>(() => new Set());
+  const [forwardDialogOpen, setForwardDialogOpen] = useState(false);
+  const [forwardTo, setForwardTo] = useState("");
+  const [forwardComment, setForwardComment] = useState("");
+  /** Narrow layout: show either list or message, not both stacked. */
+  const [narrowInboxPane, setNarrowInboxPane] = useState<"list" | "detail">("list");
   const [searchParams, setSearchParams] = useSearchParams();
+  const isStackedInbox = useIsBelowLg();
+  const wasStackedInboxRef = useRef<boolean | null>(null);
   const deepLinkedMessageID = searchParams.get("message_id");
 
   const categoriesQuery = useQuery({
@@ -124,11 +165,16 @@ export default function InboxPage({ accountFilter }: Props) {
       }),
     enabled: Boolean(accessToken),
   });
+  const draftsScope = accountFilter === "all" ? "all" : accountFilter;
   const draftsQuery = useQuery({
-    queryKey: ["draft-suggestions", accessToken, accountFilter],
+    queryKey: ["draft-suggestions", accessToken, draftsScope],
     queryFn: () => listDraftSuggestions(accessToken!, accountFilter === "all" ? undefined : accountFilter),
     enabled: Boolean(accessToken),
-    refetchInterval: 3000,
+  });
+  const forwardAllowlistQuery = useQuery({
+    queryKey: ["forward-allowlist", accessToken],
+    queryFn: () => getForwardAllowlist(accessToken!),
+    enabled: Boolean(accessToken && forwardDialogOpen),
   });
 
   const categorizeMutation = useMutation({
@@ -170,6 +216,29 @@ export default function InboxPage({ accountFilter }: Props) {
       });
     },
   });
+  const forwardMutation = useMutation({
+    mutationFn: async () => {
+      if (!accessToken || !selected) throw new Error("Not authenticated");
+      const trimmed = forwardTo.trim().toLowerCase();
+      if (!trimmed) throw new Error("Choose a destination");
+      await forwardMessage(accessToken, selected.id, {
+        to_email: trimmed,
+        comment: forwardComment.trim() || undefined,
+      });
+    },
+    onSuccess: () => {
+      toast({ title: "Message forwarded" });
+      setForwardDialogOpen(false);
+      setForwardComment("");
+    },
+    onError: (err) => {
+      toast({
+        title: "Could not forward message",
+        description: err instanceof Error ? err.message : "Please try again.",
+        variant: "destructive",
+      });
+    },
+  });
 
   const categoryFilters = useMemo(() => {
     const slugs = categoriesQuery.data?.map((c) => c.slug) ?? [];
@@ -195,12 +264,25 @@ export default function InboxPage({ accountFilter }: Props) {
       return;
     }
     setSelectedId(target.id);
+    setNarrowInboxPane("detail");
     // Clean query string after honoring the deep link to avoid reselect loops.
     const next = new URLSearchParams(searchParams);
     next.delete("message_id");
     next.delete("account_id");
     setSearchParams(next, { replace: true });
   }, [deepLinkedMessageID, filtered, searchParams, setSearchParams]);
+
+  useEffect(() => {
+    if (wasStackedInboxRef.current === null) {
+      wasStackedInboxRef.current = isStackedInbox;
+      return;
+    }
+    const prev = wasStackedInboxRef.current;
+    wasStackedInboxRef.current = isStackedInbox;
+    if (isStackedInbox && !prev && selectedId) {
+      setNarrowInboxPane("detail");
+    }
+  }, [isStackedInbox, selectedId]);
 
   useEffect(() => {
     // Avoid overriding deep-link selection before it is applied.
@@ -218,6 +300,7 @@ export default function InboxPage({ accountFilter }: Props) {
 
   const selected = filtered.find((m) => m.id === selectedId) ?? filtered[0];
   const selAccount = selected ? accounts.find((a) => a.id === selected.account_id) : undefined;
+  const selectedFromLines = selected ? senderLines(selected.from_json) : null;
 
   useEffect(() => {
     if (!accessToken || !selected?.body_text || !looksLikeTextConvertedHtml(selected.body_text)) {
@@ -267,9 +350,26 @@ export default function InboxPage({ accountFilter }: Props) {
     });
   }, [draftByMessageKey]);
 
+  useEffect(() => {
+    if (!forwardDialogOpen) return;
+    const emails = forwardAllowlistQuery.data?.emails ?? [];
+    if (emails.length === 0) return;
+    setForwardTo((prev) => (prev && emails.includes(prev) ? prev : emails[0]));
+  }, [forwardDialogOpen, forwardAllowlistQuery.data?.emails]);
+
   const selectedMessageKey = selected ? `${selected.account_id}:${selected.id}` : "";
   const selectedDraftID = selectedMessageKey ? draftByMessageKey.get(selectedMessageKey) : undefined;
   const selectedDraftPending = selectedMessageKey !== "" && pendingDraftMessageKeys.has(selectedMessageKey);
+
+  const openForwardDialog = () => {
+    setForwardComment("");
+    const cached = queryClient.getQueryData<{ emails: string[] }>(["forward-allowlist", accessToken]);
+    setForwardTo(cached?.emails?.[0] ?? "");
+    setForwardDialogOpen(true);
+  };
+
+  const showMessageList = !isStackedInbox || narrowInboxPane === "list";
+  const showMessageDetail = Boolean(selected && (!isStackedInbox || narrowInboxPane === "detail"));
 
   return (
     <div className="space-y-6">
@@ -336,16 +436,26 @@ export default function InboxPage({ accountFilter }: Props) {
         </div>
       )}
 
-      <div className="grid gap-6 lg:grid-cols-[minmax(0,1fr)_minmax(0,1.2fr)]">
-        {/* List */}
+      <div
+        className={cn(
+          "grid gap-6",
+          !isStackedInbox && "lg:grid-cols-[minmax(0,1fr)_minmax(0,1.2fr)]",
+        )}
+      >
+        {/* List — full width on narrow when browsing messages */}
+        {showMessageList && (
         <ul className="surface-card divide-y divide-border/70 overflow-hidden">
           {filtered.map((m) => {
             const acct = accounts.find((a) => a.id === m.account_id);
             const isSel = selected?.id === m.id;
+            const from = senderLines(m.from_json);
             return (
               <li
                 key={m.id}
-                onClick={() => setSelectedId(m.id)}
+                onClick={() => {
+                  setSelectedId(m.id);
+                  if (isStackedInbox) setNarrowInboxPane("detail");
+                }}
                 className={cn(
                   "cursor-pointer px-4 py-3 transition",
                   isSel ? "bg-secondary/70" : "hover:bg-secondary/40"
@@ -363,8 +473,11 @@ export default function InboxPage({ accountFilter }: Props) {
                     "text-foreground/90"
                   )}
                 >
-                  {m.from_json?.name ?? m.from_json?.address ?? "Unknown sender"}
+                  {from.primary}
                 </p>
+                {from.secondary && (
+                  <p className="truncate text-xs text-muted-foreground">{from.secondary}</p>
+                )}
                 <p className="truncate text-sm text-foreground/85">{m.subject}</p>
                 <p className="mt-0.5 truncate text-xs text-muted-foreground">{m.preview}</p>
                 <div className="mt-2 flex items-center gap-2">
@@ -377,40 +490,70 @@ export default function InboxPage({ accountFilter }: Props) {
             );
           })}
         </ul>
+        )}
 
-        {/* Detail */}
-        {selected && (
+        {/* Detail — on narrow widths, replaces the list until user goes back */}
+        {showMessageDetail && selected && (
           <article className="surface-card flex flex-col">
-            <div className="flex items-center justify-between border-b border-border/70 px-5 py-3">
-              <AccountBadge account={selAccount} showEmail />
-              <div className="flex items-center gap-1">
-                {selectedDraftID && (
-                  <Button asChild size="sm" variant="ghost">
-                    <Link to={`/drafts?draft_id=${encodeURIComponent(selectedDraftID)}`}>
-                      <Reply className="mr-1.5 h-3.5 w-3.5" />
-                      Open draft
-                    </Link>
-                  </Button>
-                )}
-                {!selectedDraftID && (
-                  <Button
-                    size="sm"
-                    variant="ghost"
-                    disabled={selectedDraftPending || createDraftMutation.isPending}
-                    onClick={() => {
-                      if (!selected) return;
-                      const key = `${selected.account_id}:${selected.id}`;
-                      setPendingDraftMessageKeys((prev) => new Set(prev).add(key));
-                      createDraftMutation.mutate({ accountID: selected.account_id, messageID: selected.id });
-                    }}
-                  >
-                    <Reply className="mr-1.5 h-3.5 w-3.5" />
-                    {selectedDraftPending ? "Draft queued..." : "Create draft"}
-                  </Button>
-                )}
-                <Button size="sm" variant="ghost"><Forward className="mr-1.5 h-3.5 w-3.5" />Forward</Button>
-                <Button size="sm" variant="ghost"><Archive className="h-3.5 w-3.5" /></Button>
+            {isStackedInbox && (
+              <nav
+                aria-label="Inbox navigation"
+                className="flex border-b border-border/70 px-3 py-2"
+              >
+                <Button
+                  type="button"
+                  variant="ghost"
+                  size="sm"
+                  className="-ml-1 h-8 gap-1 px-2 text-muted-foreground hover:text-foreground"
+                  onClick={() => setNarrowInboxPane("list")}
+                >
+                  <ChevronLeft className="h-4 w-4" />
+                  Messages
+                </Button>
+              </nav>
+            )}
+            <div className="flex min-w-0 items-center justify-between gap-3 border-b border-border/70 px-5 py-3">
+              <div className="min-w-0 flex-1">
+                <AccountBadge account={selAccount} showEmail className="max-w-full" />
               </div>
+              <DropdownMenu>
+                <DropdownMenuTrigger asChild>
+                  <Button size="sm" variant="outline" className="shrink-0 gap-1">
+                    Actions
+                    <ChevronDown className="h-3.5 w-3.5 opacity-70" />
+                  </Button>
+                </DropdownMenuTrigger>
+                <DropdownMenuContent align="end" className="w-52">
+                  {selectedDraftID ? (
+                    <DropdownMenuItem asChild>
+                      <Link
+                        to={`/drafts?draft_id=${encodeURIComponent(selectedDraftID)}`}
+                        className="flex cursor-pointer items-center"
+                      >
+                        <Reply className="mr-2 h-3.5 w-3.5" />
+                        Open draft
+                      </Link>
+                    </DropdownMenuItem>
+                  ) : (
+                    <DropdownMenuItem
+                      disabled={selectedDraftPending || createDraftMutation.isPending}
+                      onClick={() => {
+                        if (!selected) return;
+                        const key = `${selected.account_id}:${selected.id}`;
+                        setPendingDraftMessageKeys((prev) => new Set(prev).add(key));
+                        createDraftMutation.mutate({ accountID: selected.account_id, messageID: selected.id });
+                      }}
+                    >
+                      <Reply className="mr-2 h-3.5 w-3.5" />
+                      {selectedDraftPending ? "Draft queued…" : "Create draft"}
+                    </DropdownMenuItem>
+                  )}
+                  <DropdownMenuItem disabled={!selected} onClick={() => openForwardDialog()}>
+                    <Forward className="mr-2 h-3.5 w-3.5" />
+                    Forward…
+                  </DropdownMenuItem>
+                </DropdownMenuContent>
+              </DropdownMenu>
             </div>
             <div className="px-6 py-5">
               <div className="flex items-start justify-between gap-3">
@@ -419,11 +562,17 @@ export default function InboxPage({ accountFilter }: Props) {
                 </h2>
                 <CategoryPill category={selected.category_slug ?? "uncategorized"} />
               </div>
-              <p className="mt-2 text-sm text-muted-foreground">
-                <span className="font-medium text-foreground/80">
-                  {selected.from_json?.name ?? selected.from_json?.address ?? "Unknown sender"}
-                </span>{" "}
-                &lt;{selected.from_json?.address ?? "unknown"}&gt; · {relativeTime(selected.received_at)}
+              <p className="mt-2 flex flex-wrap items-baseline gap-x-1 text-sm text-muted-foreground">
+                <span>From</span>
+                <span className="font-medium text-foreground/90">{selectedFromLines?.primary}</span>
+                {selectedFromLines?.secondary && (
+                  <>
+                    <span className="text-muted-foreground">·</span>
+                    <span className="font-mono text-xs text-foreground/85">{selectedFromLines.secondary}</span>
+                  </>
+                )}
+                <span className="text-muted-foreground">·</span>
+                <span>{relativeTime(selected.received_at)}</span>
               </p>
             </div>
             <div className="hairline" />
@@ -436,6 +585,102 @@ export default function InboxPage({ accountFilter }: Props) {
           </article>
         )}
       </div>
+
+      <Dialog
+        open={forwardDialogOpen}
+        onOpenChange={(open) => {
+          setForwardDialogOpen(open);
+          if (!open) {
+            setForwardComment("");
+          }
+        }}
+      >
+        <DialogContent className="sm:max-w-md">
+          <DialogHeader>
+            <DialogTitle>Forward message</DialogTitle>
+            <DialogDescription>
+              Only addresses on your forwarding allowlist can receive this message. The original is forwarded via Microsoft Graph
+              (including attachments when supported).
+            </DialogDescription>
+          </DialogHeader>
+          {forwardAllowlistQuery.isLoading ? (
+            <p className="text-sm text-muted-foreground">Loading allowlist…</p>
+          ) : (forwardAllowlistQuery.data?.emails?.length ?? 0) === 0 ? (
+            <p className="text-sm text-muted-foreground">
+              Add at least one destination under{" "}
+              <Link
+                to="/rules"
+                className="font-medium text-foreground underline-offset-4 hover:underline"
+                onClick={() => setForwardDialogOpen(false)}
+              >
+                Forwarding rules
+              </Link>{" "}
+              before forwarding.
+            </p>
+          ) : (
+            <div className="space-y-3">
+              <div className="space-y-1.5">
+                <label className="text-xs text-muted-foreground" htmlFor="forward-to-select">
+                  Destination
+                </label>
+                <Select
+                  value={forwardTo}
+                  onValueChange={(v) => {
+                    setForwardTo(v);
+                  }}
+                >
+                  <SelectTrigger id="forward-to-select">
+                    <SelectValue placeholder="Select allowlisted email" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {(forwardAllowlistQuery.data?.emails ?? []).map((email) => (
+                      <SelectItem key={email} value={email}>
+                        {email}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              </div>
+              <div className="space-y-1.5">
+                <label className="text-xs text-muted-foreground" htmlFor="forward-comment">
+                  Comment to recipients (optional)
+                </label>
+                <Textarea
+                  id="forward-comment"
+                  value={forwardComment}
+                  onChange={(e) => setForwardComment(e.target.value)}
+                  placeholder="Shown above the forwarded message in Outlook"
+                  rows={3}
+                />
+              </div>
+            </div>
+          )}
+          <DialogFooter className="gap-2 sm:gap-0">
+            <Button type="button" variant="outline" onClick={() => setForwardDialogOpen(false)}>
+              Cancel
+            </Button>
+            <Button
+              type="button"
+              disabled={
+                forwardMutation.isPending ||
+                forwardAllowlistQuery.isLoading ||
+                (forwardAllowlistQuery.data?.emails?.length ?? 0) === 0 ||
+                !forwardTo.trim()
+              }
+              onClick={() => forwardMutation.mutate()}
+            >
+              {forwardMutation.isPending ? (
+                <>
+                  <Loader2 className="mr-1.5 h-3.5 w-3.5 animate-spin" />
+                  Forwarding…
+                </>
+              ) : (
+                "Confirm forward"
+              )}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
     </div>
   );
 }

@@ -43,12 +43,23 @@ func (g *GraphClient) client() *http.Client {
 }
 
 func (g *GraphClient) getJSON(ctx context.Context, accessToken, reqURL string, out any) error {
+	return g.doGetJSON(ctx, accessToken, reqURL, out, false)
+}
+
+// getJSONMail sets Prefer for HTML bodies and immutable message ids (stable across folder moves).
+func (g *GraphClient) getJSONMail(ctx context.Context, accessToken, reqURL string, out any) error {
+	return g.doGetJSON(ctx, accessToken, reqURL, out, true)
+}
+
+func (g *GraphClient) doGetJSON(ctx context.Context, accessToken, reqURL string, out any, mail bool) error {
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, reqURL, nil)
 	if err != nil {
 		return err
 	}
 	req.Header.Set("Authorization", "Bearer "+accessToken)
-	req.Header.Set("Prefer", `outlook.body-content-type="html"`)
+	if mail {
+		req.Header.Set("Prefer", `outlook.body-content-type="html", IdType="ImmutableId"`)
+	}
 	body, err := g.doJSONWithRetry(ctx, req)
 	if err != nil {
 		return err
@@ -229,10 +240,59 @@ type graphMessageJSON struct {
 			Address string `json:"address"`
 		} `json:"emailAddress"`
 	} `json:"from"`
+	ToRecipients []struct {
+		EmailAddress struct {
+			Name    string `json:"name"`
+			Address string `json:"address"`
+		} `json:"emailAddress"`
+	} `json:"toRecipients"`
+	CcRecipients []struct {
+		EmailAddress struct {
+			Name    string `json:"name"`
+			Address string `json:"address"`
+		} `json:"emailAddress"`
+	} `json:"ccRecipients"`
 	Body struct {
 		ContentType string `json:"contentType"`
 		Content     string `json:"content"`
 	} `json:"body"`
+}
+
+func mapGraphRecipients(in []struct {
+	EmailAddress struct {
+		Name    string `json:"name"`
+		Address string `json:"address"`
+	} `json:"emailAddress"`
+}) []driven.GraphRecipient {
+	if len(in) == 0 {
+		return nil
+	}
+	out := make([]driven.GraphRecipient, 0, len(in))
+	for _, r := range in {
+		out = append(out, driven.GraphRecipient{
+			Name:    r.EmailAddress.Name,
+			Address: r.EmailAddress.Address,
+		})
+	}
+	return out
+}
+
+func mapGraphMessage(m graphMessageJSON) driven.GraphMessage {
+	return driven.GraphMessage{
+		ID:               m.ID,
+		ConversationID:   m.ConversationID,
+		ReceivedDateTime: m.ReceivedDateTime,
+		Subject:          m.Subject,
+		FromName:         m.From.EmailAddress.Name,
+		FromAddress:      m.From.EmailAddress.Address,
+		ToRecipients:     mapGraphRecipients(m.ToRecipients),
+		CcRecipients:     mapGraphRecipients(m.CcRecipients),
+		BodyPreview:      m.BodyPreview,
+		BodyContent:      m.Body.Content,
+		BodyContentType:  m.Body.ContentType,
+		HasAttachments:   m.HasAttachments,
+		ChangeKey:        m.ChangeKey,
+	}
 }
 
 // ListInboxMessages lists top messages from Inbox (no delta in Phase 1).
@@ -247,33 +307,15 @@ func (g *GraphClient) ListInboxMessages(ctx context.Context, accessToken string,
 	q := u.Query()
 	q.Set("$top", fmt.Sprintf("%d", top))
 	q.Set("$orderby", "receivedDateTime desc")
-	q.Set("$select", "id,conversationId,receivedDateTime,subject,body,bodyPreview,from,hasAttachments,changeKey")
+	q.Set("$select", "id,conversationId,receivedDateTime,subject,body,bodyPreview,from,toRecipients,ccRecipients,hasAttachments,changeKey")
 	u.RawQuery = q.Encode()
 	var res listMessagesResponse
-	if err := g.getJSON(ctx, accessToken, u.String(), &res); err != nil {
+	if err := g.getJSONMail(ctx, accessToken, u.String(), &res); err != nil {
 		return nil, err
 	}
 	out := make([]driven.GraphMessage, 0, len(res.Value))
 	for _, m := range res.Value {
-		rt, _ := time.Parse(time.RFC3339Nano, m.ReceivedDateTime)
-		if rt.IsZero() {
-			rt, _ = time.Parse(time.RFC3339, m.ReceivedDateTime)
-		}
-		gm := driven.GraphMessage{
-			ID:               m.ID,
-			ConversationID:   m.ConversationID,
-			ReceivedDateTime: m.ReceivedDateTime,
-			Subject:          m.Subject,
-			FromName:         m.From.EmailAddress.Name,
-			FromAddress:      m.From.EmailAddress.Address,
-			BodyPreview:      m.BodyPreview,
-			BodyContent:      m.Body.Content,
-			BodyContentType:  m.Body.ContentType,
-			HasAttachments:   m.HasAttachments,
-			ChangeKey:        m.ChangeKey,
-		}
-		_ = rt
-		out = append(out, gm)
+		out = append(out, mapGraphMessage(m))
 	}
 	return out, nil
 }
@@ -291,7 +333,7 @@ func (g *GraphClient) ListInboxDelta(ctx context.Context, accessToken string, de
 		u, _ := url.Parse(g.apiRoot() + "/me/mailFolders/inbox/messages/delta")
 		q := u.Query()
 		q.Set("$top", fmt.Sprintf("%d", pageSize))
-		q.Set("$select", "id,conversationId,receivedDateTime,subject,body,bodyPreview,from,hasAttachments,changeKey")
+		q.Set("$select", "id,conversationId,receivedDateTime,subject,body,bodyPreview,from,toRecipients,ccRecipients,hasAttachments,changeKey")
 		u.RawQuery = q.Encode()
 		nextURL = u.String()
 	}
@@ -299,7 +341,7 @@ func (g *GraphClient) ListInboxDelta(ctx context.Context, accessToken string, de
 	finalDelta := ""
 	for nextURL != "" {
 		var res deltaMessagesResponse
-		if err := g.getJSON(ctx, accessToken, nextURL, &res); err != nil {
+		if err := g.getJSONMail(ctx, accessToken, nextURL, &res); err != nil {
 			return nil, err
 		}
 		for _, m := range res.Value {
@@ -307,19 +349,7 @@ func (g *GraphClient) ListInboxDelta(ctx context.Context, accessToken string, de
 			if strings.TrimSpace(m.ID) == "" {
 				continue
 			}
-			out = append(out, driven.GraphMessage{
-				ID:               m.ID,
-				ConversationID:   m.ConversationID,
-				ReceivedDateTime: m.ReceivedDateTime,
-				Subject:          m.Subject,
-				FromName:         m.From.EmailAddress.Name,
-				FromAddress:      m.From.EmailAddress.Address,
-				BodyPreview:      m.BodyPreview,
-				BodyContent:      m.Body.Content,
-				BodyContentType:  m.Body.ContentType,
-				HasAttachments:   m.HasAttachments,
-				ChangeKey:        m.ChangeKey,
-			})
+			out = append(out, mapGraphMessage(m))
 		}
 		if strings.TrimSpace(res.DeltaLink) != "" {
 			finalDelta = strings.TrimSpace(res.DeltaLink)
@@ -337,24 +367,37 @@ func (g *GraphClient) ListInboxDelta(ctx context.Context, accessToken string, de
 
 // GetMessageBody fetches full message body content.
 func (g *GraphClient) GetMessageBody(ctx context.Context, accessToken string, providerMessageID string) (*driven.GraphMessage, error) {
-	u := g.apiRoot() + "/me/messages/" + url.PathEscape(providerMessageID) + "?$select=id,conversationId,receivedDateTime,subject,body,bodyPreview,from,hasAttachments,changeKey"
+	id := strings.TrimSpace(providerMessageID)
+	if id == "" {
+		return nil, fmt.Errorf("empty provider message id")
+	}
+	u := g.apiRoot() + "/me/messages/" + url.PathEscape(id) + "?$select=id,conversationId,receivedDateTime,subject,body,bodyPreview,from,toRecipients,ccRecipients,hasAttachments,changeKey"
 	var m graphMessageJSON
-	if err := g.getJSON(ctx, accessToken, u, &m); err != nil {
+	if err := g.getJSONMail(ctx, accessToken, u, &m); err != nil {
 		return nil, err
 	}
-	return &driven.GraphMessage{
-		ID:               m.ID,
-		ConversationID:   m.ConversationID,
-		ReceivedDateTime: m.ReceivedDateTime,
-		Subject:          m.Subject,
-		FromName:         m.From.EmailAddress.Name,
-		FromAddress:      m.From.EmailAddress.Address,
-		BodyPreview:      m.BodyPreview,
-		BodyContent:      m.Body.Content,
-		BodyContentType:  m.Body.ContentType,
-		HasAttachments:   m.HasAttachments,
-		ChangeKey:        m.ChangeKey,
-	}, nil
+	gm := mapGraphMessage(m)
+	return &gm, nil
+}
+
+// ResolveGraphMessageID returns the message id Graph accepts for mutating requests, using immutable ids when supported.
+func (g *GraphClient) ResolveGraphMessageID(ctx context.Context, accessToken string, providerMessageID string) (string, error) {
+	id := strings.TrimSpace(providerMessageID)
+	if id == "" {
+		return "", fmt.Errorf("empty provider message id")
+	}
+	u := g.apiRoot() + "/me/messages/" + url.PathEscape(id) + "?$select=id"
+	var m struct {
+		ID string `json:"id"`
+	}
+	if err := g.getJSONMail(ctx, accessToken, u, &m); err != nil {
+		return "", err
+	}
+	out := strings.TrimSpace(m.ID)
+	if out == "" {
+		return "", fmt.Errorf("graph returned empty message id")
+	}
+	return out, nil
 }
 
 func (g *GraphClient) SendMail(ctx context.Context, accessToken string, toEmail, subject, body string) error {
@@ -379,7 +422,7 @@ func (g *GraphClient) ReplyToMessage(ctx context.Context, accessToken string, pr
 	if strings.TrimSpace(providerMessageID) == "" {
 		return fmt.Errorf("empty provider message id")
 	}
-	u := g.apiRoot() + "/me/messages/" + url.PathEscape(providerMessageID) + "/reply"
+	u := g.apiRoot() + "/me/messages/" + url.PathEscape(strings.TrimSpace(providerMessageID)) + "/reply"
 	payload := map[string]any{
 		"message": map[string]any{
 			"body": map[string]any{
@@ -407,7 +450,8 @@ func (g *GraphClient) ForwardMessage(ctx context.Context, accessToken string, pr
 	if toEmail == "" {
 		return fmt.Errorf("empty forward recipient")
 	}
-	u := g.apiRoot() + "/me/messages/" + url.PathEscape(providerMessageID) + "/forward"
+	id := strings.TrimSpace(providerMessageID)
+	u := g.apiRoot() + "/me/messages/" + url.PathEscape(id) + "/forward"
 	payload := map[string]any{
 		"comment": comment,
 		"toRecipients": []map[string]any{

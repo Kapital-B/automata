@@ -26,11 +26,11 @@ export default function DraftsPage({ accountFilter }: Props) {
   const deepLinkedDraftID = searchParams.get("draft_id");
   const [editableSubject, setEditableSubject] = useState("");
   const [editableBody, setEditableBody] = useState("");
+  const draftsScope = accountFilter === "all" ? "all" : accountFilter;
   const draftsQuery = useQuery({
-    queryKey: ["draft-suggestions", accessToken, accountFilter],
+    queryKey: ["draft-suggestions", accessToken, draftsScope],
     queryFn: () => listDraftSuggestions(accessToken!, accountFilter === "all" ? undefined : accountFilter),
     enabled: Boolean(accessToken),
-    refetchInterval: 3000,
   });
   const visible = useMemo(() => draftsQuery.data ?? [], [draftsQuery.data]);
   const draft = visible.find((d) => d.id === selectedId) ?? visible[0];
@@ -38,7 +38,7 @@ export default function DraftsPage({ accountFilter }: Props) {
     queryKey: ["draft-send-attempts", accessToken, draft?.id],
     queryFn: () => listDraftSendAttempts(accessToken!, draft!.id),
     enabled: Boolean(accessToken && draft?.id),
-    refetchInterval: 3000,
+    refetchInterval: 20_000,
   });
   useEffect(() => {
     if (!draft) return;
@@ -69,7 +69,7 @@ export default function DraftsPage({ accountFilter }: Props) {
     },
     onSuccess: () => {
       toast({ title: "Draft saved" });
-      void queryClient.invalidateQueries({ queryKey: ["draft-suggestions", accessToken, accountFilter] });
+      void queryClient.invalidateQueries({ queryKey: ["draft-suggestions"] });
     },
     onError: (error) => {
       toast({ title: "Could not save draft", description: error instanceof Error ? error.message : "Unknown error", variant: "destructive" });
@@ -83,7 +83,7 @@ export default function DraftsPage({ accountFilter }: Props) {
     onSuccess: () => {
       toast({ title: "Draft discarded" });
       setSelectedId("");
-      void queryClient.invalidateQueries({ queryKey: ["draft-suggestions", accessToken, accountFilter] });
+      void queryClient.invalidateQueries({ queryKey: ["draft-suggestions"] });
       void queryClient.invalidateQueries({ queryKey: ["runs", accessToken] });
     },
     onError: (error) => {
@@ -100,7 +100,7 @@ export default function DraftsPage({ accountFilter }: Props) {
     onSuccess: () => {
       toast({ title: "Draft sent" });
       setSelectedId("");
-      void queryClient.invalidateQueries({ queryKey: ["draft-suggestions", accessToken, accountFilter] });
+      void queryClient.invalidateQueries({ queryKey: ["draft-suggestions"] });
       void queryClient.invalidateQueries({ queryKey: ["runs", accessToken] });
     },
     onError: (error) => {

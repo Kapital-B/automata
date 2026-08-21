@@ -4,6 +4,7 @@
 **Owner:** Product (single-user / self-hosted context)  
 **Last updated:** 2026-04-28  
 **Parent PRD:** [docs/prds/initial.md](initial.md)  
+**Related addenda:** [Project correspondence intelligence](addendum-project-correspondence.md)  
 
 ## 1. Summary
 

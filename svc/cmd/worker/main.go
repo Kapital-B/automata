@@ -11,6 +11,7 @@ import (
 	"github.com/Kapital-B/automata/svc/internal/adapters/outbound/microsoft"
 	"github.com/Kapital-B/automata/svc/internal/adapters/outbound/persistence/sqlite"
 	"github.com/Kapital-B/automata/svc/internal/adapters/outbound/security"
+	appcontacts "github.com/Kapital-B/automata/svc/internal/application/contacts"
 	appmessages "github.com/Kapital-B/automata/svc/internal/application/messages"
 	"github.com/Kapital-B/automata/svc/internal/configuration"
 	"github.com/hibiken/asynq"
@@ -57,6 +58,11 @@ func main() {
 		Graph:    graph,
 		Vault:    vault,
 		JobRuns:  repo,
+		Resolve: &appcontacts.ResolveService{
+			Users:    repo,
+			Messages: repo,
+			Contacts: repo,
+		},
 	}
 	var categorizeSvc *appmessages.CategorizeService
 	var summarizeSvc *appmessages.SummarizeService

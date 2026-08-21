@@ -11,6 +11,8 @@ import NotFound from "./pages/NotFound.tsx";
 import TodayPage from "./pages/Today";
 import InboxPage from "./pages/Inbox";
 import AccountsPage from "./pages/Accounts";
+import PeoplePage from "./pages/People";
+import PersonDetailPage from "./pages/PersonDetail";
 import RulesPage from "./pages/Rules";
 import DraftsPage from "./pages/Drafts";
 import RunsPage from "./pages/Runs";
@@ -59,6 +61,22 @@ const App = () => (
               element={
                 <ProtectedRoute>
                   <AppShell>{(ctx) => <InboxPage {...ctx} />}</AppShell>
+                </ProtectedRoute>
+              }
+            />
+            <Route
+              path="/people"
+              element={
+                <ProtectedRoute>
+                  <AppShell>{() => <PeoplePage />}</AppShell>
+                </ProtectedRoute>
+              }
+            />
+            <Route
+              path="/people/:id"
+              element={
+                <ProtectedRoute>
+                  <AppShell>{() => <PersonDetailPage />}</AppShell>
                 </ProtectedRoute>
               }
             />

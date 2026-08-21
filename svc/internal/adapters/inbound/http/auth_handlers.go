@@ -201,7 +201,11 @@ func (h *Handlers) me(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "internal"})
 		return
 	}
-	writeJSON(w, http.StatusOK, map[string]any{"user_id": uid.String(), "email": email})
+	resp := map[string]any{"user_id": uid.String(), "email": email}
+	if orgID, err := h.Users.GetHomeOrganisationID(r.Context(), uid); err == nil {
+		resp["home_organisation_id"] = orgID.String()
+	}
+	writeJSON(w, http.StatusOK, resp)
 }
 
 func (h *Handlers) redirectAuthSuccess(w http.ResponseWriter, r *http.Request, pair auth.TokenPair) {

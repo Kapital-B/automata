@@ -55,7 +55,13 @@ func (s *AutoDraftService) GenerateForAccount(ctx context.Context, userID, accou
 		onlyUnseen = false
 	}
 	started := time.Now().UTC()
-	_ = s.JobRuns.InsertJobRun(ctx, runID, accountID, "draft_suggest", trigger, "running", started, time.Time{}, nil, `{}`)
+	if opts.RunID != nil {
+		if err := s.JobRuns.PromoteJobRunToRunning(ctx, runID, started); err != nil {
+			return nil, err
+		}
+	} else {
+		_ = s.JobRuns.InsertJobRun(ctx, runID, accountID, "draft_suggest", trigger, "running", started, time.Time{}, nil, `{}`)
+	}
 
 	fail := func(err error) (*AutoDraftResult, error) {
 		msg := err.Error()

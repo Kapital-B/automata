@@ -7,6 +7,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/Kapital-B/automata/svc/internal/domain/organisations"
 	"github.com/google/uuid"
 )
 
@@ -25,6 +26,57 @@ func (r *Repository) CreateUser(ctx context.Context, id uuid.UUID, email string,
 		id.String(), em, ph, formatRFC3339(now.UTC()), formatRFC3339(now.UTC()),
 	)
 	return err
+}
+
+func (r *Repository) CreateUserWithHomeOrg(ctx context.Context, id uuid.UUID, email string, passwordHash *string, now time.Time, identityProvider, identitySubject, identityEmail string) (uuid.UUID, error) {
+	tx, err := r.db.BeginTx(ctx, nil)
+	if err != nil {
+		return uuid.Nil, err
+	}
+	defer func() { _ = tx.Rollback() }()
+
+	em := normalizeEmail(email)
+	var ph any
+	if passwordHash != nil {
+		ph = *passwordHash
+	}
+	ts := formatRFC3339(now.UTC())
+	orgID := uuid.New()
+
+	if _, err := tx.ExecContext(ctx, `
+		INSERT INTO organisations (id, name, created_at, updated_at) VALUES (?, ?, ?, ?)
+	`, orgID.String(), organisations.DefaultName, ts, ts); err != nil {
+		return uuid.Nil, err
+	}
+	if _, err := tx.ExecContext(ctx, `
+		INSERT INTO users (id, email, password_hash, home_organisation_id, created_at, updated_at)
+		VALUES (?, ?, ?, ?, ?, ?)
+	`, id.String(), em, ph, orgID.String(), ts, ts); err != nil {
+		return uuid.Nil, err
+	}
+	memberID := uuid.New()
+	if _, err := tx.ExecContext(ctx, `
+		INSERT INTO organisation_members (id, organisation_id, user_id, org_role, created_at)
+		VALUES (?, ?, ?, ?, ?)
+	`, memberID.String(), orgID.String(), id.String(), string(organisations.RoleOwner), ts); err != nil {
+		return uuid.Nil, err
+	}
+	if strings.TrimSpace(identityProvider) != "" {
+		identEmail := normalizeEmail(identityEmail)
+		if identEmail == "" {
+			identEmail = em
+		}
+		if _, err := tx.ExecContext(ctx, `
+			INSERT INTO user_identities (id, user_id, provider, provider_subject, email_at_link, created_at)
+			VALUES (?, ?, ?, ?, ?, ?)
+		`, uuid.New().String(), id.String(), identityProvider, identitySubject, identEmail, ts); err != nil {
+			return uuid.Nil, err
+		}
+	}
+	if err := tx.Commit(); err != nil {
+		return uuid.Nil, err
+	}
+	return orgID, nil
 }
 
 func (r *Repository) GetUserByEmail(ctx context.Context, email string) (uuid.UUID, *string, error) {
@@ -55,6 +107,21 @@ func (r *Repository) GetUserByID(ctx context.Context, id uuid.UUID) (string, err
 		return "", err
 	}
 	return email, nil
+}
+
+func (r *Repository) GetHomeOrganisationID(ctx context.Context, userID uuid.UUID) (uuid.UUID, error) {
+	var orgStr sql.NullString
+	err := r.db.QueryRowContext(ctx, `SELECT home_organisation_id FROM users WHERE id = ?`, userID.String()).Scan(&orgStr)
+	if errors.Is(err, sql.ErrNoRows) {
+		return uuid.Nil, sql.ErrNoRows
+	}
+	if err != nil {
+		return uuid.Nil, err
+	}
+	if !orgStr.Valid || orgStr.String == "" {
+		return uuid.Nil, sql.ErrNoRows
+	}
+	return uuid.Parse(orgStr.String)
 }
 
 func (r *Repository) FindIdentity(ctx context.Context, provider, providerSubject string) (uuid.UUID, bool, error) {

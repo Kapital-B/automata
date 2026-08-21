@@ -138,8 +138,9 @@ export function useAssistantHomeData(accountFilter: AccountFilter) {
     enabled: canLoadSecondary,
   });
 
+  const draftsScope = activeAccountID ?? "all";
   const draftsQuery = useQuery({
-    queryKey: ["assistant-home", "drafts", accessToken, activeAccountID],
+    queryKey: ["draft-suggestions", accessToken, draftsScope],
     queryFn: () => listDraftSuggestions(accessToken!, activeAccountID),
     enabled: canLoadSecondary,
   });
@@ -187,8 +188,7 @@ export function useAssistantHomeData(accountFilter: AccountFilter) {
   return {
     ...state,
     isLoading:
-      accountsQuery.isPending ||
-      (canLoadSecondary && (summaryQuery.isPending || draftsQuery.isPending || runsQuery.isPending)),
+      accountsQuery.isPending || (canLoadSecondary && summaryQuery.isPending),
     accountsError: accountsQuery.error,
     summaryError: summaryQuery.error,
     draftsError: draftsQuery.error,

@@ -9,7 +9,7 @@ import {
   History,
   Settings as SettingsIcon,
   MessageSquare,
-  LayoutDashboard,
+  Users,
   Mail,
   Slack,
   Zap,
@@ -40,6 +40,7 @@ const assistantNav = [
 const primaryNav = [
   { title: "Today", url: "/today", icon: Sparkles },
   { title: "Inbox", url: "/inbox", icon: Inbox },
+  { title: "People", url: "/people", icon: Users },
   { title: "Drafts", url: "/drafts", icon: PenLine },
   { title: "Rules", url: "/rules", icon: Forward },
 ];
@@ -71,7 +72,7 @@ export function AppSidebar() {
     enabled: Boolean(accessToken) && connectedAccounts.length > 0,
   });
   const draftsBadgeQuery = useQuery({
-    queryKey: ["sidebar", "drafts-badge", accessToken],
+    queryKey: ["draft-suggestions", accessToken, "all"],
     queryFn: () => listDraftSuggestions(accessToken!),
     enabled: Boolean(accessToken) && connectedAccounts.length > 0,
   });

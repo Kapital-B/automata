@@ -2,7 +2,8 @@
 
 **Status:** Draft  
 **Owner:** Product (single-user / self-hosted context)  
-**Last updated:** 2026-04-24 (monorepo `svc/`/`web/`, Go backend)
+**Last updated:** 2026-04-24 (monorepo `svc/`/`web/`, Go backend)  
+**Related addenda:** [AI-first assistant](addendum-ai-first-assistant.md) · [Project correspondence intelligence](addendum-project-correspondence.md)
 
 ## 1. Summary
 

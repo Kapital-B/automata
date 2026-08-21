@@ -56,7 +56,14 @@ func (s *ForwardRulesService) RunAccount(ctx context.Context, userID, accountID 
 	if trigger == "" {
 		trigger = "api"
 	}
-	_ = s.JobRuns.InsertJobRun(ctx, jobID, accountID, "forward_rules", trigger, "running", time.Now().UTC(), time.Time{}, nil, `{}`)
+	started := time.Now().UTC()
+	if opts.RunID != nil {
+		if err := s.JobRuns.PromoteJobRunToRunning(ctx, jobID, started); err != nil {
+			return uuid.Nil, err
+		}
+	} else {
+		_ = s.JobRuns.InsertJobRun(ctx, jobID, accountID, "forward_rules", trigger, "running", started, time.Time{}, nil, `{}`)
+	}
 
 	allowlistRows, err := s.Forwards.ListForwardAllowlist(ctx, userID)
 	if err != nil {
@@ -101,6 +108,8 @@ func (s *ForwardRulesService) RunAccount(ctx context.Context, userID, accountID 
 	for _, msg := range rows {
 		messageForwarded := false
 		messageHadFailure := false
+		var graphMsgID string
+		var graphResolveErr error
 		for _, rule := range rules {
 			if !rule.Enabled {
 				continue
@@ -125,7 +134,22 @@ func (s *ForwardRulesService) RunAccount(ctx context.Context, userID, accountID 
 				skipped++
 				continue
 			}
-			if err := s.Graph.ForwardMessage(ctx, accessToken, msg.ProviderMessageID, rule.ForwardTo, ""); err != nil {
+			if graphResolveErr != nil {
+				continue
+			}
+			if graphMsgID == "" {
+				var err error
+				graphMsgID, err = s.Graph.ResolveGraphMessageID(ctx, accessToken, msg.ProviderMessageID)
+				if err != nil {
+					graphResolveErr = err
+					e := err.Error()
+					_ = s.insertAudit(ctx, userID, accountID, msg.ID, rule.ID, jobID, "failed", &e)
+					failed++
+					messageHadFailure = true
+					continue
+				}
+			}
+			if err := s.Graph.ForwardMessage(ctx, accessToken, graphMsgID, rule.ForwardTo, ""); err != nil {
 				e := err.Error()
 				_ = s.insertAudit(ctx, userID, accountID, msg.ID, rule.ID, jobID, "failed", &e)
 				failed++

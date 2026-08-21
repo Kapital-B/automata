@@ -56,7 +56,13 @@ func (s *CategorizeService) CategorizeAccount(ctx context.Context, userID, accou
 		return nil, err
 	}
 	if s.JobRuns != nil {
-		_ = s.JobRuns.InsertJobRun(ctx, jobID, accountID, "categorize", trigger, "running", started, time.Time{}, nil, `{}`)
+		if opts.RunID != nil {
+			if err := s.JobRuns.PromoteJobRunToRunning(ctx, jobID, started); err != nil {
+				return fail(err)
+			}
+		} else {
+			_ = s.JobRuns.InsertJobRun(ctx, jobID, accountID, "categorize", trigger, "running", started, time.Time{}, nil, `{}`)
+		}
 	}
 
 	categories, err := s.Messages.ListCategoryDefinitions(ctx, userID)

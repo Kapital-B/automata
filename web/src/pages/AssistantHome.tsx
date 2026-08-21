@@ -55,6 +55,7 @@ export default function AssistantHomePage({ accountFilter }: Props) {
     onSuccess: (res) => {
       void queryClient.invalidateQueries({ queryKey: ["summary"] });
       void queryClient.invalidateQueries({ queryKey: ["assistant-home", "runs"] });
+      void queryClient.invalidateQueries({ queryKey: ["runs"] });
       if (res.total === 0) {
         toast({ title: "No connected accounts available" });
         return;
@@ -67,6 +68,13 @@ export default function AssistantHomePage({ accountFilter }: Props) {
             : `${res.queued} account${res.queued === 1 ? "" : "s"} queued.`,
       });
     },
+    onError: (err) => {
+      toast({
+        title: "Could not refresh summary",
+        description: err instanceof Error ? err.message : "Please try again.",
+        variant: "destructive",
+      });
+    },
   });
 
   const doneMutation = useMutation({
@@ -76,6 +84,14 @@ export default function AssistantHomePage({ accountFilter }: Props) {
     },
     onSuccess: () => {
       void queryClient.invalidateQueries({ queryKey: ["summary"] });
+      void queryClient.invalidateQueries({ queryKey: ["draft-suggestions"] });
+    },
+    onError: (err) => {
+      toast({
+        title: "Could not mark action item done",
+        description: err instanceof Error ? err.message : "Please try again.",
+        variant: "destructive",
+      });
     },
   });
 
@@ -86,6 +102,13 @@ export default function AssistantHomePage({ accountFilter }: Props) {
     },
     onSuccess: () => {
       void queryClient.invalidateQueries({ queryKey: ["summary"] });
+    },
+    onError: (err) => {
+      toast({
+        title: "Could not dismiss FYI",
+        description: err instanceof Error ? err.message : "Please try again.",
+        variant: "destructive",
+      });
     },
   });
 

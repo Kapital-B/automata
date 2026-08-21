@@ -70,7 +70,13 @@ func (s *SummarizeService) SummarizeAccount(ctx context.Context, userID uuid.UUI
 		trigger = "api"
 	}
 	started := time.Now().UTC()
-	_ = s.JobRuns.InsertJobRun(ctx, runID, accountID, "summarize", trigger, "running", started, time.Time{}, nil, `{}`)
+	if opts.RunID != nil {
+		if err := s.JobRuns.PromoteJobRunToRunning(ctx, runID, started); err != nil {
+			return nil, err
+		}
+	} else {
+		_ = s.JobRuns.InsertJobRun(ctx, runID, accountID, "summarize", trigger, "running", started, time.Time{}, nil, `{}`)
+	}
 
 	fail := func(err error) (*SummarizeResult, error) {
 		msg := err.Error()

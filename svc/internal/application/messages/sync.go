@@ -22,6 +22,10 @@ type SyncService struct {
 	Graph    driven.MicrosoftGraph
 	Vault    driven.TokenVault
 	JobRuns  driven.JobRunRepository
+	Resolve  interface {
+		ResolveAfterSync(ctx context.Context, userID, accountID uuid.UUID, providerMessageIDs []string) error
+		BackfillAccount(ctx context.Context, userID, accountID uuid.UUID) error
+	}
 }
 
 type SyncResult struct {
@@ -87,7 +91,13 @@ func (s *SyncService) SyncInboxWithOptions(ctx context.Context, userID uuid.UUID
 	}
 	started := time.Now().UTC()
 	if s.JobRuns != nil {
-		_ = s.JobRuns.InsertJobRun(ctx, jobID, accountID, "sync", trigger, "running", started, time.Time{}, nil, `{}`)
+		if opts.RunID != nil {
+			if err := s.JobRuns.PromoteJobRunToRunning(ctx, jobID, started); err != nil {
+				return nil, err
+			}
+		} else {
+			_ = s.JobRuns.InsertJobRun(ctx, jobID, accountID, "sync", trigger, "running", started, time.Time{}, nil, `{}`)
+		}
 	}
 
 	prevDeltaLink, err := s.Accounts.GetSyncDeltaLink(ctx, userID, accountID)
@@ -119,6 +129,7 @@ func (s *SyncService) SyncInboxWithOptions(ctx context.Context, userID uuid.UUID
 	}
 
 	n := 0
+	providerIDs := make([]string, 0, len(list))
 	for _, gm := range list {
 		rt, err := parseGraphTime(gm.ReceivedDateTime)
 		if err != nil {
@@ -135,6 +146,8 @@ func (s *SyncService) SyncInboxWithOptions(ctx context.Context, userID uuid.UUID
 		}
 		fromObj := map[string]string{"name": gm.FromName, "address": gm.FromAddress}
 		fromJSON, _ := json.Marshal(fromObj)
+		toJSON, _ := json.Marshal(graphRecipientsJSON(gm.ToRecipients))
+		ccJSON, _ := json.Marshal(graphRecipientsJSON(gm.CcRecipients))
 		conv := gm.ConversationID
 		etag := gm.ChangeKey
 		m := driven.MessageRow{
@@ -145,6 +158,8 @@ func (s *SyncService) SyncInboxWithOptions(ctx context.Context, userID uuid.UUID
 			ReceivedAt:        rt,
 			Subject:           gm.Subject,
 			FromJSON:          string(fromJSON),
+			ToJSON:            string(toJSON),
+			CcJSON:            string(ccJSON),
 			BodyText:          nullIfEmpty(body),
 			BodyFetchedAt:     bodyFetched,
 			HasAttachments:    gm.HasAttachments,
@@ -159,10 +174,18 @@ func (s *SyncService) SyncInboxWithOptions(ctx context.Context, userID uuid.UUID
 			}
 			return nil, err
 		}
+		providerIDs = append(providerIDs, gm.ID)
 		n++
 		if s.JobRuns != nil {
 			_ = s.JobRuns.UpdateJobRunMeta(ctx, jobID, syncProgressMetaJSON(len(list), n, n, deltaUsed, deltaResetReason))
 		}
+	}
+	if s.Resolve != nil {
+		if n > 0 {
+			_ = s.Resolve.ResolveAfterSync(ctx, userID, accountID, providerIDs)
+		}
+		// Idempotent backfill so People is populated for mail synced before contacts existed.
+		_ = s.Resolve.BackfillAccount(ctx, userID, accountID)
 	}
 	if err := s.Accounts.UpsertSyncState(ctx, userID, accountID, &deltaRes.DeltaLink, time.Now().UTC()); err != nil {
 		return nil, err
@@ -183,6 +206,14 @@ func parseGraphTime(s string) (time.Time, error) {
 		return t.UTC(), nil
 	}
 	return time.Parse(time.RFC3339, s)
+}
+
+func graphRecipientsJSON(recs []driven.GraphRecipient) []map[string]string {
+	out := make([]map[string]string, 0, len(recs))
+	for _, r := range recs {
+		out = append(out, map[string]string{"name": r.Name, "address": r.Address})
+	}
+	return out
 }
 
 func normalizeBody(content, _ string) string {

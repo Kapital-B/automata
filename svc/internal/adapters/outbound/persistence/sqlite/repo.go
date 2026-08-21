@@ -5,6 +5,7 @@ import (
 	"database/sql"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"strings"
 	"time"
 
@@ -263,15 +264,25 @@ func (r *Repository) UpsertMessage(ctx context.Context, m driven.MessageRow) err
 	if fromJSON == "" {
 		fromJSON = "{}"
 	}
+	toJSON := m.ToJSON
+	if toJSON == "" {
+		toJSON = "[]"
+	}
+	ccJSON := m.CcJSON
+	if ccJSON == "" {
+		ccJSON = "[]"
+	}
 	_, err := r.db.ExecContext(ctx, `
 		INSERT INTO messages (id, account_id, provider_message_id, conversation_id, received_at, subject, from_json,
-			to_cc_preview, body_text, body_fetched_at, has_attachments, raw_etag, created_at, updated_at)
-		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+			to_json, cc_json, to_cc_preview, body_text, body_fetched_at, has_attachments, raw_etag, created_at, updated_at)
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 		ON CONFLICT(account_id, provider_message_id) DO UPDATE SET
 			conversation_id = excluded.conversation_id,
 			received_at = excluded.received_at,
 			subject = excluded.subject,
 			from_json = excluded.from_json,
+			to_json = excluded.to_json,
+			cc_json = excluded.cc_json,
 			to_cc_preview = excluded.to_cc_preview,
 			body_text = COALESCE(excluded.body_text, messages.body_text),
 			body_fetched_at = COALESCE(excluded.body_fetched_at, messages.body_fetched_at),
@@ -281,11 +292,25 @@ func (r *Repository) UpsertMessage(ctx context.Context, m driven.MessageRow) err
 			forward_seen_at = messages.forward_seen_at,
 			updated_at = excluded.updated_at`,
 		m.ID.String(), m.AccountID.String(), m.ProviderMessageID, nullStr(m.ConversationID),
-		formatRFC3339(m.ReceivedAt.UTC()), m.Subject, fromJSON,
+		formatRFC3339(m.ReceivedAt.UTC()), m.Subject, fromJSON, toJSON, ccJSON,
 		nullStr(m.ToCCPreview), nullStr(m.BodyText), nullTimeStr(m.BodyFetchedAt),
 		boolInt(m.HasAttachments), nullStr(m.RawEtag), now, now,
 	)
 	return err
+}
+
+func (r *Repository) GetMessageIDByProvider(ctx context.Context, accountID uuid.UUID, providerMessageID string) (uuid.UUID, error) {
+	var idStr string
+	err := r.db.QueryRowContext(ctx, `
+		SELECT id FROM messages WHERE account_id = ? AND provider_message_id = ?
+	`, accountID.String(), providerMessageID).Scan(&idStr)
+	if errors.Is(err, sql.ErrNoRows) {
+		return uuid.Nil, sql.ErrNoRows
+	}
+	if err != nil {
+		return uuid.Nil, err
+	}
+	return uuid.Parse(idStr)
 }
 
 func (r *Repository) ListMessagesByAccount(ctx context.Context, userID uuid.UUID, accountID uuid.UUID, limit, offset int) ([]driven.MessageRow, error) {
@@ -300,7 +325,7 @@ func (r *Repository) ListMessagesByAccount(ctx context.Context, userID uuid.UUID
 func (r *Repository) GetMessage(ctx context.Context, userID uuid.UUID, id uuid.UUID) (*driven.MessageRow, error) {
 	row := r.db.QueryRowContext(ctx, `
 		SELECT m.id, m.account_id, m.provider_message_id, m.conversation_id, m.received_at, m.subject, m.from_json,
-			m.to_cc_preview, m.body_text, m.body_fetched_at, m.has_attachments, m.raw_etag,
+			m.to_json, m.cc_json, m.to_cc_preview, m.body_text, m.body_fetched_at, m.has_attachments, m.raw_etag,
 			cd.slug, mc.confidence, m.created_at, m.updated_at, m.summary_seen_at, m.forward_seen_at
 		FROM messages m
 		INNER JOIN accounts a ON a.id = m.account_id AND a.user_id = ?
@@ -333,7 +358,7 @@ func (r *Repository) ListMessages(ctx context.Context, userID uuid.UUID, filter 
 	var b strings.Builder
 	b.WriteString(`
 		SELECT m.id, m.account_id, m.provider_message_id, m.conversation_id, m.received_at, m.subject, m.from_json,
-			m.to_cc_preview, m.body_text, m.body_fetched_at, m.has_attachments, m.raw_etag,
+			m.to_json, m.cc_json, m.to_cc_preview, m.body_text, m.body_fetched_at, m.has_attachments, m.raw_etag,
 			cd.slug, mc.confidence, m.created_at, m.updated_at, m.summary_seen_at, m.forward_seen_at
 		FROM messages m
 		INNER JOIN accounts a ON a.id = m.account_id AND a.user_id = ?
@@ -607,6 +632,7 @@ func scanMessageScanner(s rowScanner) (*driven.MessageRow, error) {
 	var m driven.MessageRow
 	var idStr, accStr string
 	var conv, preview, body, bodyAt, etag sql.NullString
+	var toJSON, ccJSON string
 	var receivedAt, createdAt, updatedAt string
 	var categorySlug sql.NullString
 	var confidence sql.NullFloat64
@@ -615,7 +641,7 @@ func scanMessageScanner(s rowScanner) (*driven.MessageRow, error) {
 	var forwardSeen sql.NullString
 	if err := s.Scan(
 		&idStr, &accStr, &m.ProviderMessageID, &conv, &receivedAt, &m.Subject, &m.FromJSON,
-		&preview, &body, &bodyAt, &hasAtt, &etag, &categorySlug, &confidence, &createdAt, &updatedAt, &summarySeen, &forwardSeen,
+		&toJSON, &ccJSON, &preview, &body, &bodyAt, &hasAtt, &etag, &categorySlug, &confidence, &createdAt, &updatedAt, &summarySeen, &forwardSeen,
 	); err != nil {
 		return nil, err
 	}
@@ -629,6 +655,8 @@ func scanMessageScanner(s rowScanner) (*driven.MessageRow, error) {
 		return nil, err
 	}
 	m.ConversationID = nullStringPtr(conv)
+	m.ToJSON = toJSON
+	m.CcJSON = ccJSON
 	m.ToCCPreview = nullStringPtr(preview)
 	m.BodyText = nullStringPtr(body)
 	m.CategorySlug = nullStringPtr(categorySlug)
@@ -657,14 +685,14 @@ func scanMessageScanner(s rowScanner) (*driven.MessageRow, error) {
 	if err != nil {
 		return nil, err
 	}
-	if summarySeen.Valid && strings.TrimSpace(summarySeen.String) != "" {
+	if summarySeen.Valid {
 		t, err := parseTime(summarySeen.String)
 		if err != nil {
 			return nil, err
 		}
 		m.SummarySeenAt = &t
 	}
-	if forwardSeen.Valid && strings.TrimSpace(forwardSeen.String) != "" {
+	if forwardSeen.Valid {
 		t, err := parseTime(forwardSeen.String)
 		if err != nil {
 			return nil, err
@@ -734,6 +762,31 @@ func (r *Repository) TakeOAuthState(ctx context.Context, state string) (flow str
 func (r *Repository) DeleteExpiredStates(ctx context.Context, before time.Time) error {
 	_, err := r.db.ExecContext(ctx, `DELETE FROM oauth_states WHERE created_at < ?`, formatRFC3339(before.UTC()))
 	return err
+}
+
+// PromoteJobRunToRunning marks a previously enqueued pending run as running without wiping meta_json
+// or changing started_at (enqueue time stays authoritative).
+func (r *Repository) PromoteJobRunToRunning(ctx context.Context, id uuid.UUID, startedAt time.Time) error {
+	_ = startedAt
+	res, err := r.db.ExecContext(ctx, `
+		UPDATE job_runs
+		SET status = 'running',
+		    finished_at = NULL,
+		    error_message = NULL
+		WHERE id = ? AND status IN ('pending', 'running')`,
+		id.String(),
+	)
+	if err != nil {
+		return err
+	}
+	n, err := res.RowsAffected()
+	if err != nil {
+		return err
+	}
+	if n == 0 {
+		return fmt.Errorf("job run %s not found or not pending/running", id.String())
+	}
+	return nil
 }
 
 // InsertJobRun inserts or updates a job run row (same id: final status update).
@@ -1540,6 +1593,14 @@ func (r *Repository) InsertForwardAudit(ctx context.Context, row driven.ForwardA
 		INSERT INTO forward_audit (id, user_id, account_id, message_id, rule_id, run_id, status, reason, created_at)
 		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
 	`, row.ID.String(), row.UserID.String(), row.AccountID.String(), row.MessageID.String(), row.RuleID.String(), row.RunID.String(), row.Status, nullStr(row.Reason), formatRFC3339(row.CreatedAt))
+	return err
+}
+
+func (r *Repository) InsertManualForwardAudit(ctx context.Context, row driven.ManualForwardAuditRow) error {
+	_, err := r.db.ExecContext(ctx, `
+		INSERT INTO manual_forward_audit (id, user_id, account_id, message_id, to_email, comment, status, reason, created_at)
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+	`, row.ID.String(), row.UserID.String(), row.AccountID.String(), row.MessageID.String(), row.ToEmail, nullStr(row.Comment), row.Status, nullStr(row.Reason), formatRFC3339(row.CreatedAt))
 	return err
 }
 

@@ -111,10 +111,7 @@ func (s *Service) Register(ctx context.Context, email, password string) (uuid.UU
 	id := uuid.New()
 	now := time.Now().UTC()
 	h := string(hash)
-	if err := s.Users.CreateUser(ctx, id, email, &h, now); err != nil {
-		return uuid.Nil, err
-	}
-	if err := s.Users.AttachIdentity(ctx, uuid.New(), id, "password", id.String(), email, now); err != nil {
+	if _, err := s.Users.CreateUserWithHomeOrg(ctx, id, email, &h, now, "password", id.String(), email); err != nil {
 		return uuid.Nil, err
 	}
 	return id, nil
@@ -233,10 +230,7 @@ func (s *Service) finishExternalLogin(ctx context.Context, provider, subject, em
 		return TokenPair{}, err
 	}
 	id := uuid.New()
-	if err := s.Users.CreateUser(ctx, id, email, nil, now); err != nil {
-		return TokenPair{}, err
-	}
-	if err := s.Users.AttachIdentity(ctx, uuid.New(), id, provider, subject, email, now); err != nil {
+	if _, err := s.Users.CreateUserWithHomeOrg(ctx, id, email, nil, now, provider, subject, email); err != nil {
 		return TokenPair{}, err
 	}
 	return s.issueTokenPair(ctx, id)

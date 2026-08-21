@@ -35,11 +35,19 @@ type GraphMessage struct {
 	Subject          string
 	FromName         string
 	FromAddress      string
+	ToRecipients     []GraphRecipient
+	CcRecipients     []GraphRecipient
 	BodyPreview      string
 	BodyContent      string
 	BodyContentType  string // Text or HTML
 	HasAttachments   bool
 	ChangeKey        string
+}
+
+// GraphRecipient is a To/Cc mailbox address on a Graph message.
+type GraphRecipient struct {
+	Name    string
+	Address string
 }
 
 type GraphDeltaResult struct {
@@ -53,6 +61,8 @@ type MicrosoftGraph interface {
 	ListInboxMessages(ctx context.Context, accessToken string, top int) ([]GraphMessage, error)
 	ListInboxDelta(ctx context.Context, accessToken string, deltaLink string, pageSize int) (*GraphDeltaResult, error)
 	GetMessageBody(ctx context.Context, accessToken string, providerMessageID string) (*GraphMessage, error)
+	// ResolveGraphMessageID returns the id Graph accepts for /me/messages/{id} actions (immutable id when Prefer is set).
+	ResolveGraphMessageID(ctx context.Context, accessToken string, providerMessageID string) (string, error)
 	SendMail(ctx context.Context, accessToken string, toEmail, subject, body string) error
 	ReplyToMessage(ctx context.Context, accessToken string, providerMessageID string, body string) error
 	// ForwardMessage forwards an existing mailbox message by Graph message id (server preserves body and attachments).

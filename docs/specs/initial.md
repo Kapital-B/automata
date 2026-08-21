@@ -2,7 +2,7 @@
 
 **Status:** Draft  
 **Companion PRD:** [docs/prds/initial.md](../prds/initial.md)  
-**Related addenda:** [Redis, Asynq, and the job runner](addendum-redis-asynq-jobs.md)  
+**Related addenda:** [Redis, Asynq, and the job runner](addendum-redis-asynq-jobs.md) · [Project correspondence Wave 1](addendum-project-correspondence-wave1.md)  
 **Last updated:** 2026-04-25 (monorepo `svc/`/`web/`, Go backend, Phase 1 API-only)
 
 This document specifies architecture, data model, integrations, APIs, and operational behavior. The **PRD** remains the source of product intent; this document is the source of **implementation invariants** (especially **multi-account provenance**).

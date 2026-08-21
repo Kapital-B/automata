@@ -80,11 +80,11 @@ export default function TodayPage({ accountFilter }: Props) {
       void queryClient.invalidateQueries({ queryKey: ["summary"] });
     },
   });
+  const draftsScope = activeAccountID ?? "all";
   const draftsQuery = useQuery({
-    queryKey: ["draft-suggestions", accessToken, activeAccountID ?? "all"],
+    queryKey: ["draft-suggestions", accessToken, draftsScope],
     queryFn: () => listDraftSuggestions(accessToken!, activeAccountID),
     enabled: Boolean(accessToken),
-    refetchInterval: 3000,
   });
   const draftByMessageKey = useMemo(() => {
     const m = new Map<string, string>();
@@ -152,8 +152,15 @@ export default function TodayPage({ accountFilter }: Props) {
         }
         actions={
           <>
-            <Button variant="outline" size="sm">
-              <CheckCircle2 className="mr-1.5 h-3.5 w-3.5" /> Mark all reviewed
+            <Button
+              variant="outline"
+              size="sm"
+              disabled
+              title="Bulk “mark all reviewed” needs a backend endpoint; use Done on each item for now."
+            >
+              <CheckCircle2 className="mr-1.5 h-3.5 w-3.5" />
+              <span>Mark all reviewed</span>
+              <span className="ml-1.5 text-[10px] font-normal normal-case text-muted-foreground">(coming later)</span>
             </Button>
             <Button
               size="sm"

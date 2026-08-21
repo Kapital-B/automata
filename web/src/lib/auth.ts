@@ -11,6 +11,7 @@ export type AuthTokens = {
 export type AuthUser = {
   userId: string;
   email: string;
+  homeOrganisationId?: string;
 };
 
 type TokenResponse = {
@@ -22,6 +23,7 @@ type TokenResponse = {
 type MeResponse = {
   user_id: string;
   email: string;
+  home_organisation_id?: string;
 };
 
 type OAuthStartResponse = {
@@ -285,7 +287,63 @@ export async function fetchCurrentUser(accessToken: string): Promise<AuthUser> {
   return {
     userId: response.user_id,
     email: response.email,
+    homeOrganisationId: response.home_organisation_id,
   };
+}
+
+export type ContactListItem = {
+  id: string;
+  organisation_id: string;
+  display_name: string;
+  company?: string;
+  created_at: string;
+  updated_at: string;
+};
+
+export type ContactIdentity = {
+  id: string;
+  kind: string;
+  value_normalized: string;
+  value_raw: string;
+  created_at: string;
+};
+
+export type ContactDetail = ContactListItem & {
+  identities: ContactIdentity[];
+  recent_messages: { message_id: string; account_id: string }[];
+  suggested_merges: { id: string; display_name: string }[];
+};
+
+export async function listContacts(
+  accessToken: string,
+  opts?: { q?: string; limit?: number; offset?: number },
+) {
+  const params = new URLSearchParams();
+  if (opts?.q) params.set("q", opts.q);
+  if (typeof opts?.limit === "number") params.set("limit", String(opts.limit));
+  if (typeof opts?.offset === "number") params.set("offset", String(opts.offset));
+  const qs = params.toString();
+  return apiRequest<ContactListItem[]>(`/api/contacts${qs ? `?${qs}` : ""}`, {
+    headers: toAuthHeader(accessToken),
+  });
+}
+
+export async function getContact(accessToken: string, contactID: string) {
+  return apiRequest<ContactDetail>(`/api/contacts/${contactID}`, {
+    headers: toAuthHeader(accessToken),
+  });
+}
+
+export async function mergeContacts(
+  accessToken: string,
+  survivorID: string,
+  sourceContactID: string,
+) {
+  return apiRequest<{ ok: boolean }>(`/api/contacts/${survivorID}/merge`, {
+    method: "POST",
+    headers: toAuthHeader(accessToken),
+    body: JSON.stringify({ source_contact_id: sourceContactID }),
+  });
 }
 
 export async function startOAuthLogin(provider: "google" | "microsoft") {
@@ -488,6 +546,14 @@ export async function listMessages(accessToken: string, filter: ListMessagesFilt
 export async function getMessage(accessToken: string, id: string) {
   return apiRequest<MessageItem>(`/api/messages/${id}`, {
     headers: toAuthHeader(accessToken),
+  });
+}
+
+export async function forwardMessage(accessToken: string, messageID: string, payload: { to_email: string; comment?: string }) {
+  return apiRequest<{ status: string }>(`/api/messages/${messageID}/forward`, {
+    method: "POST",
+    headers: toAuthHeader(accessToken),
+    body: JSON.stringify(payload),
   });
 }
 

@@ -19,6 +19,7 @@ import (
 	"github.com/Kapital-B/automata/svc/internal/adapters/outbound/security"
 	appaccounts "github.com/Kapital-B/automata/svc/internal/application/accounts"
 	"github.com/Kapital-B/automata/svc/internal/application/auth"
+	appcontacts "github.com/Kapital-B/automata/svc/internal/application/contacts"
 	appmessages "github.com/Kapital-B/automata/svc/internal/application/messages"
 	"github.com/Kapital-B/automata/svc/internal/configuration"
 	"github.com/go-chi/cors"
@@ -86,6 +87,17 @@ func main() {
 		StateTTL:    cfg.OAuthStateTTL,
 	})
 
+	resolveSvc := &appcontacts.ResolveService{
+		Users:    repo,
+		Messages: repo,
+		Contacts: repo,
+	}
+	contactSvc := &appcontacts.Service{
+		Users:    repo,
+		Contacts: repo,
+		Messages: repo,
+	}
+
 	syncSvc := &appmessages.SyncService{
 		Accounts: repo,
 		Messages: repo,
@@ -93,6 +105,7 @@ func main() {
 		Graph:    graph,
 		Vault:    vault,
 		JobRuns:  repo,
+		Resolve:  resolveSvc,
 	}
 	var categorizeSvc *appmessages.CategorizeService
 	var summarizeSvc *appmessages.SummarizeService
@@ -174,6 +187,7 @@ func main() {
 		DraftsSvc:       draftsSvc,
 		ForwardRulesSvc: forwardRulesSvc,
 		AuthSvc:         authSvc,
+		ContactSvc:      contactSvc,
 		Accounts:        repo,
 		Messages:        repo,
 		JobRuns:         repo,
@@ -182,6 +196,7 @@ func main() {
 		Schedules:       repo,
 		OAuthStates:     repo,
 		Users:           repo,
+		Contacts:        repo,
 		Dashboard:       cfg.DashboardBaseURL,
 		SuccessPath:     cfg.OAuthSuccessPath,
 		ErrorPath:       cfg.OAuthErrorPath,

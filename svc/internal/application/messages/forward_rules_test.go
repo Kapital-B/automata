@@ -4,6 +4,7 @@ import (
 	"context"
 	"database/sql"
 	"errors"
+	"strings"
 	"testing"
 	"time"
 
@@ -31,6 +32,9 @@ func (f *fakeForwardGraph) ListInboxDelta(ctx context.Context, accessToken strin
 }
 func (f *fakeForwardGraph) GetMessageBody(ctx context.Context, accessToken string, providerMessageID string) (*driven.GraphMessage, error) {
 	return nil, errors.New("not implemented")
+}
+func (f *fakeForwardGraph) ResolveGraphMessageID(ctx context.Context, accessToken string, providerMessageID string) (string, error) {
+	return strings.TrimSpace(providerMessageID), nil
 }
 func (f *fakeForwardGraph) SendMail(ctx context.Context, accessToken string, toEmail, subject, body string) error {
 	return errors.New("not implemented")
@@ -176,6 +180,68 @@ func TestForwardRulesUsesForwardSeenMarkerNotReceivedAt(t *testing.T) {
 	}
 	if forwarded != 1 {
 		t.Fatalf("expected one forwarded audit row, got %d", forwarded)
+	}
+}
+
+func TestForwardRulesSecondRunDoesNotCallGraphAgain(t *testing.T) {
+	graph := &fakeForwardGraph{}
+	_, svc, _, userID, accountID, _ := setupForwardRulesService(t, graph)
+	_, err := svc.RunAccount(context.Background(), userID, accountID, ForwardRulesOptions{Trigger: "schedule"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if graph.forwardCalls != 1 {
+		t.Fatalf("want 1 forward call after first run, got %d", graph.forwardCalls)
+	}
+	_, err = svc.RunAccount(context.Background(), userID, accountID, ForwardRulesOptions{Trigger: "schedule"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if graph.forwardCalls != 1 {
+		t.Fatalf("want 1 forward call total after second run (message already seen), got %d", graph.forwardCalls)
+	}
+}
+
+func TestForwardRulesSkippedAuditWhenRuleDoesNotMatch(t *testing.T) {
+	graph := &fakeForwardGraph{}
+	db, svc, repo, userID, accountID, messageID := setupForwardRulesService(t, graph)
+	ruleNoMatchID := uuid.New()
+	forwardTo := "bills@example.com"
+	if err := repo.CreateForwardRule(context.Background(), driven.ForwardRuleRow{
+		ID:            ruleNoMatchID,
+		UserID:        userID,
+		AccountID:     accountID,
+		Name:          "Newsletter only",
+		Mode:          "logic",
+		ConditionJSON: `{"all":[{"field":"category_slug","op":"equals","value":"newsletter"}]}`,
+		ForwardTo:     forwardTo,
+		Enabled:       true,
+		CreatedAt:     time.Now().UTC(),
+		UpdatedAt:     time.Now().UTC(),
+	}); err != nil {
+		t.Fatal(err)
+	}
+	_, err := svc.RunAccount(context.Background(), userID, accountID, ForwardRulesOptions{Trigger: "schedule"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if graph.forwardCalls != 1 {
+		t.Fatalf("expected exactly one Graph forward, got %d", graph.forwardCalls)
+	}
+	var skipped, forwarded int
+	if err := db.QueryRow(`SELECT COUNT(1) FROM forward_audit WHERE message_id = ? AND status = 'skipped' AND rule_id = ?`,
+		messageID.String(), ruleNoMatchID.String()).Scan(&skipped); err != nil {
+		t.Fatal(err)
+	}
+	if skipped != 1 {
+		t.Fatalf("want 1 skipped audit for non-matching rule, got %d", skipped)
+	}
+	if err := db.QueryRow(`SELECT COUNT(1) FROM forward_audit WHERE message_id = ? AND status = 'forwarded'`,
+		messageID.String()).Scan(&forwarded); err != nil {
+		t.Fatal(err)
+	}
+	if forwarded != 1 {
+		t.Fatalf("want 1 forwarded audit, got %d", forwarded)
 	}
 }
 

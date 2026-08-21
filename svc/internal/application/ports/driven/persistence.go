@@ -34,6 +34,8 @@ type MessageRow struct {
 	ReceivedAt         time.Time
 	Subject            string
 	FromJSON           string
+	ToJSON             string
+	CcJSON             string
 	ToCCPreview        *string
 	BodyText           *string
 	BodyFetchedAt      *time.Time
@@ -224,6 +226,18 @@ type ForwardAuditRow struct {
 	CreatedAt time.Time
 }
 
+type ManualForwardAuditRow struct {
+	ID        uuid.UUID
+	UserID    uuid.UUID
+	AccountID uuid.UUID
+	MessageID uuid.UUID
+	ToEmail   string
+	Comment   *string
+	Status    string
+	Reason    *string
+	CreatedAt time.Time
+}
+
 // AccountRepository persists accounts and OAuth tokens (ciphertext).
 type AccountRepository interface {
 	InsertAccount(ctx context.Context, a AccountRow, tokenCiphertext []byte) error
@@ -239,6 +253,7 @@ type AccountRepository interface {
 // MessageRepository stores Graph messages.
 type MessageRepository interface {
 	UpsertMessage(ctx context.Context, m MessageRow) error
+	GetMessageIDByProvider(ctx context.Context, accountID uuid.UUID, providerMessageID string) (uuid.UUID, error)
 	ListMessagesByAccount(ctx context.Context, userID uuid.UUID, accountID uuid.UUID, limit, offset int) ([]MessageRow, error)
 	ListMessages(ctx context.Context, userID uuid.UUID, filter MessageListFilter) ([]MessageRow, error)
 	GetMessage(ctx context.Context, userID uuid.UUID, id uuid.UUID) (*MessageRow, error)
@@ -265,15 +280,92 @@ type OAuthStateRepository interface {
 // UserRepository persists app users and external identities.
 type UserRepository interface {
 	CreateUser(ctx context.Context, id uuid.UUID, email string, passwordHash *string, now time.Time) error
+	// CreateUserWithHomeOrg inserts the user, a Personal organisation, owner membership,
+	// and optional password/oauth identity in one transaction. identityProvider empty skips identity.
+	CreateUserWithHomeOrg(ctx context.Context, id uuid.UUID, email string, passwordHash *string, now time.Time, identityProvider, identitySubject, identityEmail string) (orgID uuid.UUID, err error)
 	GetUserByEmail(ctx context.Context, email string) (id uuid.UUID, passwordHash *string, err error)
 	GetUserByID(ctx context.Context, id uuid.UUID) (email string, err error)
+	GetHomeOrganisationID(ctx context.Context, userID uuid.UUID) (uuid.UUID, error)
 	FindIdentity(ctx context.Context, provider, providerSubject string) (userID uuid.UUID, ok bool, err error)
 	AttachIdentity(ctx context.Context, id uuid.UUID, userID uuid.UUID, provider, providerSubject, emailAtLink string, now time.Time) error
+}
+
+// OrganisationRow is a persisted organisation.
+type OrganisationRow struct {
+	ID        uuid.UUID
+	Name      string
+	CreatedAt time.Time
+	UpdatedAt time.Time
+}
+
+// OrganisationRepository reads organisations and membership.
+type OrganisationRepository interface {
+	GetOrganisation(ctx context.Context, id uuid.UUID) (*OrganisationRow, error)
+}
+
+// ContactRow is a persisted address-book contact.
+type ContactRow struct {
+	ID                  uuid.UUID
+	OrganisationID      uuid.UUID
+	DisplayName         string
+	Company             *string
+	MergedIntoContactID *uuid.UUID
+	CreatedAt           time.Time
+	UpdatedAt           time.Time
+}
+
+// ContactIdentityRow is one identity on a contact.
+type ContactIdentityRow struct {
+	ID              uuid.UUID
+	OrganisationID  uuid.UUID
+	ContactID       uuid.UUID
+	Kind            string
+	ValueNormalized string
+	ValueRaw        string
+	CreatedAt       time.Time
+}
+
+// CorrespondenceParticipantRow links a contact to a message (or later manual item).
+type CorrespondenceParticipantRow struct {
+	ID             uuid.UUID
+	OrganisationID uuid.UUID
+	ContactID      uuid.UUID
+	Role           string
+	MessageID      *uuid.UUID
+	ManualItemID   *uuid.UUID
+}
+
+// ContactListFilter narrows contact listing within one organisation.
+type ContactListFilter struct {
+	Query  string
+	Limit  int
+	Offset int
+}
+
+// ContactRepository persists org-scoped contacts and mail participants.
+type ContactRepository interface {
+	ListContacts(ctx context.Context, organisationID uuid.UUID, filter ContactListFilter) ([]ContactRow, error)
+	GetContact(ctx context.Context, organisationID, contactID uuid.UUID) (*ContactRow, error)
+	CreateContact(ctx context.Context, row ContactRow) error
+	UpdateContactDisplayNameIfEmpty(ctx context.Context, organisationID, contactID uuid.UUID, displayName string, at time.Time) error
+	ListIdentities(ctx context.Context, organisationID, contactID uuid.UUID) ([]ContactIdentityRow, error)
+	FindContactIdentity(ctx context.Context, organisationID uuid.UUID, kind, valueNormalized string) (*ContactIdentityRow, error)
+	CreateIdentity(ctx context.Context, row ContactIdentityRow) error
+	UpsertParticipant(ctx context.Context, row CorrespondenceParticipantRow) error
+	ListRecentMessageIDs(ctx context.Context, organisationID, contactID uuid.UUID, limit int) ([]uuid.UUID, error)
+	SuggestMerges(ctx context.Context, organisationID, contactID uuid.UUID) ([]ContactRow, error)
+	MergeContacts(ctx context.Context, organisationID, survivorID, sourceID uuid.UUID, at time.Time) error
+	// ResolveEmailContact finds or creates a contact for an email in the organisation.
+	ResolveEmailContact(ctx context.Context, organisationID uuid.UUID, email, displayName string, now time.Time) (contactID uuid.UUID, err error)
+	ListMessageIDsForAccount(ctx context.Context, accountID uuid.UUID, limit int) ([]uuid.UUID, error)
 }
 
 // JobRunRepository records sync runs (Phase 1: synchronous insert).
 type JobRunRepository interface {
 	InsertJobRun(ctx context.Context, id uuid.UUID, accountID uuid.UUID, jobType string, trigger string, status string, startedAt, finishedAt time.Time, errMsg *string, metaJSON string) error
+	// PromoteJobRunToRunning transitions a queued run from pending to running (worker pickup).
+	// Idempotent if the run is already running. Fails if the row is missing or in a terminal state.
+	PromoteJobRunToRunning(ctx context.Context, id uuid.UUID, startedAt time.Time) error
 	UpdateJobRunMeta(ctx context.Context, id uuid.UUID, metaJSON string) error
 	UpdateJobRunStatus(ctx context.Context, id uuid.UUID, status string, finishedAt *time.Time, errMsg *string, metaJSON string) error
 	ListJobRuns(ctx context.Context, userID uuid.UUID, filter JobRunListFilter) ([]JobRunRow, error)
@@ -319,4 +411,5 @@ type ForwardRepository interface {
 	DeleteForwardRule(ctx context.Context, userID, ruleID uuid.UUID) error
 	ListForwardAuditByRun(ctx context.Context, userID, runID uuid.UUID) ([]ForwardAuditRow, error)
 	InsertForwardAudit(ctx context.Context, row ForwardAuditRow) error
+	InsertManualForwardAudit(ctx context.Context, row ManualForwardAuditRow) error
 }

@@ -78,11 +78,11 @@ export default function RulesPage({ accountFilter }: Props) {
         mode: newRuleMode,
         condition_json: JSON.parse(newConditionJSON),
         forward_to: newForwardTo,
-        enabled: true,
+        enabled: false,
       });
     },
     onSuccess: () => {
-      toast({ title: "Rule created" });
+      toast({ title: "Rule created (paused)", description: "Enable the rule when you are ready to allow auto-forwarding." });
       void queryClient.invalidateQueries({ queryKey: ["forward-rules"] });
     },
     onError: (e) => toast({ title: "Could not create rule", description: e instanceof Error ? e.message : "Unknown error", variant: "destructive" }),
@@ -123,7 +123,7 @@ export default function RulesPage({ accountFilter }: Props) {
       <PageHeader
         eyebrow="Automation"
         title="Forwarding rules"
-        description="Rules can only forward to addresses on your allowlist. Each execution is recorded against the originating account."
+        description="New rules stay paused until you enable them — nothing auto-forwards by mistake. Destinations must be on your allowlist; each run is audited per account."
         actions={
           <Button
             size="sm"
@@ -137,6 +137,9 @@ export default function RulesPage({ accountFilter }: Props) {
       />
       <div className="surface-card p-4 space-y-3">
         <h3 className="font-display text-lg">Create rule</h3>
+        <p className="text-xs text-muted-foreground">
+          Rules are created <span className="font-medium text-foreground">paused</span>. Use the toggle on a rule to turn forwarding on after you have reviewed conditions and the allowlist destination.
+        </p>
         <div className="grid gap-3 md:grid-cols-4">
           <Input value={newRuleName} onChange={(e) => setNewRuleName(e.target.value)} placeholder="Rule name" />
           <Select value={newRuleMode} onValueChange={(v) => setNewRuleMode(v as "logic" | "llm")}>

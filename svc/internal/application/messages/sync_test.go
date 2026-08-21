@@ -5,6 +5,7 @@ import (
 	"database/sql"
 	"encoding/json"
 	"errors"
+	"strings"
 	"testing"
 	"time"
 
@@ -63,6 +64,9 @@ func (f *fakeDeltaGraph) ListInboxDelta(ctx context.Context, accessToken string,
 }
 func (f *fakeDeltaGraph) GetMessageBody(ctx context.Context, accessToken string, providerMessageID string) (*driven.GraphMessage, error) {
 	return nil, errors.New("not implemented")
+}
+func (f *fakeDeltaGraph) ResolveGraphMessageID(ctx context.Context, accessToken string, providerMessageID string) (string, error) {
+	return strings.TrimSpace(providerMessageID), nil
 }
 func (f *fakeDeltaGraph) SendMail(ctx context.Context, accessToken string, toEmail, subject, body string) error {
 	return errors.New("not implemented")
