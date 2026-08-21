@@ -14,6 +14,7 @@ import {
   syncAccount,
   type MessageItem,
 } from "@/lib/auth";
+import { ProjectAssignControl } from "@/components/ProjectAssignControl";
 import { Paperclip, Reply, Forward, Loader2, ChevronDown, ChevronLeft } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { Button } from "@/components/ui/button";
@@ -562,6 +563,10 @@ export default function InboxPage({ accountFilter }: Props) {
                 </h2>
                 <CategoryPill category={selected.category_slug ?? "uncategorized"} />
               </div>
+              <ProjectAssignControl
+                messageID={selected.id}
+                hasConversation={Boolean(selected.conversation_id)}
+              />
               <p className="mt-2 flex flex-wrap items-baseline gap-x-1 text-sm text-muted-foreground">
                 <span>From</span>
                 <span className="font-medium text-foreground/90">{selectedFromLines?.primary}</span>

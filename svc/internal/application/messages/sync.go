@@ -26,11 +26,14 @@ type SyncService struct {
 		ResolveAfterSync(ctx context.Context, userID, accountID uuid.UUID, providerMessageIDs []string) error
 		BackfillAccount(ctx context.Context, userID, accountID uuid.UUID) error
 	}
+	Assign interface {
+		AssignAfterSync(ctx context.Context, userID, accountID uuid.UUID) error
+	}
 }
 
 type SyncResult struct {
-	JobRunID           uuid.UUID
-	MessagesUpserted   int
+	JobRunID         uuid.UUID
+	MessagesUpserted int
 }
 
 type SyncOptions struct {
@@ -186,6 +189,9 @@ func (s *SyncService) SyncInboxWithOptions(ctx context.Context, userID uuid.UUID
 		}
 		// Idempotent backfill so People is populated for mail synced before contacts existed.
 		_ = s.Resolve.BackfillAccount(ctx, userID, accountID)
+	}
+	if s.Assign != nil {
+		_ = s.Assign.AssignAfterSync(ctx, userID, accountID)
 	}
 	if err := s.Accounts.UpsertSyncState(ctx, userID, accountID, &deltaRes.DeltaLink, time.Now().UTC()); err != nil {
 		return nil, err

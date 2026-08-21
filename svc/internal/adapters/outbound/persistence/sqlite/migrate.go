@@ -33,6 +33,12 @@ func Migrate(db *sql.DB) error {
 			}
 			continue
 		}
+		if e.Name() == "016_projects_assignments.sql" {
+			if err := migrateProjectsAssignments(db); err != nil {
+				return err
+			}
+			continue
+		}
 		b, err := migrationFS.ReadFile(e.Name())
 		if err != nil {
 			return err
@@ -464,4 +470,152 @@ func backfillHomeOrganisations(db *sql.DB) error {
 
 func newMigrationUUID() string {
 	return uuid.New().String()
+}
+
+func migrateProjectsAssignments(db *sql.DB) error {
+	statements := []string{
+		`CREATE TABLE IF NOT EXISTS projects (
+			id TEXT PRIMARY KEY NOT NULL,
+			organisation_id TEXT NOT NULL REFERENCES organisations(id) ON DELETE CASCADE,
+			name TEXT NOT NULL,
+			code TEXT NOT NULL,
+			description TEXT,
+			client TEXT,
+			keywords_json TEXT NOT NULL DEFAULT '[]',
+			archived_at TEXT,
+			created_at TEXT NOT NULL,
+			updated_at TEXT NOT NULL,
+			UNIQUE (organisation_id, code)
+		)`,
+		`CREATE INDEX IF NOT EXISTS idx_projects_org ON projects(organisation_id)`,
+		`CREATE TABLE IF NOT EXISTS project_members (
+			id TEXT PRIMARY KEY NOT NULL,
+			project_id TEXT NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
+			user_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+			role TEXT NOT NULL DEFAULT '',
+			discipline TEXT,
+			responsibilities TEXT,
+			current_scope TEXT,
+			approval_authority TEXT,
+			out_of_scope TEXT,
+			created_at TEXT NOT NULL,
+			updated_at TEXT NOT NULL,
+			UNIQUE (project_id, user_id)
+		)`,
+		`CREATE INDEX IF NOT EXISTS idx_project_members_user ON project_members(user_id)`,
+		`CREATE TABLE IF NOT EXISTS project_participants (
+			project_id TEXT NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
+			contact_id TEXT NOT NULL REFERENCES contacts(id) ON DELETE CASCADE,
+			first_seen_at TEXT NOT NULL,
+			PRIMARY KEY (project_id, contact_id)
+		)`,
+		`CREATE TABLE IF NOT EXISTS thread_assignments (
+			id TEXT PRIMARY KEY NOT NULL,
+			organisation_id TEXT NOT NULL REFERENCES organisations(id) ON DELETE CASCADE,
+			account_id TEXT NOT NULL REFERENCES accounts(id) ON DELETE CASCADE,
+			conversation_id TEXT NOT NULL,
+			project_id TEXT REFERENCES projects(id) ON DELETE SET NULL,
+			status TEXT NOT NULL CHECK (status IN ('committed', 'provisional')),
+			confidence REAL,
+			reason TEXT NOT NULL DEFAULT '',
+			source TEXT NOT NULL CHECK (source IN ('user', 'rule', 'llm')),
+			run_id TEXT REFERENCES job_runs(id) ON DELETE SET NULL,
+			assigned_by_user_id TEXT REFERENCES users(id) ON DELETE SET NULL,
+			created_at TEXT NOT NULL,
+			updated_at TEXT NOT NULL,
+			UNIQUE (account_id, conversation_id)
+		)`,
+		`CREATE INDEX IF NOT EXISTS idx_thread_assignments_org ON thread_assignments(organisation_id)`,
+		`CREATE TABLE IF NOT EXISTS message_assignment_overrides (
+			message_id TEXT PRIMARY KEY NOT NULL REFERENCES messages(id) ON DELETE CASCADE,
+			organisation_id TEXT NOT NULL REFERENCES organisations(id) ON DELETE CASCADE,
+			account_id TEXT NOT NULL REFERENCES accounts(id) ON DELETE CASCADE,
+			project_id TEXT REFERENCES projects(id) ON DELETE SET NULL,
+			status TEXT NOT NULL CHECK (status IN ('committed', 'provisional')),
+			confidence REAL,
+			reason TEXT NOT NULL DEFAULT '',
+			source TEXT NOT NULL CHECK (source IN ('user', 'rule', 'llm')),
+			run_id TEXT REFERENCES job_runs(id) ON DELETE SET NULL,
+			assigned_by_user_id TEXT REFERENCES users(id) ON DELETE SET NULL,
+			created_at TEXT NOT NULL,
+			updated_at TEXT NOT NULL
+		)`,
+		`CREATE INDEX IF NOT EXISTS idx_msg_overrides_org ON message_assignment_overrides(organisation_id)`,
+	}
+	for _, stmt := range statements {
+		if _, err := db.Exec(stmt); err != nil {
+			return err
+		}
+	}
+	return extendJobRunTypes(db)
+}
+
+func extendJobRunTypes(db *sql.DB) error {
+	var sqlText string
+	err := db.QueryRow(`SELECT sql FROM sqlite_master WHERE type='table' AND name='job_runs'`).Scan(&sqlText)
+	if err != nil {
+		return err
+	}
+	if strings.Contains(sqlText, "assign_projects") && strings.Contains(sqlText, "resolve_contacts") {
+		return nil
+	}
+
+	var foreignKeys int
+	if err := db.QueryRow(`PRAGMA foreign_keys`).Scan(&foreignKeys); err != nil {
+		return err
+	}
+	if _, err := db.Exec(`PRAGMA foreign_keys=OFF`); err != nil {
+		return err
+	}
+	defer func() {
+		if foreignKeys != 0 {
+			_, _ = db.Exec(`PRAGMA foreign_keys=ON`)
+		}
+	}()
+
+	tx, err := db.Begin()
+	if err != nil {
+		return err
+	}
+	defer func() { _ = tx.Rollback() }()
+
+	if _, err := tx.Exec(`
+		CREATE TABLE job_runs_new (
+			id TEXT PRIMARY KEY NOT NULL,
+			account_id TEXT REFERENCES accounts(id) ON DELETE SET NULL,
+			job_type TEXT NOT NULL CHECK (job_type IN (
+				'sync', 'summarize', 'categorize', 'forward_rules', 'draft_suggest',
+				'resolve_contacts', 'assign_projects'
+			)),
+			trigger_kind TEXT NOT NULL CHECK (trigger_kind IN ('schedule', 'api')),
+			status TEXT NOT NULL CHECK (status IN ('pending', 'running', 'success', 'failed', 'cancelled')),
+			time_window_start TEXT,
+			time_window_end TEXT,
+			started_at TEXT NOT NULL,
+			finished_at TEXT,
+			error_message TEXT,
+			meta_json TEXT NOT NULL DEFAULT '{}'
+		)
+	`); err != nil {
+		return err
+	}
+	if _, err := tx.Exec(`
+		INSERT INTO job_runs_new (
+			id, account_id, job_type, trigger_kind, status,
+			time_window_start, time_window_end, started_at, finished_at, error_message, meta_json
+		)
+		SELECT
+			id, account_id, job_type, trigger_kind, status,
+			time_window_start, time_window_end, started_at, finished_at, error_message, meta_json
+		FROM job_runs
+	`); err != nil {
+		return err
+	}
+	if _, err := tx.Exec(`DROP TABLE job_runs`); err != nil {
+		return err
+	}
+	if _, err := tx.Exec(`ALTER TABLE job_runs_new RENAME TO job_runs`); err != nil {
+		return err
+	}
+	return tx.Commit()
 }

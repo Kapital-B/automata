@@ -18,6 +18,7 @@ import (
 	"github.com/Kapital-B/automata/svc/internal/application/auth"
 	appcontacts "github.com/Kapital-B/automata/svc/internal/application/contacts"
 	appmessages "github.com/Kapital-B/automata/svc/internal/application/messages"
+	appprojects "github.com/Kapital-B/automata/svc/internal/application/projects"
 	"github.com/Kapital-B/automata/svc/internal/application/ports/driven"
 	domainacc "github.com/Kapital-B/automata/svc/internal/domain/accounts"
 	"github.com/go-chi/chi/v5"
@@ -36,6 +37,7 @@ type Handlers struct {
 	ForwardRulesSvc *appmessages.ForwardRulesService
 	AuthSvc         *auth.Service
 	ContactSvc      *appcontacts.Service
+	ProjectSvc      *appprojects.Service
 	Accounts        driven.AccountRepository
 	Messages        driven.MessageRepository
 	JobRuns         driven.JobRunRepository
@@ -45,6 +47,8 @@ type Handlers struct {
 	OAuthStates     driven.OAuthStateRepository
 	Users           driven.UserRepository
 	Contacts        driven.ContactRepository
+	Projects        driven.ProjectRepository
+	Assignments     driven.AssignmentRepository
 	Dashboard       string
 	SuccessPath     string
 	ErrorPath       string
@@ -80,6 +84,16 @@ func (h *Handlers) Routes() http.Handler {
 	r.Get("/api/contacts/{id}", h.getContact)
 	r.Post("/api/contacts/{id}/identities", h.addContactIdentity)
 	r.Post("/api/contacts/{id}/merge", h.mergeContacts)
+
+	r.Get("/api/projects", h.listProjects)
+	r.Post("/api/projects", h.createProject)
+	r.Get("/api/projects/{id}", h.getProject)
+	r.Patch("/api/projects/{id}", h.updateProject)
+	r.Patch("/api/projects/{id}/member", h.updateProjectMember)
+	r.Get("/api/unassigned/summary", h.unassignedSummary)
+	r.Get("/api/unassigned", h.listUnassigned)
+	r.Post("/api/messages/{id}/project-assignment", h.assignMessageProject)
+	r.Delete("/api/messages/{id}/project-assignment/override", h.clearMessageOverride)
 
 	r.Get("/api/accounts", h.listAccounts)
 	r.Post("/api/accounts", h.startConnect)
@@ -392,6 +406,7 @@ func (h *Handlers) listMessages(w http.ResponseWriter, r *http.Request) {
 		Preview            string          `json:"preview"`
 		CategorySlug       *string         `json:"category_slug,omitempty"`
 		CategoryConfidence *float64        `json:"category_confidence,omitempty"`
+		ConversationID     *string         `json:"conversation_id,omitempty"`
 	}
 	out := make([]item, 0, len(rows))
 	for _, m := range rows {
@@ -411,6 +426,7 @@ func (h *Handlers) listMessages(w http.ResponseWriter, r *http.Request) {
 			Preview:            preview,
 			CategorySlug:       m.CategorySlug,
 			CategoryConfidence: m.CategoryConfidence,
+			ConversationID:     m.ConversationID,
 		})
 	}
 	writeJSON(w, http.StatusOK, out)

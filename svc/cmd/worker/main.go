@@ -13,6 +13,7 @@ import (
 	"github.com/Kapital-B/automata/svc/internal/adapters/outbound/security"
 	appcontacts "github.com/Kapital-B/automata/svc/internal/application/contacts"
 	appmessages "github.com/Kapital-B/automata/svc/internal/application/messages"
+	appprojects "github.com/Kapital-B/automata/svc/internal/application/projects"
 	"github.com/Kapital-B/automata/svc/internal/configuration"
 	"github.com/hibiken/asynq"
 	_ "modernc.org/sqlite"
@@ -62,6 +63,14 @@ func main() {
 			Users:    repo,
 			Messages: repo,
 			Contacts: repo,
+		},
+		Assign: &appprojects.AssignService{
+			Users:       repo,
+			Projects:    repo,
+			Assignments: repo,
+			Contacts:    repo,
+			Messages:    repo,
+			JobRuns:     repo,
 		},
 	}
 	var categorizeSvc *appmessages.CategorizeService

@@ -10,6 +10,8 @@ import {
   Settings as SettingsIcon,
   MessageSquare,
   Users,
+  FolderKanban,
+  CircleHelp,
   Mail,
   Slack,
   Zap,
@@ -31,7 +33,7 @@ import {
 import { cn } from "@/lib/utils";
 import { useAuth } from "@/components/auth/AuthProvider";
 import { useAccountsData } from "@/hooks/useAccountsData";
-import { getSummary, listDraftSuggestions } from "@/lib/auth";
+import { getSummary, getUnassignedSummary, listDraftSuggestions } from "@/lib/auth";
 
 const assistantNav = [
   { title: "Assistant", url: "/", icon: MessageSquare, end: true },
@@ -40,6 +42,8 @@ const assistantNav = [
 const primaryNav = [
   { title: "Today", url: "/today", icon: Sparkles },
   { title: "Inbox", url: "/inbox", icon: Inbox },
+  { title: "Projects", url: "/projects", icon: FolderKanban },
+  { title: "Unassigned", url: "/unassigned", icon: CircleHelp },
   { title: "People", url: "/people", icon: Users },
   { title: "Drafts", url: "/drafts", icon: PenLine },
   { title: "Rules", url: "/rules", icon: Forward },
@@ -76,8 +80,16 @@ export function AppSidebar() {
     queryFn: () => listDraftSuggestions(accessToken!),
     enabled: Boolean(accessToken) && connectedAccounts.length > 0,
   });
+  const unassignedBadgeQuery = useQuery({
+    queryKey: ["unassigned-summary", accessToken],
+    queryFn: () => getUnassignedSummary(accessToken!),
+    enabled: Boolean(accessToken),
+  });
   const todayBadge = summaryBadgeQuery.data?.action_items?.length ?? 0;
   const draftsBadge = draftsBadgeQuery.data?.length ?? 0;
+  const unassignedBadge =
+    (unassignedBadgeQuery.data?.unassigned ?? 0) +
+    (unassignedBadgeQuery.data?.provisional ?? 0);
 
   const isActive = (url: string, end?: boolean) =>
     end ? location.pathname === url : location.pathname.startsWith(url) && url !== "/";
@@ -165,6 +177,11 @@ export function AppSidebar() {
                               {item.title === "Drafts" && (
                                 <span className="rounded-full border border-sidebar-border px-1.5 py-0.5 text-[10px] font-medium leading-none">
                                   {draftsBadge}
+                                </span>
+                              )}
+                              {item.title === "Unassigned" && unassignedBadge > 0 && (
+                                <span className="rounded-full border border-sidebar-border px-1.5 py-0.5 text-[10px] font-medium leading-none">
+                                  {unassignedBadge}
                                 </span>
                               )}
                             </>

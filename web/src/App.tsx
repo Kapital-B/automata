@@ -13,6 +13,9 @@ import InboxPage from "./pages/Inbox";
 import AccountsPage from "./pages/Accounts";
 import PeoplePage from "./pages/People";
 import PersonDetailPage from "./pages/PersonDetail";
+import ProjectsPage from "./pages/Projects";
+import ProjectDetailPage from "./pages/ProjectDetail";
+import UnassignedPage from "./pages/Unassigned";
 import RulesPage from "./pages/Rules";
 import DraftsPage from "./pages/Drafts";
 import RunsPage from "./pages/Runs";
@@ -77,6 +80,30 @@ const App = () => (
               element={
                 <ProtectedRoute>
                   <AppShell>{() => <PersonDetailPage />}</AppShell>
+                </ProtectedRoute>
+              }
+            />
+            <Route
+              path="/projects"
+              element={
+                <ProtectedRoute>
+                  <AppShell>{() => <ProjectsPage />}</AppShell>
+                </ProtectedRoute>
+              }
+            />
+            <Route
+              path="/projects/:id"
+              element={
+                <ProtectedRoute>
+                  <AppShell>{() => <ProjectDetailPage />}</AppShell>
+                </ProtectedRoute>
+              }
+            />
+            <Route
+              path="/unassigned"
+              element={
+                <ProtectedRoute>
+                  <AppShell>{() => <UnassignedPage />}</AppShell>
                 </ProtectedRoute>
               }
             />

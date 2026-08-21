@@ -21,6 +21,7 @@ import (
 	"github.com/Kapital-B/automata/svc/internal/application/auth"
 	appcontacts "github.com/Kapital-B/automata/svc/internal/application/contacts"
 	appmessages "github.com/Kapital-B/automata/svc/internal/application/messages"
+	appprojects "github.com/Kapital-B/automata/svc/internal/application/projects"
 	"github.com/Kapital-B/automata/svc/internal/configuration"
 	"github.com/go-chi/cors"
 	_ "modernc.org/sqlite"
@@ -97,6 +98,21 @@ func main() {
 		Contacts: repo,
 		Messages: repo,
 	}
+	projectSvc := &appprojects.Service{
+		Users:       repo,
+		Projects:    repo,
+		Assignments: repo,
+		Contacts:    repo,
+		Messages:    repo,
+	}
+	assignSvc := &appprojects.AssignService{
+		Users:       repo,
+		Projects:    repo,
+		Assignments: repo,
+		Contacts:    repo,
+		Messages:    repo,
+		JobRuns:     repo,
+	}
 
 	syncSvc := &appmessages.SyncService{
 		Accounts: repo,
@@ -106,6 +122,7 @@ func main() {
 		Vault:    vault,
 		JobRuns:  repo,
 		Resolve:  resolveSvc,
+		Assign:   assignSvc,
 	}
 	var categorizeSvc *appmessages.CategorizeService
 	var summarizeSvc *appmessages.SummarizeService
@@ -188,6 +205,7 @@ func main() {
 		ForwardRulesSvc: forwardRulesSvc,
 		AuthSvc:         authSvc,
 		ContactSvc:      contactSvc,
+		ProjectSvc:      projectSvc,
 		Accounts:        repo,
 		Messages:        repo,
 		JobRuns:         repo,
@@ -197,6 +215,8 @@ func main() {
 		OAuthStates:     repo,
 		Users:           repo,
 		Contacts:        repo,
+		Projects:        repo,
+		Assignments:     repo,
 		Dashboard:       cfg.DashboardBaseURL,
 		SuccessPath:     cfg.OAuthSuccessPath,
 		ErrorPath:       cfg.OAuthErrorPath,

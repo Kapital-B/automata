@@ -139,6 +139,7 @@ export type MessageItem = {
   preview: string;
   category_slug?: string;
   category_confidence?: number;
+  conversation_id?: string;
 };
 
 export type DraftSuggestion = {
@@ -344,6 +345,158 @@ export async function mergeContacts(
     headers: toAuthHeader(accessToken),
     body: JSON.stringify({ source_contact_id: sourceContactID }),
   });
+}
+
+export type ProjectListItem = {
+  id: string;
+  organisation_id: string;
+  name: string;
+  code: string;
+  description?: string;
+  client?: string;
+  keywords: string[];
+  archived_at?: string;
+  created_at: string;
+  updated_at: string;
+};
+
+export type ProjectMember = {
+  id: string;
+  project_id: string;
+  user_id: string;
+  role: string;
+  discipline?: string;
+  responsibilities?: string;
+  current_scope?: string;
+  approval_authority?: string;
+  out_of_scope?: string;
+  created_at: string;
+  updated_at: string;
+};
+
+export type ProjectDetail = ProjectListItem & {
+  member?: ProjectMember;
+};
+
+export type UnassignedSummary = {
+  unassigned: number;
+  provisional: number;
+};
+
+export type UnassignedItem = {
+  kind: "message";
+  message_id: string;
+  account_id: string;
+  account_label: string;
+  subject: string;
+  from_json?: { name?: string; address?: string };
+  conversation_id?: string;
+  received_at: string;
+  status: "unassigned" | "provisional";
+  reason?: string;
+  source?: string;
+  project_id?: string;
+};
+
+export type EffectiveAssignment = {
+  status: string;
+  reason?: string;
+  source?: string;
+  scope?: string;
+  account_id?: string;
+  message_id?: string;
+  project_id?: string;
+  conversation_id?: string;
+};
+
+export async function listProjects(accessToken: string, includeArchived = false) {
+  const qs = includeArchived ? "?include_archived=true" : "";
+  return apiRequest<ProjectListItem[]>(`/api/projects${qs}`, {
+    headers: toAuthHeader(accessToken),
+  });
+}
+
+export async function getProject(accessToken: string, projectID: string) {
+  return apiRequest<ProjectDetail>(`/api/projects/${projectID}`, {
+    headers: toAuthHeader(accessToken),
+  });
+}
+
+export async function createProject(
+  accessToken: string,
+  body: { name: string; code: string; description?: string; keywords?: string[] },
+) {
+  return apiRequest<ProjectListItem>("/api/projects", {
+    method: "POST",
+    headers: toAuthHeader(accessToken),
+    body: JSON.stringify(body),
+  });
+}
+
+export async function updateProject(
+  accessToken: string,
+  projectID: string,
+  body: Record<string, unknown>,
+) {
+  return apiRequest<ProjectListItem>(`/api/projects/${projectID}`, {
+    method: "PATCH",
+    headers: toAuthHeader(accessToken),
+    body: JSON.stringify(body),
+  });
+}
+
+export async function updateProjectMember(
+  accessToken: string,
+  projectID: string,
+  body: Record<string, unknown>,
+) {
+  return apiRequest<ProjectMember>(`/api/projects/${projectID}/member`, {
+    method: "PATCH",
+    headers: toAuthHeader(accessToken),
+    body: JSON.stringify(body),
+  });
+}
+
+export async function getUnassignedSummary(accessToken: string) {
+  return apiRequest<UnassignedSummary>("/api/unassigned/summary", {
+    headers: toAuthHeader(accessToken),
+  });
+}
+
+export async function listUnassigned(
+  accessToken: string,
+  opts?: { status?: string; limit?: number; offset?: number },
+) {
+  const params = new URLSearchParams();
+  if (opts?.status) params.set("status", opts.status);
+  if (typeof opts?.limit === "number") params.set("limit", String(opts.limit));
+  if (typeof opts?.offset === "number") params.set("offset", String(opts.offset));
+  const qs = params.toString();
+  return apiRequest<UnassignedItem[]>(`/api/unassigned${qs ? `?${qs}` : ""}`, {
+    headers: toAuthHeader(accessToken),
+  });
+}
+
+export async function assignMessageProject(
+  accessToken: string,
+  messageID: string,
+  body: { project_id?: string | null; scope?: "thread" | "message"; status?: string },
+) {
+  return apiRequest<EffectiveAssignment>(`/api/messages/${messageID}/project-assignment`, {
+    method: "POST",
+    headers: toAuthHeader(accessToken),
+    body: JSON.stringify(body),
+  });
+}
+
+export async function clearMessageProjectOverride(accessToken: string, messageID: string) {
+  return apiRequest<EffectiveAssignment>(
+    `/api/messages/${messageID}/project-assignment/override`,
+    {
+      method: "DELETE",
+      headers: toAuthHeader(accessToken),
+    },
+  );
 }
 
 export async function startOAuthLogin(provider: "google" | "microsoft") {

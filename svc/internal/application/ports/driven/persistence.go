@@ -73,13 +73,13 @@ type MessageCategoryRow struct {
 }
 
 type MessageListFilter struct {
-	AccountID           *uuid.UUID
-	Category            string
-	Since               *time.Time
-	OnlySummaryUnseen   bool
-	OnlyForwardUnseen   bool
-	Limit               int
-	Offset              int
+	AccountID         *uuid.UUID
+	Category          string
+	Since             *time.Time
+	OnlySummaryUnseen bool
+	OnlyForwardUnseen bool
+	Limit             int
+	Offset            int
 }
 
 // JobRunRow is the persisted job run shape for API responses and auditing.
@@ -358,6 +358,131 @@ type ContactRepository interface {
 	// ResolveEmailContact finds or creates a contact for an email in the organisation.
 	ResolveEmailContact(ctx context.Context, organisationID uuid.UUID, email, displayName string, now time.Time) (contactID uuid.UUID, err error)
 	ListMessageIDsForAccount(ctx context.Context, accountID uuid.UUID, limit int) ([]uuid.UUID, error)
+	ListContactIDsForMessage(ctx context.Context, organisationID, messageID uuid.UUID) ([]uuid.UUID, error)
+	ListContactIDsForThread(ctx context.Context, organisationID, accountID uuid.UUID, conversationID string) ([]uuid.UUID, error)
+}
+
+// ProjectRow is a persisted project.
+type ProjectRow struct {
+	ID             uuid.UUID
+	OrganisationID uuid.UUID
+	Name           string
+	Code           string
+	Description    *string
+	Client         *string
+	Keywords       []string
+	ArchivedAt     *time.Time
+	CreatedAt      time.Time
+	UpdatedAt      time.Time
+}
+
+// ProjectMemberRow is the operator's membership on a project.
+type ProjectMemberRow struct {
+	ID                uuid.UUID
+	ProjectID         uuid.UUID
+	UserID            uuid.UUID
+	Role              string
+	Discipline        *string
+	Responsibilities  *string
+	CurrentScope      *string
+	ApprovalAuthority *string
+	OutOfScope        *string
+	CreatedAt         time.Time
+	UpdatedAt         time.Time
+}
+
+// ProjectListFilter narrows project listing.
+type ProjectListFilter struct {
+	IncludeArchived bool
+	Limit           int
+	Offset          int
+}
+
+// ProjectRepository persists org-scoped projects and membership.
+type ProjectRepository interface {
+	ListProjects(ctx context.Context, organisationID uuid.UUID, filter ProjectListFilter) ([]ProjectRow, error)
+	GetProject(ctx context.Context, organisationID, projectID uuid.UUID) (*ProjectRow, error)
+	GetProjectByCode(ctx context.Context, organisationID uuid.UUID, code string) (*ProjectRow, error)
+	CreateProject(ctx context.Context, project ProjectRow, member ProjectMemberRow) error
+	UpdateProject(ctx context.Context, project ProjectRow) error
+	GetProjectMember(ctx context.Context, projectID, userID uuid.UUID) (*ProjectMemberRow, error)
+	UpdateProjectMember(ctx context.Context, member ProjectMemberRow) error
+	UpsertProjectParticipant(ctx context.Context, projectID, contactID uuid.UUID, firstSeenAt time.Time) error
+	CountProjectMembers(ctx context.Context, projectID uuid.UUID) (int, error)
+}
+
+// AssignmentRow is a thread or override assignment.
+type AssignmentRow struct {
+	ID               uuid.UUID
+	OrganisationID   uuid.UUID
+	AccountID        uuid.UUID
+	ConversationID   string // thread only
+	MessageID        *uuid.UUID
+	ProjectID        *uuid.UUID
+	Status           string
+	Confidence       *float64
+	Reason           string
+	Source           string
+	RunID            *uuid.UUID
+	AssignedByUserID *uuid.UUID
+	CreatedAt        time.Time
+	UpdatedAt        time.Time
+}
+
+// EffectiveAssignment is the resolved project for a message.
+type EffectiveAssignment struct {
+	ProjectID      *uuid.UUID
+	Status         string // committed | provisional | unassigned
+	Reason         string
+	Source         string
+	Scope          string // thread | message | none
+	ConversationID *string
+	AccountID      uuid.UUID
+	MessageID      uuid.UUID
+}
+
+// UnassignedItem is a mail row for the Unassigned queue.
+type UnassignedItem struct {
+	MessageID      uuid.UUID
+	AccountID      uuid.UUID
+	AccountLabel   string
+	Subject        string
+	FromJSON       string
+	ConversationID *string
+	ReceivedAt     time.Time
+	Status         string // unassigned | provisional
+	Reason         string
+	ProjectID      *uuid.UUID
+	Source         string
+}
+
+// UnassignedListFilter narrows the unassigned queue.
+type UnassignedListFilter struct {
+	Status string // unassigned | provisional | all
+	Limit  int
+	Offset int
+}
+
+// UnassignedSummary counts for nav badge.
+type UnassignedSummary struct {
+	Unassigned  int
+	Provisional int
+}
+
+// AssignmentRepository persists thread/message project assignments.
+type AssignmentRepository interface {
+	UpsertThreadAssignment(ctx context.Context, row AssignmentRow) error
+	GetThreadAssignment(ctx context.Context, accountID uuid.UUID, conversationID string) (*AssignmentRow, error)
+	DeleteThreadAssignment(ctx context.Context, accountID uuid.UUID, conversationID string) error
+	UpsertMessageOverride(ctx context.Context, row AssignmentRow) error
+	GetMessageOverride(ctx context.Context, messageID uuid.UUID) (*AssignmentRow, error)
+	DeleteMessageOverride(ctx context.Context, messageID uuid.UUID) error
+	EffectiveAssignment(ctx context.Context, userID, messageID uuid.UUID) (*EffectiveAssignment, error)
+	ListUnassigned(ctx context.Context, userID uuid.UUID, filter UnassignedListFilter) ([]UnassignedItem, error)
+	CountUnassignedSummary(ctx context.Context, userID uuid.UUID) (UnassignedSummary, error)
+	// ListMessagesNeedingAssign returns recent messages on an account with no effective project.
+	ListMessagesNeedingAssign(ctx context.Context, userID, accountID uuid.UUID, limit int) ([]MessageRow, error)
+	FindCommittedSiblingProject(ctx context.Context, userID, accountID uuid.UUID, conversationID string, excludeMessageID uuid.UUID) (*uuid.UUID, error)
 }
 
 // JobRunRepository records sync runs (Phase 1: synchronous insert).
