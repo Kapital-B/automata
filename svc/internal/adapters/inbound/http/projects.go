@@ -294,19 +294,32 @@ func (h *Handlers) listUnassigned(w http.ResponseWriter, r *http.Request) {
 	out := make([]map[string]any, 0, len(items))
 	for _, it := range items {
 		row := map[string]any{
-			"kind":          "message",
-			"message_id":    it.MessageID.String(),
-			"account_id":    it.AccountID.String(),
-			"account_label": it.AccountLabel,
-			"subject":       it.Subject,
-			"from_json":     jsonRawOrObject(it.FromJSON),
-			"received_at":   it.ReceivedAt.UTC().Format(time.RFC3339Nano),
-			"status":        it.Status,
-			"reason":        it.Reason,
-			"source":        it.Source,
+			"kind":        it.Kind,
+			"subject":     it.Subject,
+			"status":      it.Status,
+			"reason":      it.Reason,
+			"source":      it.Source,
+			"occurred_at": it.OccurredAt.UTC().Format(time.RFC3339Nano),
 		}
-		if it.ConversationID != nil {
-			row["conversation_id"] = *it.ConversationID
+		if it.Kind == "manual" {
+			if it.ManualItemID != nil {
+				row["manual_item_id"] = it.ManualItemID.String()
+			}
+			row["channel"] = it.Channel
+			row["title"] = it.Subject
+		} else {
+			if it.MessageID != nil {
+				row["message_id"] = it.MessageID.String()
+			}
+			if it.AccountID != nil {
+				row["account_id"] = it.AccountID.String()
+			}
+			row["account_label"] = it.AccountLabel
+			row["from_json"] = jsonRawOrObject(it.FromJSON)
+			row["received_at"] = it.OccurredAt.UTC().Format(time.RFC3339Nano)
+			if it.ConversationID != nil {
+				row["conversation_id"] = *it.ConversationID
+			}
 		}
 		if it.ProjectID != nil {
 			row["project_id"] = it.ProjectID.String()
@@ -474,4 +487,212 @@ func jsonRawOrObject(s string) any {
 		return map[string]any{}
 	}
 	return v
+}
+
+func (h *Handlers) getProjectTimeline(w http.ResponseWriter, r *http.Request) {
+	uid, ok := UserIDFromContext(r.Context())
+	if !ok {
+		writeJSON(w, http.StatusUnauthorized, map[string]string{"error": "unauthorized"})
+		return
+	}
+	if h.ProjectSvc == nil {
+		writeJSON(w, http.StatusServiceUnavailable, map[string]string{"error": "projects not configured"})
+		return
+	}
+	id, err := uuid.Parse(chi.URLParam(r, "id"))
+	if err != nil {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "bad id"})
+		return
+	}
+	filter := driven.TimelineFilter{Source: strings.TrimSpace(r.URL.Query().Get("source"))}
+	// unassigned_to_issue is accepted and ignored until 1d (all items qualify).
+	_ = r.URL.Query().Get("unassigned_to_issue")
+	if v := r.URL.Query().Get("limit"); v != "" {
+		n, err := strconv.Atoi(v)
+		if err != nil {
+			writeJSON(w, http.StatusBadRequest, map[string]string{"error": "bad limit"})
+			return
+		}
+		filter.Limit = n
+	}
+	if v := r.URL.Query().Get("offset"); v != "" {
+		n, err := strconv.Atoi(v)
+		if err != nil {
+			writeJSON(w, http.StatusBadRequest, map[string]string{"error": "bad offset"})
+			return
+		}
+		filter.Offset = n
+	}
+	items, err := h.ProjectSvc.GetTimeline(r.Context(), uid, id, filter)
+	if err != nil {
+		if errors.Is(err, appprojects.ErrNotFound) {
+			writeJSON(w, http.StatusNotFound, map[string]string{"error": "not found"})
+			return
+		}
+		h.Log.Error("timeline", "err", err)
+		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "internal"})
+		return
+	}
+	out := make([]map[string]any, 0, len(items))
+	for _, it := range items {
+		row := map[string]any{
+			"source":      it.Source,
+			"occurred_at": it.OccurredAt.UTC().Format(time.RFC3339Nano),
+			"title":       it.Title,
+			"snippet":     it.Snippet,
+		}
+		contacts := make([]map[string]any, 0, len(it.Contacts))
+		for _, c := range it.Contacts {
+			contacts = append(contacts, map[string]any{
+				"id": c.ID.String(), "display_name": c.DisplayName, "role": c.Role,
+			})
+		}
+		row["contacts"] = contacts
+		if it.AccountID != nil {
+			row["account_id"] = it.AccountID.String()
+			row["account_label"] = it.AccountLabel
+		}
+		if it.MessageID != nil {
+			row["message_id"] = it.MessageID.String()
+		}
+		if it.ManualItemID != nil {
+			row["manual_item_id"] = it.ManualItemID.String()
+			row["channel"] = it.Channel
+			row["body_text"] = it.BodyText
+		}
+		out = append(out, row)
+	}
+	writeJSON(w, http.StatusOK, out)
+}
+
+func (h *Handlers) createManualItem(w http.ResponseWriter, r *http.Request) {
+	uid, ok := UserIDFromContext(r.Context())
+	if !ok {
+		writeJSON(w, http.StatusUnauthorized, map[string]string{"error": "unauthorized"})
+		return
+	}
+	if h.ProjectSvc == nil {
+		writeJSON(w, http.StatusServiceUnavailable, map[string]string{"error": "projects not configured"})
+		return
+	}
+	var body struct {
+		Channel               string   `json:"channel"`
+		OccurredAt            string   `json:"occurred_at"`
+		Title                 string   `json:"title"`
+		BodyText              string   `json:"body_text"`
+		ProjectID             *string  `json:"project_id"`
+		ParticipantContactIDs []string `json:"participant_contact_ids"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid json"})
+		return
+	}
+	occurredAt, err := time.Parse(time.RFC3339Nano, body.OccurredAt)
+	if err != nil {
+		occurredAt, err = time.Parse(time.RFC3339, body.OccurredAt)
+	}
+	if err != nil {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "bad occurred_at"})
+		return
+	}
+	in := appprojects.CreateManualInput{
+		Channel: body.Channel, OccurredAt: occurredAt, Title: body.Title, BodyText: body.BodyText,
+	}
+	if body.ProjectID != nil && strings.TrimSpace(*body.ProjectID) != "" {
+		pid, err := uuid.Parse(strings.TrimSpace(*body.ProjectID))
+		if err != nil {
+			writeJSON(w, http.StatusBadRequest, map[string]string{"error": "bad project_id"})
+			return
+		}
+		in.ProjectID = &pid
+	}
+	for _, s := range body.ParticipantContactIDs {
+		cid, err := uuid.Parse(strings.TrimSpace(s))
+		if err != nil {
+			continue
+		}
+		in.ParticipantContactIDs = append(in.ParticipantContactIDs, cid)
+	}
+	row, err := h.ProjectSvc.CreateManualItem(r.Context(), uid, in)
+	if err != nil {
+		switch {
+		case errors.Is(err, appprojects.ErrInvalidChannel):
+			writeJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid channel"})
+		case errors.Is(err, appprojects.ErrInvalidBody):
+			writeJSON(w, http.StatusBadRequest, map[string]string{"error": "body_text required"})
+		case errors.Is(err, appprojects.ErrNotFound):
+			writeJSON(w, http.StatusNotFound, map[string]string{"error": "not found"})
+		default:
+			writeJSON(w, http.StatusBadRequest, map[string]string{"error": err.Error()})
+		}
+		return
+	}
+	writeJSON(w, http.StatusCreated, manualItemJSON(*row))
+}
+
+func (h *Handlers) assignManualItemProject(w http.ResponseWriter, r *http.Request) {
+	uid, ok := UserIDFromContext(r.Context())
+	if !ok {
+		writeJSON(w, http.StatusUnauthorized, map[string]string{"error": "unauthorized"})
+		return
+	}
+	if h.ProjectSvc == nil {
+		writeJSON(w, http.StatusServiceUnavailable, map[string]string{"error": "projects not configured"})
+		return
+	}
+	id, err := uuid.Parse(chi.URLParam(r, "id"))
+	if err != nil {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "bad id"})
+		return
+	}
+	var body struct {
+		ProjectID *string `json:"project_id"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid json"})
+		return
+	}
+	var projectID *uuid.UUID
+	if body.ProjectID != nil && strings.TrimSpace(*body.ProjectID) != "" {
+		pid, err := uuid.Parse(strings.TrimSpace(*body.ProjectID))
+		if err != nil {
+			writeJSON(w, http.StatusBadRequest, map[string]string{"error": "bad project_id"})
+			return
+		}
+		projectID = &pid
+	}
+	row, err := h.ProjectSvc.AssignManualItem(r.Context(), uid, id, projectID)
+	if err != nil {
+		if errors.Is(err, appprojects.ErrNotFound) {
+			writeJSON(w, http.StatusNotFound, map[string]string{"error": "not found"})
+			return
+		}
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": err.Error()})
+		return
+	}
+	writeJSON(w, http.StatusOK, manualItemJSON(*row))
+}
+
+func manualItemJSON(m driven.ManualItemRow) map[string]any {
+	out := map[string]any{
+		"id":                 m.ID.String(),
+		"organisation_id":    m.OrganisationID.String(),
+		"channel":            m.Channel,
+		"occurred_at":        m.OccurredAt.UTC().Format(time.RFC3339Nano),
+		"title":              m.Title,
+		"body_text":          m.BodyText,
+		"assignment_status":  m.AssignmentStatus,
+		"created_by_user_id": m.CreatedByUserID.String(),
+		"created_at":         m.CreatedAt.UTC().Format(time.RFC3339Nano),
+	}
+	if m.ProjectID != nil {
+		out["project_id"] = m.ProjectID.String()
+	}
+	if m.AssignmentReason != nil {
+		out["assignment_reason"] = *m.AssignmentReason
+	}
+	if m.AssignmentSource != nil {
+		out["assignment_source"] = *m.AssignmentSource
+	}
+	return out
 }

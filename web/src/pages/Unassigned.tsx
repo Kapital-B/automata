@@ -12,6 +12,7 @@ import { useAuth } from "@/components/auth/AuthProvider";
 import { useAccountsData } from "@/hooks/useAccountsData";
 import {
   ApiError,
+  assignManualItem,
   assignMessageProject,
   listProjects,
   listUnassigned,
@@ -51,14 +52,18 @@ export default function UnassignedPage() {
 
   const assignMutation = useMutation({
     mutationFn: async (args: {
-      messageID: string;
+      kind: "message" | "manual";
+      id: string;
       projectID: string;
-      scope: "thread" | "message";
+      scope?: "thread" | "message";
     }) => {
       if (!accessToken) throw new Error("Not authenticated");
-      return assignMessageProject(accessToken, args.messageID, {
+      if (args.kind === "manual") {
+        return assignManualItem(accessToken, args.id, { project_id: args.projectID });
+      }
+      return assignMessageProject(accessToken, args.id, {
         project_id: args.projectID,
-        scope: args.scope,
+        scope: args.scope ?? "thread",
         status: "committed",
       });
     },
@@ -66,6 +71,7 @@ export default function UnassignedPage() {
       toast({ title: "Assigned" });
       await queryClient.invalidateQueries({ queryKey: ["unassigned"] });
       await queryClient.invalidateQueries({ queryKey: ["unassigned-summary"] });
+      await queryClient.invalidateQueries({ queryKey: ["project-timeline"] });
     },
     onError: (err) => {
       toast({
@@ -76,14 +82,15 @@ export default function UnassignedPage() {
     },
   });
 
-  const accountFor = (accountID: string) => accounts.find((x) => x.id === accountID);
+  const accountFor = (accountID?: string) =>
+    accountID ? accounts.find((x) => x.id === accountID) : undefined;
 
   return (
     <div className="space-y-8">
       <PageHeader
         eyebrow="Queue"
         title="Unassigned"
-        description="Mail without a committed project, plus provisional suggestions to confirm."
+        description="Mail and pasted notes without a committed project, plus provisional suggestions."
       />
 
       {unassignedQuery.isLoading ? (
@@ -95,7 +102,7 @@ export default function UnassignedPage() {
         <p className="text-sm text-destructive">
           {unassignedQuery.error instanceof ApiError
             ? unassignedQuery.error.message
-            : "Could not load unassigned mail."}
+            : "Could not load unassigned items."}
         </p>
       ) : (
         <>
@@ -106,26 +113,29 @@ export default function UnassignedPage() {
             projects={projectsQuery.data ?? []}
             accountFor={accountFor}
             assigning={assignMutation.isPending}
-            onAssign={(messageID, projectID, scope) =>
-              assignMutation.mutate({ messageID, projectID, scope })
-            }
+            onAssign={(args) => assignMutation.mutate(args)}
           />
           <Section
             title="Unassigned"
-            empty="Inbox is clear — sync a mailbox or create a project to start assigning."
+            empty="Queue is clear — sync mail or paste correspondence from a project."
             items={plain}
             projects={projectsQuery.data ?? []}
             accountFor={accountFor}
             assigning={assignMutation.isPending}
-            onAssign={(messageID, projectID, scope) =>
-              assignMutation.mutate({ messageID, projectID, scope })
-            }
+            onAssign={(args) => assignMutation.mutate(args)}
           />
         </>
       )}
     </div>
   );
 }
+
+type AssignArgs = {
+  kind: "message" | "manual";
+  id: string;
+  projectID: string;
+  scope?: "thread" | "message";
+};
 
 function Section({
   title,
@@ -140,9 +150,9 @@ function Section({
   empty: string;
   items: UnassignedItem[];
   projects: { id: string; name: string; code: string }[];
-  accountFor: (id: string) => UiAccount | undefined;
+  accountFor: (id?: string) => UiAccount | undefined;
   assigning: boolean;
-  onAssign: (messageID: string, projectID: string, scope: "thread" | "message") => void;
+  onAssign: (args: AssignArgs) => void;
 }) {
   return (
     <section className="space-y-3">
@@ -159,7 +169,7 @@ function Section({
         <ul className="divide-y divide-border/70 border-y border-border/70">
           {items.map((item) => (
             <UnassignedRow
-              key={item.message_id}
+              key={item.message_id ?? item.manual_item_id ?? item.occurred_at}
               item={item}
               projects={projects}
               account={accountFor(item.account_id)}
@@ -184,29 +194,45 @@ function UnassignedRow({
   projects: { id: string; name: string; code: string }[];
   account: UiAccount | undefined;
   assigning: boolean;
-  onAssign: (messageID: string, projectID: string, scope: "thread" | "message") => void;
+  onAssign: (args: AssignArgs) => void;
 }) {
   const [projectID, setProjectID] = useState("");
-  const from = item.from_json?.name || item.from_json?.address || "Unknown sender";
+  const isManual = item.kind === "manual";
+  const headline = isManual
+    ? item.title || item.subject || "(untitled)"
+    : item.subject || "(no subject)";
+  const from = item.from_json?.name || item.from_json?.address || "";
+  const when = item.occurred_at || item.received_at;
 
   return (
     <li className="space-y-3 py-4">
-      <div className="flex flex-wrap items-start justify-between gap-3">
-        <div className="min-w-0 space-y-1">
-          <div className="flex flex-wrap items-center gap-2">
+      <div className="min-w-0 space-y-1">
+        <div className="flex flex-wrap items-center gap-2">
+          {isManual ? (
+            <span className="text-xs uppercase tracking-wider text-muted-foreground">
+              {item.channel || "manual"}
+            </span>
+          ) : (
             <AccountBadge account={account} />
+          )}
+          {!isManual && item.message_id && item.account_id ? (
             <Link
               to={`/inbox?message_id=${encodeURIComponent(item.message_id)}&account_id=${encodeURIComponent(item.account_id)}`}
               className="font-medium hover:underline"
             >
-              {item.subject || "(no subject)"}
+              {headline}
             </Link>
-          </div>
-          <p className="text-xs text-muted-foreground">{from}</p>
-          {item.reason ? (
-            <p className="text-xs text-muted-foreground">Reason: {item.reason}</p>
-          ) : null}
+          ) : (
+            <span className="font-medium">{headline}</span>
+          )}
         </div>
+        {from ? <p className="text-xs text-muted-foreground">{from}</p> : null}
+        {when ? (
+          <p className="text-xs text-muted-foreground">{new Date(when).toLocaleString()}</p>
+        ) : null}
+        {item.reason ? (
+          <p className="text-xs text-muted-foreground">Reason: {item.reason}</p>
+        ) : null}
       </div>
       <div className="flex flex-wrap items-center gap-2">
         <Select value={projectID} onValueChange={setProjectID}>
@@ -221,21 +247,49 @@ function UnassignedRow({
             ))}
           </SelectContent>
         </Select>
-        <Button
-          size="sm"
-          disabled={!projectID || assigning || !item.conversation_id}
-          onClick={() => onAssign(item.message_id, projectID, "thread")}
-        >
-          Assign thread
-        </Button>
-        <Button
-          size="sm"
-          variant="outline"
-          disabled={!projectID || assigning}
-          onClick={() => onAssign(item.message_id, projectID, "message")}
-        >
-          This message only
-        </Button>
+        {isManual ? (
+          <Button
+            size="sm"
+            disabled={!projectID || assigning || !item.manual_item_id}
+            onClick={() =>
+              onAssign({ kind: "manual", id: item.manual_item_id!, projectID })
+            }
+          >
+            Assign
+          </Button>
+        ) : (
+          <>
+            <Button
+              size="sm"
+              disabled={!projectID || assigning || !item.conversation_id || !item.message_id}
+              onClick={() =>
+                onAssign({
+                  kind: "message",
+                  id: item.message_id!,
+                  projectID,
+                  scope: "thread",
+                })
+              }
+            >
+              Assign thread
+            </Button>
+            <Button
+              size="sm"
+              variant="outline"
+              disabled={!projectID || assigning || !item.message_id}
+              onClick={() =>
+                onAssign({
+                  kind: "message",
+                  id: item.message_id!,
+                  projectID,
+                  scope: "message",
+                })
+              }
+            >
+              This message only
+            </Button>
+          </>
+        )}
       </div>
     </li>
   );

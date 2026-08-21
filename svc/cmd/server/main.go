@@ -102,6 +102,8 @@ func main() {
 		Users:       repo,
 		Projects:    repo,
 		Assignments: repo,
+		Manuals:     repo,
+		Timeline:    repo,
 		Contacts:    repo,
 		Messages:    repo,
 	}

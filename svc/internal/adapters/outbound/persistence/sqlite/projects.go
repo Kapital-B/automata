@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"sort"
 	"strings"
 	"time"
 
@@ -458,7 +459,9 @@ func (r *Repository) ListUnassigned(ctx context.Context, userID uuid.UUID, filte
 		status = "all"
 	}
 
-	// Load candidate messages for the user, compute effective assignment in Go for correctness.
+	out := make([]driven.UnassignedItem, 0)
+
+	// Mail candidates
 	rows, err := r.db.QueryContext(ctx, `
 		SELECT m.id, m.account_id, a.label, m.subject, m.from_json, m.conversation_id, m.received_at
 		FROM messages m
@@ -471,13 +474,6 @@ func (r *Repository) ListUnassigned(ctx context.Context, userID uuid.UUID, filte
 	}
 	defer rows.Close()
 
-	type cand struct {
-		id, accountID            uuid.UUID
-		label, subject, fromJSON string
-		conv                     *string
-		receivedAt               time.Time
-	}
-	cands := make([]cand, 0)
 	for rows.Next() {
 		var idStr, accStr, label, subject, fromJSON, receivedAt string
 		var conv sql.NullString
@@ -490,18 +486,7 @@ func (r *Repository) ListUnassigned(ctx context.Context, userID uuid.UUID, filte
 		if err != nil {
 			return nil, err
 		}
-		cands = append(cands, cand{
-			id: id, accountID: acc, label: label, subject: subject, fromJSON: fromJSON,
-			conv: nullStringPtr(conv), receivedAt: rt,
-		})
-	}
-	if err := rows.Err(); err != nil {
-		return nil, err
-	}
-
-	out := make([]driven.UnassignedItem, 0)
-	for _, c := range cands {
-		eff, err := r.EffectiveAssignment(ctx, userID, c.id)
+		eff, err := r.EffectiveAssignment(ctx, userID, id)
 		if err != nil || eff == nil {
 			continue
 		}
@@ -519,16 +504,57 @@ func (r *Repository) ListUnassigned(ctx context.Context, userID uuid.UUID, filte
 		if status == "provisional" && itemStatus != "provisional" {
 			continue
 		}
+		msgID, accID := id, acc
 		out = append(out, driven.UnassignedItem{
-			MessageID: c.id, AccountID: c.accountID, AccountLabel: c.label,
-			Subject: c.subject, FromJSON: c.fromJSON, ConversationID: c.conv,
-			ReceivedAt: c.receivedAt, Status: itemStatus, Reason: eff.Reason,
+			Kind: "message", MessageID: &msgID, AccountID: &accID, AccountLabel: label,
+			Subject: subject, FromJSON: fromJSON, ConversationID: nullStringPtr(conv),
+			OccurredAt: rt, Status: itemStatus, Reason: eff.Reason,
 			ProjectID: eff.ProjectID, Source: eff.Source,
 		})
-		if len(out) >= offset+limit {
-			break
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+
+	// Manual candidates
+	orgID, err := r.GetHomeOrganisationID(ctx, userID)
+	if err == nil {
+		manuals, err := r.ListUnassignedManualItems(ctx, orgID, 500)
+		if err == nil {
+			for _, m := range manuals {
+				itemStatus := "unassigned"
+				if m.AssignmentStatus == "provisional" && m.ProjectID != nil {
+					itemStatus = "provisional"
+				} else if m.AssignmentStatus == "committed" && m.ProjectID != nil {
+					continue
+				}
+				if status == "unassigned" && itemStatus != "unassigned" {
+					continue
+				}
+				if status == "provisional" && itemStatus != "provisional" {
+					continue
+				}
+				mid := m.ID
+				reason := ""
+				if m.AssignmentReason != nil {
+					reason = *m.AssignmentReason
+				}
+				src := ""
+				if m.AssignmentSource != nil {
+					src = *m.AssignmentSource
+				}
+				out = append(out, driven.UnassignedItem{
+					Kind: "manual", ManualItemID: &mid, Subject: m.Title, Channel: m.Channel,
+					OccurredAt: m.OccurredAt, Status: itemStatus, Reason: reason,
+					ProjectID: m.ProjectID, Source: src,
+				})
+			}
 		}
 	}
+
+	sort.Slice(out, func(i, j int) bool {
+		return out[i].OccurredAt.After(out[j].OccurredAt)
+	})
 	if offset >= len(out) {
 		return []driven.UnassignedItem{}, nil
 	}

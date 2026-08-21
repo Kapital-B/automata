@@ -17,6 +17,37 @@ func (s AssignmentStatus) Valid() bool {
 	return s == StatusCommitted || s == StatusProvisional
 }
 
+// ManualAssignmentStatus includes explicit unassigned for manual_items rows.
+func ValidManualAssignmentStatus(s string) bool {
+	switch s {
+	case string(StatusCommitted), string(StatusProvisional), "unassigned":
+		return true
+	default:
+		return false
+	}
+}
+
+// ManualChannel is a pasted correspondence channel.
+type ManualChannel string
+
+const (
+	ChannelWhatsApp ManualChannel = "whatsapp"
+	ChannelTeams    ManualChannel = "teams"
+	ChannelSMS      ManualChannel = "sms"
+	ChannelCall     ManualChannel = "call"
+	ChannelMeeting  ManualChannel = "meeting"
+	ChannelNote     ManualChannel = "note"
+)
+
+func (c ManualChannel) Valid() bool {
+	switch c {
+	case ChannelWhatsApp, ChannelTeams, ChannelSMS, ChannelCall, ChannelMeeting, ChannelNote:
+		return true
+	default:
+		return false
+	}
+}
+
 // AssignmentSource is how an assignment was produced.
 type AssignmentSource string
 

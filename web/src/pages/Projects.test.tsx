@@ -133,11 +133,20 @@ describe("Projects UI", () => {
         reason: "name_or_keyword:DC01",
         project_id: "p1",
       },
+      {
+        kind: "manual",
+        manual_item_id: "man1",
+        channel: "teams",
+        title: "Pasted Teams note",
+        occurred_at: "2026-01-02T00:00:00Z",
+        status: "unassigned",
+      },
     ]);
     assignMessageProject.mockResolvedValue({ status: "committed", project_id: "p1" });
     wrap(<UnassignedPage />, "/unassigned");
     expect(await screen.findByText("Needs a home")).toBeInTheDocument();
     expect(screen.getByText("Maybe cooling")).toBeInTheDocument();
+    expect(screen.getByText("Pasted Teams note")).toBeInTheDocument();
     expect(screen.getByText(/Needs confirmation/i)).toBeInTheDocument();
     expect(screen.getAllByRole("button", { name: /assign thread/i }).length).toBeGreaterThan(0);
     expect(screen.getAllByRole("button", { name: /this message only/i }).length).toBeGreaterThan(0);

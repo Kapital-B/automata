@@ -11,6 +11,7 @@ import (
 	"unicode"
 
 	"github.com/Kapital-B/automata/svc/internal/application/ports/driven"
+	"github.com/Kapital-B/automata/svc/internal/domain/contacts"
 	domainprojects "github.com/Kapital-B/automata/svc/internal/domain/projects"
 	"github.com/google/uuid"
 )
@@ -28,6 +29,8 @@ type Service struct {
 	Users       driven.UserRepository
 	Projects    driven.ProjectRepository
 	Assignments driven.AssignmentRepository
+	Manuals     driven.ManualItemRepository
+	Timeline    driven.TimelineRepository
 	Contacts    driven.ContactRepository
 	Messages    driven.MessageRepository
 }
@@ -354,6 +357,140 @@ func (s *Service) upsertParticipantsFromMessage(ctx context.Context, orgID, proj
 		_ = s.Projects.UpsertProjectParticipant(ctx, projectID, cid, now)
 	}
 	return nil
+}
+
+var (
+	ErrInvalidChannel = errors.New("invalid channel")
+	ErrInvalidBody    = errors.New("body_text required")
+)
+
+type CreateManualInput struct {
+	Channel               string
+	OccurredAt            time.Time
+	Title                 string
+	BodyText              string
+	ProjectID             *uuid.UUID
+	ParticipantContactIDs []uuid.UUID
+}
+
+func (s *Service) CreateManualItem(ctx context.Context, userID uuid.UUID, in CreateManualInput) (*driven.ManualItemRow, error) {
+	if s.Manuals == nil {
+		return nil, fmt.Errorf("manuals not configured")
+	}
+	orgID, err := s.homeOrg(ctx, userID)
+	if err != nil {
+		return nil, err
+	}
+	ch := domainprojects.ManualChannel(strings.TrimSpace(strings.ToLower(in.Channel)))
+	if !ch.Valid() {
+		return nil, ErrInvalidChannel
+	}
+	body := strings.TrimSpace(in.BodyText)
+	if body == "" {
+		return nil, ErrInvalidBody
+	}
+	if in.OccurredAt.IsZero() {
+		return nil, fmt.Errorf("occurred_at required")
+	}
+	if in.ProjectID != nil {
+		p, err := s.Projects.GetProject(ctx, orgID, *in.ProjectID)
+		if err != nil {
+			return nil, err
+		}
+		if p == nil || p.ArchivedAt != nil {
+			return nil, ErrNotFound
+		}
+	}
+	now := time.Now().UTC()
+	status := "unassigned"
+	src := string(domainprojects.SourceUser)
+	reason := "user_paste"
+	if in.ProjectID != nil {
+		status = string(domainprojects.StatusCommitted)
+	}
+	row := driven.ManualItemRow{
+		ID: uuid.New(), OrganisationID: orgID, Channel: string(ch),
+		OccurredAt: in.OccurredAt.UTC(), Title: strings.TrimSpace(in.Title), BodyText: body,
+		ProjectID: in.ProjectID, AssignmentStatus: status,
+		AssignmentReason: &reason, AssignmentSource: &src,
+		CreatedByUserID: userID, CreatedAt: now,
+	}
+	if err := s.Manuals.CreateManualItem(ctx, row); err != nil {
+		return nil, err
+	}
+	for _, cid := range in.ParticipantContactIDs {
+		c, err := s.Contacts.GetContact(ctx, orgID, cid)
+		if err != nil || c == nil {
+			continue
+		}
+		_ = s.Contacts.UpsertParticipant(ctx, driven.CorrespondenceParticipantRow{
+			ID: uuid.New(), OrganisationID: orgID, ContactID: cid,
+			Role: string(contacts.RoleParticipant), ManualItemID: &row.ID,
+		})
+		if status == string(domainprojects.StatusCommitted) && in.ProjectID != nil {
+			_ = s.Projects.UpsertProjectParticipant(ctx, *in.ProjectID, cid, now)
+		}
+	}
+	return &row, nil
+}
+
+func (s *Service) AssignManualItem(ctx context.Context, userID, manualItemID uuid.UUID, projectID *uuid.UUID) (*driven.ManualItemRow, error) {
+	if s.Manuals == nil {
+		return nil, fmt.Errorf("manuals not configured")
+	}
+	orgID, err := s.homeOrg(ctx, userID)
+	if err != nil {
+		return nil, err
+	}
+	item, err := s.Manuals.GetManualItem(ctx, orgID, manualItemID)
+	if err != nil {
+		return nil, err
+	}
+	if item == nil {
+		return nil, ErrNotFound
+	}
+	status := "unassigned"
+	reason := "user_assign"
+	source := string(domainprojects.SourceUser)
+	if projectID != nil {
+		p, err := s.Projects.GetProject(ctx, orgID, *projectID)
+		if err != nil {
+			return nil, err
+		}
+		if p == nil || p.ArchivedAt != nil {
+			return nil, ErrNotFound
+		}
+		status = string(domainprojects.StatusCommitted)
+	}
+	if err := s.Manuals.UpdateManualItemAssignment(ctx, orgID, manualItemID, projectID, status, reason, source); err != nil {
+		return nil, err
+	}
+	if status == string(domainprojects.StatusCommitted) && projectID != nil {
+		now := time.Now().UTC()
+		ids, _ := s.Contacts.ListContactIDsForManualItem(ctx, orgID, manualItemID)
+		for _, cid := range ids {
+			_ = s.Projects.UpsertProjectParticipant(ctx, *projectID, cid, now)
+		}
+	}
+	return s.Manuals.GetManualItem(ctx, orgID, manualItemID)
+}
+
+func (s *Service) GetTimeline(ctx context.Context, userID, projectID uuid.UUID, filter driven.TimelineFilter) ([]driven.TimelineItem, error) {
+	if s.Timeline == nil {
+		return nil, fmt.Errorf("timeline not configured")
+	}
+	orgID, err := s.homeOrg(ctx, userID)
+	if err != nil {
+		return nil, err
+	}
+	p, err := s.Projects.GetProject(ctx, orgID, projectID)
+	if err != nil {
+		return nil, err
+	}
+	if p == nil {
+		return nil, ErrNotFound
+	}
+	return s.Timeline.ListProjectTimeline(ctx, userID, orgID, projectID, filter)
 }
 
 // AssignService auto-assigns projects after sync.

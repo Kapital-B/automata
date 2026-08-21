@@ -360,6 +360,7 @@ type ContactRepository interface {
 	ListMessageIDsForAccount(ctx context.Context, accountID uuid.UUID, limit int) ([]uuid.UUID, error)
 	ListContactIDsForMessage(ctx context.Context, organisationID, messageID uuid.UUID) ([]uuid.UUID, error)
 	ListContactIDsForThread(ctx context.Context, organisationID, accountID uuid.UUID, conversationID string) ([]uuid.UUID, error)
+	ListContactIDsForManualItem(ctx context.Context, organisationID, manualItemID uuid.UUID) ([]uuid.UUID, error)
 }
 
 // ProjectRow is a persisted project.
@@ -441,15 +442,18 @@ type EffectiveAssignment struct {
 	MessageID      uuid.UUID
 }
 
-// UnassignedItem is a mail row for the Unassigned queue.
+// UnassignedItem is a mail or manual row for the Unassigned queue.
 type UnassignedItem struct {
-	MessageID      uuid.UUID
-	AccountID      uuid.UUID
+	Kind           string // message | manual
+	MessageID      *uuid.UUID
+	ManualItemID   *uuid.UUID
+	AccountID      *uuid.UUID
 	AccountLabel   string
 	Subject        string
 	FromJSON       string
+	Channel        string
 	ConversationID *string
-	ReceivedAt     time.Time
+	OccurredAt     time.Time
 	Status         string // unassigned | provisional
 	Reason         string
 	ProjectID      *uuid.UUID
@@ -467,6 +471,65 @@ type UnassignedListFilter struct {
 type UnassignedSummary struct {
 	Unassigned  int
 	Provisional int
+}
+
+// ManualItemRow is a pasted correspondence item.
+type ManualItemRow struct {
+	ID               uuid.UUID
+	OrganisationID   uuid.UUID
+	Channel          string
+	OccurredAt       time.Time
+	Title            string
+	BodyText         string
+	ProjectID        *uuid.UUID
+	AssignmentStatus string
+	AssignmentReason *string
+	AssignmentSource *string
+	CreatedByUserID  uuid.UUID
+	CreatedAt        time.Time
+}
+
+// TimelineContact is a compact contact summary on a timeline row.
+type TimelineContact struct {
+	ID          uuid.UUID
+	DisplayName string
+	Role        string
+}
+
+// TimelineItem is one row on a project timeline.
+type TimelineItem struct {
+	Source       string // mail | manual
+	OccurredAt   time.Time
+	Title        string
+	Snippet      string
+	Contacts     []TimelineContact
+	AccountID    *uuid.UUID
+	AccountLabel string
+	MessageID    *uuid.UUID
+	ManualItemID *uuid.UUID
+	Channel      string
+	BodyText     string // manual evidence; empty for mail list view
+}
+
+// TimelineFilter narrows timeline listing.
+type TimelineFilter struct {
+	Source string // mail | manual | all
+	Limit  int
+	Offset int
+}
+
+// ManualItemRepository persists pasted correspondence.
+type ManualItemRepository interface {
+	CreateManualItem(ctx context.Context, row ManualItemRow) error
+	GetManualItem(ctx context.Context, organisationID, id uuid.UUID) (*ManualItemRow, error)
+	UpdateManualItemAssignment(ctx context.Context, organisationID, id uuid.UUID, projectID *uuid.UUID, status, reason, source string) error
+	ListManualItemsForProject(ctx context.Context, organisationID, projectID uuid.UUID) ([]ManualItemRow, error)
+	ListUnassignedManualItems(ctx context.Context, organisationID uuid.UUID, limit int) ([]ManualItemRow, error)
+}
+
+// TimelineRepository builds unified project timelines.
+type TimelineRepository interface {
+	ListProjectTimeline(ctx context.Context, userID, organisationID, projectID uuid.UUID, filter TimelineFilter) ([]TimelineItem, error)
 }
 
 // AssignmentRepository persists thread/message project assignments.

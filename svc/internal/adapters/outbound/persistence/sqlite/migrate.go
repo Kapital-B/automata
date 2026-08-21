@@ -39,6 +39,12 @@ func Migrate(db *sql.DB) error {
 			}
 			continue
 		}
+		if e.Name() == "017_manual_items.sql" {
+			if err := migrateManualItems(db); err != nil {
+				return err
+			}
+			continue
+		}
 		b, err := migrationFS.ReadFile(e.Name())
 		if err != nil {
 			return err
@@ -618,4 +624,36 @@ func extendJobRunTypes(db *sql.DB) error {
 		return err
 	}
 	return tx.Commit()
+}
+
+func migrateManualItems(db *sql.DB) error {
+	statements := []string{
+		`CREATE TABLE IF NOT EXISTS manual_items (
+			id TEXT PRIMARY KEY NOT NULL,
+			organisation_id TEXT NOT NULL REFERENCES organisations(id) ON DELETE CASCADE,
+			channel TEXT NOT NULL CHECK (channel IN ('whatsapp', 'teams', 'sms', 'call', 'meeting', 'note')),
+			occurred_at TEXT NOT NULL,
+			title TEXT NOT NULL DEFAULT '',
+			body_text TEXT NOT NULL,
+			project_id TEXT REFERENCES projects(id) ON DELETE SET NULL,
+			assignment_status TEXT NOT NULL CHECK (assignment_status IN ('committed', 'provisional', 'unassigned')),
+			assignment_reason TEXT,
+			assignment_source TEXT CHECK (assignment_source IS NULL OR assignment_source IN ('user', 'rule', 'llm')),
+			created_by_user_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+			created_at TEXT NOT NULL
+		)`,
+		`CREATE INDEX IF NOT EXISTS idx_manual_items_org ON manual_items(organisation_id)`,
+		`CREATE INDEX IF NOT EXISTS idx_manual_items_project ON manual_items(project_id)`,
+		`CREATE INDEX IF NOT EXISTS idx_manual_items_occurred ON manual_items(occurred_at)`,
+		`CREATE UNIQUE INDEX IF NOT EXISTS idx_corr_part_manual
+			ON correspondence_participants(contact_id, role, manual_item_id)
+			WHERE manual_item_id IS NOT NULL`,
+		`CREATE INDEX IF NOT EXISTS idx_corr_part_manual_item ON correspondence_participants(manual_item_id)`,
+	}
+	for _, stmt := range statements {
+		if _, err := db.Exec(stmt); err != nil {
+			return err
+		}
+	}
+	return nil
 }

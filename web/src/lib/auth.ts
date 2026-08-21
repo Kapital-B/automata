@@ -384,18 +384,54 @@ export type UnassignedSummary = {
 };
 
 export type UnassignedItem = {
-  kind: "message";
-  message_id: string;
-  account_id: string;
-  account_label: string;
-  subject: string;
+  kind: "message" | "manual";
+  message_id?: string;
+  manual_item_id?: string;
+  account_id?: string;
+  account_label?: string;
+  subject?: string;
+  title?: string;
+  channel?: string;
   from_json?: { name?: string; address?: string };
   conversation_id?: string;
-  received_at: string;
+  received_at?: string;
+  occurred_at?: string;
   status: "unassigned" | "provisional";
   reason?: string;
   source?: string;
   project_id?: string;
+};
+
+export type TimelineContact = {
+  id: string;
+  display_name: string;
+  role: string;
+};
+
+export type TimelineItem = {
+  source: "mail" | "manual";
+  occurred_at: string;
+  title: string;
+  snippet: string;
+  contacts: TimelineContact[];
+  account_id?: string;
+  account_label?: string;
+  message_id?: string;
+  manual_item_id?: string;
+  channel?: string;
+  body_text?: string;
+};
+
+export type ManualItem = {
+  id: string;
+  organisation_id: string;
+  channel: string;
+  occurred_at: string;
+  title: string;
+  body_text: string;
+  project_id?: string;
+  assignment_status: string;
+  created_at: string;
 };
 
 export type EffectiveAssignment = {
@@ -497,6 +533,52 @@ export async function clearMessageProjectOverride(accessToken: string, messageID
       headers: toAuthHeader(accessToken),
     },
   );
+}
+
+export async function getProjectTimeline(
+  accessToken: string,
+  projectID: string,
+  opts?: { source?: string; limit?: number; offset?: number },
+) {
+  const params = new URLSearchParams();
+  if (opts?.source) params.set("source", opts.source);
+  if (typeof opts?.limit === "number") params.set("limit", String(opts.limit));
+  if (typeof opts?.offset === "number") params.set("offset", String(opts.offset));
+  const qs = params.toString();
+  return apiRequest<TimelineItem[]>(
+    `/api/projects/${projectID}/timeline${qs ? `?${qs}` : ""}`,
+    { headers: toAuthHeader(accessToken) },
+  );
+}
+
+export async function createManualItem(
+  accessToken: string,
+  body: {
+    channel: string;
+    occurred_at: string;
+    title: string;
+    body_text: string;
+    project_id?: string;
+    participant_contact_ids?: string[];
+  },
+) {
+  return apiRequest<ManualItem>("/api/manual-items", {
+    method: "POST",
+    headers: toAuthHeader(accessToken),
+    body: JSON.stringify(body),
+  });
+}
+
+export async function assignManualItem(
+  accessToken: string,
+  manualItemID: string,
+  body: { project_id?: string | null },
+) {
+  return apiRequest<ManualItem>(`/api/manual-items/${manualItemID}/project-assignment`, {
+    method: "POST",
+    headers: toAuthHeader(accessToken),
+    body: JSON.stringify(body),
+  });
 }
 
 export async function startOAuthLogin(provider: "google" | "microsoft") {

@@ -90,10 +90,13 @@ func (h *Handlers) Routes() http.Handler {
 	r.Get("/api/projects/{id}", h.getProject)
 	r.Patch("/api/projects/{id}", h.updateProject)
 	r.Patch("/api/projects/{id}/member", h.updateProjectMember)
+	r.Get("/api/projects/{id}/timeline", h.getProjectTimeline)
 	r.Get("/api/unassigned/summary", h.unassignedSummary)
 	r.Get("/api/unassigned", h.listUnassigned)
 	r.Post("/api/messages/{id}/project-assignment", h.assignMessageProject)
 	r.Delete("/api/messages/{id}/project-assignment/override", h.clearMessageOverride)
+	r.Post("/api/manual-items", h.createManualItem)
+	r.Post("/api/manual-items/{id}/project-assignment", h.assignManualItemProject)
 
 	r.Get("/api/accounts", h.listAccounts)
 	r.Post("/api/accounts", h.startConnect)
