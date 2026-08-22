@@ -9,7 +9,6 @@ import {
   DialogDescription,
   DialogHeader,
   DialogTitle,
-  DialogTrigger,
 } from "@/components/ui/dialog";
 import {
   Select,
@@ -33,6 +32,7 @@ import {
   dismissInterpretation,
   getCurrentPosition,
   getProject,
+  getProjectAttention,
   getProjectTimeline,
   getApiHealth,
   interpretProject,
@@ -61,8 +61,21 @@ import { toast } from "@/hooks/use-toast";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Loader2, Plus } from "lucide-react";
 import { useEffect, useMemo, useState } from "react";
-import { Link, useNavigate, useParams } from "react-router-dom";
+import { Link, useNavigate, useParams, useSearchParams } from "react-router-dom";
 import { cn } from "@/lib/utils";
+
+const PROJECT_MODES = [
+  { id: "trail" as const, label: "Trail" },
+  { id: "position" as const, label: "Position" },
+  { id: "open" as const, label: "Open" },
+];
+
+type ProjectMode = (typeof PROJECT_MODES)[number]["id"];
+
+function parseProjectMode(raw: string | null): ProjectMode {
+  if (raw === "position" || raw === "open") return raw;
+  return "trail";
+}
 
 const CHANNELS = [
   { value: "teams", label: "Teams" },
@@ -75,6 +88,19 @@ const CHANNELS = [
 
 export default function ProjectDetailPage() {
   const { id } = useParams<{ id: string }>();
+  const [searchParams, setSearchParams] = useSearchParams();
+  const mode = parseProjectMode(searchParams.get("mode"));
+  const setMode = (next: ProjectMode) => {
+    setSearchParams(
+      (prev) => {
+        const nextParams = new URLSearchParams(prev);
+        if (next === "trail") nextParams.delete("mode");
+        else nextParams.set("mode", next);
+        return nextParams;
+      },
+      { replace: true },
+    );
+  };
   const { accessToken } = useAuth();
   const queryClient = useQueryClient();
   const navigate = useNavigate();
@@ -155,6 +181,11 @@ export default function ProjectDetailPage() {
     queryFn: () => listProjectDecisions(accessToken!, id!),
     enabled: Boolean(accessToken && id),
   });
+  const attentionQuery = useQuery({
+    queryKey: ["project-attention", accessToken, id],
+    queryFn: () => getProjectAttention(accessToken!, id!),
+    enabled: Boolean(accessToken && id),
+  });
   const healthQuery = useQuery({
     queryKey: ["api-health"],
     queryFn: () => getApiHealth(),
@@ -164,6 +195,13 @@ export default function ProjectDetailPage() {
   const openIssues = useMemo(
     () => (issuesQuery.data ?? []).filter((iss) => iss.status !== "resolved"),
     [issuesQuery.data],
+  );
+  const provisionalFacts = useMemo(
+    () =>
+      (factsQuery.data ?? []).filter((f) =>
+        f.versions.some((v) => v.status === "proposed"),
+      ),
+    [factsQuery.data],
   );
   const createIssueMutation = useMutation({
     mutationFn: async () => {
@@ -595,226 +633,175 @@ export default function ProjectDetailPage() {
 
   return (
     <div className="space-y-6">
+      <Dialog open={createFactOpen} onOpenChange={setCreateFactOpen}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>Add fact</DialogTitle>
+            <DialogDescription>
+              Creates a versioned assertion. Same subject key appends a new version —
+              never overwrites in place.
+            </DialogDescription>
+          </DialogHeader>
+          <div className="space-y-3">
+            <Input
+              value={factSubjectKey}
+              onChange={(e) => setFactSubjectKey(e.target.value)}
+              placeholder="pump.p03.duty_kw"
+            />
+            <Input
+              value={factLabel}
+              onChange={(e) => setFactLabel(e.target.value)}
+              placeholder="Pump P-03 duty"
+            />
+            <div className="flex gap-2">
+              <Input
+                value={factValue}
+                onChange={(e) => setFactValue(e.target.value)}
+                placeholder="90"
+                className="flex-1"
+              />
+              <Input
+                value={factUnit}
+                onChange={(e) => setFactUnit(e.target.value)}
+                placeholder="kW"
+                className="w-24"
+              />
+            </div>
+            <label className="flex items-center gap-2 text-sm">
+              <input
+                type="checkbox"
+                checked={factConfirmNow}
+                onChange={(e) => setFactConfirmNow(e.target.checked)}
+              />
+              Confirm as active now
+            </label>
+            {factEvidence.length > 0 ? (
+              <p className="text-xs text-muted-foreground">
+                {factEvidence.length} evidence item(s) attached
+              </p>
+            ) : null}
+            <Button
+              className="w-full"
+              disabled={
+                !factSubjectKey.trim() ||
+                !factLabel.trim() ||
+                !factValue.trim() ||
+                createFactMutation.isPending
+              }
+              onClick={() => createFactMutation.mutate()}
+            >
+              {createFactMutation.isPending ? "Saving…" : "Save fact"}
+            </Button>
+          </div>
+        </DialogContent>
+      </Dialog>
+
+      <Dialog open={createDecisionOpen} onOpenChange={setCreateDecisionOpen}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>Add decision</DialogTitle>
+            <DialogDescription>
+              Record an approval or go/no-go. Evidence can be attached later via reconcile.
+            </DialogDescription>
+          </DialogHeader>
+          <div className="space-y-3">
+            <Textarea
+              value={decisionStatement}
+              onChange={(e) => setDecisionStatement(e.target.value)}
+              placeholder="Proceed with 90 kW duty for Pump P-03"
+              rows={3}
+            />
+            <label className="flex items-center gap-2 text-sm">
+              <input
+                type="checkbox"
+                checked={decisionConfirmNow}
+                onChange={(e) => setDecisionConfirmNow(e.target.checked)}
+              />
+              Accept now
+            </label>
+            <Button
+              className="w-full"
+              disabled={!decisionStatement.trim() || createDecisionMutation.isPending}
+              onClick={() => createDecisionMutation.mutate()}
+            >
+              {createDecisionMutation.isPending ? "Saving…" : "Save decision"}
+            </Button>
+          </div>
+        </DialogContent>
+      </Dialog>
+
+      <Dialog
+        open={createIssueOpen}
+        onOpenChange={(open) => {
+          setCreateIssueOpen(open);
+          if (!open) {
+            setSuggestMeta(null);
+            setPendingItemRefs([]);
+          }
+        }}
+      >
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>Create issue</DialogTitle>
+            <DialogDescription>
+              Default assignee is you. Confirm to create — suggestions are never auto-saved.
+            </DialogDescription>
+          </DialogHeader>
+          <div className="space-y-3">
+            {suggestMeta ? (
+              <p className="text-xs text-muted-foreground">{suggestMeta}</p>
+            ) : null}
+            <Input
+              value={newIssueTitle}
+              onChange={(e) => setNewIssueTitle(e.target.value)}
+              placeholder="Pump P-03 Sizing"
+            />
+            <Textarea
+              value={newIssueNote}
+              onChange={(e) => setNewIssueNote(e.target.value)}
+              placeholder="Optional current position note"
+              rows={2}
+            />
+            <Button
+              className="w-full"
+              disabled={!newIssueTitle.trim() || createIssueMutation.isPending}
+              onClick={() => createIssueMutation.mutate()}
+            >
+              {createIssueMutation.isPending ? "Creating…" : "Create"}
+            </Button>
+          </div>
+        </DialogContent>
+      </Dialog>
+
+      <Dialog open={pasteOpen} onOpenChange={setPasteOpen}>
+        <PasteDialog
+          projectID={id!}
+          accessToken={accessToken!}
+          onDone={async () => {
+            setPasteOpen(false);
+            await queryClient.invalidateQueries({
+              queryKey: ["project-timeline", accessToken, id],
+            });
+            await queryClient.invalidateQueries({ queryKey: ["unassigned"] });
+            window.setTimeout(() => {
+              void queryClient.invalidateQueries({
+                queryKey: ["project-interpretations"],
+              });
+            }, 800);
+          }}
+        />
+      </Dialog>
+
       <PageHeader
         eyebrow={project.code}
         title={project.name}
-        description="Correspondence timeline with current position, facts, and an issues rail."
+        description="Trail, current position, and open work for this project."
         actions={
           <div className="flex flex-wrap gap-2">
-            <Dialog open={createFactOpen} onOpenChange={setCreateFactOpen}>
-              <DialogTrigger asChild>
-                <Button variant="outline">Add fact</Button>
-              </DialogTrigger>
-              <DialogContent>
-                <DialogHeader>
-                  <DialogTitle>Add fact</DialogTitle>
-                  <DialogDescription>
-                    Creates a versioned assertion. Same subject key appends a new version —
-                    never overwrites in place.
-                  </DialogDescription>
-                </DialogHeader>
-                <div className="space-y-3">
-                  <Input
-                    value={factSubjectKey}
-                    onChange={(e) => setFactSubjectKey(e.target.value)}
-                    placeholder="pump.p03.duty_kw"
-                  />
-                  <Input
-                    value={factLabel}
-                    onChange={(e) => setFactLabel(e.target.value)}
-                    placeholder="Pump P-03 duty"
-                  />
-                  <div className="flex gap-2">
-                    <Input
-                      value={factValue}
-                      onChange={(e) => setFactValue(e.target.value)}
-                      placeholder="90"
-                      className="flex-1"
-                    />
-                    <Input
-                      value={factUnit}
-                      onChange={(e) => setFactUnit(e.target.value)}
-                      placeholder="kW"
-                      className="w-24"
-                    />
-                  </div>
-                  <label className="flex items-center gap-2 text-sm">
-                    <input
-                      type="checkbox"
-                      checked={factConfirmNow}
-                      onChange={(e) => setFactConfirmNow(e.target.checked)}
-                    />
-                    Confirm as active now
-                  </label>
-                  {factEvidence.length > 0 ? (
-                    <p className="text-xs text-muted-foreground">
-                      {factEvidence.length} evidence item(s) attached
-                    </p>
-                  ) : null}
-                  <Button
-                    className="w-full"
-                    disabled={
-                      !factSubjectKey.trim() ||
-                      !factLabel.trim() ||
-                      !factValue.trim() ||
-                      createFactMutation.isPending
-                    }
-                    onClick={() => createFactMutation.mutate()}
-                  >
-                    {createFactMutation.isPending ? "Saving…" : "Save fact"}
-                  </Button>
-                </div>
-              </DialogContent>
-            </Dialog>
-            <Dialog open={createDecisionOpen} onOpenChange={setCreateDecisionOpen}>
-              <DialogTrigger asChild>
-                <Button variant="outline">Add decision</Button>
-              </DialogTrigger>
-              <DialogContent>
-                <DialogHeader>
-                  <DialogTitle>Add decision</DialogTitle>
-                  <DialogDescription>
-                    Record an approval or go/no-go. Evidence can be attached later via reconcile.
-                  </DialogDescription>
-                </DialogHeader>
-                <div className="space-y-3">
-                  <Textarea
-                    value={decisionStatement}
-                    onChange={(e) => setDecisionStatement(e.target.value)}
-                    placeholder="Proceed with 90 kW duty for Pump P-03"
-                    rows={3}
-                  />
-                  <label className="flex items-center gap-2 text-sm">
-                    <input
-                      type="checkbox"
-                      checked={decisionConfirmNow}
-                      onChange={(e) => setDecisionConfirmNow(e.target.checked)}
-                    />
-                    Accept now
-                  </label>
-                  <Button
-                    className="w-full"
-                    disabled={!decisionStatement.trim() || createDecisionMutation.isPending}
-                    onClick={() => createDecisionMutation.mutate()}
-                  >
-                    {createDecisionMutation.isPending ? "Saving…" : "Save decision"}
-                  </Button>
-                </div>
-              </DialogContent>
-            </Dialog>
-            <Dialog
-              open={createIssueOpen}
-              onOpenChange={(open) => {
-                setCreateIssueOpen(open);
-                if (!open) {
-                  setSuggestMeta(null);
-                  setPendingItemRefs([]);
-                }
-              }}
-            >
-              <DialogTrigger asChild>
-                <Button variant="outline">New issue</Button>
-              </DialogTrigger>
-              <DialogContent>
-                <DialogHeader>
-                  <DialogTitle>Create issue</DialogTitle>
-                  <DialogDescription>
-                    Default assignee is you. Confirm to create — suggestions are never auto-saved.
-                  </DialogDescription>
-                </DialogHeader>
-                <div className="space-y-3">
-                  {suggestMeta ? (
-                    <p className="text-xs text-muted-foreground">{suggestMeta}</p>
-                  ) : null}
-                  <Input
-                    value={newIssueTitle}
-                    onChange={(e) => setNewIssueTitle(e.target.value)}
-                    placeholder="Pump P-03 Sizing"
-                  />
-                  <Textarea
-                    value={newIssueNote}
-                    onChange={(e) => setNewIssueNote(e.target.value)}
-                    placeholder="Optional current position note"
-                    rows={2}
-                  />
-                  <Button
-                    className="w-full"
-                    disabled={!newIssueTitle.trim() || createIssueMutation.isPending}
-                    onClick={() => createIssueMutation.mutate()}
-                  >
-                    {createIssueMutation.isPending ? "Creating…" : "Create"}
-                  </Button>
-                </div>
-              </DialogContent>
-            </Dialog>
-            <Button
-              variant="outline"
-              disabled={!llmEnabled || suggestIssueMutation.isPending}
-              title={
-                llmEnabled
-                  ? "Propose an issue from unassigned correspondence"
-                  : "Configure LLM_BASE_URL and LLM_MODEL on the API to enable suggestions"
-              }
-              onClick={() => suggestIssueMutation.mutate()}
-            >
-              {suggestIssueMutation.isPending
-                ? "Suggesting…"
-                : llmEnabled
-                  ? "Suggest issue"
-                  : "Suggest (LLM off)"}
+            <Button onClick={() => setPasteOpen(true)}>
+              <Plus className="mr-2 h-4 w-4" />
+              Paste correspondence
             </Button>
-            <Button
-              variant="outline"
-              disabled={!llmEnabled || interpretMutation.isPending}
-              title={
-                llmEnabled
-                  ? "Extract fact/decision candidates from project correspondence"
-                  : "Configure LLM_BASE_URL and LLM_MODEL on the API to enable interpret"
-              }
-              onClick={() => interpretMutation.mutate()}
-            >
-              {interpretMutation.isPending
-                ? "Interpreting…"
-                : llmEnabled
-                  ? "Interpret"
-                  : "Interpret (LLM off)"}
-            </Button>
-            <Button
-              variant="outline"
-              disabled={
-                reconcileMutation.isPending ||
-                (interpretationsQuery.data ?? []).length === 0
-              }
-              title="Apply pending interpretations (Stage B)"
-              onClick={() => reconcileMutation.mutate()}
-            >
-              {reconcileMutation.isPending ? "Reconciling…" : "Reconcile"}
-            </Button>
-            <Dialog open={pasteOpen} onOpenChange={setPasteOpen}>
-              <DialogTrigger asChild>
-                <Button>
-                  <Plus className="mr-2 h-4 w-4" />
-                  Paste correspondence
-                </Button>
-              </DialogTrigger>
-              <PasteDialog
-                projectID={id!}
-                accessToken={accessToken!}
-                onDone={async () => {
-                  setPasteOpen(false);
-                  await queryClient.invalidateQueries({
-                    queryKey: ["project-timeline", accessToken, id],
-                  });
-                  await queryClient.invalidateQueries({ queryKey: ["unassigned"] });
-                  // Backend may auto-run interpret; refresh shortly.
-                  window.setTimeout(() => {
-                    void queryClient.invalidateQueries({
-                      queryKey: ["project-interpretations"],
-                    });
-                  }, 800);
-                }}
-              />
-            </Dialog>
             <Button variant="outline" asChild>
               <Link to="/projects">All projects</Link>
             </Button>
@@ -886,7 +873,7 @@ export default function ProjectDetailPage() {
 
       <section
         aria-label="Current position"
-        className="border-y border-border/70 py-3"
+        className="sticky top-14 z-20 border-y border-border/70 bg-background/95 py-3 backdrop-blur"
       >
         <h2 className="mb-2 text-xs font-medium uppercase tracking-wider text-muted-foreground">
           Current position
@@ -968,104 +955,145 @@ export default function ProjectDetailPage() {
         ) : null}
       </section>
 
-      <div className="grid gap-8 lg:grid-cols-[minmax(0,1fr)_240px]">
-        <div className="space-y-4">
-      <div className="flex flex-wrap gap-2">
-        {(["all", "mail", "manual"] as const).map((s) => (
+      <div
+        role="tablist"
+        aria-label="Project workspace mode"
+        className="flex flex-wrap gap-2 border-b border-border/70 pb-3"
+      >
+        {PROJECT_MODES.map((item) => (
           <Button
-            key={s}
+            key={item.id}
+            role="tab"
+            aria-selected={mode === item.id}
             size="sm"
-            variant={sourceFilter === s ? "default" : "outline"}
-            onClick={() => setSourceFilter(s)}
+            variant={mode === item.id ? "default" : "outline"}
+            onClick={() => setMode(item.id)}
           >
-            {s === "all" ? "All" : s === "mail" ? "Mail" : "Manual"}
+            {item.label}
           </Button>
         ))}
-        <Button
-          size="sm"
-          variant={unassignedToIssue ? "default" : "outline"}
-          onClick={() => setUnassignedToIssue((v) => !v)}
-        >
-          Unassigned to issue
-        </Button>
       </div>
 
-      {timelineQuery.isLoading ? (
-        <div className="flex items-center gap-2 text-sm text-muted-foreground">
-          <Loader2 className="h-4 w-4 animate-spin" />
-          Loading timeline…
-        </div>
-      ) : items.length === 0 ? (
-        <p className="py-8 text-sm text-muted-foreground">
-          No correspondence yet. Assign mail to this project or paste a Teams/WhatsApp note.
-        </p>
-      ) : (
-        <ol className="divide-y divide-border/70 border-y border-border/70">
-          {items.map((item) => (
-            <TimelineRow
-              key={
-                item.message_id ??
-                item.manual_item_id ??
-                `${item.source}-${item.occurred_at}-${item.title}`
-              }
-              item={item}
-              account={accountFor(item.account_id)}
-              projectID={id!}
-              issues={openIssues}
-              attaching={attachMutation.isPending}
-              onAttach={(issueID) =>
-                attachMutation.mutate({
-                  issueID,
-                  messageID: item.message_id,
-                  manualItemID: item.manual_item_id,
-                })
-              }
-              onCreateIssue={() => {
-                setPendingItemRefs([
-                  item.message_id
-                    ? { message_id: item.message_id }
-                    : { manual_item_id: item.manual_item_id },
-                ].filter((r) => r.message_id || r.manual_item_id));
-                setNewIssueTitle(item.title?.trim() || "");
-                setSuggestMeta("Pre-attached from timeline");
-                setCreateIssueOpen(true);
-              }}
-              onAddFactEvidence={() => {
-                setFactEvidence([
-                  item.message_id
-                    ? { message_id: item.message_id }
-                    : { manual_item_id: item.manual_item_id },
-                ].filter((r) => r.message_id || r.manual_item_id));
-                setFactLabel(item.title?.trim() || "");
-                setCreateFactOpen(true);
-              }}
-            />
-          ))}
-        </ol>
-      )}
-        </div>
+      {mode === "trail" ? (
+        <div className="space-y-4" role="tabpanel" aria-label="Trail">
+          <div className="flex flex-wrap gap-2">
+            {(["all", "mail", "manual"] as const).map((s) => (
+              <Button
+                key={s}
+                size="sm"
+                variant={sourceFilter === s ? "default" : "outline"}
+                onClick={() => setSourceFilter(s)}
+              >
+                {s === "all" ? "All" : s === "mail" ? "Mail" : "Manual"}
+              </Button>
+            ))}
+            <Button
+              size="sm"
+              variant={unassignedToIssue ? "default" : "outline"}
+              onClick={() => setUnassignedToIssue((v) => !v)}
+            >
+              Unassigned to issue
+            </Button>
+          </div>
 
-        <aside className="space-y-6 lg:border-l lg:border-border/70 lg:pl-4">
-          <div className="space-y-3">
-            <h2 className="text-sm font-medium uppercase tracking-wider text-muted-foreground">
-              Interpretations
-            </h2>
-            {interpretationsQuery.isLoading ? (
-              <Loader2 className="h-4 w-4 animate-spin text-muted-foreground" />
-            ) : (interpretationsQuery.data ?? []).length === 0 ? (
-              <p className="text-xs text-muted-foreground">No pending interpretations.</p>
-            ) : (
-              <ul className="space-y-3">
-                {(interpretationsQuery.data ?? []).map((interp) => (
-                  <InterpretationRailItem
-                    key={interp.id}
-                    interpretation={interp}
-                    dismissing={dismissInterpMutation.isPending}
-                    onDismiss={() => dismissInterpMutation.mutate(interp.id)}
-                  />
-                ))}
-              </ul>
-            )}
+          {timelineQuery.isLoading ? (
+            <div className="flex items-center gap-2 text-sm text-muted-foreground">
+              <Loader2 className="h-4 w-4 animate-spin" />
+              Loading timeline…
+            </div>
+          ) : items.length === 0 ? (
+            <p className="py-8 text-sm text-muted-foreground">
+              No correspondence yet. Assign mail to this project or paste a Teams/WhatsApp note.
+            </p>
+          ) : (
+            <ol className="divide-y divide-border/70 border-y border-border/70">
+              {items.map((item) => (
+                <TimelineRow
+                  key={
+                    item.message_id ??
+                    item.manual_item_id ??
+                    `${item.source}-${item.occurred_at}-${item.title}`
+                  }
+                  item={item}
+                  account={accountFor(item.account_id)}
+                  projectID={id!}
+                  issues={openIssues}
+                  attaching={attachMutation.isPending}
+                  onAttach={(issueID) =>
+                    attachMutation.mutate({
+                      issueID,
+                      messageID: item.message_id,
+                      manualItemID: item.manual_item_id,
+                    })
+                  }
+                  onCreateIssue={() => {
+                    setPendingItemRefs(
+                      [
+                        item.message_id
+                          ? { message_id: item.message_id }
+                          : { manual_item_id: item.manual_item_id },
+                      ].filter((r) => r.message_id || r.manual_item_id),
+                    );
+                    setNewIssueTitle(item.title?.trim() || "");
+                    setSuggestMeta("Pre-attached from timeline");
+                    setCreateIssueOpen(true);
+                  }}
+                  onAddFactEvidence={() => {
+                    setFactEvidence(
+                      [
+                        item.message_id
+                          ? { message_id: item.message_id }
+                          : { manual_item_id: item.manual_item_id },
+                      ].filter((r) => r.message_id || r.manual_item_id),
+                    );
+                    setFactLabel(item.title?.trim() || "");
+                    setCreateFactOpen(true);
+                  }}
+                />
+              ))}
+            </ol>
+          )}
+        </div>
+      ) : null}
+
+      {mode === "position" ? (
+        <div className="space-y-8" role="tabpanel" aria-label="Position">
+          <div className="flex flex-wrap gap-2">
+            <Button variant="outline" size="sm" onClick={() => setCreateFactOpen(true)}>
+              Add fact
+            </Button>
+            <Button variant="outline" size="sm" onClick={() => setCreateDecisionOpen(true)}>
+              Add decision
+            </Button>
+            <Button
+              variant="outline"
+              size="sm"
+              disabled={!llmEnabled || interpretMutation.isPending}
+              title={
+                llmEnabled
+                  ? "Extract fact/decision candidates from project correspondence"
+                  : "Configure LLM_BASE_URL and LLM_MODEL on the API to enable interpret"
+              }
+              onClick={() => interpretMutation.mutate()}
+            >
+              {interpretMutation.isPending
+                ? "Interpreting…"
+                : llmEnabled
+                  ? "Interpret"
+                  : "Interpret (LLM off)"}
+            </Button>
+            <Button
+              variant="outline"
+              size="sm"
+              disabled={
+                reconcileMutation.isPending ||
+                (interpretationsQuery.data ?? []).length === 0
+              }
+              title="Apply pending interpretations (Stage B)"
+              onClick={() => reconcileMutation.mutate()}
+            >
+              {reconcileMutation.isPending ? "Reconciling…" : "Reconcile"}
+            </Button>
           </div>
 
           <div className="space-y-3">
@@ -1075,7 +1103,7 @@ export default function ProjectDetailPage() {
             {contradictionsQuery.isLoading ? (
               <Loader2 className="h-4 w-4 animate-spin text-muted-foreground" />
             ) : (contradictionsQuery.data ?? []).length === 0 ? (
-              <p className="text-xs text-muted-foreground">No open contradictions.</p>
+              <p className="text-sm text-muted-foreground">No open contradictions.</p>
             ) : (
               <ul className="space-y-3">
                 {(contradictionsQuery.data ?? []).map((c) => (
@@ -1103,7 +1131,7 @@ export default function ProjectDetailPage() {
             {factsQuery.isLoading ? (
               <Loader2 className="h-4 w-4 animate-spin text-muted-foreground" />
             ) : (factsQuery.data ?? []).length === 0 ? (
-              <p className="text-xs text-muted-foreground">No facts yet.</p>
+              <p className="text-sm text-muted-foreground">No facts yet.</p>
             ) : (
               <ul className="space-y-3">
                 {(factsQuery.data ?? []).map((fact) => (
@@ -1133,7 +1161,7 @@ export default function ProjectDetailPage() {
             {decisionsQuery.isLoading ? (
               <Loader2 className="h-4 w-4 animate-spin text-muted-foreground" />
             ) : (decisionsQuery.data ?? []).length === 0 ? (
-              <p className="text-xs text-muted-foreground">No decisions yet.</p>
+              <p className="text-sm text-muted-foreground">No decisions yet.</p>
             ) : (
               <ul className="space-y-3">
                 {(decisionsQuery.data ?? []).map((d) => (
@@ -1149,39 +1177,141 @@ export default function ProjectDetailPage() {
               </ul>
             )}
           </div>
+        </div>
+      ) : null}
+
+      {mode === "open" ? (
+        <div className="space-y-8" role="tabpanel" aria-label="Open">
+          <div className="flex flex-wrap gap-2">
+            <Button variant="outline" size="sm" onClick={() => setCreateIssueOpen(true)}>
+              New issue
+            </Button>
+            <Button
+              variant="outline"
+              size="sm"
+              disabled={!llmEnabled || suggestIssueMutation.isPending}
+              title={
+                llmEnabled
+                  ? "Propose an issue from unassigned correspondence"
+                  : "Configure LLM_BASE_URL and LLM_MODEL on the API to enable suggestions"
+              }
+              onClick={() => suggestIssueMutation.mutate()}
+            >
+              {suggestIssueMutation.isPending
+                ? "Suggesting…"
+                : llmEnabled
+                  ? "Suggest issue"
+                  : "Suggest (LLM off)"}
+            </Button>
+          </div>
 
           <div className="space-y-3">
-          <h2 className="text-sm font-medium uppercase tracking-wider text-muted-foreground">
-            Issues
-          </h2>
-          {issuesQuery.isLoading ? (
-            <Loader2 className="h-4 w-4 animate-spin text-muted-foreground" />
-          ) : openIssues.length === 0 ? (
-            <p className="text-xs text-muted-foreground">No open issues yet.</p>
-          ) : (
-            <ul className="space-y-2">
-              {openIssues.map((iss) => (
-                <li key={iss.id}>
-                  <Link
-                    to={`/projects/${id}/issues/${iss.id}`}
-                    className="block text-sm hover:underline"
-                  >
-                    <span className="font-medium">{iss.title}</span>
-                    <span className="mt-0.5 block text-xs text-muted-foreground">
-                      {iss.assignee_label ?? "Unassigned"} · {iss.status}
-                      {iss.awaiting_me ? " · awaiting you" : ""}
-                    </span>
-                  </Link>
-                </li>
-              ))}
-            </ul>
-          )}
+            <h2 className="text-sm font-medium uppercase tracking-wider text-muted-foreground">
+              Needs attention
+            </h2>
+            {attentionQuery.isLoading ? (
+              <Loader2 className="h-4 w-4 animate-spin text-muted-foreground" />
+            ) : (attentionQuery.data?.items ?? []).length === 0 ? (
+              <p className="text-sm text-muted-foreground">Nothing project-scoped waiting on you.</p>
+            ) : (
+              <ul className="divide-y divide-border/70 border-y border-border/70">
+                {(attentionQuery.data?.items ?? []).map((item) => (
+                  <li key={item.id} className="py-2.5 text-sm">
+                    <p className="text-[10px] uppercase tracking-wider text-muted-foreground">
+                      {item.why_me.replaceAll("_", " ")}
+                    </p>
+                    <p className="mt-0.5 font-medium">{item.title}</p>
+                  </li>
+                ))}
+              </ul>
+            )}
           </div>
-        </aside>
-      </div>
+
+          <div className="space-y-3">
+            <h2 className="text-sm font-medium uppercase tracking-wider text-muted-foreground">
+              Interpretations
+            </h2>
+            {interpretationsQuery.isLoading ? (
+              <Loader2 className="h-4 w-4 animate-spin text-muted-foreground" />
+            ) : (interpretationsQuery.data ?? []).length === 0 ? (
+              <p className="text-sm text-muted-foreground">No pending interpretations.</p>
+            ) : (
+              <ul className="space-y-3">
+                {(interpretationsQuery.data ?? []).map((interp) => (
+                  <InterpretationRailItem
+                    key={interp.id}
+                    interpretation={interp}
+                    dismissing={dismissInterpMutation.isPending}
+                    onDismiss={() => dismissInterpMutation.mutate(interp.id)}
+                  />
+                ))}
+              </ul>
+            )}
+          </div>
+
+          <div className="space-y-3">
+            <h2 className="text-sm font-medium uppercase tracking-wider text-muted-foreground">
+              Provisional facts
+            </h2>
+            {factsQuery.isLoading ? (
+              <Loader2 className="h-4 w-4 animate-spin text-muted-foreground" />
+            ) : provisionalFacts.length === 0 ? (
+              <p className="text-sm text-muted-foreground">No provisional facts.</p>
+            ) : (
+              <ul className="space-y-3">
+                {provisionalFacts.map((fact) => (
+                  <FactRailItem
+                    key={fact.id}
+                    fact={fact}
+                    expanded={expandedFactID === fact.id}
+                    onToggle={() =>
+                      setExpandedFactID((cur) => (cur === fact.id ? null : fact.id))
+                    }
+                    confirming={confirmFactMutation.isPending}
+                    rejecting={rejectFactMutation.isPending}
+                    onConfirm={(versionID, supersedesVersionID) =>
+                      confirmFactMutation.mutate({ versionID, supersedesVersionID })
+                    }
+                    onReject={(versionID) => rejectFactMutation.mutate(versionID)}
+                  />
+                ))}
+              </ul>
+            )}
+          </div>
+
+          <div className="space-y-3">
+            <h2 className="text-sm font-medium uppercase tracking-wider text-muted-foreground">
+              Issues
+            </h2>
+            {issuesQuery.isLoading ? (
+              <Loader2 className="h-4 w-4 animate-spin text-muted-foreground" />
+            ) : openIssues.length === 0 ? (
+              <p className="text-sm text-muted-foreground">No open issues yet.</p>
+            ) : (
+              <ul className="space-y-2">
+                {openIssues.map((iss) => (
+                  <li key={iss.id}>
+                    <Link
+                      to={`/projects/${id}/issues/${iss.id}`}
+                      className="block text-sm hover:underline"
+                    >
+                      <span className="font-medium">{iss.title}</span>
+                      <span className="mt-0.5 block text-xs text-muted-foreground">
+                        {iss.assignee_label ?? "Unassigned"} · {iss.status}
+                        {iss.awaiting_me ? " · awaiting you" : ""}
+                      </span>
+                    </Link>
+                  </li>
+                ))}
+              </ul>
+            )}
+          </div>
+        </div>
+      ) : null}
     </div>
   );
 }
+
 
 function DecisionRailItem({
   decision,

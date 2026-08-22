@@ -1,5 +1,5 @@
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import { fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { MemoryRouter, Route, Routes } from "react-router-dom";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import ProjectDetailPage from "@/pages/ProjectDetail";
@@ -54,6 +54,7 @@ vi.mock("@/lib/auth", async () => {
     confirmDecision: vi.fn(),
     withdrawDecision: vi.fn(),
     askProject: vi.fn(),
+    getProjectAttention: vi.fn(),
   };
 });
 
@@ -77,6 +78,11 @@ const reconcileProject = vi.mocked(auth.reconcileProject);
 const resolveContradiction = vi.mocked(auth.resolveContradiction);
 const listProjectDecisions = vi.mocked(auth.listProjectDecisions);
 const askProject = vi.mocked(auth.askProject);
+const getProjectAttention = vi.mocked(auth.getProjectAttention);
+
+function selectMode(name: RegExp) {
+  fireEvent.click(screen.getByRole("tab", { name }));
+}
 
 describe("Project timeline UI", () => {
   beforeEach(() => {
@@ -100,6 +106,7 @@ describe("Project timeline UI", () => {
     resolveContradiction.mockReset();
     listProjectDecisions.mockReset();
     askProject.mockReset();
+    getProjectAttention.mockReset();
     listContacts.mockResolvedValue([]);
     listProjectIssues.mockResolvedValue([]);
     getCurrentPosition.mockResolvedValue({ facts: [], decisions: [] });
@@ -107,6 +114,18 @@ describe("Project timeline UI", () => {
     listProjectInterpretations.mockResolvedValue([]);
     listProjectContradictions.mockResolvedValue([]);
     listProjectDecisions.mockResolvedValue([]);
+    getProjectAttention.mockResolvedValue({
+      items: [],
+      counts: {
+        total: 0,
+        issue_assignee: 0,
+        member_role: 0,
+        provisional_fact: 0,
+        provisional_decision: 0,
+        open_contradiction: 0,
+        mail_action_item: 0,
+      },
+    });
     getApiHealth.mockResolvedValue({ status: "ok", llm: true });
     askProject.mockResolvedValue({ answer: "", citations: [], confidence: 0 });
     suggestProjectIssue.mockResolvedValue({
@@ -177,6 +196,7 @@ describe("Project timeline UI", () => {
     );
 
     expect(await screen.findByText("Cooling Upgrade")).toBeInTheDocument();
+    selectMode(/^Open$/i);
     fireEvent.click(screen.getByRole("button", { name: /suggest issue/i }));
     await waitFor(() => expect(suggestProjectIssue).toHaveBeenCalledWith("token", "p1"));
     expect(await screen.findByDisplayValue("Pump P-03")).toBeInTheDocument();
@@ -218,6 +238,7 @@ describe("Project timeline UI", () => {
     );
 
     expect(await screen.findByText("Cooling Upgrade")).toBeInTheDocument();
+    selectMode(/^Open$/i);
     fireEvent.click(screen.getByRole("button", { name: /^new issue$/i }));
     fireEvent.change(screen.getByPlaceholderText(/pump p-03/i), {
       target: { value: "Pump P-03" },
@@ -409,6 +430,7 @@ describe("Project timeline UI", () => {
     const position = await screen.findByLabelText(/current position/i);
     expect(position).toHaveTextContent("Pump P-03 duty");
     expect(position).toHaveTextContent("90 kW");
+    selectMode(/^Position$/i);
     expect(screen.getByRole("heading", { name: /^facts$/i })).toBeInTheDocument();
 
     fireEvent.click(screen.getByRole("button", { name: /^add fact$/i }));
@@ -486,6 +508,8 @@ describe("Project timeline UI", () => {
       </QueryClientProvider>,
     );
 
+    expect(await screen.findByText("Cooling Upgrade")).toBeInTheDocument();
+    selectMode(/^Open$/i);
     expect(await screen.findByRole("heading", { name: /^interpretations$/i })).toBeInTheDocument();
     expect(await screen.findByText(/Pump P-03 duty/i)).toBeInTheDocument();
     fireEvent.click(screen.getByRole("button", { name: /^dismiss$/i }));
@@ -558,6 +582,8 @@ describe("Project timeline UI", () => {
       </QueryClientProvider>,
     );
 
+    expect(await screen.findByText("Cooling Upgrade")).toBeInTheDocument();
+    selectMode(/^Position$/i);
     expect(await screen.findByRole("heading", { name: /^contradictions$/i })).toBeInTheDocument();
     fireEvent.click(screen.getByRole("button", { name: /^reconcile$/i }));
     await waitFor(() => expect(reconcileProject).toHaveBeenCalledWith("token", "p1"));
@@ -610,6 +636,8 @@ describe("Project timeline UI", () => {
       </QueryClientProvider>,
     );
 
+    expect(await screen.findByText("Cooling Upgrade")).toBeInTheDocument();
+    selectMode(/^Position$/i);
     expect(await screen.findByRole("heading", { name: /^decisions$/i })).toBeInTheDocument();
     expect(await screen.findByText(/Proceed with 90 kW duty/i)).toBeInTheDocument();
     fireEvent.click(screen.getByRole("button", { name: /^confirm$/i }));
@@ -646,5 +674,47 @@ describe("Project timeline UI", () => {
     );
     expect(await screen.findByText(/Pump P-03 duty is 90 kW/i)).toBeInTheDocument();
     expect(screen.getByText(/Citations:/i)).toBeInTheDocument();
+  });
+
+  it("opens Position mode from ?mode= and keeps Trail as default", async () => {
+    const client = new QueryClient({
+      defaultOptions: { queries: { retry: false }, mutations: { retry: false } },
+    });
+    render(
+      <QueryClientProvider client={client}>
+        <MemoryRouter initialEntries={["/projects/p1"]}>
+          <Routes>
+            <Route path="/projects/:id" element={<ProjectDetailPage />} />
+          </Routes>
+        </MemoryRouter>
+      </QueryClientProvider>,
+    );
+    expect(await screen.findByRole("tab", { name: /^Trail$/i })).toHaveAttribute(
+      "aria-selected",
+      "true",
+    );
+    expect(screen.getByRole("tabpanel", { name: /^Trail$/i })).toBeInTheDocument();
+    expect(screen.queryByRole("heading", { name: /^facts$/i })).not.toBeInTheDocument();
+
+    cleanup();
+
+    const client2 = new QueryClient({
+      defaultOptions: { queries: { retry: false }, mutations: { retry: false } },
+    });
+    render(
+      <QueryClientProvider client={client2}>
+        <MemoryRouter initialEntries={["/projects/p1?mode=position"]}>
+          <Routes>
+            <Route path="/projects/:id" element={<ProjectDetailPage />} />
+          </Routes>
+        </MemoryRouter>
+      </QueryClientProvider>,
+    );
+    expect(await screen.findByRole("tab", { name: /^Position$/i })).toHaveAttribute(
+      "aria-selected",
+      "true",
+    );
+    expect(screen.getByRole("tabpanel", { name: /^Position$/i })).toBeInTheDocument();
+    expect(screen.getByRole("heading", { name: /^facts$/i })).toBeInTheDocument();
   });
 });
