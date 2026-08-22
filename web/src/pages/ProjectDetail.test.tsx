@@ -46,6 +46,9 @@ vi.mock("@/lib/auth", async () => {
     listProjectInterpretations: vi.fn(),
     interpretProject: vi.fn(),
     dismissInterpretation: vi.fn(),
+    listProjectContradictions: vi.fn(),
+    reconcileProject: vi.fn(),
+    resolveContradiction: vi.fn(),
   };
 });
 
@@ -64,6 +67,9 @@ const createProjectFact = vi.mocked(auth.createProjectFact);
 const listProjectInterpretations = vi.mocked(auth.listProjectInterpretations);
 const interpretProject = vi.mocked(auth.interpretProject);
 const dismissInterpretation = vi.mocked(auth.dismissInterpretation);
+const listProjectContradictions = vi.mocked(auth.listProjectContradictions);
+const reconcileProject = vi.mocked(auth.reconcileProject);
+const resolveContradiction = vi.mocked(auth.resolveContradiction);
 
 describe("Project timeline UI", () => {
   beforeEach(() => {
@@ -82,11 +88,15 @@ describe("Project timeline UI", () => {
     listProjectInterpretations.mockReset();
     interpretProject.mockReset();
     dismissInterpretation.mockReset();
+    listProjectContradictions.mockReset();
+    reconcileProject.mockReset();
+    resolveContradiction.mockReset();
     listContacts.mockResolvedValue([]);
     listProjectIssues.mockResolvedValue([]);
     getCurrentPosition.mockResolvedValue({ facts: [], decisions: [] });
     listProjectFacts.mockResolvedValue([]);
     listProjectInterpretations.mockResolvedValue([]);
+    listProjectContradictions.mockResolvedValue([]);
     getApiHealth.mockResolvedValue({ status: "ok", llm: true });
     suggestProjectIssue.mockResolvedValue({
       title: "Pump P-03",
@@ -469,5 +479,83 @@ describe("Project timeline UI", () => {
     expect(await screen.findByText(/Pump P-03 duty/i)).toBeInTheDocument();
     fireEvent.click(screen.getByRole("button", { name: /^dismiss$/i }));
     await waitFor(() => expect(dismissInterpretation).toHaveBeenCalledWith("token", "interp1"));
+  });
+
+  it("reconciles pending interpretations and resolves contradictions", async () => {
+    const client = new QueryClient({
+      defaultOptions: { queries: { retry: false }, mutations: { retry: false } },
+    });
+    listProjectInterpretations.mockResolvedValue([
+      {
+        id: "interp1",
+        organisation_id: "o1",
+        project_id: "p1",
+        status: "pending",
+        created_at: "2026-03-03T00:00:00Z",
+        updated_at: "2026-03-03T00:00:00Z",
+        sources: [],
+        candidates: [
+          {
+            kind: "fact",
+            subject_key: "pump.p03.duty_kw",
+            label: "Pump P-03 duty",
+            value: 90,
+            unit: "kW",
+            confidence: 0.4,
+          },
+        ],
+      },
+    ]);
+    listProjectContradictions.mockResolvedValue([
+      {
+        id: "c1",
+        organisation_id: "o1",
+        project_id: "p1",
+        status: "open",
+        summary: 'pump.p03.duty_kw: active "75 kW" vs proposed "90 kW"',
+        created_at: "2026-03-03T00:00:00Z",
+        updated_at: "2026-03-03T00:00:00Z",
+        sides: [
+          { id: "s1", contradiction_id: "c1", fact_version_id: "v-active" },
+          { id: "s2", contradiction_id: "c1", fact_version_id: "v-proposed" },
+        ],
+      },
+    ]);
+    reconcileProject.mockResolvedValue({
+      processed_interpretations: 1,
+      outcomes: [{ kind: "fact", outcome: "contradiction", reason: "conflict" }],
+      contradictions_opened: 1,
+    });
+    resolveContradiction.mockResolvedValue({
+      id: "c1",
+      organisation_id: "o1",
+      project_id: "p1",
+      status: "resolved",
+      summary: "done",
+      created_at: "2026-03-03T00:00:00Z",
+      updated_at: "2026-03-03T00:00:00Z",
+      sides: [],
+    });
+
+    render(
+      <QueryClientProvider client={client}>
+        <MemoryRouter initialEntries={["/projects/p1"]}>
+          <Routes>
+            <Route path="/projects/:id" element={<ProjectDetailPage />} />
+          </Routes>
+        </MemoryRouter>
+      </QueryClientProvider>,
+    );
+
+    expect(await screen.findByRole("heading", { name: /^contradictions$/i })).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: /^reconcile$/i }));
+    await waitFor(() => expect(reconcileProject).toHaveBeenCalledWith("token", "p1"));
+    fireEvent.click(screen.getByRole("button", { name: /^keep proposed$/i }));
+    await waitFor(() =>
+      expect(resolveContradiction).toHaveBeenCalledWith("token", "c1", {
+        resolution: "supersede",
+        keep_fact_version_id: "v-proposed",
+      }),
+    );
   });
 });

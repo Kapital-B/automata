@@ -20,6 +20,7 @@ import (
 	appfacts "github.com/Kapital-B/automata/svc/internal/application/facts"
 	appinterpret "github.com/Kapital-B/automata/svc/internal/application/interpret"
 	appissues "github.com/Kapital-B/automata/svc/internal/application/issues"
+	appreconcile "github.com/Kapital-B/automata/svc/internal/application/reconcile"
 	appmessages "github.com/Kapital-B/automata/svc/internal/application/messages"
 	appprojects "github.com/Kapital-B/automata/svc/internal/application/projects"
 	"github.com/Kapital-B/automata/svc/internal/application/ports/driven"
@@ -44,6 +45,7 @@ type Handlers struct {
 	IssueSvc        *appissues.Service
 	FactSvc         *appfacts.Service
 	InterpretSvc    *appinterpret.Service
+	ReconcileSvc    *appreconcile.Service
 	Accounts        driven.AccountRepository
 	Messages        driven.MessageRepository
 	JobRuns         driven.JobRunRepository
@@ -104,6 +106,9 @@ func (h *Handlers) Routes() http.Handler {
 	r.Post("/api/projects/{id}/interpret", h.interpretProject)
 	r.Get("/api/projects/{id}/interpretations", h.listProjectInterpretations)
 	r.Post("/api/interpretations/{id}/dismiss", h.dismissInterpretation)
+	r.Post("/api/projects/{id}/reconcile", h.reconcileProject)
+	r.Get("/api/projects/{id}/contradictions", h.listProjectContradictions)
+	r.Post("/api/contradictions/{id}/resolve", h.resolveContradiction)
 	r.Get("/api/facts/{id}", h.getFact)
 	r.Post("/api/fact-versions/{id}/confirm", h.confirmFactVersion)
 	r.Post("/api/fact-versions/{id}/reject", h.rejectFactVersion)

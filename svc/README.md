@@ -88,6 +88,7 @@ Open **`authorization_url`** from parsed JSON (`jq -r .authorization_url`) so `&
 | Facts (Wave 2a) | `GET/POST /api/projects/{id}/facts`, `GET /api/facts/{id}`, confirm/reject versions, evidence attach/detach |
 | Current position | `GET /api/projects/{id}/current-position` (active facts; decisions empty until 2d) |
 | Interpret (Wave 2b) | `POST /api/projects/{id}/interpret`, `GET /api/projects/{id}/interpretations`, `POST /api/interpretations/{id}/dismiss` (LLM; provisional only — does not write facts) |
+| Reconcile (Wave 2c) | `POST /api/projects/{id}/reconcile`, `GET /api/projects/{id}/contradictions`, `POST /api/contradictions/{id}/resolve` (applies fact candidates; opens contradictions when unsafe) |
 
 `GET /api/health` returns `{ "status": "ok", "llm": true|false }`.
 

@@ -896,6 +896,83 @@ export async function dismissInterpretation(accessToken: string, interpretationI
   });
 }
 
+export type ReconcileOutcome = {
+  kind: string;
+  outcome: string;
+  subject_key?: string;
+  reason: string;
+  fact_id?: string;
+  version_id?: string;
+  contradiction_id?: string;
+};
+
+export type ReconcileResult = {
+  processed_interpretations: number;
+  outcomes: ReconcileOutcome[];
+  contradictions_opened: number;
+};
+
+export type ContradictionSide = {
+  id: string;
+  contradiction_id: string;
+  fact_version_id?: string;
+  decision_id?: string;
+};
+
+export type Contradiction = {
+  id: string;
+  organisation_id: string;
+  project_id: string;
+  status: string;
+  summary: string;
+  resolution_note?: string;
+  resolved_at?: string;
+  resolved_by_user_id?: string;
+  created_at: string;
+  updated_at: string;
+  sides: ContradictionSide[];
+};
+
+export async function reconcileProject(
+  accessToken: string,
+  projectID: string,
+  body?: { interpretation_ids?: string[] },
+) {
+  return apiRequest<ReconcileResult>(`/api/projects/${projectID}/reconcile`, {
+    method: "POST",
+    headers: toAuthHeader(accessToken),
+    body: JSON.stringify(body ?? {}),
+  });
+}
+
+export async function listProjectContradictions(
+  accessToken: string,
+  projectID: string,
+  status?: string,
+) {
+  const qs = status ? `?status=${encodeURIComponent(status)}` : "";
+  return apiRequest<Contradiction[]>(`/api/projects/${projectID}/contradictions${qs}`, {
+    headers: toAuthHeader(accessToken),
+  });
+}
+
+export async function resolveContradiction(
+  accessToken: string,
+  contradictionID: string,
+  body: {
+    resolution: "supersede" | "reject_a" | "reject_b" | "note";
+    keep_fact_version_id?: string;
+    reject_fact_version_id?: string;
+    resolution_note?: string;
+  },
+) {
+  return apiRequest<Contradiction>(`/api/contradictions/${contradictionID}/resolve`, {
+    method: "POST",
+    headers: toAuthHeader(accessToken),
+    body: JSON.stringify(body),
+  });
+}
+
 export async function createManualItem(
   accessToken: string,
   body: {

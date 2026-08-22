@@ -85,6 +85,9 @@ type CreateInput struct {
 	Confirm             bool
 	SupersedesVersionID *uuid.UUID
 	Evidence            []EvidenceRef
+	Source              string // user|rule|llm; default user
+	InterpretationID    *uuid.UUID
+	Confidence          *float64
 }
 
 type ConfirmInput struct {
@@ -289,11 +292,18 @@ func (s *Service) Create(ctx context.Context, userID, projectID uuid.UUID, in Cr
 	}
 
 	uid := userID
+	source := strings.TrimSpace(in.Source)
+	if source == "" {
+		source = string(domainfacts.SourceUser)
+	}
+	if !domainfacts.Source(source).Valid() {
+		return nil, fmt.Errorf("invalid source")
+	}
 	ver := driven.FactVersionRow{
 		ID: uuid.New(), FactID: fact.ID, Status: string(status),
 		ValueJSON: valueJSON, ValueText: valueText, Unit: unit,
-		Source: string(domainfacts.SourceUser), CreatedByUserID: &uid,
-		SupersedesVersionID: supersedes, CreatedAt: now,
+		Source: source, Confidence: in.Confidence, InterpretationID: in.InterpretationID,
+		CreatedByUserID: &uid, SupersedesVersionID: supersedes, CreatedAt: now,
 	}
 	if err := s.Facts.CreateFactVersion(ctx, ver); err != nil {
 		return nil, err

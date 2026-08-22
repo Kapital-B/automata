@@ -63,6 +63,12 @@ func Migrate(db *sql.DB) error {
 			}
 			continue
 		}
+		if e.Name() == "021_contradictions.sql" {
+			if err := migrateContradictions(db); err != nil {
+				return err
+			}
+			continue
+		}
 		b, err := migrationFS.ReadFile(e.Name())
 		if err != nil {
 			return err
@@ -580,7 +586,7 @@ func extendJobRunTypes(db *sql.DB) error {
 	if err != nil {
 		return err
 	}
-	if strings.Contains(sqlText, "interpret_project") {
+	if strings.Contains(sqlText, "reconcile_project") {
 		return nil
 	}
 
@@ -609,7 +615,7 @@ func extendJobRunTypes(db *sql.DB) error {
 			account_id TEXT REFERENCES accounts(id) ON DELETE SET NULL,
 			job_type TEXT NOT NULL CHECK (job_type IN (
 				'sync', 'summarize', 'categorize', 'forward_rules', 'draft_suggest',
-				'resolve_contacts', 'assign_projects', 'interpret_project'
+				'resolve_contacts', 'assign_projects', 'interpret_project', 'reconcile_project'
 			)),
 			trigger_kind TEXT NOT NULL CHECK (trigger_kind IN ('schedule', 'api')),
 			status TEXT NOT NULL CHECK (status IN ('pending', 'running', 'success', 'failed', 'cancelled')),
@@ -811,6 +817,41 @@ func migrateInterpretations(db *sql.DB) error {
 			WHERE message_id IS NOT NULL`,
 		`CREATE INDEX IF NOT EXISTS idx_interpretation_sources_manual ON interpretation_sources(manual_item_id)
 			WHERE manual_item_id IS NOT NULL`,
+	}
+	for _, stmt := range statements {
+		if _, err := db.Exec(stmt); err != nil {
+			return err
+		}
+	}
+	return extendJobRunTypes(db)
+}
+
+func migrateContradictions(db *sql.DB) error {
+	statements := []string{
+		`CREATE TABLE IF NOT EXISTS contradictions (
+			id TEXT PRIMARY KEY NOT NULL,
+			organisation_id TEXT NOT NULL REFERENCES organisations(id) ON DELETE CASCADE,
+			project_id TEXT NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
+			status TEXT NOT NULL CHECK (status IN ('open', 'resolved')),
+			summary TEXT NOT NULL,
+			resolution_note TEXT,
+			resolved_at TEXT,
+			resolved_by_user_id TEXT REFERENCES users(id) ON DELETE SET NULL,
+			created_at TEXT NOT NULL,
+			updated_at TEXT NOT NULL
+		)`,
+		`CREATE INDEX IF NOT EXISTS idx_contradictions_project_status ON contradictions(project_id, status)`,
+		`CREATE INDEX IF NOT EXISTS idx_contradictions_org ON contradictions(organisation_id)`,
+		`CREATE TABLE IF NOT EXISTS contradiction_sides (
+			id TEXT PRIMARY KEY NOT NULL,
+			contradiction_id TEXT NOT NULL REFERENCES contradictions(id) ON DELETE CASCADE,
+			fact_version_id TEXT REFERENCES fact_versions(id) ON DELETE SET NULL,
+			decision_id TEXT,
+			CHECK (
+				fact_version_id IS NOT NULL OR decision_id IS NOT NULL
+			)
+		)`,
+		`CREATE INDEX IF NOT EXISTS idx_contradiction_sides_contradiction ON contradiction_sides(contradiction_id)`,
 	}
 	for _, stmt := range statements {
 		if _, err := db.Exec(stmt); err != nil {

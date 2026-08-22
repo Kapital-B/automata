@@ -23,6 +23,7 @@ import (
 	appfacts "github.com/Kapital-B/automata/svc/internal/application/facts"
 	appinterpret "github.com/Kapital-B/automata/svc/internal/application/interpret"
 	appissues "github.com/Kapital-B/automata/svc/internal/application/issues"
+	appreconcile "github.com/Kapital-B/automata/svc/internal/application/reconcile"
 	appmessages "github.com/Kapital-B/automata/svc/internal/application/messages"
 	appprojects "github.com/Kapital-B/automata/svc/internal/application/projects"
 	"github.com/Kapital-B/automata/svc/internal/configuration"
@@ -155,6 +156,15 @@ func main() {
 		}
 		interpretSvc.TryRunBestEffort(ctx, userID, projectID, in)
 	}
+	reconcileSvc := &appreconcile.Service{
+		Users:           repo,
+		Projects:        repo,
+		Interpretations: repo,
+		FactsRepo:       repo,
+		Facts:           factSvc,
+		Contradictions:  repo,
+		JobRuns:         repo,
+	}
 	assignSvc := &appprojects.AssignService{
 		Users:       repo,
 		Projects:    repo,
@@ -261,6 +271,7 @@ func main() {
 		IssueSvc:        issueSvc,
 		FactSvc:         factSvc,
 		InterpretSvc:    interpretSvc,
+		ReconcileSvc:    reconcileSvc,
 		Accounts:        repo,
 		Messages:        repo,
 		JobRuns:         repo,

@@ -34,13 +34,17 @@ import {
   getApiHealth,
   interpretProject,
   listContacts,
+  listProjectContradictions,
   listProjectFacts,
   listProjectInterpretations,
   listProjectIssues,
+  reconcileProject,
   rejectFactVersion,
+  resolveContradiction,
   suggestProjectIssue,
   updateProject,
   updateProjectMember,
+  type Contradiction,
   type FactDetail,
   type Interpretation,
   type IssueListItem,
@@ -124,6 +128,11 @@ export default function ProjectDetailPage() {
   const interpretationsQuery = useQuery({
     queryKey: ["project-interpretations", accessToken, id],
     queryFn: () => listProjectInterpretations(accessToken!, id!),
+    enabled: Boolean(accessToken && id),
+  });
+  const contradictionsQuery = useQuery({
+    queryKey: ["project-contradictions", accessToken, id],
+    queryFn: () => listProjectContradictions(accessToken!, id!, "open"),
     enabled: Boolean(accessToken && id),
   });
   const healthQuery = useQuery({
@@ -338,6 +347,57 @@ export default function ProjectDetailPage() {
     onError: (err) => {
       toast({
         title: "Dismiss failed",
+        description: err instanceof ApiError ? err.message : "Please try again.",
+        variant: "destructive",
+      });
+    },
+  });
+
+  const reconcileMutation = useMutation({
+    mutationFn: async () => {
+      if (!accessToken || !id) throw new Error("Not authenticated");
+      return reconcileProject(accessToken, id);
+    },
+    onSuccess: async (res) => {
+      toast({
+        title: "Reconcile complete",
+        description: `${res.processed_interpretations} interpretation(s); ${res.contradictions_opened} contradiction(s) opened.`,
+      });
+      await queryClient.invalidateQueries({ queryKey: ["project-interpretations"] });
+      await queryClient.invalidateQueries({ queryKey: ["project-contradictions"] });
+      await invalidateFacts();
+      await queryClient.invalidateQueries({ queryKey: ["project-current-position"] });
+    },
+    onError: (err) => {
+      toast({
+        title: "Reconcile failed",
+        description: err instanceof ApiError ? err.message : "Please try again.",
+        variant: "destructive",
+      });
+    },
+  });
+
+  const resolveContradictionMutation = useMutation({
+    mutationFn: async (args: {
+      id: string;
+      resolution: "supersede" | "reject_a" | "reject_b" | "note";
+      keep_fact_version_id?: string;
+    }) => {
+      if (!accessToken) throw new Error("Not authenticated");
+      return resolveContradiction(accessToken, args.id, {
+        resolution: args.resolution,
+        keep_fact_version_id: args.keep_fact_version_id,
+      });
+    },
+    onSuccess: async () => {
+      toast({ title: "Contradiction resolved" });
+      await queryClient.invalidateQueries({ queryKey: ["project-contradictions"] });
+      await invalidateFacts();
+      await queryClient.invalidateQueries({ queryKey: ["project-current-position"] });
+    },
+    onError: (err) => {
+      toast({
+        title: "Resolve failed",
         description: err instanceof ApiError ? err.message : "Please try again.",
         variant: "destructive",
       });
@@ -581,6 +641,17 @@ export default function ProjectDetailPage() {
                   ? "Interpret"
                   : "Interpret (LLM off)"}
             </Button>
+            <Button
+              variant="outline"
+              disabled={
+                reconcileMutation.isPending ||
+                (interpretationsQuery.data ?? []).length === 0
+              }
+              title="Apply pending interpretations (Stage B)"
+              onClick={() => reconcileMutation.mutate()}
+            >
+              {reconcileMutation.isPending ? "Reconciling…" : "Reconcile"}
+            </Button>
             <Dialog open={pasteOpen} onOpenChange={setPasteOpen}>
               <DialogTrigger asChild>
                 <Button>
@@ -804,6 +875,34 @@ export default function ProjectDetailPage() {
 
           <div className="space-y-3">
             <h2 className="text-sm font-medium uppercase tracking-wider text-muted-foreground">
+              Contradictions
+            </h2>
+            {contradictionsQuery.isLoading ? (
+              <Loader2 className="h-4 w-4 animate-spin text-muted-foreground" />
+            ) : (contradictionsQuery.data ?? []).length === 0 ? (
+              <p className="text-xs text-muted-foreground">No open contradictions.</p>
+            ) : (
+              <ul className="space-y-3">
+                {(contradictionsQuery.data ?? []).map((c) => (
+                  <ContradictionRailItem
+                    key={c.id}
+                    contradiction={c}
+                    resolving={resolveContradictionMutation.isPending}
+                    onResolve={(resolution, keep) =>
+                      resolveContradictionMutation.mutate({
+                        id: c.id,
+                        resolution,
+                        keep_fact_version_id: keep,
+                      })
+                    }
+                  />
+                ))}
+              </ul>
+            )}
+          </div>
+
+          <div className="space-y-3">
+            <h2 className="text-sm font-medium uppercase tracking-wider text-muted-foreground">
               Facts
             </h2>
             {factsQuery.isLoading ? (
@@ -862,6 +961,56 @@ export default function ProjectDetailPage() {
         </aside>
       </div>
     </div>
+  );
+}
+
+function ContradictionRailItem({
+  contradiction,
+  resolving,
+  onResolve,
+}: {
+  contradiction: Contradiction;
+  resolving: boolean;
+  onResolve: (
+    resolution: "supersede" | "reject_a" | "reject_b" | "note",
+    keepFactVersionID?: string,
+  ) => void;
+}) {
+  const sides = contradiction.sides ?? [];
+  const proposed = sides.length >= 2 ? sides[1]?.fact_version_id : sides[0]?.fact_version_id;
+  return (
+    <li className="space-y-2 text-sm">
+      <p className="text-xs">{contradiction.summary}</p>
+      <div className="flex flex-wrap gap-1.5">
+        <Button
+          size="sm"
+          variant="outline"
+          className="h-7 text-xs"
+          disabled={resolving || !proposed}
+          onClick={() => onResolve("supersede", proposed)}
+        >
+          Keep proposed
+        </Button>
+        <Button
+          size="sm"
+          variant="outline"
+          className="h-7 text-xs"
+          disabled={resolving}
+          onClick={() => onResolve("reject_b")}
+        >
+          Reject proposed
+        </Button>
+        <Button
+          size="sm"
+          variant="ghost"
+          className="h-7 text-xs"
+          disabled={resolving}
+          onClick={() => onResolve("note")}
+        >
+          Note only
+        </Button>
+      </div>
+    </li>
   );
 }
 
