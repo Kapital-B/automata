@@ -255,7 +255,7 @@ Each slice should be shippable. Do not start Ask Project AI before facts exist. 
 
 **Wave 2 is done** when the core acceptance scenario below works on Path A with mail + paste only.
 
-**Wave 3** (separate): live non-email connectors; enabling Path B (invite + optional contact↔profile link).
+**Wave 3** (separate): live non-email connectors; enabling Path B (invite + optional contact↔profile link) — see [Wave 3 PRD](addendum-project-correspondence-wave3.md) and [Wave 3 spec](../specs/addendum-project-correspondence-wave3.md).
 
 ---
 

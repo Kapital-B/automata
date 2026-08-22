@@ -394,7 +394,7 @@ Each slice should be shippable and testable. Do not start Issues before Contacts
 
 **Wave 2** (separate addendum): two-stage reconciliation, facts, decision register, role-aware Needs My Input, auto-resolution of attention, Ask Project AI over structured state — see [Wave 2 PRD](addendum-project-correspondence-wave2.md) and [Wave 2 spec](../specs/addendum-project-correspondence-wave2.md).
 
-**Wave 3** (separate addendum): live Slack / Teams / WhatsApp / SMS / transcripts / document revisions, mapping into the same correspondence model. **Enabling** Path B (invite a profile onto a project, then optionally link your contact to that profile) is a product slice in this wave or later. The **shape** required for Path B is already a Wave 1 spec constraint ([§3](#3-strategic-freeze-ship-path-a-keep-contact-and-profile-distinct)).
+**Wave 3** (separate addendum): live Slack / Teams / WhatsApp / SMS / transcripts / document revisions, mapping into the same correspondence model; enabling Path B (invite + optional contact↔profile link) — see [Wave 3 PRD](addendum-project-correspondence-wave3.md) and [Wave 3 spec](../specs/addendum-project-correspondence-wave3.md).
 
 ## 13. Invariants
 
