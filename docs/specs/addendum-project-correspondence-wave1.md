@@ -8,6 +8,8 @@
 
 This document specifies schema, APIs, jobs, and UI for **Wave 1** (slices 1a–1d). The PRD is authoritative for product intent. This spec is authoritative for implementation invariants.
 
+Wave 2 is specified separately: [addendum-project-correspondence-wave2.md](addendum-project-correspondence-wave2.md).
+
 Parent mail invariants still apply: `account_id` on mail-derived rows, `(account_id, provider_message_id)` uniqueness, explicit send confirmation, allowlisted forwarding, no secrets in logs.
 
 ---

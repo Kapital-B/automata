@@ -11,6 +11,8 @@ This addendum freezes the first move from Automata’s mailbox-first product tow
 
 A companion technical spec is [docs/specs/addendum-project-correspondence-wave1.md](../specs/addendum-project-correspondence-wave1.md). The PRD remains authoritative for product intent; the spec is authoritative for schema, APIs, and invariants.
 
+**Wave 2** (facts, decisions, reconcile, Needs My Input, Ask Project AI) is a separate addendum: [addendum-project-correspondence-wave2.md](addendum-project-correspondence-wave2.md) with [spec](../specs/addendum-project-correspondence-wave2.md).
+
 ---
 
 ## 1. Summary
@@ -390,7 +392,7 @@ Each slice should be shippable and testable. Do not start Issues before Contacts
 
 **Wave 1 is done** when the core acceptance story below works without live WhatsApp or Teams.
 
-**Wave 2** (separate addendum): two-stage reconciliation, facts, decision register, role-aware Needs My Input, auto-resolution of attention, Ask Project AI over structured state.
+**Wave 2** (separate addendum): two-stage reconciliation, facts, decision register, role-aware Needs My Input, auto-resolution of attention, Ask Project AI over structured state — see [Wave 2 PRD](addendum-project-correspondence-wave2.md) and [Wave 2 spec](../specs/addendum-project-correspondence-wave2.md).
 
 **Wave 3** (separate addendum): live Slack / Teams / WhatsApp / SMS / transcripts / document revisions, mapping into the same correspondence model. **Enabling** Path B (invite a profile onto a project, then optionally link your contact to that profile) is a product slice in this wave or later. The **shape** required for Path B is already a Wave 1 spec constraint ([§3](#3-strategic-freeze-ship-path-a-keep-contact-and-profile-distinct)).
 
