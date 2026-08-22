@@ -506,9 +506,17 @@ export type CurrentPositionFact = {
   evidence_count: number;
 };
 
+export type CurrentPositionDecision = {
+  decision_id: string;
+  statement: string;
+  status: string;
+  decided_at?: string;
+  evidence_count: number;
+};
+
 export type CurrentPosition = {
   facts: CurrentPositionFact[];
-  decisions: unknown[];
+  decisions: CurrentPositionDecision[];
 };
 
 export type InterpretationCandidate = {
@@ -970,6 +978,110 @@ export async function resolveContradiction(
     method: "POST",
     headers: toAuthHeader(accessToken),
     body: JSON.stringify(body),
+  });
+}
+
+export type DecisionEvidence = {
+  id: string;
+  decision_id: string;
+  message_id?: string;
+  manual_item_id?: string;
+  added_at: string;
+};
+
+export type Decision = {
+  id: string;
+  organisation_id: string;
+  project_id: string;
+  statement: string;
+  status: string;
+  source: string;
+  issue_id?: string;
+  decided_at?: string;
+  assignee_user_id?: string;
+  assignee_contact_id?: string;
+  confidence?: number;
+  supersedes_decision_id?: string;
+  created_by_user_id?: string;
+  created_at: string;
+  updated_at: string;
+  evidence: DecisionEvidence[];
+};
+
+export type AttentionItem = {
+  id: string;
+  why_me: string;
+  title: string;
+  project_id: string;
+  project_name?: string;
+  ref_type: string;
+  ref_id: string;
+};
+
+export type AttentionResult = {
+  items: AttentionItem[];
+  counts: {
+    total: number;
+    issue_assignee: number;
+    member_role: number;
+    provisional_fact: number;
+    provisional_decision: number;
+    open_contradiction: number;
+    mail_action_item: number;
+  };
+};
+
+export async function listProjectDecisions(
+  accessToken: string,
+  projectID: string,
+  status?: string,
+) {
+  const qs = status ? `?status=${encodeURIComponent(status)}` : "";
+  return apiRequest<Decision[]>(`/api/projects/${projectID}/decisions${qs}`, {
+    headers: toAuthHeader(accessToken),
+  });
+}
+
+export async function createProjectDecision(
+  accessToken: string,
+  projectID: string,
+  body: {
+    statement: string;
+    confirm?: boolean;
+    issue_id?: string;
+    evidence?: { message_id?: string; manual_item_id?: string }[];
+  },
+) {
+  return apiRequest<Decision>(`/api/projects/${projectID}/decisions`, {
+    method: "POST",
+    headers: toAuthHeader(accessToken),
+    body: JSON.stringify(body),
+  });
+}
+
+export async function confirmDecision(accessToken: string, decisionID: string) {
+  return apiRequest<Decision>(`/api/decisions/${decisionID}/confirm`, {
+    method: "POST",
+    headers: toAuthHeader(accessToken),
+  });
+}
+
+export async function withdrawDecision(accessToken: string, decisionID: string) {
+  return apiRequest<Decision>(`/api/decisions/${decisionID}/withdraw`, {
+    method: "POST",
+    headers: toAuthHeader(accessToken),
+  });
+}
+
+export async function getAttention(accessToken: string) {
+  return apiRequest<AttentionResult>(`/api/attention`, {
+    headers: toAuthHeader(accessToken),
+  });
+}
+
+export async function getProjectAttention(accessToken: string, projectID: string) {
+  return apiRequest<AttentionResult>(`/api/projects/${projectID}/attention`, {
+    headers: toAuthHeader(accessToken),
   });
 }
 

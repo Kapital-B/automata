@@ -1,12 +1,12 @@
 import { Link } from "react-router-dom";
-import { useMutation, useQueryClient } from "@tanstack/react-query";
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { AlertCircle, CheckCircle2, Mail, Plug, RefreshCw, Server, Slack, Zap } from "lucide-react";
 import type { AccountFilter } from "@/components/AppShell";
 import { AccountBadge } from "@/components/AccountBadge";
 import { Button } from "@/components/ui/button";
 import { useAuth } from "@/components/auth/AuthProvider";
 import { relativeTime } from "@/lib/accounts";
-import { dismissFYI, markActionItemDone, refreshSummary } from "@/lib/auth";
+import { dismissFYI, getAttention, markActionItemDone, refreshSummary } from "@/lib/auth";
 import { toast } from "@/hooks/use-toast";
 import { useAssistantHomeData } from "@/hooks/useAssistantHomeData";
 
@@ -39,6 +39,13 @@ export default function AssistantHomePage({ accountFilter }: Props) {
     draftsError,
     runsError,
   } = useAssistantHomeData(accountFilter);
+
+  const attentionQuery = useQuery({
+    queryKey: ["attention", accessToken],
+    queryFn: () => getAttention(accessToken!),
+    enabled: Boolean(accessToken),
+  });
+  const needsMe = attentionQuery.data?.counts?.total ?? 0;
 
   const refreshMutation = useMutation({
     mutationFn: async () => {
@@ -164,7 +171,8 @@ export default function AssistantHomePage({ accountFilter }: Props) {
   return (
     <div className="space-y-8">
       <section className="surface-card px-4 py-4">
-        <div className="grid grid-cols-2 gap-3 md:grid-cols-5">
+        <div className="grid grid-cols-2 gap-3 md:grid-cols-6">
+          <Metric label="Needs my input" value={String(needsMe)} />
           <Metric label="Action items" value={String(actionItems.length)} />
           <Metric label="FYI" value={String(fyi.length)} />
           <Metric label="Accounts" value={`${connectedAccounts.length}/${accounts.length}`} />
@@ -174,6 +182,26 @@ export default function AssistantHomePage({ accountFilter }: Props) {
           />
           {typeof draftsReady === "number" && <Metric label="Drafts ready" value={String(draftsReady)} />}
         </div>
+        {needsMe > 0 && attentionQuery.data ? (
+          <ul className="mt-4 space-y-2 border-t border-border/60 pt-3">
+            {attentionQuery.data.items.slice(0, 5).map((item) => (
+              <li key={item.id} className="text-sm">
+                <Link
+                  to={`/projects/${item.project_id}`}
+                  className="hover:underline"
+                >
+                  <span className="text-[10px] uppercase tracking-wider text-muted-foreground">
+                    {item.why_me.replaceAll("_", " ")}
+                  </span>
+                  <span className="mt-0.5 block">
+                    {item.title}
+                    {item.project_name ? ` · ${item.project_name}` : ""}
+                  </span>
+                </Link>
+              </li>
+            ))}
+          </ul>
+        ) : null}
       </section>
 
       {summaryError && (

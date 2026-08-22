@@ -24,7 +24,9 @@ import {
   ApiError,
   addIssueItem,
   confirmFactVersion,
+  confirmDecision,
   createManualItem,
+  createProjectDecision,
   createProjectFact,
   createProjectIssue,
   dismissInterpretation,
@@ -35,6 +37,7 @@ import {
   interpretProject,
   listContacts,
   listProjectContradictions,
+  listProjectDecisions,
   listProjectFacts,
   listProjectInterpretations,
   listProjectIssues,
@@ -44,7 +47,9 @@ import {
   suggestProjectIssue,
   updateProject,
   updateProjectMember,
+  withdrawDecision,
   type Contradiction,
+  type Decision,
   type FactDetail,
   type Interpretation,
   type IssueListItem,
@@ -93,6 +98,9 @@ export default function ProjectDetailPage() {
     { message_id?: string; manual_item_id?: string }[]
   >([]);
   const [expandedFactID, setExpandedFactID] = useState<string | null>(null);
+  const [createDecisionOpen, setCreateDecisionOpen] = useState(false);
+  const [decisionStatement, setDecisionStatement] = useState("");
+  const [decisionConfirmNow, setDecisionConfirmNow] = useState(true);
 
   const projectQuery = useQuery({
     queryKey: ["project", accessToken, id],
@@ -133,6 +141,11 @@ export default function ProjectDetailPage() {
   const contradictionsQuery = useQuery({
     queryKey: ["project-contradictions", accessToken, id],
     queryFn: () => listProjectContradictions(accessToken!, id!, "open"),
+    enabled: Boolean(accessToken && id),
+  });
+  const decisionsQuery = useQuery({
+    queryKey: ["project-decisions", accessToken, id],
+    queryFn: () => listProjectDecisions(accessToken!, id!),
     enabled: Boolean(accessToken && id),
   });
   const healthQuery = useQuery({
@@ -404,6 +417,71 @@ export default function ProjectDetailPage() {
     },
   });
 
+  const createDecisionMutation = useMutation({
+    mutationFn: async () => {
+      if (!accessToken || !id) throw new Error("Not authenticated");
+      return createProjectDecision(accessToken, id, {
+        statement: decisionStatement.trim(),
+        confirm: decisionConfirmNow,
+      });
+    },
+    onSuccess: async () => {
+      toast({ title: decisionConfirmNow ? "Decision accepted" : "Decision proposed" });
+      setCreateDecisionOpen(false);
+      setDecisionStatement("");
+      await queryClient.invalidateQueries({ queryKey: ["project-decisions"] });
+      await queryClient.invalidateQueries({ queryKey: ["project-current-position"] });
+      await queryClient.invalidateQueries({ queryKey: ["attention"] });
+    },
+    onError: (err) => {
+      toast({
+        title: "Create decision failed",
+        description: err instanceof ApiError ? err.message : "Please try again.",
+        variant: "destructive",
+      });
+    },
+  });
+
+  const confirmDecisionMutation = useMutation({
+    mutationFn: async (decisionID: string) => {
+      if (!accessToken) throw new Error("Not authenticated");
+      return confirmDecision(accessToken, decisionID);
+    },
+    onSuccess: async () => {
+      toast({ title: "Decision confirmed" });
+      await queryClient.invalidateQueries({ queryKey: ["project-decisions"] });
+      await queryClient.invalidateQueries({ queryKey: ["project-current-position"] });
+      await queryClient.invalidateQueries({ queryKey: ["attention"] });
+    },
+    onError: (err) => {
+      toast({
+        title: "Confirm failed",
+        description: err instanceof ApiError ? err.message : "Please try again.",
+        variant: "destructive",
+      });
+    },
+  });
+
+  const withdrawDecisionMutation = useMutation({
+    mutationFn: async (decisionID: string) => {
+      if (!accessToken) throw new Error("Not authenticated");
+      return withdrawDecision(accessToken, decisionID);
+    },
+    onSuccess: async () => {
+      toast({ title: "Decision withdrawn" });
+      await queryClient.invalidateQueries({ queryKey: ["project-decisions"] });
+      await queryClient.invalidateQueries({ queryKey: ["project-current-position"] });
+      await queryClient.invalidateQueries({ queryKey: ["attention"] });
+    },
+    onError: (err) => {
+      toast({
+        title: "Withdraw failed",
+        description: err instanceof ApiError ? err.message : "Please try again.",
+        variant: "destructive",
+      });
+    },
+  });
+
   const [name, setName] = useState("");
   const [keywords, setKeywords] = useState("");
   const [role, setRole] = useState("");
@@ -560,6 +638,42 @@ export default function ProjectDetailPage() {
                     onClick={() => createFactMutation.mutate()}
                   >
                     {createFactMutation.isPending ? "Saving…" : "Save fact"}
+                  </Button>
+                </div>
+              </DialogContent>
+            </Dialog>
+            <Dialog open={createDecisionOpen} onOpenChange={setCreateDecisionOpen}>
+              <DialogTrigger asChild>
+                <Button variant="outline">Add decision</Button>
+              </DialogTrigger>
+              <DialogContent>
+                <DialogHeader>
+                  <DialogTitle>Add decision</DialogTitle>
+                  <DialogDescription>
+                    Record an approval or go/no-go. Evidence can be attached later via reconcile.
+                  </DialogDescription>
+                </DialogHeader>
+                <div className="space-y-3">
+                  <Textarea
+                    value={decisionStatement}
+                    onChange={(e) => setDecisionStatement(e.target.value)}
+                    placeholder="Proceed with 90 kW duty for Pump P-03"
+                    rows={3}
+                  />
+                  <label className="flex items-center gap-2 text-sm">
+                    <input
+                      type="checkbox"
+                      checked={decisionConfirmNow}
+                      onChange={(e) => setDecisionConfirmNow(e.target.checked)}
+                    />
+                    Accept now
+                  </label>
+                  <Button
+                    className="w-full"
+                    disabled={!decisionStatement.trim() || createDecisionMutation.isPending}
+                    onClick={() => createDecisionMutation.mutate()}
+                  >
+                    {createDecisionMutation.isPending ? "Saving…" : "Save decision"}
                   </Button>
                 </div>
               </DialogContent>
@@ -755,21 +869,38 @@ export default function ProjectDetailPage() {
         </h2>
         {currentPositionQuery.isLoading ? (
           <Loader2 className="h-4 w-4 animate-spin text-muted-foreground" />
-        ) : (currentPositionQuery.data?.facts ?? []).length === 0 ? (
-          <p className="text-sm text-muted-foreground">No active facts yet.</p>
+        ) : (currentPositionQuery.data?.facts ?? []).length === 0 &&
+          (currentPositionQuery.data?.decisions ?? []).length === 0 ? (
+          <p className="text-sm text-muted-foreground">No active facts or decisions yet.</p>
         ) : (
-          <ul className="flex flex-wrap gap-x-6 gap-y-2">
-            {(currentPositionQuery.data?.facts ?? []).map((f) => (
-              <li key={f.version_id} className="text-sm">
-                <span className="text-muted-foreground">{f.label}</span>
-                <span className="mx-1.5 text-muted-foreground/60">·</span>
-                <span className="font-medium">
-                  {f.value_text}
-                  {f.unit ? ` ${f.unit}` : ""}
-                </span>
-              </li>
-            ))}
-          </ul>
+          <div className="space-y-2">
+            {(currentPositionQuery.data?.facts ?? []).length > 0 ? (
+              <ul className="flex flex-wrap gap-x-6 gap-y-2">
+                {(currentPositionQuery.data?.facts ?? []).map((f) => (
+                  <li key={f.version_id} className="text-sm">
+                    <span className="text-muted-foreground">{f.label}</span>
+                    <span className="mx-1.5 text-muted-foreground/60">·</span>
+                    <span className="font-medium">
+                      {f.value_text}
+                      {f.unit ? ` ${f.unit}` : ""}
+                    </span>
+                  </li>
+                ))}
+              </ul>
+            ) : null}
+            {(currentPositionQuery.data?.decisions ?? []).length > 0 ? (
+              <ul className="space-y-1">
+                {(currentPositionQuery.data?.decisions ?? []).map((d) => (
+                  <li key={d.decision_id} className="text-sm">
+                    <span className="text-[10px] uppercase tracking-wider text-muted-foreground">
+                      Decision
+                    </span>{" "}
+                    <span className="font-medium">{d.statement}</span>
+                  </li>
+                ))}
+              </ul>
+            ) : null}
+          </div>
         )}
       </section>
 
@@ -932,6 +1063,30 @@ export default function ProjectDetailPage() {
           </div>
 
           <div className="space-y-3">
+            <h2 className="text-sm font-medium uppercase tracking-wider text-muted-foreground">
+              Decisions
+            </h2>
+            {decisionsQuery.isLoading ? (
+              <Loader2 className="h-4 w-4 animate-spin text-muted-foreground" />
+            ) : (decisionsQuery.data ?? []).length === 0 ? (
+              <p className="text-xs text-muted-foreground">No decisions yet.</p>
+            ) : (
+              <ul className="space-y-3">
+                {(decisionsQuery.data ?? []).map((d) => (
+                  <DecisionRailItem
+                    key={d.id}
+                    decision={d}
+                    confirming={confirmDecisionMutation.isPending}
+                    withdrawing={withdrawDecisionMutation.isPending}
+                    onConfirm={() => confirmDecisionMutation.mutate(d.id)}
+                    onWithdraw={() => withdrawDecisionMutation.mutate(d.id)}
+                  />
+                ))}
+              </ul>
+            )}
+          </div>
+
+          <div className="space-y-3">
           <h2 className="text-sm font-medium uppercase tracking-wider text-muted-foreground">
             Issues
           </h2>
@@ -961,6 +1116,49 @@ export default function ProjectDetailPage() {
         </aside>
       </div>
     </div>
+  );
+}
+
+function DecisionRailItem({
+  decision,
+  confirming,
+  withdrawing,
+  onConfirm,
+  onWithdraw,
+}: {
+  decision: Decision;
+  confirming: boolean;
+  withdrawing: boolean;
+  onConfirm: () => void;
+  onWithdraw: () => void;
+}) {
+  return (
+    <li className="space-y-1.5 text-sm">
+      <p className="text-xs uppercase tracking-wider text-muted-foreground">{decision.status}</p>
+      <p>{decision.statement}</p>
+      {decision.status === "proposed" ? (
+        <div className="flex flex-wrap gap-1.5">
+          <Button
+            size="sm"
+            variant="outline"
+            className="h-7 text-xs"
+            disabled={confirming}
+            onClick={onConfirm}
+          >
+            Confirm
+          </Button>
+          <Button
+            size="sm"
+            variant="ghost"
+            className="h-7 text-xs"
+            disabled={withdrawing}
+            onClick={onWithdraw}
+          >
+            Withdraw
+          </Button>
+        </div>
+      ) : null}
+    </li>
   );
 }
 

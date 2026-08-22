@@ -84,9 +84,30 @@ func (h *Handlers) getProjectCurrentPosition(w http.ResponseWriter, r *http.Requ
 		}
 		facts = append(facts, row)
 	}
+	decisions := make([]map[string]any, 0)
+	if h.DecisionSvc != nil {
+		views, err := h.DecisionSvc.ListAcceptedRecent(r.Context(), uid, projectID, 10)
+		if err != nil {
+			writeFactError(w, err)
+			return
+		}
+		for _, v := range views {
+			d := v.Decision
+			row := map[string]any{
+				"decision_id":    d.ID.String(),
+				"statement":      d.Statement,
+				"status":         d.Status,
+				"evidence_count": len(v.Evidence),
+			}
+			if d.DecidedAt != nil {
+				row["decided_at"] = d.DecidedAt.UTC().Format(time.RFC3339Nano)
+			}
+			decisions = append(decisions, row)
+		}
+	}
 	writeJSON(w, http.StatusOK, map[string]any{
 		"facts":     facts,
-		"decisions": []any{},
+		"decisions": decisions,
 	})
 }
 

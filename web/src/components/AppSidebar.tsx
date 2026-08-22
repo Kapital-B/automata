@@ -33,7 +33,7 @@ import {
 import { cn } from "@/lib/utils";
 import { useAuth } from "@/components/auth/AuthProvider";
 import { useAccountsData } from "@/hooks/useAccountsData";
-import { getSummary, getUnassignedSummary, listDraftSuggestions } from "@/lib/auth";
+import { getSummary, getUnassignedSummary, listDraftSuggestions, getAttention } from "@/lib/auth";
 
 const assistantNav = [
   { title: "Assistant", url: "/", icon: MessageSquare, end: true },
@@ -85,11 +85,17 @@ export function AppSidebar() {
     queryFn: () => getUnassignedSummary(accessToken!),
     enabled: Boolean(accessToken),
   });
+  const attentionBadgeQuery = useQuery({
+    queryKey: ["attention", accessToken],
+    queryFn: () => getAttention(accessToken!),
+    enabled: Boolean(accessToken),
+  });
   const todayBadge = summaryBadgeQuery.data?.action_items?.length ?? 0;
   const draftsBadge = draftsBadgeQuery.data?.length ?? 0;
   const unassignedBadge =
     (unassignedBadgeQuery.data?.unassigned ?? 0) +
     (unassignedBadgeQuery.data?.provisional ?? 0);
+  const needsMeBadge = attentionBadgeQuery.data?.counts?.total ?? 0;
 
   const isActive = (url: string, end?: boolean) =>
     end ? location.pathname === url : location.pathname.startsWith(url) && url !== "/";
@@ -140,7 +146,19 @@ export function AppSidebar() {
                       {({ isActive: a }) => (
                         <span className={linkClass(a)}>
                           <item.icon className="h-4 w-4 shrink-0" />
-                          {!collapsed && <span>{item.title}</span>}
+                          {!collapsed && (
+                            <>
+                              <span className="flex-1">{item.title}</span>
+                              {needsMeBadge > 0 ? (
+                                <span
+                                  className="rounded-full border border-sidebar-border px-1.5 py-0.5 text-[10px] font-medium leading-none"
+                                  title="Needs my input"
+                                >
+                                  {needsMeBadge}
+                                </span>
+                              ) : null}
+                            </>
+                          )}
                         </span>
                       )}
                     </NavLink>

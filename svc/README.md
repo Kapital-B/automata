@@ -86,9 +86,11 @@ Open **`authorization_url`** from parsed JSON (`jq -r .authorization_url`) so `&
 | Issues | `GET/POST /api/projects/{id}/issues`, `GET/PATCH /api/issues/{id}`, items attach/detach |
 | Suggest | `POST /api/projects/{id}/issues/suggest` (requires `LLM_BASE_URL` + `LLM_MODEL`; confirm via create) |
 | Facts (Wave 2a) | `GET/POST /api/projects/{id}/facts`, `GET /api/facts/{id}`, confirm/reject versions, evidence attach/detach |
-| Current position | `GET /api/projects/{id}/current-position` (active facts; decisions empty until 2d) |
+| Current position | `GET /api/projects/{id}/current-position` (active facts + recent accepted decisions) |
 | Interpret (Wave 2b) | `POST /api/projects/{id}/interpret`, `GET /api/projects/{id}/interpretations`, `POST /api/interpretations/{id}/dismiss` (LLM; provisional only — does not write facts) |
 | Reconcile (Wave 2c) | `POST /api/projects/{id}/reconcile`, `GET /api/projects/{id}/contradictions`, `POST /api/contradictions/{id}/resolve` (applies fact candidates; opens contradictions when unsafe) |
+| Decisions (Wave 2d) | `GET/POST /api/projects/{id}/decisions`, `POST /api/decisions/{id}/confirm`, `POST /api/decisions/{id}/withdraw`, `PATCH /api/decisions/{id}` |
+| Needs My Input (Wave 2d) | `GET /api/attention`, `GET /api/projects/{id}/attention` (derived `why_me` items + counts) |
 
 `GET /api/health` returns `{ "status": "ok", "llm": true|false }`.
 

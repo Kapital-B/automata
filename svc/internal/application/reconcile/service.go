@@ -10,8 +10,10 @@ import (
 	"time"
 
 	appfacts "github.com/Kapital-B/automata/svc/internal/application/facts"
+	appdecisions "github.com/Kapital-B/automata/svc/internal/application/decisions"
 	"github.com/Kapital-B/automata/svc/internal/application/ports/driven"
 	domaincontr "github.com/Kapital-B/automata/svc/internal/domain/contradictions"
+	domaindec "github.com/Kapital-B/automata/svc/internal/domain/decisions"
 	domainfacts "github.com/Kapital-B/automata/svc/internal/domain/facts"
 	domaininterp "github.com/Kapital-B/automata/svc/internal/domain/interpretations"
 	"github.com/google/uuid"
@@ -31,6 +33,7 @@ type Service struct {
 	Interpretations driven.InterpretationRepository
 	FactsRepo       driven.FactRepository
 	Facts           *appfacts.Service
+	Decisions       *appdecisions.Service
 	Contradictions  driven.ContradictionRepository
 	JobRuns         driven.JobRunRepository
 }
@@ -39,13 +42,14 @@ type ReconcileInput struct {
 	InterpretationIDs []uuid.UUID // empty = all pending
 }
 
-type CandidateOutcome struct {
+type 	CandidateOutcome struct {
 	Kind            string `json:"kind"`
 	Outcome         string `json:"outcome"`
 	Subject         string `json:"subject_key,omitempty"`
 	Reason          string `json:"reason"`
 	FactID          string `json:"fact_id,omitempty"`
 	VersionID       string `json:"version_id,omitempty"`
+	DecisionID      string `json:"decision_id,omitempty"`
 	ContradictionID string `json:"contradiction_id,omitempty"`
 }
 
@@ -165,20 +169,70 @@ func (s *Service) reconcileOne(ctx context.Context, userID, orgID, projectID uui
 	opened := 0
 	for _, c := range root.Candidates {
 		kind := strings.ToLower(strings.TrimSpace(c.Kind))
-		if kind != string(domaininterp.KindFact) {
-			outs = append(outs, CandidateOutcome{Kind: kind, Outcome: "ignore", Reason: "decision candidates deferred to slice 2d"})
-			continue
-		}
-		out, didOpen, err := s.reconcileFactCandidate(ctx, userID, orgID, projectID, interp.ID, c)
-		if err != nil {
-			return nil, 0, err
-		}
-		outs = append(outs, out)
-		if didOpen {
-			opened++
+		switch kind {
+		case string(domaininterp.KindFact):
+			out, didOpen, err := s.reconcileFactCandidate(ctx, userID, orgID, projectID, interp.ID, c)
+			if err != nil {
+				return nil, 0, err
+			}
+			outs = append(outs, out)
+			if didOpen {
+				opened++
+			}
+		case string(domaininterp.KindDecision):
+			out, err := s.reconcileDecisionCandidate(ctx, userID, projectID, c)
+			if err != nil {
+				return nil, 0, err
+			}
+			outs = append(outs, out)
+		default:
+			outs = append(outs, CandidateOutcome{Kind: kind, Outcome: "ignore", Reason: "unknown candidate kind"})
 		}
 	}
 	return outs, opened, nil
+}
+
+func (s *Service) reconcileDecisionCandidate(ctx context.Context, userID, projectID uuid.UUID, c candidatePayload) (CandidateOutcome, error) {
+	if s.Decisions == nil {
+		return CandidateOutcome{Kind: "decision", Outcome: "ignore", Reason: "decisions not configured"}, nil
+	}
+	statement := strings.TrimSpace(c.Statement)
+	if statement == "" {
+		return CandidateOutcome{Kind: "decision", Outcome: "ignore", Reason: "empty statement"}, nil
+	}
+	norm := normalizeValue(statement)
+	existing, err := s.Decisions.List(ctx, userID, projectID, string(domaindec.StatusAccepted))
+	if err != nil {
+		return CandidateOutcome{}, err
+	}
+	for _, v := range existing {
+		if normalizeValue(v.Decision.Statement) == norm {
+			for _, ref := range evidenceFromCandidate(c) {
+				_, _ = s.Decisions.AddEvidence(ctx, userID, v.Decision.ID, appdecisions.EvidenceRef{
+					MessageID: ref.MessageID, ManualItemID: ref.ManualItemID,
+				})
+			}
+			return CandidateOutcome{
+				Kind: "decision", Outcome: "reinforce", Reason: "compatible with accepted decision",
+				DecisionID: v.Decision.ID.String(),
+			}, nil
+		}
+	}
+	evidence := make([]appdecisions.EvidenceRef, 0)
+	for _, ref := range evidenceFromCandidate(c) {
+		evidence = append(evidence, appdecisions.EvidenceRef{MessageID: ref.MessageID, ManualItemID: ref.ManualItemID})
+	}
+	view, err := s.Decisions.Create(ctx, userID, projectID, appdecisions.CreateInput{
+		Statement: statement, Confirm: false, Evidence: evidence,
+		Source: string(domaindec.SourceLLM), Confidence: &c.Confidence,
+	})
+	if err != nil {
+		return CandidateOutcome{}, err
+	}
+	return CandidateOutcome{
+		Kind: "decision", Outcome: "confirm_new", Reason: "proposed decision from interpretation",
+		DecisionID: view.Decision.ID.String(),
+	}, nil
 }
 
 func (s *Service) reconcileFactCandidate(ctx context.Context, userID, orgID, projectID, interpID uuid.UUID, c candidatePayload) (CandidateOutcome, bool, error) {

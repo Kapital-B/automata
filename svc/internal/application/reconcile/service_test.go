@@ -10,6 +10,7 @@ import (
 	"github.com/Kapital-B/automata/svc/internal/adapters/outbound/persistence/sqlite"
 	"github.com/Kapital-B/automata/svc/internal/application/auth"
 	appfacts "github.com/Kapital-B/automata/svc/internal/application/facts"
+	appdecisions "github.com/Kapital-B/automata/svc/internal/application/decisions"
 	"github.com/Kapital-B/automata/svc/internal/application/ports/driven"
 	appprojects "github.com/Kapital-B/automata/svc/internal/application/projects"
 	appreconcile "github.com/Kapital-B/automata/svc/internal/application/reconcile"
@@ -38,9 +39,12 @@ func setupReconcile(t *testing.T, name string) (*sqlite.Repository, *appfacts.Se
 	factSvc := &appfacts.Service{
 		Users: repo, Projects: repo, Facts: repo, Issues: repo, Assignments: repo, Manuals: repo, Messages: repo,
 	}
+	decisionSvc := &appdecisions.Service{
+		Users: repo, Projects: repo, Decisions: repo, Issues: repo, Assignments: repo, Manuals: repo, Messages: repo,
+	}
 	reconcileSvc := &appreconcile.Service{
 		Users: repo, Projects: repo, Interpretations: repo, FactsRepo: repo, Facts: factSvc,
-		Contradictions: repo, JobRuns: repo,
+		Decisions: decisionSvc, Contradictions: repo, JobRuns: repo,
 	}
 	userID, err := authSvc.Register(context.Background(), name+"@example.com", "password123")
 	if err != nil {

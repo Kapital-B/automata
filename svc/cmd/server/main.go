@@ -24,6 +24,8 @@ import (
 	appinterpret "github.com/Kapital-B/automata/svc/internal/application/interpret"
 	appissues "github.com/Kapital-B/automata/svc/internal/application/issues"
 	appreconcile "github.com/Kapital-B/automata/svc/internal/application/reconcile"
+	appattention "github.com/Kapital-B/automata/svc/internal/application/attention"
+	appdecisions "github.com/Kapital-B/automata/svc/internal/application/decisions"
 	appmessages "github.com/Kapital-B/automata/svc/internal/application/messages"
 	appprojects "github.com/Kapital-B/automata/svc/internal/application/projects"
 	"github.com/Kapital-B/automata/svc/internal/configuration"
@@ -135,6 +137,15 @@ func main() {
 		Manuals:     repo,
 		Messages:    repo,
 	}
+	decisionSvc := &appdecisions.Service{
+		Users:       repo,
+		Projects:    repo,
+		Decisions:   repo,
+		Issues:      repo,
+		Assignments: repo,
+		Manuals:     repo,
+		Messages:    repo,
+	}
 	interpretSvc := &appinterpret.Service{
 		Users:           repo,
 		Projects:        repo,
@@ -162,8 +173,12 @@ func main() {
 		Interpretations: repo,
 		FactsRepo:       repo,
 		Facts:           factSvc,
+		Decisions:       decisionSvc,
 		Contradictions:  repo,
 		JobRuns:         repo,
+	}
+	attentionSvc := &appattention.Service{
+		Users: repo, Projects: repo, Issues: repo, Facts: repo, Decisions: repo, Contradictions: repo,
 	}
 	assignSvc := &appprojects.AssignService{
 		Users:       repo,
@@ -272,6 +287,8 @@ func main() {
 		FactSvc:         factSvc,
 		InterpretSvc:    interpretSvc,
 		ReconcileSvc:    reconcileSvc,
+		DecisionSvc:     decisionSvc,
+		AttentionSvc:    attentionSvc,
 		Accounts:        repo,
 		Messages:        repo,
 		JobRuns:         repo,

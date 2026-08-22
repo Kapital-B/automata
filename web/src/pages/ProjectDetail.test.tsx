@@ -49,6 +49,10 @@ vi.mock("@/lib/auth", async () => {
     listProjectContradictions: vi.fn(),
     reconcileProject: vi.fn(),
     resolveContradiction: vi.fn(),
+    listProjectDecisions: vi.fn(),
+    createProjectDecision: vi.fn(),
+    confirmDecision: vi.fn(),
+    withdrawDecision: vi.fn(),
   };
 });
 
@@ -70,6 +74,7 @@ const dismissInterpretation = vi.mocked(auth.dismissInterpretation);
 const listProjectContradictions = vi.mocked(auth.listProjectContradictions);
 const reconcileProject = vi.mocked(auth.reconcileProject);
 const resolveContradiction = vi.mocked(auth.resolveContradiction);
+const listProjectDecisions = vi.mocked(auth.listProjectDecisions);
 
 describe("Project timeline UI", () => {
   beforeEach(() => {
@@ -91,12 +96,14 @@ describe("Project timeline UI", () => {
     listProjectContradictions.mockReset();
     reconcileProject.mockReset();
     resolveContradiction.mockReset();
+    listProjectDecisions.mockReset();
     listContacts.mockResolvedValue([]);
     listProjectIssues.mockResolvedValue([]);
     getCurrentPosition.mockResolvedValue({ facts: [], decisions: [] });
     listProjectFacts.mockResolvedValue([]);
     listProjectInterpretations.mockResolvedValue([]);
     listProjectContradictions.mockResolvedValue([]);
+    listProjectDecisions.mockResolvedValue([]);
     getApiHealth.mockResolvedValue({ status: "ok", llm: true });
     suggestProjectIssue.mockResolvedValue({
       title: "Pump P-03",
