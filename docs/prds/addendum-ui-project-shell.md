@@ -192,7 +192,7 @@ Unchanged jobs; Inbox demoted. Connectors page may rename Accounts over time wit
 | Slice | Delivers | Exit criteria |
 | ----- | -------- | ------------- |
 | **U1** | Nav IA: Home / Projects / Triage / People + More; redirects from Today/Unassigned | Primary nav has four items; Inbox only under More — **done 2026-08-22** |
-| **U2** | Home list-first Needs me + below-fold recent/triage | Single attention list is the first viewport focus |
+| **U2** | Home list-first Needs me + below-fold recent/triage | Single attention list is the first viewport focus — **done 2026-08-22** |
 | **U3** | Project workspace Trail \| Position \| Open | Rails gone as permanent chrome; modes work |
 | **U4** | Multi-project Ask on Home + API | Cross-project question returns cited answer or insufficiency; no fact writes |
 | **U5** | Polish: deep links from Needs me → mode, empty states, triage rename | DC01 contradiction from Home opens Position/Open correctly |
