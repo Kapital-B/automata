@@ -216,8 +216,21 @@ func (r *Repository) ListProjectTimeline(ctx context.Context, userID, organisati
 			item.ManualItemID = &mid
 			contacts, _ := r.timelineContactsForManual(ctx, organisationID, m.ID)
 			item.Contacts = contacts
+			if issueID, err := r.FindIssueIDByManualItem(ctx, m.ID); err == nil {
+				item.IssueID = issueID
+			}
 			out = append(out, item)
 		}
+	}
+
+	if filter.UnassignedToIssue {
+		filtered := make([]driven.TimelineItem, 0, len(out))
+		for _, it := range out {
+			if it.IssueID == nil {
+				filtered = append(filtered, it)
+			}
+		}
+		out = filtered
 	}
 
 	sort.Slice(out, func(i, j int) bool {
@@ -276,6 +289,9 @@ func (r *Repository) listMailTimelineItems(ctx context.Context, userID, organisa
 		item.MessageID = &msgID
 		contacts, _ := r.timelineContactsForMessage(ctx, organisationID, msgID)
 		item.Contacts = contacts
+		if issueID, err := r.FindIssueIDByMessage(ctx, msgID); err == nil {
+			item.IssueID = issueID
+		}
 		out = append(out, item)
 	}
 	return out, rows.Err()

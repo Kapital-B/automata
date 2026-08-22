@@ -22,12 +22,16 @@ import { useAuth } from "@/components/auth/AuthProvider";
 import { useAccountsData } from "@/hooks/useAccountsData";
 import {
   ApiError,
+  addIssueItem,
   createManualItem,
+  createProjectIssue,
   getProject,
   getProjectTimeline,
   listContacts,
+  listProjectIssues,
   updateProject,
   updateProjectMember,
+  type IssueListItem,
   type TimelineItem,
 } from "@/lib/auth";
 import type { UiAccount } from "@/lib/accounts";
@@ -54,7 +58,10 @@ export default function ProjectDetailPage() {
   const navigate = useNavigate();
   const { accounts } = useAccountsData();
   const [sourceFilter, setSourceFilter] = useState<"all" | "mail" | "manual">("all");
+  const [unassignedToIssue, setUnassignedToIssue] = useState(false);
   const [pasteOpen, setPasteOpen] = useState(false);
+  const [createIssueOpen, setCreateIssueOpen] = useState(false);
+  const [newIssueTitle, setNewIssueTitle] = useState("");
 
   const projectQuery = useQuery({
     queryKey: ["project", accessToken, id],
@@ -62,12 +69,67 @@ export default function ProjectDetailPage() {
     enabled: Boolean(accessToken && id),
   });
   const timelineQuery = useQuery({
-    queryKey: ["project-timeline", accessToken, id, sourceFilter],
+    queryKey: ["project-timeline", accessToken, id, sourceFilter, unassignedToIssue],
     queryFn: () =>
-      getProjectTimeline(accessToken!, id!, { source: sourceFilter, limit: 100 }),
+      getProjectTimeline(accessToken!, id!, {
+        source: sourceFilter,
+        unassigned_to_issue: unassignedToIssue,
+        limit: 100,
+      }),
+    enabled: Boolean(accessToken && id),
+  });
+  const issuesQuery = useQuery({
+    queryKey: ["project-issues", accessToken, id],
+    queryFn: () => listProjectIssues(accessToken!, id!),
     enabled: Boolean(accessToken && id),
   });
 
+  const createIssueMutation = useMutation({
+    mutationFn: async () => {
+      if (!accessToken || !id) throw new Error("Not authenticated");
+      return createProjectIssue(accessToken, id, { title: newIssueTitle.trim() });
+    },
+    onSuccess: async () => {
+      toast({ title: "Issue created" });
+      setCreateIssueOpen(false);
+      setNewIssueTitle("");
+      await queryClient.invalidateQueries({ queryKey: ["project-issues"] });
+    },
+    onError: (err) => {
+      toast({
+        title: "Could not create issue",
+        description: err instanceof ApiError ? err.message : "Please try again.",
+        variant: "destructive",
+      });
+    },
+  });
+
+  const attachMutation = useMutation({
+    mutationFn: async (args: {
+      issueID: string;
+      messageID?: string;
+      manualItemID?: string;
+    }) => {
+      if (!accessToken) throw new Error("Not authenticated");
+      return addIssueItem(accessToken, args.issueID, {
+        message_id: args.messageID,
+        manual_item_id: args.manualItemID,
+      });
+    },
+    onSuccess: async () => {
+      toast({ title: "Attached to issue" });
+      await queryClient.invalidateQueries({ queryKey: ["project-timeline"] });
+      await queryClient.invalidateQueries({ queryKey: ["project-issues"] });
+      await queryClient.invalidateQueries({ queryKey: ["issue"] });
+    },
+    onError: (err) => {
+      toast({
+        title: "Attach failed",
+        description: err instanceof ApiError ? err.message : "Please try again.",
+        variant: "destructive",
+      });
+    },
+  });
   const [name, setName] = useState("");
   const [role, setRole] = useState("");
   const [discipline, setDiscipline] = useState("");
@@ -152,9 +214,36 @@ export default function ProjectDetailPage() {
       <PageHeader
         eyebrow={project.code}
         title={project.name}
-        description="Correspondence timeline. Issues land in the next slice."
+        description="Correspondence timeline with an issues rail for trails."
         actions={
           <div className="flex flex-wrap gap-2">
+            <Dialog open={createIssueOpen} onOpenChange={setCreateIssueOpen}>
+              <DialogTrigger asChild>
+                <Button variant="outline">New issue</Button>
+              </DialogTrigger>
+              <DialogContent>
+                <DialogHeader>
+                  <DialogTitle>Create issue</DialogTitle>
+                  <DialogDescription>
+                    Default assignee is you. Attach correspondence from the timeline.
+                  </DialogDescription>
+                </DialogHeader>
+                <div className="space-y-3">
+                  <Input
+                    value={newIssueTitle}
+                    onChange={(e) => setNewIssueTitle(e.target.value)}
+                    placeholder="Pump P-03 Sizing"
+                  />
+                  <Button
+                    className="w-full"
+                    disabled={!newIssueTitle.trim() || createIssueMutation.isPending}
+                    onClick={() => createIssueMutation.mutate()}
+                  >
+                    {createIssueMutation.isPending ? "Creating…" : "Create"}
+                  </Button>
+                </div>
+              </DialogContent>
+            </Dialog>
             <Dialog open={pasteOpen} onOpenChange={setPasteOpen}>
               <DialogTrigger asChild>
                 <Button>
@@ -231,6 +320,8 @@ export default function ProjectDetailPage() {
         </div>
       </details>
 
+      <div className="grid gap-8 lg:grid-cols-[minmax(0,1fr)_220px]">
+        <div className="space-y-4">
       <div className="flex flex-wrap gap-2">
         {(["all", "mail", "manual"] as const).map((s) => (
           <Button
@@ -242,6 +333,13 @@ export default function ProjectDetailPage() {
             {s === "all" ? "All" : s === "mail" ? "Mail" : "Manual"}
           </Button>
         ))}
+        <Button
+          size="sm"
+          variant={unassignedToIssue ? "default" : "outline"}
+          onClick={() => setUnassignedToIssue((v) => !v)}
+        >
+          Unassigned to issue
+        </Button>
       </div>
 
       {timelineQuery.isLoading ? (
@@ -264,10 +362,50 @@ export default function ProjectDetailPage() {
               }
               item={item}
               account={accountFor(item.account_id)}
+              projectID={id!}
+              issues={issuesQuery.data ?? []}
+              attaching={attachMutation.isPending}
+              onAttach={(issueID) =>
+                attachMutation.mutate({
+                  issueID,
+                  messageID: item.message_id,
+                  manualItemID: item.manual_item_id,
+                })
+              }
             />
           ))}
         </ol>
       )}
+        </div>
+
+        <aside className="space-y-3 lg:border-l lg:border-border/70 lg:pl-4">
+          <h2 className="text-sm font-medium uppercase tracking-wider text-muted-foreground">
+            Issues
+          </h2>
+          {issuesQuery.isLoading ? (
+            <Loader2 className="h-4 w-4 animate-spin text-muted-foreground" />
+          ) : (issuesQuery.data ?? []).length === 0 ? (
+            <p className="text-xs text-muted-foreground">No issues yet.</p>
+          ) : (
+            <ul className="space-y-2">
+              {(issuesQuery.data ?? []).map((iss) => (
+                <li key={iss.id}>
+                  <Link
+                    to={`/projects/${id}/issues/${iss.id}`}
+                    className="block text-sm hover:underline"
+                  >
+                    <span className="font-medium">{iss.title}</span>
+                    <span className="mt-0.5 block text-xs text-muted-foreground">
+                      {iss.status}
+                      {iss.awaiting_me ? " · awaiting you" : ""}
+                    </span>
+                  </Link>
+                </li>
+              ))}
+            </ul>
+          )}
+        </aside>
+      </div>
     </div>
   );
 }
@@ -275,11 +413,20 @@ export default function ProjectDetailPage() {
 function TimelineRow({
   item,
   account,
+  projectID,
+  issues,
+  attaching,
+  onAttach,
 }: {
   item: TimelineItem;
   account: UiAccount | undefined;
+  projectID: string;
+  issues: IssueListItem[];
+  attaching: boolean;
+  onAttach: (issueID: string) => void;
 }) {
   const [expanded, setExpanded] = useState(false);
+  const [attachIssueID, setAttachIssueID] = useState("");
   const when = useMemo(() => {
     try {
       return new Date(item.occurred_at).toLocaleString();
@@ -296,6 +443,14 @@ function TimelineRow({
         {item.channel ? <span>· {item.channel}</span> : null}
         <span>· {when}</span>
         {item.source === "mail" ? <AccountBadge account={account} /> : null}
+        {item.issue_id ? (
+          <Link
+            to={`/projects/${projectID}/issues/${item.issue_id}`}
+            className="rounded border border-border/70 px-1.5 py-0.5 hover:underline"
+          >
+            On issue
+          </Link>
+        ) : null}
       </div>
       {item.source === "mail" && item.message_id && item.account_id ? (
         <Link
@@ -319,6 +474,31 @@ function TimelineRow({
               {item.body_text}
             </pre>
           ) : null}
+        </div>
+      ) : null}
+      {!item.issue_id && issues.length > 0 ? (
+        <div className="flex flex-wrap items-center gap-2 pt-1">
+          <select
+            aria-label="Attach to issue"
+            className="h-8 rounded-md border border-input bg-background px-2 text-xs"
+            value={attachIssueID}
+            onChange={(e) => setAttachIssueID(e.target.value)}
+          >
+            <option value="">Attach to issue…</option>
+            {issues.map((iss) => (
+              <option key={iss.id} value={iss.id}>
+                {iss.title}
+              </option>
+            ))}
+          </select>
+          <Button
+            size="sm"
+            className="h-8"
+            disabled={!attachIssueID || attaching}
+            onClick={() => onAttach(attachIssueID)}
+          >
+            Attach
+          </Button>
         </div>
       ) : null}
     </li>

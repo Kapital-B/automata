@@ -20,6 +20,7 @@ import (
 	appaccounts "github.com/Kapital-B/automata/svc/internal/application/accounts"
 	"github.com/Kapital-B/automata/svc/internal/application/auth"
 	appcontacts "github.com/Kapital-B/automata/svc/internal/application/contacts"
+	appissues "github.com/Kapital-B/automata/svc/internal/application/issues"
 	appmessages "github.com/Kapital-B/automata/svc/internal/application/messages"
 	appprojects "github.com/Kapital-B/automata/svc/internal/application/projects"
 	"github.com/Kapital-B/automata/svc/internal/configuration"
@@ -46,6 +47,10 @@ func main() {
 	defer db.Close()
 	db.SetMaxOpenConns(1)
 	db.SetConnMaxLifetime(time.Hour)
+	if _, err := db.Exec(`PRAGMA foreign_keys=ON`); err != nil {
+		log.Error("foreign keys", "err", err)
+		os.Exit(1)
+	}
 
 	if err := sqlite.Migrate(db); err != nil {
 		log.Error("migrate", "err", err)
@@ -104,6 +109,15 @@ func main() {
 		Assignments: repo,
 		Manuals:     repo,
 		Timeline:    repo,
+		Contacts:    repo,
+		Messages:    repo,
+	}
+	issueSvc := &appissues.Service{
+		Users:       repo,
+		Projects:    repo,
+		Issues:      repo,
+		Assignments: repo,
+		Manuals:     repo,
 		Contacts:    repo,
 		Messages:    repo,
 	}
@@ -208,6 +222,7 @@ func main() {
 		AuthSvc:         authSvc,
 		ContactSvc:      contactSvc,
 		ProjectSvc:      projectSvc,
+		IssueSvc:        issueSvc,
 		Accounts:        repo,
 		Messages:        repo,
 		JobRuns:         repo,
@@ -219,6 +234,7 @@ func main() {
 		Contacts:        repo,
 		Projects:        repo,
 		Assignments:     repo,
+		Issues:          repo,
 		Dashboard:       cfg.DashboardBaseURL,
 		SuccessPath:     cfg.OAuthSuccessPath,
 		ErrorPath:       cfg.OAuthErrorPath,

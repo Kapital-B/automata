@@ -34,6 +34,10 @@ func main() {
 	defer db.Close()
 	db.SetMaxOpenConns(1)
 	db.SetConnMaxLifetime(time.Hour)
+	if _, err := db.Exec(`PRAGMA foreign_keys=ON`); err != nil {
+		log.Error("foreign keys", "err", err)
+		os.Exit(1)
+	}
 	if err := sqlite.Migrate(db); err != nil {
 		log.Error("migrate", "err", err)
 		os.Exit(1)

@@ -45,6 +45,12 @@ func Migrate(db *sql.DB) error {
 			}
 			continue
 		}
+		if e.Name() == "018_issues.sql" {
+			if err := migrateIssues(db); err != nil {
+				return err
+			}
+			continue
+		}
 		b, err := migrationFS.ReadFile(e.Name())
 		if err != nil {
 			return err
@@ -649,6 +655,50 @@ func migrateManualItems(db *sql.DB) error {
 			ON correspondence_participants(contact_id, role, manual_item_id)
 			WHERE manual_item_id IS NOT NULL`,
 		`CREATE INDEX IF NOT EXISTS idx_corr_part_manual_item ON correspondence_participants(manual_item_id)`,
+	}
+	for _, stmt := range statements {
+		if _, err := db.Exec(stmt); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func migrateIssues(db *sql.DB) error {
+	statements := []string{
+		`CREATE TABLE IF NOT EXISTS issues (
+			id TEXT PRIMARY KEY NOT NULL,
+			organisation_id TEXT NOT NULL REFERENCES organisations(id) ON DELETE CASCADE,
+			project_id TEXT NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
+			title TEXT NOT NULL,
+			current_position_note TEXT NOT NULL DEFAULT '',
+			status TEXT NOT NULL CHECK (status IN ('open', 'awaiting_input', 'resolved')),
+			assignee_user_id TEXT REFERENCES users(id) ON DELETE SET NULL,
+			assignee_contact_id TEXT REFERENCES contacts(id) ON DELETE SET NULL,
+			created_at TEXT NOT NULL,
+			updated_at TEXT NOT NULL,
+			CHECK (
+				assignee_user_id IS NULL OR assignee_contact_id IS NULL
+			)
+		)`,
+		`CREATE INDEX IF NOT EXISTS idx_issues_project ON issues(project_id)`,
+		`CREATE INDEX IF NOT EXISTS idx_issues_org ON issues(organisation_id)`,
+		`CREATE TABLE IF NOT EXISTS issue_items (
+			id TEXT PRIMARY KEY NOT NULL,
+			issue_id TEXT NOT NULL REFERENCES issues(id) ON DELETE CASCADE,
+			message_id TEXT REFERENCES messages(id) ON DELETE CASCADE,
+			manual_item_id TEXT REFERENCES manual_items(id) ON DELETE CASCADE,
+			added_at TEXT NOT NULL,
+			CHECK (
+				(message_id IS NOT NULL AND manual_item_id IS NULL) OR
+				(message_id IS NULL AND manual_item_id IS NOT NULL)
+			)
+		)`,
+		`CREATE UNIQUE INDEX IF NOT EXISTS idx_issue_items_message
+			ON issue_items(message_id) WHERE message_id IS NOT NULL`,
+		`CREATE UNIQUE INDEX IF NOT EXISTS idx_issue_items_manual
+			ON issue_items(manual_item_id) WHERE manual_item_id IS NOT NULL`,
+		`CREATE INDEX IF NOT EXISTS idx_issue_items_issue ON issue_items(issue_id)`,
 	}
 	for _, stmt := range statements {
 		if _, err := db.Exec(stmt); err != nil {

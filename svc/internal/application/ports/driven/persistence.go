@@ -509,13 +509,52 @@ type TimelineItem struct {
 	ManualItemID *uuid.UUID
 	Channel      string
 	BodyText     string // manual evidence; empty for mail list view
+	IssueID      *uuid.UUID
 }
 
 // TimelineFilter narrows timeline listing.
 type TimelineFilter struct {
-	Source string // mail | manual | all
-	Limit  int
-	Offset int
+	Source            string // mail | manual | all
+	UnassignedToIssue bool
+	Limit             int
+	Offset            int
+}
+
+// IssueRow is a persisted project issue.
+type IssueRow struct {
+	ID                   uuid.UUID
+	OrganisationID       uuid.UUID
+	ProjectID            uuid.UUID
+	Title                string
+	CurrentPositionNote  string
+	Status               string
+	AssigneeUserID       *uuid.UUID
+	AssigneeContactID    *uuid.UUID
+	CreatedAt            time.Time
+	UpdatedAt            time.Time
+}
+
+// IssueItemRow links correspondence to an issue.
+type IssueItemRow struct {
+	ID           uuid.UUID
+	IssueID      uuid.UUID
+	MessageID    *uuid.UUID
+	ManualItemID *uuid.UUID
+	AddedAt      time.Time
+}
+
+// IssueRepository persists issues and trail links.
+type IssueRepository interface {
+	CreateIssue(ctx context.Context, row IssueRow) error
+	GetIssue(ctx context.Context, organisationID, issueID uuid.UUID) (*IssueRow, error)
+	ListIssuesByProject(ctx context.Context, organisationID, projectID uuid.UUID) ([]IssueRow, error)
+	UpdateIssue(ctx context.Context, row IssueRow) error
+	AddIssueItem(ctx context.Context, row IssueItemRow) error
+	RemoveIssueItem(ctx context.Context, organisationID, issueID, itemID uuid.UUID) error
+	GetIssueItem(ctx context.Context, organisationID, itemID uuid.UUID) (*IssueItemRow, error)
+	ListIssueItems(ctx context.Context, issueID uuid.UUID) ([]IssueItemRow, error)
+	FindIssueIDByMessage(ctx context.Context, messageID uuid.UUID) (*uuid.UUID, error)
+	FindIssueIDByManualItem(ctx context.Context, manualItemID uuid.UUID) (*uuid.UUID, error)
 }
 
 // ManualItemRepository persists pasted correspondence.

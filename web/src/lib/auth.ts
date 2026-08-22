@@ -420,6 +420,39 @@ export type TimelineItem = {
   manual_item_id?: string;
   channel?: string;
   body_text?: string;
+  issue_id?: string;
+};
+
+export type IssueListItem = {
+  id: string;
+  organisation_id: string;
+  project_id: string;
+  title: string;
+  current_position_note: string;
+  status: "open" | "awaiting_input" | "resolved";
+  assignee_user_id?: string;
+  assignee_contact_id?: string;
+  awaiting_me: boolean;
+  created_at: string;
+  updated_at: string;
+};
+
+export type IssueTrailItem = {
+  id: string;
+  issue_id: string;
+  source: "mail" | "manual";
+  title: string;
+  snippet?: string;
+  added_at: string;
+  occurred_at?: string;
+  message_id?: string;
+  manual_item_id?: string;
+  channel?: string;
+  account_id?: string;
+};
+
+export type IssueDetail = IssueListItem & {
+  items: IssueTrailItem[];
 };
 
 export type ManualItem = {
@@ -538,10 +571,11 @@ export async function clearMessageProjectOverride(accessToken: string, messageID
 export async function getProjectTimeline(
   accessToken: string,
   projectID: string,
-  opts?: { source?: string; limit?: number; offset?: number },
+  opts?: { source?: string; unassigned_to_issue?: boolean; limit?: number; offset?: number },
 ) {
   const params = new URLSearchParams();
   if (opts?.source) params.set("source", opts.source);
+  if (opts?.unassigned_to_issue) params.set("unassigned_to_issue", "true");
   if (typeof opts?.limit === "number") params.set("limit", String(opts.limit));
   if (typeof opts?.offset === "number") params.set("offset", String(opts.offset));
   const qs = params.toString();
@@ -549,6 +583,71 @@ export async function getProjectTimeline(
     `/api/projects/${projectID}/timeline${qs ? `?${qs}` : ""}`,
     { headers: toAuthHeader(accessToken) },
   );
+}
+
+export async function listProjectIssues(accessToken: string, projectID: string) {
+  return apiRequest<IssueListItem[]>(`/api/projects/${projectID}/issues`, {
+    headers: toAuthHeader(accessToken),
+  });
+}
+
+export async function createProjectIssue(
+  accessToken: string,
+  projectID: string,
+  body: {
+    title: string;
+    current_position_note?: string;
+    assignee_user_id?: string | null;
+    assignee_contact_id?: string | null;
+    item_refs?: { message_id?: string; manual_item_id?: string }[];
+  },
+) {
+  return apiRequest<IssueDetail>(`/api/projects/${projectID}/issues`, {
+    method: "POST",
+    headers: toAuthHeader(accessToken),
+    body: JSON.stringify(body),
+  });
+}
+
+export async function getIssue(accessToken: string, issueID: string) {
+  return apiRequest<IssueDetail>(`/api/issues/${issueID}`, {
+    headers: toAuthHeader(accessToken),
+  });
+}
+
+export async function updateIssue(
+  accessToken: string,
+  issueID: string,
+  body: Record<string, unknown>,
+) {
+  return apiRequest<IssueDetail>(`/api/issues/${issueID}`, {
+    method: "PATCH",
+    headers: toAuthHeader(accessToken),
+    body: JSON.stringify(body),
+  });
+}
+
+export async function addIssueItem(
+  accessToken: string,
+  issueID: string,
+  body: { message_id?: string; manual_item_id?: string },
+) {
+  return apiRequest<IssueDetail>(`/api/issues/${issueID}/items`, {
+    method: "POST",
+    headers: toAuthHeader(accessToken),
+    body: JSON.stringify(body),
+  });
+}
+
+export async function removeIssueItem(
+  accessToken: string,
+  issueID: string,
+  itemID: string,
+) {
+  return apiRequest<IssueDetail>(`/api/issues/${issueID}/items/${itemID}`, {
+    method: "DELETE",
+    headers: toAuthHeader(accessToken),
+  });
 }
 
 export async function createManualItem(

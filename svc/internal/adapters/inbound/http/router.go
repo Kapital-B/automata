@@ -17,6 +17,7 @@ import (
 	appaccounts "github.com/Kapital-B/automata/svc/internal/application/accounts"
 	"github.com/Kapital-B/automata/svc/internal/application/auth"
 	appcontacts "github.com/Kapital-B/automata/svc/internal/application/contacts"
+	appissues "github.com/Kapital-B/automata/svc/internal/application/issues"
 	appmessages "github.com/Kapital-B/automata/svc/internal/application/messages"
 	appprojects "github.com/Kapital-B/automata/svc/internal/application/projects"
 	"github.com/Kapital-B/automata/svc/internal/application/ports/driven"
@@ -38,6 +39,7 @@ type Handlers struct {
 	AuthSvc         *auth.Service
 	ContactSvc      *appcontacts.Service
 	ProjectSvc      *appprojects.Service
+	IssueSvc        *appissues.Service
 	Accounts        driven.AccountRepository
 	Messages        driven.MessageRepository
 	JobRuns         driven.JobRunRepository
@@ -49,6 +51,7 @@ type Handlers struct {
 	Contacts        driven.ContactRepository
 	Projects        driven.ProjectRepository
 	Assignments     driven.AssignmentRepository
+	Issues          driven.IssueRepository
 	Dashboard       string
 	SuccessPath     string
 	ErrorPath       string
@@ -91,6 +94,12 @@ func (h *Handlers) Routes() http.Handler {
 	r.Patch("/api/projects/{id}", h.updateProject)
 	r.Patch("/api/projects/{id}/member", h.updateProjectMember)
 	r.Get("/api/projects/{id}/timeline", h.getProjectTimeline)
+	r.Get("/api/projects/{id}/issues", h.listProjectIssues)
+	r.Post("/api/projects/{id}/issues", h.createProjectIssue)
+	r.Get("/api/issues/{id}", h.getIssue)
+	r.Patch("/api/issues/{id}", h.updateIssue)
+	r.Post("/api/issues/{id}/items", h.addIssueItem)
+	r.Delete("/api/issues/{id}/items/{itemID}", h.removeIssueItem)
 	r.Get("/api/unassigned/summary", h.unassignedSummary)
 	r.Get("/api/unassigned", h.listUnassigned)
 	r.Post("/api/messages/{id}/project-assignment", h.assignMessageProject)

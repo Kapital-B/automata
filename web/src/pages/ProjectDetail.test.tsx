@@ -31,6 +31,9 @@ vi.mock("@/lib/auth", async () => {
     getProjectTimeline: vi.fn(),
     createManualItem: vi.fn(),
     listContacts: vi.fn(),
+    listProjectIssues: vi.fn(),
+    createProjectIssue: vi.fn(),
+    addIssueItem: vi.fn(),
     updateProject: vi.fn(),
     updateProjectMember: vi.fn(),
   };
@@ -40,6 +43,9 @@ const getProject = vi.mocked(auth.getProject);
 const getProjectTimeline = vi.mocked(auth.getProjectTimeline);
 const createManualItem = vi.mocked(auth.createManualItem);
 const listContacts = vi.mocked(auth.listContacts);
+const listProjectIssues = vi.mocked(auth.listProjectIssues);
+const createProjectIssue = vi.mocked(auth.createProjectIssue);
+const addIssueItem = vi.mocked(auth.addIssueItem);
 
 describe("Project timeline UI", () => {
   beforeEach(() => {
@@ -47,7 +53,11 @@ describe("Project timeline UI", () => {
     getProjectTimeline.mockReset();
     createManualItem.mockReset();
     listContacts.mockReset();
+    listProjectIssues.mockReset();
+    createProjectIssue.mockReset();
+    addIssueItem.mockReset();
     listContacts.mockResolvedValue([]);
+    listProjectIssues.mockResolvedValue([]);
     getProject.mockResolvedValue({
       id: "p1",
       organisation_id: "o1",
@@ -80,6 +90,96 @@ describe("Project timeline UI", () => {
         message_id: "msg1",
       },
     ]);
+  });
+
+  it("creates an issue from the project page", async () => {
+    const client = new QueryClient({
+      defaultOptions: { queries: { retry: false }, mutations: { retry: false } },
+    });
+    createProjectIssue.mockResolvedValue({
+      id: "iss1",
+      organisation_id: "o1",
+      project_id: "p1",
+      title: "Pump P-03",
+      current_position_note: "",
+      status: "open",
+      awaiting_me: false,
+      created_at: "2026-03-03T00:00:00Z",
+      updated_at: "2026-03-03T00:00:00Z",
+      items: [],
+    });
+
+    render(
+      <QueryClientProvider client={client}>
+        <MemoryRouter initialEntries={["/projects/p1"]}>
+          <Routes>
+            <Route path="/projects/:id" element={<ProjectDetailPage />} />
+          </Routes>
+        </MemoryRouter>
+      </QueryClientProvider>,
+    );
+
+    expect(await screen.findByText("Cooling Upgrade")).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: /new issue/i }));
+    fireEvent.change(screen.getByPlaceholderText(/pump p-03/i), {
+      target: { value: "Pump P-03" },
+    });
+    fireEvent.click(screen.getByRole("button", { name: /^create$/i }));
+    await waitFor(() =>
+      expect(createProjectIssue).toHaveBeenCalledWith("token", "p1", { title: "Pump P-03" }),
+    );
+  });
+
+  it("attaches a timeline item to an issue", async () => {
+    const client = new QueryClient({
+      defaultOptions: { queries: { retry: false }, mutations: { retry: false } },
+    });
+    listProjectIssues.mockResolvedValue([
+      {
+        id: "iss1",
+        organisation_id: "o1",
+        project_id: "p1",
+        title: "Pump P-03",
+        current_position_note: "",
+        status: "open",
+        awaiting_me: false,
+        created_at: "2026-03-03T00:00:00Z",
+        updated_at: "2026-03-03T00:00:00Z",
+      },
+    ]);
+    addIssueItem.mockResolvedValue({
+      id: "iss1",
+      organisation_id: "o1",
+      project_id: "p1",
+      title: "Pump P-03",
+      current_position_note: "",
+      status: "open",
+      awaiting_me: false,
+      created_at: "2026-03-03T00:00:00Z",
+      updated_at: "2026-03-03T00:00:00Z",
+      items: [],
+    });
+
+    render(
+      <QueryClientProvider client={client}>
+        <MemoryRouter initialEntries={["/projects/p1"]}>
+          <Routes>
+            <Route path="/projects/:id" element={<ProjectDetailPage />} />
+          </Routes>
+        </MemoryRouter>
+      </QueryClientProvider>,
+    );
+
+    expect(await screen.findByText("Teams note")).toBeInTheDocument();
+    const attachSelect = screen.getAllByLabelText(/attach to issue/i)[0]!;
+    fireEvent.change(attachSelect, { target: { value: "iss1" } });
+    fireEvent.click(screen.getAllByRole("button", { name: /^attach$/i })[0]!);
+    await waitFor(() =>
+      expect(addIssueItem).toHaveBeenCalledWith("token", "iss1", {
+        message_id: undefined,
+        manual_item_id: "man1",
+      }),
+    );
   });
 
   it("renders timeline mail and manual in order and paste submits", async () => {

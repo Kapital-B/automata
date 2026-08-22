@@ -505,8 +505,7 @@ func (h *Handlers) getProjectTimeline(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	filter := driven.TimelineFilter{Source: strings.TrimSpace(r.URL.Query().Get("source"))}
-	// unassigned_to_issue is accepted and ignored until 1d (all items qualify).
-	_ = r.URL.Query().Get("unassigned_to_issue")
+	filter.UnassignedToIssue = r.URL.Query().Get("unassigned_to_issue") == "true"
 	if v := r.URL.Query().Get("limit"); v != "" {
 		n, err := strconv.Atoi(v)
 		if err != nil {
@@ -559,6 +558,9 @@ func (h *Handlers) getProjectTimeline(w http.ResponseWriter, r *http.Request) {
 			row["manual_item_id"] = it.ManualItemID.String()
 			row["channel"] = it.Channel
 			row["body_text"] = it.BodyText
+		}
+		if it.IssueID != nil {
+			row["issue_id"] = it.IssueID.String()
 		}
 		out = append(out, row)
 	}
