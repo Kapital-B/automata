@@ -38,6 +38,11 @@ vi.mock("@/lib/auth", async () => {
     addIssueItem: vi.fn(),
     updateProject: vi.fn(),
     updateProjectMember: vi.fn(),
+    getCurrentPosition: vi.fn(),
+    listProjectFacts: vi.fn(),
+    createProjectFact: vi.fn(),
+    confirmFactVersion: vi.fn(),
+    rejectFactVersion: vi.fn(),
   };
 });
 
@@ -50,6 +55,9 @@ const createProjectIssue = vi.mocked(auth.createProjectIssue);
 const suggestProjectIssue = vi.mocked(auth.suggestProjectIssue);
 const getApiHealth = vi.mocked(auth.getApiHealth);
 const addIssueItem = vi.mocked(auth.addIssueItem);
+const getCurrentPosition = vi.mocked(auth.getCurrentPosition);
+const listProjectFacts = vi.mocked(auth.listProjectFacts);
+const createProjectFact = vi.mocked(auth.createProjectFact);
 
 describe("Project timeline UI", () => {
   beforeEach(() => {
@@ -62,8 +70,13 @@ describe("Project timeline UI", () => {
     suggestProjectIssue.mockReset();
     getApiHealth.mockReset();
     addIssueItem.mockReset();
+    getCurrentPosition.mockReset();
+    listProjectFacts.mockReset();
+    createProjectFact.mockReset();
     listContacts.mockResolvedValue([]);
     listProjectIssues.mockResolvedValue([]);
+    getCurrentPosition.mockResolvedValue({ facts: [], decisions: [] });
+    listProjectFacts.mockResolvedValue([]);
     getApiHealth.mockResolvedValue({ status: "ok", llm: true });
     suggestProjectIssue.mockResolvedValue({
       title: "Pump P-03",
@@ -281,6 +294,113 @@ describe("Project timeline UI", () => {
         expect.objectContaining({
           body_text: "90 kW is approved",
           project_id: "p1",
+        }),
+      ),
+    );
+  });
+
+  it("shows current position and creates a confirmed fact", async () => {
+    const client = new QueryClient({
+      defaultOptions: { queries: { retry: false }, mutations: { retry: false } },
+    });
+    getCurrentPosition.mockResolvedValue({
+      facts: [
+        {
+          fact_id: "f1",
+          subject_key: "pump.p03.duty_kw",
+          label: "Pump P-03 duty",
+          version_id: "v1",
+          value_json: 90,
+          value_text: "90",
+          unit: "kW",
+          evidence_count: 1,
+        },
+      ],
+      decisions: [],
+    });
+    listProjectFacts.mockResolvedValue([
+      {
+        id: "f1",
+        organisation_id: "o1",
+        project_id: "p1",
+        subject_key: "pump.p03.duty_kw",
+        label: "Pump P-03 duty",
+        created_at: "2026-03-01T00:00:00Z",
+        updated_at: "2026-03-02T00:00:00Z",
+        versions: [
+          {
+            id: "v1",
+            fact_id: "f1",
+            status: "active",
+            value_json: 90,
+            value_text: "90",
+            unit: "kW",
+            source: "user",
+            created_at: "2026-03-02T00:00:00Z",
+            evidence: [],
+          },
+        ],
+      },
+    ]);
+    createProjectFact.mockResolvedValue({
+      id: "f2",
+      organisation_id: "o1",
+      project_id: "p1",
+      subject_key: "pump.p03.flow",
+      label: "Pump P-03 flow",
+      created_at: "2026-03-03T00:00:00Z",
+      updated_at: "2026-03-03T00:00:00Z",
+      versions: [
+        {
+          id: "v2",
+          fact_id: "f2",
+          status: "active",
+          value_json: 12,
+          value_text: "12",
+          unit: "L/s",
+          source: "user",
+          created_at: "2026-03-03T00:00:00Z",
+          evidence: [],
+        },
+      ],
+    });
+
+    render(
+      <QueryClientProvider client={client}>
+        <MemoryRouter initialEntries={["/projects/p1"]}>
+          <Routes>
+            <Route path="/projects/:id" element={<ProjectDetailPage />} />
+          </Routes>
+        </MemoryRouter>
+      </QueryClientProvider>,
+    );
+
+    const position = await screen.findByLabelText(/current position/i);
+    expect(position).toHaveTextContent("Pump P-03 duty");
+    expect(position).toHaveTextContent("90 kW");
+    expect(screen.getByRole("heading", { name: /^facts$/i })).toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole("button", { name: /^add fact$/i }));
+    fireEvent.change(screen.getByPlaceholderText("pump.p03.duty_kw"), {
+      target: { value: "pump.p03.flow" },
+    });
+    fireEvent.change(screen.getByPlaceholderText("Pump P-03 duty"), {
+      target: { value: "Pump P-03 flow" },
+    });
+    fireEvent.change(screen.getByPlaceholderText("90"), { target: { value: "12" } });
+    fireEvent.change(screen.getByPlaceholderText("kW"), { target: { value: "L/s" } });
+    fireEvent.click(screen.getByRole("button", { name: /save fact/i }));
+
+    await waitFor(() =>
+      expect(createProjectFact).toHaveBeenCalledWith(
+        "token",
+        "p1",
+        expect.objectContaining({
+          subject_key: "pump.p03.flow",
+          label: "Pump P-03 flow",
+          value: 12,
+          unit: "L/s",
+          confirm: true,
         }),
       ),
     );

@@ -85,6 +85,8 @@ Open **`authorization_url`** from parsed JSON (`jq -r .authorization_url`) so `&
 | Timeline / paste | `GET /api/projects/{id}/timeline`, `POST /api/manual-items` |
 | Issues | `GET/POST /api/projects/{id}/issues`, `GET/PATCH /api/issues/{id}`, items attach/detach |
 | Suggest | `POST /api/projects/{id}/issues/suggest` (requires `LLM_BASE_URL` + `LLM_MODEL`; confirm via create) |
+| Facts (Wave 2a) | `GET/POST /api/projects/{id}/facts`, `GET /api/facts/{id}`, confirm/reject versions, evidence attach/detach |
+| Current position | `GET /api/projects/{id}/current-position` (active facts; decisions empty until 2d) |
 
 `GET /api/health` returns `{ "status": "ok", "llm": true|false }`.
 

@@ -458,6 +458,59 @@ export type IssueDetail = IssueListItem & {
   items: IssueTrailItem[];
 };
 
+export type FactEvidence = {
+  id: string;
+  fact_version_id: string;
+  message_id?: string;
+  manual_item_id?: string;
+  added_at: string;
+};
+
+export type FactVersion = {
+  id: string;
+  fact_id: string;
+  status: "proposed" | "active" | "superseded" | "rejected";
+  value_json: unknown;
+  value_text: string;
+  unit?: string;
+  source: string;
+  confidence?: number;
+  supersedes_version_id?: string;
+  superseded_by_version_id?: string;
+  superseded_at?: string;
+  created_by_user_id?: string;
+  created_at: string;
+  evidence: FactEvidence[];
+};
+
+export type FactDetail = {
+  id: string;
+  organisation_id: string;
+  project_id: string;
+  issue_id?: string;
+  subject_key: string;
+  label: string;
+  created_at: string;
+  updated_at: string;
+  versions: FactVersion[];
+};
+
+export type CurrentPositionFact = {
+  fact_id: string;
+  subject_key: string;
+  label: string;
+  version_id: string;
+  value_json: unknown;
+  value_text: string;
+  unit?: string;
+  evidence_count: number;
+};
+
+export type CurrentPosition = {
+  facts: CurrentPositionFact[];
+  decisions: unknown[];
+};
+
 export type ManualItem = {
   id: string;
   organisation_id: string;
@@ -684,6 +737,98 @@ export async function removeIssueItem(
     method: "DELETE",
     headers: toAuthHeader(accessToken),
   });
+}
+
+export async function listProjectFacts(
+  accessToken: string,
+  projectID: string,
+  opts?: { include?: Array<"proposed" | "history"> },
+) {
+  const params = new URLSearchParams();
+  if (opts?.include?.length) params.set("include", opts.include.join(","));
+  const qs = params.toString();
+  return apiRequest<FactDetail[]>(
+    `/api/projects/${projectID}/facts${qs ? `?${qs}` : ""}`,
+    { headers: toAuthHeader(accessToken) },
+  );
+}
+
+export async function getCurrentPosition(accessToken: string, projectID: string) {
+  return apiRequest<CurrentPosition>(`/api/projects/${projectID}/current-position`, {
+    headers: toAuthHeader(accessToken),
+  });
+}
+
+export async function createProjectFact(
+  accessToken: string,
+  projectID: string,
+  body: {
+    subject_key: string;
+    label: string;
+    value: unknown;
+    unit?: string;
+    issue_id?: string;
+    confirm?: boolean;
+    supersedes_version_id?: string;
+    evidence?: { message_id?: string; manual_item_id?: string }[];
+  },
+) {
+  return apiRequest<FactDetail>(`/api/projects/${projectID}/facts`, {
+    method: "POST",
+    headers: toAuthHeader(accessToken),
+    body: JSON.stringify(body),
+  });
+}
+
+export async function getFact(accessToken: string, factID: string) {
+  return apiRequest<FactDetail>(`/api/facts/${factID}`, {
+    headers: toAuthHeader(accessToken),
+  });
+}
+
+export async function confirmFactVersion(
+  accessToken: string,
+  versionID: string,
+  body?: { supersedes_version_id?: string },
+) {
+  return apiRequest<FactDetail>(`/api/fact-versions/${versionID}/confirm`, {
+    method: "POST",
+    headers: toAuthHeader(accessToken),
+    body: JSON.stringify(body ?? {}),
+  });
+}
+
+export async function rejectFactVersion(accessToken: string, versionID: string) {
+  return apiRequest<FactDetail>(`/api/fact-versions/${versionID}/reject`, {
+    method: "POST",
+    headers: toAuthHeader(accessToken),
+  });
+}
+
+export async function addFactEvidence(
+  accessToken: string,
+  versionID: string,
+  body: { message_id?: string; manual_item_id?: string },
+) {
+  return apiRequest<FactDetail>(`/api/fact-versions/${versionID}/evidence`, {
+    method: "POST",
+    headers: toAuthHeader(accessToken),
+    body: JSON.stringify(body),
+  });
+}
+
+export async function removeFactEvidence(
+  accessToken: string,
+  versionID: string,
+  evidenceID: string,
+) {
+  return apiRequest<FactDetail>(
+    `/api/fact-versions/${versionID}/evidence/${evidenceID}`,
+    {
+      method: "DELETE",
+      headers: toAuthHeader(accessToken),
+    },
+  );
 }
 
 export async function createManualItem(

@@ -20,6 +20,7 @@ import (
 	appaccounts "github.com/Kapital-B/automata/svc/internal/application/accounts"
 	"github.com/Kapital-B/automata/svc/internal/application/auth"
 	appcontacts "github.com/Kapital-B/automata/svc/internal/application/contacts"
+	appfacts "github.com/Kapital-B/automata/svc/internal/application/facts"
 	appissues "github.com/Kapital-B/automata/svc/internal/application/issues"
 	appmessages "github.com/Kapital-B/automata/svc/internal/application/messages"
 	appprojects "github.com/Kapital-B/automata/svc/internal/application/projects"
@@ -121,6 +122,15 @@ func main() {
 		Contacts:    repo,
 		Messages:    repo,
 		Timeline:    repo,
+	}
+	factSvc := &appfacts.Service{
+		Users:       repo,
+		Projects:    repo,
+		Facts:       repo,
+		Issues:      repo,
+		Assignments: repo,
+		Manuals:     repo,
+		Messages:    repo,
 	}
 	assignSvc := &appprojects.AssignService{
 		Users:       repo,
@@ -225,6 +235,7 @@ func main() {
 		ContactSvc:      contactSvc,
 		ProjectSvc:      projectSvc,
 		IssueSvc:        issueSvc,
+		FactSvc:         factSvc,
 		Accounts:        repo,
 		Messages:        repo,
 		JobRuns:         repo,

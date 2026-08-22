@@ -17,6 +17,7 @@ import (
 	appaccounts "github.com/Kapital-B/automata/svc/internal/application/accounts"
 	"github.com/Kapital-B/automata/svc/internal/application/auth"
 	appcontacts "github.com/Kapital-B/automata/svc/internal/application/contacts"
+	appfacts "github.com/Kapital-B/automata/svc/internal/application/facts"
 	appissues "github.com/Kapital-B/automata/svc/internal/application/issues"
 	appmessages "github.com/Kapital-B/automata/svc/internal/application/messages"
 	appprojects "github.com/Kapital-B/automata/svc/internal/application/projects"
@@ -40,6 +41,7 @@ type Handlers struct {
 	ContactSvc      *appcontacts.Service
 	ProjectSvc      *appprojects.Service
 	IssueSvc        *appissues.Service
+	FactSvc         *appfacts.Service
 	Accounts        driven.AccountRepository
 	Messages        driven.MessageRepository
 	JobRuns         driven.JobRunRepository
@@ -94,6 +96,14 @@ func (h *Handlers) Routes() http.Handler {
 	r.Patch("/api/projects/{id}", h.updateProject)
 	r.Patch("/api/projects/{id}/member", h.updateProjectMember)
 	r.Get("/api/projects/{id}/timeline", h.getProjectTimeline)
+	r.Get("/api/projects/{id}/current-position", h.getProjectCurrentPosition)
+	r.Get("/api/projects/{id}/facts", h.listProjectFacts)
+	r.Post("/api/projects/{id}/facts", h.createProjectFact)
+	r.Get("/api/facts/{id}", h.getFact)
+	r.Post("/api/fact-versions/{id}/confirm", h.confirmFactVersion)
+	r.Post("/api/fact-versions/{id}/reject", h.rejectFactVersion)
+	r.Post("/api/fact-versions/{id}/evidence", h.addFactEvidence)
+	r.Delete("/api/fact-versions/{id}/evidence/{evidenceID}", h.removeFactEvidence)
 	r.Get("/api/projects/{id}/issues", h.listProjectIssues)
 	r.Post("/api/projects/{id}/issues/suggest", h.suggestProjectIssue)
 	r.Post("/api/projects/{id}/issues", h.createProjectIssue)

@@ -23,16 +23,22 @@ import { useAccountsData } from "@/hooks/useAccountsData";
 import {
   ApiError,
   addIssueItem,
+  confirmFactVersion,
   createManualItem,
+  createProjectFact,
   createProjectIssue,
+  getCurrentPosition,
   getProject,
   getProjectTimeline,
   getApiHealth,
   listContacts,
+  listProjectFacts,
   listProjectIssues,
+  rejectFactVersion,
   suggestProjectIssue,
   updateProject,
   updateProjectMember,
+  type FactDetail,
   type IssueListItem,
   type TimelineItem,
 } from "@/lib/auth";
@@ -69,6 +75,16 @@ export default function ProjectDetailPage() {
     { message_id?: string; manual_item_id?: string }[]
   >([]);
   const [suggestMeta, setSuggestMeta] = useState<string | null>(null);
+  const [createFactOpen, setCreateFactOpen] = useState(false);
+  const [factSubjectKey, setFactSubjectKey] = useState("pump.p03.duty_kw");
+  const [factLabel, setFactLabel] = useState("");
+  const [factValue, setFactValue] = useState("");
+  const [factUnit, setFactUnit] = useState("");
+  const [factConfirmNow, setFactConfirmNow] = useState(true);
+  const [factEvidence, setFactEvidence] = useState<
+    { message_id?: string; manual_item_id?: string }[]
+  >([]);
+  const [expandedFactID, setExpandedFactID] = useState<string | null>(null);
 
   const projectQuery = useQuery({
     queryKey: ["project", accessToken, id],
@@ -88,6 +104,17 @@ export default function ProjectDetailPage() {
   const issuesQuery = useQuery({
     queryKey: ["project-issues", accessToken, id],
     queryFn: () => listProjectIssues(accessToken!, id!),
+    enabled: Boolean(accessToken && id),
+  });
+  const currentPositionQuery = useQuery({
+    queryKey: ["project-current-position", accessToken, id],
+    queryFn: () => getCurrentPosition(accessToken!, id!),
+    enabled: Boolean(accessToken && id),
+  });
+  const factsQuery = useQuery({
+    queryKey: ["project-facts", accessToken, id],
+    queryFn: () =>
+      listProjectFacts(accessToken!, id!, { include: ["proposed", "history"] }),
     enabled: Boolean(accessToken && id),
   });
   const healthQuery = useQuery({
@@ -183,6 +210,91 @@ export default function ProjectDetailPage() {
       });
     },
   });
+
+  const invalidateFacts = async () => {
+    await queryClient.invalidateQueries({ queryKey: ["project-facts"] });
+    await queryClient.invalidateQueries({ queryKey: ["project-current-position"] });
+  };
+
+  const createFactMutation = useMutation({
+    mutationFn: async () => {
+      if (!accessToken || !id) throw new Error("Not authenticated");
+      const trimmed = factValue.trim();
+      const asNumber = Number(trimmed);
+      const value =
+        trimmed !== "" && !Number.isNaN(asNumber) && /^-?\d+(\.\d+)?$/.test(trimmed)
+          ? asNumber
+          : trimmed;
+      const existing = (factsQuery.data ?? []).find((f) => f.subject_key === factSubjectKey.trim());
+      const active = existing?.versions.find((v) => v.status === "active");
+      return createProjectFact(accessToken, id, {
+        subject_key: factSubjectKey.trim(),
+        label: factLabel.trim(),
+        value,
+        unit: factUnit.trim() || undefined,
+        confirm: factConfirmNow,
+        supersedes_version_id:
+          factConfirmNow && active ? active.id : undefined,
+        evidence: factEvidence.length > 0 ? factEvidence : undefined,
+      });
+    },
+    onSuccess: async () => {
+      toast({ title: factConfirmNow ? "Fact confirmed" : "Fact proposed" });
+      setCreateFactOpen(false);
+      setFactLabel("");
+      setFactValue("");
+      setFactUnit("");
+      setFactEvidence([]);
+      setFactConfirmNow(true);
+      await invalidateFacts();
+    },
+    onError: (err) => {
+      toast({
+        title: "Could not save fact",
+        description: err instanceof ApiError ? err.message : "Please try again.",
+        variant: "destructive",
+      });
+    },
+  });
+
+  const confirmFactMutation = useMutation({
+    mutationFn: async (args: { versionID: string; supersedesVersionID?: string }) => {
+      if (!accessToken) throw new Error("Not authenticated");
+      return confirmFactVersion(accessToken, args.versionID, {
+        supersedes_version_id: args.supersedesVersionID,
+      });
+    },
+    onSuccess: async () => {
+      toast({ title: "Fact confirmed" });
+      await invalidateFacts();
+    },
+    onError: (err) => {
+      toast({
+        title: "Confirm failed",
+        description: err instanceof ApiError ? err.message : "Please try again.",
+        variant: "destructive",
+      });
+    },
+  });
+
+  const rejectFactMutation = useMutation({
+    mutationFn: async (versionID: string) => {
+      if (!accessToken) throw new Error("Not authenticated");
+      return rejectFactVersion(accessToken, versionID);
+    },
+    onSuccess: async () => {
+      toast({ title: "Proposal rejected" });
+      await invalidateFacts();
+    },
+    onError: (err) => {
+      toast({
+        title: "Reject failed",
+        description: err instanceof ApiError ? err.message : "Please try again.",
+        variant: "destructive",
+      });
+    },
+  });
+
   const [name, setName] = useState("");
   const [keywords, setKeywords] = useState("");
   const [role, setRole] = useState("");
@@ -275,9 +387,74 @@ export default function ProjectDetailPage() {
       <PageHeader
         eyebrow={project.code}
         title={project.name}
-        description="Correspondence timeline with an issues rail for trails."
+        description="Correspondence timeline with current position, facts, and an issues rail."
         actions={
           <div className="flex flex-wrap gap-2">
+            <Dialog open={createFactOpen} onOpenChange={setCreateFactOpen}>
+              <DialogTrigger asChild>
+                <Button variant="outline">Add fact</Button>
+              </DialogTrigger>
+              <DialogContent>
+                <DialogHeader>
+                  <DialogTitle>Add fact</DialogTitle>
+                  <DialogDescription>
+                    Creates a versioned assertion. Same subject key appends a new version —
+                    never overwrites in place.
+                  </DialogDescription>
+                </DialogHeader>
+                <div className="space-y-3">
+                  <Input
+                    value={factSubjectKey}
+                    onChange={(e) => setFactSubjectKey(e.target.value)}
+                    placeholder="pump.p03.duty_kw"
+                  />
+                  <Input
+                    value={factLabel}
+                    onChange={(e) => setFactLabel(e.target.value)}
+                    placeholder="Pump P-03 duty"
+                  />
+                  <div className="flex gap-2">
+                    <Input
+                      value={factValue}
+                      onChange={(e) => setFactValue(e.target.value)}
+                      placeholder="90"
+                      className="flex-1"
+                    />
+                    <Input
+                      value={factUnit}
+                      onChange={(e) => setFactUnit(e.target.value)}
+                      placeholder="kW"
+                      className="w-24"
+                    />
+                  </div>
+                  <label className="flex items-center gap-2 text-sm">
+                    <input
+                      type="checkbox"
+                      checked={factConfirmNow}
+                      onChange={(e) => setFactConfirmNow(e.target.checked)}
+                    />
+                    Confirm as active now
+                  </label>
+                  {factEvidence.length > 0 ? (
+                    <p className="text-xs text-muted-foreground">
+                      {factEvidence.length} evidence item(s) attached
+                    </p>
+                  ) : null}
+                  <Button
+                    className="w-full"
+                    disabled={
+                      !factSubjectKey.trim() ||
+                      !factLabel.trim() ||
+                      !factValue.trim() ||
+                      createFactMutation.isPending
+                    }
+                    onClick={() => createFactMutation.mutate()}
+                  >
+                    {createFactMutation.isPending ? "Saving…" : "Save fact"}
+                  </Button>
+                </div>
+              </DialogContent>
+            </Dialog>
             <Dialog
               open={createIssueOpen}
               onOpenChange={(open) => {
@@ -427,7 +604,34 @@ export default function ProjectDetailPage() {
         </div>
       </details>
 
-      <div className="grid gap-8 lg:grid-cols-[minmax(0,1fr)_220px]">
+      <section
+        aria-label="Current position"
+        className="border-y border-border/70 py-3"
+      >
+        <h2 className="mb-2 text-xs font-medium uppercase tracking-wider text-muted-foreground">
+          Current position
+        </h2>
+        {currentPositionQuery.isLoading ? (
+          <Loader2 className="h-4 w-4 animate-spin text-muted-foreground" />
+        ) : (currentPositionQuery.data?.facts ?? []).length === 0 ? (
+          <p className="text-sm text-muted-foreground">No active facts yet.</p>
+        ) : (
+          <ul className="flex flex-wrap gap-x-6 gap-y-2">
+            {(currentPositionQuery.data?.facts ?? []).map((f) => (
+              <li key={f.version_id} className="text-sm">
+                <span className="text-muted-foreground">{f.label}</span>
+                <span className="mx-1.5 text-muted-foreground/60">·</span>
+                <span className="font-medium">
+                  {f.value_text}
+                  {f.unit ? ` ${f.unit}` : ""}
+                </span>
+              </li>
+            ))}
+          </ul>
+        )}
+      </section>
+
+      <div className="grid gap-8 lg:grid-cols-[minmax(0,1fr)_240px]">
         <div className="space-y-4">
       <div className="flex flex-wrap gap-2">
         {(["all", "mail", "manual"] as const).map((s) => (
@@ -489,13 +693,53 @@ export default function ProjectDetailPage() {
                 setSuggestMeta("Pre-attached from timeline");
                 setCreateIssueOpen(true);
               }}
+              onAddFactEvidence={() => {
+                setFactEvidence([
+                  item.message_id
+                    ? { message_id: item.message_id }
+                    : { manual_item_id: item.manual_item_id },
+                ].filter((r) => r.message_id || r.manual_item_id));
+                setFactLabel(item.title?.trim() || "");
+                setCreateFactOpen(true);
+              }}
             />
           ))}
         </ol>
       )}
         </div>
 
-        <aside className="space-y-3 lg:border-l lg:border-border/70 lg:pl-4">
+        <aside className="space-y-6 lg:border-l lg:border-border/70 lg:pl-4">
+          <div className="space-y-3">
+            <h2 className="text-sm font-medium uppercase tracking-wider text-muted-foreground">
+              Facts
+            </h2>
+            {factsQuery.isLoading ? (
+              <Loader2 className="h-4 w-4 animate-spin text-muted-foreground" />
+            ) : (factsQuery.data ?? []).length === 0 ? (
+              <p className="text-xs text-muted-foreground">No facts yet.</p>
+            ) : (
+              <ul className="space-y-3">
+                {(factsQuery.data ?? []).map((fact) => (
+                  <FactRailItem
+                    key={fact.id}
+                    fact={fact}
+                    expanded={expandedFactID === fact.id}
+                    onToggle={() =>
+                      setExpandedFactID((cur) => (cur === fact.id ? null : fact.id))
+                    }
+                    confirming={confirmFactMutation.isPending}
+                    rejecting={rejectFactMutation.isPending}
+                    onConfirm={(versionID, supersedesVersionID) =>
+                      confirmFactMutation.mutate({ versionID, supersedesVersionID })
+                    }
+                    onReject={(versionID) => rejectFactMutation.mutate(versionID)}
+                  />
+                ))}
+              </ul>
+            )}
+          </div>
+
+          <div className="space-y-3">
           <h2 className="text-sm font-medium uppercase tracking-wider text-muted-foreground">
             Issues
           </h2>
@@ -521,9 +765,91 @@ export default function ProjectDetailPage() {
               ))}
             </ul>
           )}
+          </div>
         </aside>
       </div>
     </div>
+  );
+}
+
+function FactRailItem({
+  fact,
+  expanded,
+  onToggle,
+  confirming,
+  rejecting,
+  onConfirm,
+  onReject,
+}: {
+  fact: FactDetail;
+  expanded: boolean;
+  onToggle: () => void;
+  confirming: boolean;
+  rejecting: boolean;
+  onConfirm: (versionID: string, supersedesVersionID?: string) => void;
+  onReject: (versionID: string) => void;
+}) {
+  const active = fact.versions.find((v) => v.status === "active");
+  const proposed = fact.versions.filter((v) => v.status === "proposed");
+  const history = fact.versions.filter(
+    (v) => v.status === "superseded" || v.status === "rejected",
+  );
+  const display = active ?? proposed[0];
+  return (
+    <li className="text-sm">
+      <button type="button" className="w-full text-left hover:underline" onClick={onToggle}>
+        <span className="font-medium">{fact.label}</span>
+        <span className="mt-0.5 block text-xs text-muted-foreground">
+          {display
+            ? `${display.value_text}${display.unit ? ` ${display.unit}` : ""} · ${display.status}`
+            : fact.subject_key}
+        </span>
+      </button>
+      {expanded ? (
+        <div className="mt-2 space-y-2 border-l border-border/60 pl-2">
+          {proposed.map((v) => (
+            <div key={v.id} className="space-y-1">
+              <p className="text-xs text-muted-foreground">
+                Proposed: {v.value_text}
+                {v.unit ? ` ${v.unit}` : ""}
+              </p>
+              <div className="flex flex-wrap gap-1">
+                <Button
+                  size="sm"
+                  className="h-7 text-xs"
+                  disabled={confirming}
+                  onClick={() => onConfirm(v.id, active?.id)}
+                >
+                  Confirm
+                </Button>
+                <Button
+                  size="sm"
+                  variant="outline"
+                  className="h-7 text-xs"
+                  disabled={rejecting}
+                  onClick={() => onReject(v.id)}
+                >
+                  Reject
+                </Button>
+              </div>
+            </div>
+          ))}
+          {history.length > 0 ? (
+            <ul className="space-y-1 text-xs text-muted-foreground">
+              {history.map((v) => (
+                <li key={v.id}>
+                  {v.status}: {v.value_text}
+                  {v.unit ? ` ${v.unit}` : ""}
+                  {v.evidence?.length
+                    ? ` · ${v.evidence.length} evidence`
+                    : ""}
+                </li>
+              ))}
+            </ul>
+          ) : null}
+        </div>
+      ) : null}
+    </li>
   );
 }
 
@@ -535,6 +861,7 @@ function TimelineRow({
   attaching,
   onAttach,
   onCreateIssue,
+  onAddFactEvidence,
 }: {
   item: TimelineItem;
   account: UiAccount | undefined;
@@ -543,6 +870,7 @@ function TimelineRow({
   attaching: boolean;
   onAttach: (issueID: string) => void;
   onCreateIssue: () => void;
+  onAddFactEvidence: () => void;
 }) {
   const [expanded, setExpanded] = useState(false);
   const [attachIssueID, setAttachIssueID] = useState("");
@@ -625,8 +953,17 @@ function TimelineRow({
           <Button size="sm" variant="outline" className="h-8" onClick={onCreateIssue}>
             New issue…
           </Button>
+          <Button size="sm" variant="outline" className="h-8" onClick={onAddFactEvidence}>
+            Add as fact…
+          </Button>
         </div>
-      ) : null}
+      ) : (
+        <div className="flex flex-wrap items-center gap-2 pt-1">
+          <Button size="sm" variant="outline" className="h-8" onClick={onAddFactEvidence}>
+            Add as fact…
+          </Button>
+        </div>
+      )}
     </li>
   );
 }

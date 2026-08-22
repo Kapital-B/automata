@@ -51,6 +51,12 @@ func Migrate(db *sql.DB) error {
 			}
 			continue
 		}
+		if e.Name() == "019_facts.sql" {
+			if err := migrateFacts(db); err != nil {
+				return err
+			}
+			continue
+		}
 		b, err := migrationFS.ReadFile(e.Name())
 		if err != nil {
 			return err
@@ -699,6 +705,65 @@ func migrateIssues(db *sql.DB) error {
 		`CREATE UNIQUE INDEX IF NOT EXISTS idx_issue_items_manual
 			ON issue_items(manual_item_id) WHERE manual_item_id IS NOT NULL`,
 		`CREATE INDEX IF NOT EXISTS idx_issue_items_issue ON issue_items(issue_id)`,
+	}
+	for _, stmt := range statements {
+		if _, err := db.Exec(stmt); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func migrateFacts(db *sql.DB) error {
+	statements := []string{
+		`CREATE TABLE IF NOT EXISTS facts (
+			id TEXT PRIMARY KEY NOT NULL,
+			organisation_id TEXT NOT NULL REFERENCES organisations(id) ON DELETE CASCADE,
+			project_id TEXT NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
+			issue_id TEXT REFERENCES issues(id) ON DELETE SET NULL,
+			subject_key TEXT NOT NULL,
+			label TEXT NOT NULL,
+			created_at TEXT NOT NULL,
+			updated_at TEXT NOT NULL,
+			UNIQUE (project_id, subject_key)
+		)`,
+		`CREATE INDEX IF NOT EXISTS idx_facts_project ON facts(project_id)`,
+		`CREATE INDEX IF NOT EXISTS idx_facts_org ON facts(organisation_id)`,
+		`CREATE TABLE IF NOT EXISTS fact_versions (
+			id TEXT PRIMARY KEY NOT NULL,
+			fact_id TEXT NOT NULL REFERENCES facts(id) ON DELETE CASCADE,
+			status TEXT NOT NULL CHECK (status IN ('proposed', 'active', 'superseded', 'rejected')),
+			value_json TEXT NOT NULL,
+			value_text TEXT NOT NULL,
+			unit TEXT,
+			source TEXT NOT NULL CHECK (source IN ('user', 'rule', 'llm')),
+			confidence REAL,
+			interpretation_id TEXT,
+			supersedes_version_id TEXT REFERENCES fact_versions(id) ON DELETE SET NULL,
+			superseded_by_version_id TEXT REFERENCES fact_versions(id) ON DELETE SET NULL,
+			superseded_at TEXT,
+			created_by_user_id TEXT REFERENCES users(id) ON DELETE SET NULL,
+			created_at TEXT NOT NULL
+		)`,
+		`CREATE INDEX IF NOT EXISTS idx_fact_versions_fact ON fact_versions(fact_id, status)`,
+		`CREATE UNIQUE INDEX IF NOT EXISTS idx_fact_versions_one_active
+			ON fact_versions(fact_id) WHERE status = 'active'`,
+		`CREATE TABLE IF NOT EXISTS fact_evidence (
+			id TEXT PRIMARY KEY NOT NULL,
+			fact_version_id TEXT NOT NULL REFERENCES fact_versions(id) ON DELETE CASCADE,
+			message_id TEXT REFERENCES messages(id) ON DELETE CASCADE,
+			manual_item_id TEXT REFERENCES manual_items(id) ON DELETE CASCADE,
+			added_at TEXT NOT NULL,
+			CHECK (
+				(message_id IS NOT NULL AND manual_item_id IS NULL) OR
+				(message_id IS NULL AND manual_item_id IS NOT NULL)
+			)
+		)`,
+		`CREATE INDEX IF NOT EXISTS idx_fact_evidence_version ON fact_evidence(fact_version_id)`,
+		`CREATE INDEX IF NOT EXISTS idx_fact_evidence_message ON fact_evidence(message_id)
+			WHERE message_id IS NOT NULL`,
+		`CREATE INDEX IF NOT EXISTS idx_fact_evidence_manual ON fact_evidence(manual_item_id)
+			WHERE manual_item_id IS NOT NULL`,
 	}
 	for _, stmt := range statements {
 		if _, err := db.Exec(stmt); err != nil {
