@@ -384,6 +384,25 @@ func (r *Repository) ListMessages(ctx context.Context, userID uuid.UUID, filter 
 	if filter.OnlyForwardUnseen {
 		b.WriteString(` AND m.forward_seen_at IS NULL`)
 	}
+	if filter.ProjectID != nil {
+		b.WriteString(`
+		AND EXISTS (
+			SELECT 1
+			FROM messages mx
+			LEFT JOIN message_assignment_overrides ox ON ox.message_id = mx.id
+			LEFT JOIN thread_assignments tx
+				ON tx.account_id = mx.account_id
+				AND mx.conversation_id IS NOT NULL
+				AND mx.conversation_id != ''
+				AND tx.conversation_id = mx.conversation_id
+			WHERE mx.id = m.id
+			  AND CASE
+					WHEN ox.message_id IS NOT NULL THEN ox.project_id = ?
+					ELSE tx.project_id = ?
+				END
+		)`)
+		args = append(args, filter.ProjectID.String(), filter.ProjectID.String())
+	}
 	b.WriteString(` ORDER BY m.received_at DESC LIMIT ? OFFSET ?`)
 	args = append(args, limit, offset)
 	rows, err := r.db.QueryContext(ctx, b.String(), args...)

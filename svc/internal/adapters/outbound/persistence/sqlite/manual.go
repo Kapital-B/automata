@@ -251,9 +251,20 @@ func (r *Repository) listMailTimelineItems(ctx context.Context, userID, organisa
 		SELECT m.id, m.account_id, a.label, m.subject, m.body_text, m.received_at
 		FROM messages m
 		INNER JOIN accounts a ON a.id = m.account_id AND a.user_id = ?
+		LEFT JOIN message_assignment_overrides o ON o.message_id = m.id
+		LEFT JOIN thread_assignments t
+			ON t.account_id = m.account_id
+			AND m.conversation_id IS NOT NULL
+			AND m.conversation_id != ''
+			AND t.conversation_id = m.conversation_id
+		WHERE
+			CASE
+				WHEN o.message_id IS NOT NULL THEN o.project_id = ?
+				ELSE t.project_id = ?
+			END
 		ORDER BY m.received_at DESC
-		LIMIT 2000
-	`, userID.String())
+		LIMIT 500
+	`, userID.String(), projectID.String(), projectID.String())
 	if err != nil {
 		return nil, err
 	}
@@ -272,10 +283,6 @@ func (r *Repository) listMailTimelineItems(ctx context.Context, userID, organisa
 		rt, err := parseTime(receivedAt)
 		if err != nil {
 			return nil, err
-		}
-		eff, err := r.EffectiveAssignment(ctx, userID, msgID)
-		if err != nil || eff == nil || eff.ProjectID == nil || *eff.ProjectID != projectID {
-			continue
 		}
 		bodyText := ""
 		if body.Valid {

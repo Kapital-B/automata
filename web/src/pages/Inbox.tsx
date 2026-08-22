@@ -11,6 +11,7 @@ import {
   listCategories,
   listDraftSuggestions,
   listMessages,
+  listProjects,
   syncAccount,
   type MessageItem,
 } from "@/lib/auth";
@@ -136,6 +137,7 @@ export default function InboxPage({ accountFilter }: Props) {
   const { accounts } = useAccountsData();
   const queryClient = useQueryClient();
   const [cat, setCat] = useState<string>("all");
+  const [projectFilter, setProjectFilter] = useState<string>("all");
   const [selectedId, setSelectedId] = useState<string>("");
   const [htmlRefreshAttempts, setHtmlRefreshAttempts] = useState<Set<string>>(() => new Set());
   const [refreshingHtmlMessageIds, setRefreshingHtmlMessageIds] = useState<Set<string>>(() => new Set());
@@ -157,15 +159,28 @@ export default function InboxPage({ accountFilter }: Props) {
   });
 
   const messagesQuery = useQuery({
-    queryKey: ["messages", accessToken, accountFilter, cat],
+    queryKey: ["messages", accessToken, accountFilter, cat, projectFilter],
     queryFn: () =>
       listMessages(accessToken!, {
         accountId: accountFilter === "all" ? undefined : accountFilter,
         category: cat === "all" ? undefined : cat,
+        projectId: projectFilter === "all" ? undefined : projectFilter,
         limit: 200,
       }),
     enabled: Boolean(accessToken),
   });
+  const projectsQuery = useQuery({
+    queryKey: ["projects", accessToken, "inbox-filter"],
+    queryFn: () => listProjects(accessToken!),
+    enabled: Boolean(accessToken),
+  });
+  const projectById = useMemo(() => {
+    const map = new Map<string, string>();
+    for (const p of projectsQuery.data ?? []) {
+      map.set(p.id, p.code);
+    }
+    return map;
+  }, [projectsQuery.data]);
   const draftsScope = accountFilter === "all" ? "all" : accountFilter;
   const draftsQuery = useQuery({
     queryKey: ["draft-suggestions", accessToken, draftsScope],
@@ -423,6 +438,19 @@ export default function InboxPage({ accountFilter }: Props) {
             {c}
           </button>
         ))}
+        <select
+          aria-label="Filter by project"
+          className="h-7 rounded-full border border-border bg-card px-3 text-xs text-muted-foreground"
+          value={projectFilter}
+          onChange={(e) => setProjectFilter(e.target.value)}
+        >
+          <option value="all">All projects</option>
+          {(projectsQuery.data ?? []).map((p) => (
+            <option key={p.id} value={p.id}>
+              {p.code} — {p.name}
+            </option>
+          ))}
+        </select>
         <span className="ml-auto text-xs text-muted-foreground">
           {filtered.length} {filtered.length === 1 ? "message" : "messages"}
         </span>
@@ -463,7 +491,14 @@ export default function InboxPage({ accountFilter }: Props) {
                 )}
               >
                 <div className="flex items-center justify-between gap-2">
-                  <AccountBadge account={acct} />
+                  <div className="flex flex-wrap items-center gap-1.5">
+                    <AccountBadge account={acct} />
+                    {m.project_id && projectById.get(m.project_id) ? (
+                      <span className="font-mono text-[10px] text-muted-foreground">
+                        {projectById.get(m.project_id)}
+                      </span>
+                    ) : null}
+                  </div>
                   <span className="text-[11px] text-muted-foreground">
                     {relativeTime(m.received_at)}
                   </span>

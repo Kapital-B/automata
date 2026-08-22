@@ -373,21 +373,26 @@ func writeIssueError(w http.ResponseWriter, err error) {
 func issueJSON(v appissues.IssueView, withItems bool) map[string]any {
 	iss := v.Issue
 	out := map[string]any{
-		"id":                     iss.ID.String(),
-		"organisation_id":        iss.OrganisationID.String(),
-		"project_id":             iss.ProjectID.String(),
-		"title":                  iss.Title,
-		"current_position_note":  iss.CurrentPositionNote,
-		"status":                 iss.Status,
-		"awaiting_me":            v.AwaitingMe,
-		"created_at":             iss.CreatedAt.UTC().Format(time.RFC3339Nano),
-		"updated_at":             iss.UpdatedAt.UTC().Format(time.RFC3339Nano),
+		"id":                    iss.ID.String(),
+		"organisation_id":       iss.OrganisationID.String(),
+		"project_id":            iss.ProjectID.String(),
+		"title":                 iss.Title,
+		"current_position_note": iss.CurrentPositionNote,
+		"status":                iss.Status,
+		"awaiting_me":           v.AwaitingMe,
+		"created_at":            iss.CreatedAt.UTC().Format(time.RFC3339Nano),
+		"updated_at":            iss.UpdatedAt.UTC().Format(time.RFC3339Nano),
 	}
 	if iss.AssigneeUserID != nil {
 		out["assignee_user_id"] = iss.AssigneeUserID.String()
 	}
 	if iss.AssigneeContactID != nil {
 		out["assignee_contact_id"] = iss.AssigneeContactID.String()
+	}
+	if v.AssigneeLabel != "" {
+		out["assignee_label"] = v.AssigneeLabel
+	} else if iss.AssigneeUserID == nil && iss.AssigneeContactID == nil {
+		out["assignee_label"] = "Unassigned"
 	}
 	if withItems {
 		items := make([]map[string]any, 0, len(v.Items))

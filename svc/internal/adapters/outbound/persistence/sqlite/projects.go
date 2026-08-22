@@ -445,6 +445,24 @@ func (r *Repository) EffectiveAssignment(ctx context.Context, userID, messageID 
 	return out, nil
 }
 
+// EffectiveProjectIDsForMessages returns committed/provisional project ids for the given messages.
+func (r *Repository) EffectiveProjectIDsForMessages(ctx context.Context, userID uuid.UUID, messages []driven.MessageRow) (map[uuid.UUID]*uuid.UUID, error) {
+	out := make(map[uuid.UUID]*uuid.UUID, len(messages))
+	if len(messages) == 0 {
+		return out, nil
+	}
+	for _, m := range messages {
+		eff, err := r.EffectiveAssignment(ctx, userID, m.ID)
+		if err != nil {
+			return nil, err
+		}
+		if eff != nil && eff.ProjectID != nil {
+			out[m.ID] = eff.ProjectID
+		}
+	}
+	return out, nil
+}
+
 func (r *Repository) ListUnassigned(ctx context.Context, userID uuid.UUID, filter driven.UnassignedListFilter) ([]driven.UnassignedItem, error) {
 	limit := filter.Limit
 	if limit <= 0 {

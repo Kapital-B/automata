@@ -17,12 +17,20 @@ import { FolderKanban, Loader2, Plus } from "lucide-react";
 import { useState } from "react";
 import { Link } from "react-router-dom";
 
+function parseKeywords(raw: string): string[] {
+  return raw
+    .split(/[,;\n]+/)
+    .map((k) => k.trim())
+    .filter(Boolean);
+}
+
 export default function ProjectsPage() {
   const { accessToken } = useAuth();
   const queryClient = useQueryClient();
   const [open, setOpen] = useState(false);
   const [name, setName] = useState("");
   const [code, setCode] = useState("");
+  const [keywords, setKeywords] = useState("");
 
   const query = useQuery({
     queryKey: ["projects", accessToken],
@@ -33,13 +41,18 @@ export default function ProjectsPage() {
   const createMutation = useMutation({
     mutationFn: async () => {
       if (!accessToken) throw new Error("Not authenticated");
-      return createProject(accessToken, { name: name.trim(), code: code.trim() });
+      return createProject(accessToken, {
+        name: name.trim(),
+        code: code.trim(),
+        keywords: parseKeywords(keywords),
+      });
     },
     onSuccess: async () => {
       toast({ title: "Project created" });
       setOpen(false);
       setName("");
       setCode("");
+      setKeywords("");
       await queryClient.invalidateQueries({ queryKey: ["projects"] });
     },
     onError: (err) => {
@@ -72,7 +85,7 @@ export default function ProjectsPage() {
                 <DialogTitle>Create project</DialogTitle>
                 <DialogDescription>
                   Code must be 2–8 characters (e.g. DC01), letters and digits, starting with a
-                  letter.
+                  letter. Keywords help auto-assign mail.
                 </DialogDescription>
               </DialogHeader>
               <div className="space-y-3">
@@ -98,6 +111,18 @@ export default function ProjectsPage() {
                     placeholder="DC01"
                     className="font-mono uppercase"
                   />
+                </div>
+                <div className="space-y-1">
+                  <label className="text-xs text-muted-foreground" htmlFor="project-keywords">
+                    Keywords
+                  </label>
+                  <Input
+                    id="project-keywords"
+                    value={keywords}
+                    onChange={(e) => setKeywords(e.target.value)}
+                    placeholder="cooling, chiller, P-03"
+                  />
+                  <p className="text-[11px] text-muted-foreground">Comma-separated.</p>
                 </div>
                 <Button
                   className="w-full"
@@ -147,6 +172,11 @@ function ProjectRow({ project }: { project: ProjectListItem }) {
         <div>
           <p className="font-medium text-foreground">{project.name}</p>
           <p className="font-mono text-xs text-muted-foreground">{project.code}</p>
+          {project.keywords?.length ? (
+            <p className="mt-0.5 text-xs text-muted-foreground">
+              {project.keywords.join(", ")}
+            </p>
+          ) : null}
         </div>
         <span className="text-xs text-muted-foreground">Open</span>
       </Link>

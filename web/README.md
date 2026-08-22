@@ -36,13 +36,16 @@ npm run build   # production bundle
 |------|-------------|
 | **Auth** | Register / login, or Microsoft/Google OAuth per environment config. |
 | **Accounts** | Connect mailbox (M365 work/personal), sync, delete account. |
-| **Inbox** | List/filter by category, open message, HTML body refresh via sync, create draft, **manual forward** (allowlisted destination + optional comment). |
+| **Inbox** | List/filter by category and **project**, open message, HTML body refresh via sync, create draft, **manual forward**, **project assign** control. |
+| **Projects** | Create with code + keywords; open timeline; paste correspondence; issues rail; suggest issue (when LLM is on). |
+| **Unassigned** | Queue of mail/pastes without a committed project; assign to project. |
+| **People** | Contacts from mail; merge suggestions. |
 | **Today** | Summary snapshot, action items (mark done), FYI dismiss, refresh summary, draft shortcuts. |
 | **Rules** | Forward allowlist, create rules (**paused by default**), toggle enable, run rules now. |
 | **Drafts** | List/edit/send/discard draft suggestions. |
 | **Runs** | Background job history. |
 | **Settings** | Summary + schedule configuration. |
-| **Assistant** | Phase 1 home (non-conversational): mirrors Today-style signals with account filter. |
+| **Assistant** | Phase 1 home: action items, drafts, failed runs, and **unassigned counts** when present. |
 
 ---
 
@@ -58,7 +61,9 @@ Use this after backend (`svc`) and worker are up, with a real or test M365 accou
 6. **Drafts** — From Today or Inbox, queue draft generation; open draft, edit, discard or send as appropriate.
 7. **Forwarding (rules)** — Add allowlist addresses; create a rule (starts **paused**); enable intentionally; run rules; confirm behavior and **Runs** / job visibility.
 8. **Forwarding (manual)** — From Inbox detail, **Forward** → pick allowlisted address → confirm; verify toast and that Graph forward succeeds for that message.
-9. **Runs** — Confirm job rows for sync, categorize, summarize, draft, forward_rules transitions (pending → running → success/failed as applicable).
+10. **Projects** — Create `DC01` with keywords; sync/assign mail; paste a Teams note; create issue Pump P-03; attach items; delete a source message and confirm the issue remains.
+11. **Unassigned** — Confirm badge/count and assign remaining items.
+12. **Suggest issue** — With LLM configured, propose from unassigned timeline items and confirm create; without LLM, the button stays disabled.
 
 ---
 

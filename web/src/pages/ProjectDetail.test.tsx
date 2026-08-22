@@ -34,6 +34,7 @@ vi.mock("@/lib/auth", async () => {
     listProjectIssues: vi.fn(),
     createProjectIssue: vi.fn(),
     suggestProjectIssue: vi.fn(),
+    getApiHealth: vi.fn(),
     addIssueItem: vi.fn(),
     updateProject: vi.fn(),
     updateProjectMember: vi.fn(),
@@ -47,6 +48,7 @@ const listContacts = vi.mocked(auth.listContacts);
 const listProjectIssues = vi.mocked(auth.listProjectIssues);
 const createProjectIssue = vi.mocked(auth.createProjectIssue);
 const suggestProjectIssue = vi.mocked(auth.suggestProjectIssue);
+const getApiHealth = vi.mocked(auth.getApiHealth);
 const addIssueItem = vi.mocked(auth.addIssueItem);
 
 describe("Project timeline UI", () => {
@@ -58,9 +60,11 @@ describe("Project timeline UI", () => {
     listProjectIssues.mockReset();
     createProjectIssue.mockReset();
     suggestProjectIssue.mockReset();
+    getApiHealth.mockReset();
     addIssueItem.mockReset();
     listContacts.mockResolvedValue([]);
     listProjectIssues.mockResolvedValue([]);
+    getApiHealth.mockResolvedValue({ status: "ok", llm: true });
     suggestProjectIssue.mockResolvedValue({
       title: "Pump P-03",
       item_refs: [{ manual_item_id: "man1" }],
@@ -170,13 +174,17 @@ describe("Project timeline UI", () => {
     );
 
     expect(await screen.findByText("Cooling Upgrade")).toBeInTheDocument();
-    fireEvent.click(screen.getByRole("button", { name: /new issue/i }));
+    fireEvent.click(screen.getByRole("button", { name: /^new issue$/i }));
     fireEvent.change(screen.getByPlaceholderText(/pump p-03/i), {
       target: { value: "Pump P-03" },
     });
     fireEvent.click(screen.getByRole("button", { name: /^create$/i }));
     await waitFor(() =>
-      expect(createProjectIssue).toHaveBeenCalledWith("token", "p1", { title: "Pump P-03" }),
+      expect(createProjectIssue).toHaveBeenCalledWith("token", "p1", {
+        title: "Pump P-03",
+        current_position_note: undefined,
+        item_refs: undefined,
+      }),
     );
   });
 

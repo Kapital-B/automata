@@ -149,7 +149,10 @@ func (h *Handlers) Routes() http.Handler {
 }
 
 func (h *Handlers) health(w http.ResponseWriter, r *http.Request) {
-	writeJSON(w, http.StatusOK, map[string]string{"status": "ok"})
+	writeJSON(w, http.StatusOK, map[string]any{
+		"status": "ok",
+		"llm":    h.CategorizeSvc != nil || (h.IssueSvc != nil && h.IssueSvc.HasLLM()),
+	})
 }
 
 func (h *Handlers) listAccounts(w http.ResponseWriter, r *http.Request) {
@@ -377,6 +380,14 @@ func (h *Handlers) listMessages(w http.ResponseWriter, r *http.Request) {
 		}
 		filter.AccountID = &id
 	}
+	if pid := r.URL.Query().Get("project_id"); pid != "" {
+		id, err := uuid.Parse(pid)
+		if err != nil {
+			writeJSON(w, http.StatusBadRequest, map[string]string{"error": "bad project_id"})
+			return
+		}
+		filter.ProjectID = &id
+	}
 	if v := r.URL.Query().Get("since"); v != "" {
 		ts, err := time.Parse(time.RFC3339, v)
 		if err != nil {
@@ -401,7 +412,8 @@ func (h *Handlers) listMessages(w http.ResponseWriter, r *http.Request) {
 		}
 		filter.Offset = n
 	}
-	rows, err := h.Messages.ListMessages(r.Context(), userIDOrEmpty(r), filter)
+	uid := userIDOrEmpty(r)
+	rows, err := h.Messages.ListMessages(r.Context(), uid, filter)
 	if err != nil {
 		h.Log.Error("list messages", "err", err)
 		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "internal"})
@@ -420,6 +432,7 @@ func (h *Handlers) listMessages(w http.ResponseWriter, r *http.Request) {
 		CategorySlug       *string         `json:"category_slug,omitempty"`
 		CategoryConfidence *float64        `json:"category_confidence,omitempty"`
 		ConversationID     *string         `json:"conversation_id,omitempty"`
+		ProjectID          *string         `json:"project_id,omitempty"`
 	}
 	out := make([]item, 0, len(rows))
 	for _, m := range rows {
@@ -427,7 +440,7 @@ func (h *Handlers) listMessages(w http.ResponseWriter, r *http.Request) {
 		if m.BodyText != nil {
 			preview = messagePreview(*m.BodyText, 160)
 		}
-		out = append(out, item{
+		it := item{
 			ID:                 m.ID.String(),
 			AccountID:          m.AccountID.String(),
 			ProviderMessageID:  m.ProviderMessageID,
@@ -440,7 +453,14 @@ func (h *Handlers) listMessages(w http.ResponseWriter, r *http.Request) {
 			CategorySlug:       m.CategorySlug,
 			CategoryConfidence: m.CategoryConfidence,
 			ConversationID:     m.ConversationID,
-		})
+		}
+		if h.Assignments != nil {
+			if eff, err := h.Assignments.EffectiveAssignment(r.Context(), uid, m.ID); err == nil && eff != nil && eff.ProjectID != nil {
+				s := eff.ProjectID.String()
+				it.ProjectID = &s
+			}
+		}
+		out = append(out, it)
 	}
 	writeJSON(w, http.StatusOK, out)
 }

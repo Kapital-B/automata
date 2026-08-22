@@ -74,6 +74,7 @@ type MessageCategoryRow struct {
 
 type MessageListFilter struct {
 	AccountID         *uuid.UUID
+	ProjectID         *uuid.UUID
 	Category          string
 	Since             *time.Time
 	OnlySummaryUnseen bool

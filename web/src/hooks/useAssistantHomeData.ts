@@ -10,6 +10,7 @@ import {
   type SummaryFYI,
   type SummaryPayload,
   getSummary,
+  getUnassignedSummary,
   listDraftSuggestions,
   listRuns,
 } from "@/lib/auth";
@@ -35,6 +36,7 @@ export type AssistantHomeState = {
   runs?: JobRun[];
   latestRun?: JobRun;
   failedRuns: JobRun[];
+  unassignedCount?: number;
   suggestions: AssistantSuggestion[];
 };
 
@@ -64,20 +66,33 @@ export function buildAssistantSuggestions(state: AssistantHomeState): AssistantS
       description: "Jump to the messages behind your current action items.",
       href: "/inbox",
     });
-  } else if (state.fyi.length > 0) {
+  }
+
+  if ((state.unassignedCount ?? 0) > 0) {
     out.push({
-      id: "review-fyi",
-      title: `Review ${state.fyi.length} FYI item${state.fyi.length === 1 ? "" : "s"}`,
-      description: "Catch up on awareness items.",
-      href: "/today",
+      id: "work-unassigned",
+      title: `Clear ${state.unassignedCount} unassigned item${state.unassignedCount === 1 ? "" : "s"}`,
+      description: "Assign mail and pastes to a project.",
+      href: "/unassigned",
     });
-  } else if (!state.summary?.snapshot) {
-    out.push({
-      id: "refresh-summary",
-      title: "Refresh today's summary",
-      description: "Generate a new summary snapshot.",
-      href: "/today",
-    });
+  }
+
+  if (state.actionItems.length === 0 && (state.unassignedCount ?? 0) === 0) {
+    if (state.fyi.length > 0) {
+      out.push({
+        id: "review-fyi",
+        title: `Review ${state.fyi.length} FYI item${state.fyi.length === 1 ? "" : "s"}`,
+        description: "Catch up on awareness items.",
+        href: "/today",
+      });
+    } else if (!state.summary?.snapshot) {
+      out.push({
+        id: "refresh-summary",
+        title: "Refresh today's summary",
+        description: "Generate a new summary snapshot.",
+        href: "/today",
+      });
+    }
   }
 
   if ((state.draftsReady ?? 0) > 0) {
@@ -151,6 +166,12 @@ export function useAssistantHomeData(accountFilter: AccountFilter) {
     enabled: canLoadSecondary,
   });
 
+  const unassignedQuery = useQuery({
+    queryKey: ["unassigned-summary", accessToken],
+    queryFn: () => getUnassignedSummary(accessToken!),
+    enabled: Boolean(accessToken),
+  });
+
   const state = useMemo<AssistantHomeState>(() => {
     const summary = summaryQuery.data ?? null;
     const actionItems = summary?.action_items ?? [];
@@ -158,6 +179,8 @@ export function useAssistantHomeData(accountFilter: AccountFilter) {
     const runs = runsQuery.data;
     const failedRuns = (runs ?? []).filter((r) => r.status === "failed");
     const latestRun = (runs ?? [])[0];
+    const unassignedCount =
+      (unassignedQuery.data?.unassigned ?? 0) + (unassignedQuery.data?.provisional ?? 0);
 
     const base: AssistantHomeState = {
       activeAccountID,
@@ -172,6 +195,7 @@ export function useAssistantHomeData(accountFilter: AccountFilter) {
       runs,
       latestRun,
       failedRuns,
+      unassignedCount,
       suggestions: [],
     };
     return { ...base, suggestions: buildAssistantSuggestions(base) };
@@ -183,6 +207,7 @@ export function useAssistantHomeData(accountFilter: AccountFilter) {
     summaryQuery.data,
     draftsQuery.data,
     runsQuery.data,
+    unassignedQuery.data,
   ]);
 
   return {

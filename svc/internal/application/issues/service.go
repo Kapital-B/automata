@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"sort"
 	"strings"
 	"time"
 
@@ -38,10 +39,16 @@ func (s *Service) homeOrg(ctx context.Context, userID uuid.UUID) (uuid.UUID, err
 	return s.Users.GetHomeOrganisationID(ctx, userID)
 }
 
+// HasLLM reports whether issue suggest can run.
+func (s *Service) HasLLM() bool {
+	return s != nil && s.LLM != nil
+}
+
 type IssueView struct {
-	Issue      driven.IssueRow
-	AwaitingMe bool
-	Items      []TrailItem
+	Issue         driven.IssueRow
+	AwaitingMe    bool
+	AssigneeLabel string
+	Items         []TrailItem
 }
 
 type TrailItem struct {
@@ -96,7 +103,10 @@ func (s *Service) List(ctx context.Context, userID, projectID uuid.UUID) ([]Issu
 	}
 	out := make([]IssueView, 0, len(rows))
 	for _, row := range rows {
-		out = append(out, IssueView{Issue: row, AwaitingMe: awaitingMe(row, userID)})
+		out = append(out, IssueView{
+			Issue: row, AwaitingMe: awaitingMe(row, userID),
+			AssigneeLabel: s.assigneeLabel(ctx, orgID, userID, row),
+		})
 	}
 	return out, nil
 }
@@ -121,7 +131,27 @@ func (s *Service) Get(ctx context.Context, userID, issueID uuid.UUID) (*IssueVie
 	for _, it := range items {
 		trail = append(trail, s.enrichTrailItem(ctx, userID, orgID, it))
 	}
-	return &IssueView{Issue: *row, AwaitingMe: awaitingMe(*row, userID), Items: trail}, nil
+	sort.SliceStable(trail, func(i, j int) bool {
+		ai, aj := trail[i].OccurredAt, trail[j].OccurredAt
+		if ai == nil && aj == nil {
+			return trail[i].Item.AddedAt.Before(trail[j].Item.AddedAt)
+		}
+		if ai == nil {
+			return false
+		}
+		if aj == nil {
+			return true
+		}
+		if ai.Equal(*aj) {
+			return trail[i].Item.AddedAt.Before(trail[j].Item.AddedAt)
+		}
+		return ai.Before(*aj)
+	})
+	return &IssueView{
+		Issue: *row, AwaitingMe: awaitingMe(*row, userID),
+		AssigneeLabel: s.assigneeLabel(ctx, orgID, userID, *row),
+		Items:         trail,
+	}, nil
 }
 
 func (s *Service) Create(ctx context.Context, userID, projectID uuid.UUID, in CreateInput) (*IssueView, error) {
@@ -325,6 +355,23 @@ func (s *Service) validateAssignee(ctx context.Context, orgID, projectID uuid.UU
 func awaitingMe(row driven.IssueRow, caller uuid.UUID) bool {
 	return row.Status == string(domainissues.StatusAwaitingInput) &&
 		row.AssigneeUserID != nil && *row.AssigneeUserID == caller
+}
+
+func (s *Service) assigneeLabel(ctx context.Context, orgID, caller uuid.UUID, row driven.IssueRow) string {
+	if row.AssigneeUserID != nil {
+		if *row.AssigneeUserID == caller {
+			return "You"
+		}
+		return "Member"
+	}
+	if row.AssigneeContactID != nil && s.Contacts != nil {
+		c, err := s.Contacts.GetContact(ctx, orgID, *row.AssigneeContactID)
+		if err == nil && c != nil {
+			return c.DisplayName
+		}
+		return "Contact"
+	}
+	return "Unassigned"
 }
 
 func (s *Service) enrichTrailItem(ctx context.Context, userID, orgID uuid.UUID, it driven.IssueItemRow) TrailItem {

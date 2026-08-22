@@ -140,6 +140,7 @@ export type MessageItem = {
   category_slug?: string;
   category_confidence?: number;
   conversation_id?: string;
+  project_id?: string;
 };
 
 export type DraftSuggestion = {
@@ -180,6 +181,7 @@ export type ForwardRule = {
 
 export type ListMessagesFilter = {
   accountId?: string;
+  projectId?: string;
   category?: string;
   since?: string;
   limit?: number;
@@ -432,6 +434,7 @@ export type IssueListItem = {
   status: "open" | "awaiting_input" | "resolved";
   assignee_user_id?: string;
   assignee_contact_id?: string;
+  assignee_label?: string;
   awaiting_me: boolean;
   created_at: string;
   updated_at: string;
@@ -583,6 +586,15 @@ export async function getProjectTimeline(
     `/api/projects/${projectID}/timeline${qs ? `?${qs}` : ""}`,
     { headers: toAuthHeader(accessToken) },
   );
+}
+
+export type ApiHealth = {
+  status: string;
+  llm?: boolean;
+};
+
+export async function getApiHealth() {
+  return apiRequest<ApiHealth>("/api/health");
 }
 
 export async function listProjectIssues(accessToken: string, projectID: string) {
@@ -882,6 +894,9 @@ export async function listMessages(accessToken: string, filter: ListMessagesFilt
   const params = new URLSearchParams();
   if (filter.accountId) {
     params.set("account_id", filter.accountId);
+  }
+  if (filter.projectId) {
+    params.set("project_id", filter.projectId);
   }
   if (filter.category) {
     params.set("category", filter.category);

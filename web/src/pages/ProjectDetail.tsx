@@ -27,6 +27,7 @@ import {
   createProjectIssue,
   getProject,
   getProjectTimeline,
+  getApiHealth,
   listContacts,
   listProjectIssues,
   suggestProjectIssue,
@@ -89,7 +90,16 @@ export default function ProjectDetailPage() {
     queryFn: () => listProjectIssues(accessToken!, id!),
     enabled: Boolean(accessToken && id),
   });
-
+  const healthQuery = useQuery({
+    queryKey: ["api-health"],
+    queryFn: () => getApiHealth(),
+    staleTime: 60_000,
+  });
+  const llmEnabled = healthQuery.data?.llm === true;
+  const openIssues = useMemo(
+    () => (issuesQuery.data ?? []).filter((iss) => iss.status !== "resolved"),
+    [issuesQuery.data],
+  );
   const createIssueMutation = useMutation({
     mutationFn: async () => {
       if (!accessToken || !id) throw new Error("Not authenticated");
@@ -174,6 +184,7 @@ export default function ProjectDetailPage() {
     },
   });
   const [name, setName] = useState("");
+  const [keywords, setKeywords] = useState("");
   const [role, setRole] = useState("");
   const [discipline, setDiscipline] = useState("");
   const [scope, setScope] = useState("");
@@ -181,6 +192,7 @@ export default function ProjectDetailPage() {
   useEffect(() => {
     if (!projectQuery.data) return;
     setName(projectQuery.data.name);
+    setKeywords((projectQuery.data.keywords ?? []).join(", "));
     setRole(projectQuery.data.member?.role ?? "");
     setDiscipline(projectQuery.data.member?.discipline ?? "");
     setScope(projectQuery.data.member?.current_scope ?? "");
@@ -189,7 +201,13 @@ export default function ProjectDetailPage() {
   const saveMutation = useMutation({
     mutationFn: async () => {
       if (!accessToken || !id) throw new Error("Not authenticated");
-      await updateProject(accessToken, id, { name: name.trim() });
+      await updateProject(accessToken, id, {
+        name: name.trim(),
+        keywords: keywords
+          .split(/[,;\n]+/)
+          .map((k) => k.trim())
+          .filter(Boolean),
+      });
       await updateProjectMember(accessToken, id, {
         role: role.trim(),
         discipline: discipline.trim() || null,
@@ -307,10 +325,19 @@ export default function ProjectDetailPage() {
             </Dialog>
             <Button
               variant="outline"
-              disabled={suggestIssueMutation.isPending}
+              disabled={!llmEnabled || suggestIssueMutation.isPending}
+              title={
+                llmEnabled
+                  ? "Propose an issue from unassigned correspondence"
+                  : "Configure LLM_BASE_URL and LLM_MODEL on the API to enable suggestions"
+              }
               onClick={() => suggestIssueMutation.mutate()}
             >
-              {suggestIssueMutation.isPending ? "Suggesting…" : "Suggest issue"}
+              {suggestIssueMutation.isPending
+                ? "Suggesting…"
+                : llmEnabled
+                  ? "Suggest issue"
+                  : "Suggest (LLM off)"}
             </Button>
             <Dialog open={pasteOpen} onOpenChange={setPasteOpen}>
               <DialogTrigger asChild>
@@ -353,6 +380,18 @@ export default function ProjectDetailPage() {
               Name
             </label>
             <Input id="proj-name" value={name} onChange={(e) => setName(e.target.value)} />
+          </div>
+          <div className="space-y-1">
+            <label className="text-xs text-muted-foreground" htmlFor="proj-keywords">
+              Keywords
+            </label>
+            <Input
+              id="proj-keywords"
+              value={keywords}
+              onChange={(e) => setKeywords(e.target.value)}
+              placeholder="cooling, chiller, P-03"
+            />
+            <p className="text-[11px] text-muted-foreground">Comma-separated; used for auto-assign.</p>
           </div>
           <p className="font-mono text-xs text-muted-foreground">Code: {project.code}</p>
           <div className="space-y-1">
@@ -431,7 +470,7 @@ export default function ProjectDetailPage() {
               item={item}
               account={accountFor(item.account_id)}
               projectID={id!}
-              issues={issuesQuery.data ?? []}
+              issues={openIssues}
               attaching={attachMutation.isPending}
               onAttach={(issueID) =>
                 attachMutation.mutate({
@@ -440,6 +479,16 @@ export default function ProjectDetailPage() {
                   manualItemID: item.manual_item_id,
                 })
               }
+              onCreateIssue={() => {
+                setPendingItemRefs([
+                  item.message_id
+                    ? { message_id: item.message_id }
+                    : { manual_item_id: item.manual_item_id },
+                ].filter((r) => r.message_id || r.manual_item_id));
+                setNewIssueTitle(item.title?.trim() || "");
+                setSuggestMeta("Pre-attached from timeline");
+                setCreateIssueOpen(true);
+              }}
             />
           ))}
         </ol>
@@ -452,11 +501,11 @@ export default function ProjectDetailPage() {
           </h2>
           {issuesQuery.isLoading ? (
             <Loader2 className="h-4 w-4 animate-spin text-muted-foreground" />
-          ) : (issuesQuery.data ?? []).length === 0 ? (
-            <p className="text-xs text-muted-foreground">No issues yet.</p>
+          ) : openIssues.length === 0 ? (
+            <p className="text-xs text-muted-foreground">No open issues yet.</p>
           ) : (
             <ul className="space-y-2">
-              {(issuesQuery.data ?? []).map((iss) => (
+              {openIssues.map((iss) => (
                 <li key={iss.id}>
                   <Link
                     to={`/projects/${id}/issues/${iss.id}`}
@@ -464,7 +513,7 @@ export default function ProjectDetailPage() {
                   >
                     <span className="font-medium">{iss.title}</span>
                     <span className="mt-0.5 block text-xs text-muted-foreground">
-                      {iss.status}
+                      {iss.assignee_label ?? "Unassigned"} · {iss.status}
                       {iss.awaiting_me ? " · awaiting you" : ""}
                     </span>
                   </Link>
@@ -485,6 +534,7 @@ function TimelineRow({
   issues,
   attaching,
   onAttach,
+  onCreateIssue,
 }: {
   item: TimelineItem;
   account: UiAccount | undefined;
@@ -492,6 +542,7 @@ function TimelineRow({
   issues: IssueListItem[];
   attaching: boolean;
   onAttach: (issueID: string) => void;
+  onCreateIssue: () => void;
 }) {
   const [expanded, setExpanded] = useState(false);
   const [attachIssueID, setAttachIssueID] = useState("");
@@ -544,28 +595,35 @@ function TimelineRow({
           ) : null}
         </div>
       ) : null}
-      {!item.issue_id && issues.length > 0 ? (
+      {!item.issue_id ? (
         <div className="flex flex-wrap items-center gap-2 pt-1">
-          <select
-            aria-label="Attach to issue"
-            className="h-8 rounded-md border border-input bg-background px-2 text-xs"
-            value={attachIssueID}
-            onChange={(e) => setAttachIssueID(e.target.value)}
-          >
-            <option value="">Attach to issue…</option>
-            {issues.map((iss) => (
-              <option key={iss.id} value={iss.id}>
-                {iss.title}
-              </option>
-            ))}
-          </select>
-          <Button
-            size="sm"
-            className="h-8"
-            disabled={!attachIssueID || attaching}
-            onClick={() => onAttach(attachIssueID)}
-          >
-            Attach
+          {issues.length > 0 ? (
+            <>
+              <select
+                aria-label="Attach to issue"
+                className="h-8 rounded-md border border-input bg-background px-2 text-xs"
+                value={attachIssueID}
+                onChange={(e) => setAttachIssueID(e.target.value)}
+              >
+                <option value="">Attach to issue…</option>
+                {issues.map((iss) => (
+                  <option key={iss.id} value={iss.id}>
+                    {iss.title}
+                  </option>
+                ))}
+              </select>
+              <Button
+                size="sm"
+                className="h-8"
+                disabled={!attachIssueID || attaching}
+                onClick={() => onAttach(attachIssueID)}
+              >
+                Attach
+              </Button>
+            </>
+          ) : null}
+          <Button size="sm" variant="outline" className="h-8" onClick={onCreateIssue}>
+            New issue…
           </Button>
         </div>
       ) : null}
