@@ -57,6 +57,12 @@ func Migrate(db *sql.DB) error {
 			}
 			continue
 		}
+		if e.Name() == "020_interpretations.sql" {
+			if err := migrateInterpretations(db); err != nil {
+				return err
+			}
+			continue
+		}
 		b, err := migrationFS.ReadFile(e.Name())
 		if err != nil {
 			return err
@@ -574,7 +580,7 @@ func extendJobRunTypes(db *sql.DB) error {
 	if err != nil {
 		return err
 	}
-	if strings.Contains(sqlText, "assign_projects") && strings.Contains(sqlText, "resolve_contacts") {
+	if strings.Contains(sqlText, "interpret_project") {
 		return nil
 	}
 
@@ -603,7 +609,7 @@ func extendJobRunTypes(db *sql.DB) error {
 			account_id TEXT REFERENCES accounts(id) ON DELETE SET NULL,
 			job_type TEXT NOT NULL CHECK (job_type IN (
 				'sync', 'summarize', 'categorize', 'forward_rules', 'draft_suggest',
-				'resolve_contacts', 'assign_projects'
+				'resolve_contacts', 'assign_projects', 'interpret_project'
 			)),
 			trigger_kind TEXT NOT NULL CHECK (trigger_kind IN ('schedule', 'api')),
 			status TEXT NOT NULL CHECK (status IN ('pending', 'running', 'success', 'failed', 'cancelled')),
@@ -771,4 +777,45 @@ func migrateFacts(db *sql.DB) error {
 		}
 	}
 	return nil
+}
+
+func migrateInterpretations(db *sql.DB) error {
+	statements := []string{
+		`CREATE TABLE IF NOT EXISTS interpretations (
+			id TEXT PRIMARY KEY NOT NULL,
+			organisation_id TEXT NOT NULL REFERENCES organisations(id) ON DELETE CASCADE,
+			project_id TEXT NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
+			account_id TEXT REFERENCES accounts(id) ON DELETE SET NULL,
+			run_id TEXT REFERENCES job_runs(id) ON DELETE SET NULL,
+			status TEXT NOT NULL CHECK (status IN ('pending', 'accepted', 'dismissed', 'expired')),
+			payload_json TEXT NOT NULL,
+			confidence REAL,
+			reason TEXT NOT NULL DEFAULT '',
+			created_at TEXT NOT NULL,
+			updated_at TEXT NOT NULL
+		)`,
+		`CREATE INDEX IF NOT EXISTS idx_interpretations_project_status ON interpretations(project_id, status)`,
+		`CREATE INDEX IF NOT EXISTS idx_interpretations_org ON interpretations(organisation_id)`,
+		`CREATE TABLE IF NOT EXISTS interpretation_sources (
+			id TEXT PRIMARY KEY NOT NULL,
+			interpretation_id TEXT NOT NULL REFERENCES interpretations(id) ON DELETE CASCADE,
+			message_id TEXT REFERENCES messages(id) ON DELETE CASCADE,
+			manual_item_id TEXT REFERENCES manual_items(id) ON DELETE CASCADE,
+			CHECK (
+				(message_id IS NOT NULL AND manual_item_id IS NULL) OR
+				(message_id IS NULL AND manual_item_id IS NOT NULL)
+			)
+		)`,
+		`CREATE INDEX IF NOT EXISTS idx_interpretation_sources_interp ON interpretation_sources(interpretation_id)`,
+		`CREATE INDEX IF NOT EXISTS idx_interpretation_sources_message ON interpretation_sources(message_id)
+			WHERE message_id IS NOT NULL`,
+		`CREATE INDEX IF NOT EXISTS idx_interpretation_sources_manual ON interpretation_sources(manual_item_id)
+			WHERE manual_item_id IS NOT NULL`,
+	}
+	for _, stmt := range statements {
+		if _, err := db.Exec(stmt); err != nil {
+			return err
+		}
+	}
+	return extendJobRunTypes(db)
 }

@@ -18,6 +18,7 @@ import (
 	"github.com/Kapital-B/automata/svc/internal/application/auth"
 	appcontacts "github.com/Kapital-B/automata/svc/internal/application/contacts"
 	appfacts "github.com/Kapital-B/automata/svc/internal/application/facts"
+	appinterpret "github.com/Kapital-B/automata/svc/internal/application/interpret"
 	appissues "github.com/Kapital-B/automata/svc/internal/application/issues"
 	appmessages "github.com/Kapital-B/automata/svc/internal/application/messages"
 	appprojects "github.com/Kapital-B/automata/svc/internal/application/projects"
@@ -42,6 +43,7 @@ type Handlers struct {
 	ProjectSvc      *appprojects.Service
 	IssueSvc        *appissues.Service
 	FactSvc         *appfacts.Service
+	InterpretSvc    *appinterpret.Service
 	Accounts        driven.AccountRepository
 	Messages        driven.MessageRepository
 	JobRuns         driven.JobRunRepository
@@ -99,6 +101,9 @@ func (h *Handlers) Routes() http.Handler {
 	r.Get("/api/projects/{id}/current-position", h.getProjectCurrentPosition)
 	r.Get("/api/projects/{id}/facts", h.listProjectFacts)
 	r.Post("/api/projects/{id}/facts", h.createProjectFact)
+	r.Post("/api/projects/{id}/interpret", h.interpretProject)
+	r.Get("/api/projects/{id}/interpretations", h.listProjectInterpretations)
+	r.Post("/api/interpretations/{id}/dismiss", h.dismissInterpretation)
 	r.Get("/api/facts/{id}", h.getFact)
 	r.Post("/api/fact-versions/{id}/confirm", h.confirmFactVersion)
 	r.Post("/api/fact-versions/{id}/reject", h.rejectFactVersion)
@@ -161,7 +166,7 @@ func (h *Handlers) Routes() http.Handler {
 func (h *Handlers) health(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, map[string]any{
 		"status": "ok",
-		"llm":    h.CategorizeSvc != nil || (h.IssueSvc != nil && h.IssueSvc.HasLLM()),
+		"llm":    h.CategorizeSvc != nil || (h.IssueSvc != nil && h.IssueSvc.HasLLM()) || (h.InterpretSvc != nil && h.InterpretSvc.HasLLM()),
 	})
 }
 

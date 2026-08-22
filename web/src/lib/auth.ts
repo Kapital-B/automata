@@ -511,6 +511,42 @@ export type CurrentPosition = {
   decisions: unknown[];
 };
 
+export type InterpretationCandidate = {
+  kind: "fact" | "decision" | string;
+  subject_key?: string;
+  label?: string;
+  value?: unknown;
+  unit?: string;
+  statement?: string;
+  message_ids?: string[];
+  manual_item_ids?: string[];
+  confidence: number;
+  reason?: string;
+};
+
+export type InterpretationSource = {
+  id: string;
+  interpretation_id: string;
+  message_id?: string;
+  manual_item_id?: string;
+};
+
+export type Interpretation = {
+  id: string;
+  organisation_id: string;
+  project_id: string;
+  account_id?: string;
+  run_id?: string;
+  status: "pending" | "accepted" | "dismissed" | "expired" | string;
+  payload_json?: unknown;
+  confidence?: number;
+  reason?: string;
+  created_at: string;
+  updated_at: string;
+  sources: InterpretationSource[];
+  candidates: InterpretationCandidate[];
+};
+
 export type ManualItem = {
   id: string;
   organisation_id: string;
@@ -829,6 +865,35 @@ export async function removeFactEvidence(
       headers: toAuthHeader(accessToken),
     },
   );
+}
+
+export async function listProjectInterpretations(accessToken: string, projectID: string) {
+  return apiRequest<Interpretation[]>(`/api/projects/${projectID}/interpretations`, {
+    headers: toAuthHeader(accessToken),
+  });
+}
+
+export async function interpretProject(
+  accessToken: string,
+  projectID: string,
+  body?: {
+    account_id?: string;
+    message_ids?: string[];
+    manual_item_ids?: string[];
+  },
+) {
+  return apiRequest<Interpretation>(`/api/projects/${projectID}/interpret`, {
+    method: "POST",
+    headers: toAuthHeader(accessToken),
+    body: JSON.stringify(body ?? {}),
+  });
+}
+
+export async function dismissInterpretation(accessToken: string, interpretationID: string) {
+  return apiRequest<Interpretation>(`/api/interpretations/${interpretationID}/dismiss`, {
+    method: "POST",
+    headers: toAuthHeader(accessToken),
+  });
 }
 
 export async function createManualItem(

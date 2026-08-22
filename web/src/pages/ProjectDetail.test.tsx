@@ -43,6 +43,9 @@ vi.mock("@/lib/auth", async () => {
     createProjectFact: vi.fn(),
     confirmFactVersion: vi.fn(),
     rejectFactVersion: vi.fn(),
+    listProjectInterpretations: vi.fn(),
+    interpretProject: vi.fn(),
+    dismissInterpretation: vi.fn(),
   };
 });
 
@@ -58,6 +61,9 @@ const addIssueItem = vi.mocked(auth.addIssueItem);
 const getCurrentPosition = vi.mocked(auth.getCurrentPosition);
 const listProjectFacts = vi.mocked(auth.listProjectFacts);
 const createProjectFact = vi.mocked(auth.createProjectFact);
+const listProjectInterpretations = vi.mocked(auth.listProjectInterpretations);
+const interpretProject = vi.mocked(auth.interpretProject);
+const dismissInterpretation = vi.mocked(auth.dismissInterpretation);
 
 describe("Project timeline UI", () => {
   beforeEach(() => {
@@ -73,10 +79,14 @@ describe("Project timeline UI", () => {
     getCurrentPosition.mockReset();
     listProjectFacts.mockReset();
     createProjectFact.mockReset();
+    listProjectInterpretations.mockReset();
+    interpretProject.mockReset();
+    dismissInterpretation.mockReset();
     listContacts.mockResolvedValue([]);
     listProjectIssues.mockResolvedValue([]);
     getCurrentPosition.mockResolvedValue({ facts: [], decisions: [] });
     listProjectFacts.mockResolvedValue([]);
+    listProjectInterpretations.mockResolvedValue([]);
     getApiHealth.mockResolvedValue({ status: "ok", llm: true });
     suggestProjectIssue.mockResolvedValue({
       title: "Pump P-03",
@@ -404,5 +414,60 @@ describe("Project timeline UI", () => {
         }),
       ),
     );
+  });
+
+  it("lists pending interpretations and dismisses them", async () => {
+    const client = new QueryClient({
+      defaultOptions: { queries: { retry: false }, mutations: { retry: false } },
+    });
+    listProjectInterpretations.mockResolvedValue([
+      {
+        id: "interp1",
+        organisation_id: "o1",
+        project_id: "p1",
+        status: "pending",
+        reason: "duty language",
+        confidence: 0.8,
+        created_at: "2026-03-03T00:00:00Z",
+        updated_at: "2026-03-03T00:00:00Z",
+        sources: [{ id: "s1", interpretation_id: "interp1", manual_item_id: "man1" }],
+        candidates: [
+          {
+            kind: "fact",
+            subject_key: "pump.p03.duty_kw",
+            label: "Pump P-03 duty",
+            value: 90,
+            unit: "kW",
+            confidence: 0.8,
+            reason: "Teams note",
+          },
+        ],
+      },
+    ]);
+    dismissInterpretation.mockResolvedValue({
+      id: "interp1",
+      organisation_id: "o1",
+      project_id: "p1",
+      status: "dismissed",
+      created_at: "2026-03-03T00:00:00Z",
+      updated_at: "2026-03-03T00:00:00Z",
+      sources: [],
+      candidates: [],
+    });
+
+    render(
+      <QueryClientProvider client={client}>
+        <MemoryRouter initialEntries={["/projects/p1"]}>
+          <Routes>
+            <Route path="/projects/:id" element={<ProjectDetailPage />} />
+          </Routes>
+        </MemoryRouter>
+      </QueryClientProvider>,
+    );
+
+    expect(await screen.findByRole("heading", { name: /^interpretations$/i })).toBeInTheDocument();
+    expect(await screen.findByText(/Pump P-03 duty/i)).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: /^dismiss$/i }));
+    await waitFor(() => expect(dismissInterpretation).toHaveBeenCalledWith("token", "interp1"));
   });
 });

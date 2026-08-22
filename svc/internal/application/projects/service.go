@@ -33,6 +33,9 @@ type Service struct {
 	Timeline    driven.TimelineRepository
 	Contacts    driven.ContactRepository
 	Messages    driven.MessageRepository
+	// AfterProjectCorrespondence is optional best-effort hook (e.g. interpret) after
+	// committed paste/assign. Must not fail the caller.
+	AfterProjectCorrespondence func(ctx context.Context, userID, projectID uuid.UUID, messageID, manualItemID *uuid.UUID)
 }
 
 func (s *Service) homeOrg(ctx context.Context, userID uuid.UUID) (uuid.UUID, error) {
@@ -306,6 +309,11 @@ func (s *Service) AssignMessage(ctx context.Context, userID, messageID uuid.UUID
 
 	if status == domainprojects.StatusCommitted && in.ProjectID != nil {
 		_ = s.upsertParticipantsFromMessage(ctx, orgID, *in.ProjectID, msg)
+		if s.AfterProjectCorrespondence != nil {
+			mid := messageID
+			pid := *in.ProjectID
+			s.AfterProjectCorrespondence(ctx, userID, pid, &mid, nil)
+		}
 	}
 	return s.Assignments.EffectiveAssignment(ctx, userID, messageID)
 }
@@ -431,6 +439,11 @@ func (s *Service) CreateManualItem(ctx context.Context, userID uuid.UUID, in Cre
 			_ = s.Projects.UpsertProjectParticipant(ctx, *in.ProjectID, cid, now)
 		}
 	}
+	if status == string(domainprojects.StatusCommitted) && in.ProjectID != nil && s.AfterProjectCorrespondence != nil {
+		manID := row.ID
+		pid := *in.ProjectID
+		s.AfterProjectCorrespondence(ctx, userID, pid, nil, &manID)
+	}
 	return &row, nil
 }
 
@@ -470,6 +483,11 @@ func (s *Service) AssignManualItem(ctx context.Context, userID, manualItemID uui
 		ids, _ := s.Contacts.ListContactIDsForManualItem(ctx, orgID, manualItemID)
 		for _, cid := range ids {
 			_ = s.Projects.UpsertProjectParticipant(ctx, *projectID, cid, now)
+		}
+		if s.AfterProjectCorrespondence != nil {
+			manID := manualItemID
+			pid := *projectID
+			s.AfterProjectCorrespondence(ctx, userID, pid, nil, &manID)
 		}
 	}
 	return s.Manuals.GetManualItem(ctx, orgID, manualItemID)

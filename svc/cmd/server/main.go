@@ -21,11 +21,13 @@ import (
 	"github.com/Kapital-B/automata/svc/internal/application/auth"
 	appcontacts "github.com/Kapital-B/automata/svc/internal/application/contacts"
 	appfacts "github.com/Kapital-B/automata/svc/internal/application/facts"
+	appinterpret "github.com/Kapital-B/automata/svc/internal/application/interpret"
 	appissues "github.com/Kapital-B/automata/svc/internal/application/issues"
 	appmessages "github.com/Kapital-B/automata/svc/internal/application/messages"
 	appprojects "github.com/Kapital-B/automata/svc/internal/application/projects"
 	"github.com/Kapital-B/automata/svc/internal/configuration"
 	"github.com/go-chi/cors"
+	"github.com/google/uuid"
 	_ "modernc.org/sqlite"
 )
 
@@ -132,6 +134,27 @@ func main() {
 		Manuals:     repo,
 		Messages:    repo,
 	}
+	interpretSvc := &appinterpret.Service{
+		Users:           repo,
+		Projects:        repo,
+		Interpretations: repo,
+		Facts:           repo,
+		Timeline:        repo,
+		Assignments:     repo,
+		Manuals:         repo,
+		Messages:        repo,
+		JobRuns:         repo,
+	}
+	projectSvc.AfterProjectCorrespondence = func(ctx context.Context, userID, projectID uuid.UUID, messageID, manualItemID *uuid.UUID) {
+		in := appinterpret.RunInput{Trigger: "api"}
+		if messageID != nil {
+			in.MessageIDs = []uuid.UUID{*messageID}
+		}
+		if manualItemID != nil {
+			in.ManualItemIDs = []uuid.UUID{*manualItemID}
+		}
+		interpretSvc.TryRunBestEffort(ctx, userID, projectID, in)
+	}
 	assignSvc := &appprojects.AssignService{
 		Users:       repo,
 		Projects:    repo,
@@ -170,6 +193,7 @@ func main() {
 			APIKey:  cfg.LLMAPIKey,
 		}
 		issueSvc.LLM = llm
+		interpretSvc.LLM = llm
 		categorizeSvc = &appmessages.CategorizeService{
 			Messages: repo,
 			LLM:      llm,
@@ -236,6 +260,7 @@ func main() {
 		ProjectSvc:      projectSvc,
 		IssueSvc:        issueSvc,
 		FactSvc:         factSvc,
+		InterpretSvc:    interpretSvc,
 		Accounts:        repo,
 		Messages:        repo,
 		JobRuns:         repo,

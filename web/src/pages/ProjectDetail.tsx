@@ -27,18 +27,22 @@ import {
   createManualItem,
   createProjectFact,
   createProjectIssue,
+  dismissInterpretation,
   getCurrentPosition,
   getProject,
   getProjectTimeline,
   getApiHealth,
+  interpretProject,
   listContacts,
   listProjectFacts,
+  listProjectInterpretations,
   listProjectIssues,
   rejectFactVersion,
   suggestProjectIssue,
   updateProject,
   updateProjectMember,
   type FactDetail,
+  type Interpretation,
   type IssueListItem,
   type TimelineItem,
 } from "@/lib/auth";
@@ -115,6 +119,11 @@ export default function ProjectDetailPage() {
     queryKey: ["project-facts", accessToken, id],
     queryFn: () =>
       listProjectFacts(accessToken!, id!, { include: ["proposed", "history"] }),
+    enabled: Boolean(accessToken && id),
+  });
+  const interpretationsQuery = useQuery({
+    queryKey: ["project-interpretations", accessToken, id],
+    queryFn: () => listProjectInterpretations(accessToken!, id!),
     enabled: Boolean(accessToken && id),
   });
   const healthQuery = useQuery({
@@ -289,6 +298,46 @@ export default function ProjectDetailPage() {
     onError: (err) => {
       toast({
         title: "Reject failed",
+        description: err instanceof ApiError ? err.message : "Please try again.",
+        variant: "destructive",
+      });
+    },
+  });
+
+  const interpretMutation = useMutation({
+    mutationFn: async () => {
+      if (!accessToken || !id) throw new Error("Not authenticated");
+      return interpretProject(accessToken, id);
+    },
+    onSuccess: async (res) => {
+      const n = res.candidates?.length ?? 0;
+      toast({
+        title: n > 0 ? "Interpretation ready" : "No durable candidates",
+        description: n > 0 ? `${n} candidate(s) pending review.` : res.reason || undefined,
+      });
+      await queryClient.invalidateQueries({ queryKey: ["project-interpretations"] });
+    },
+    onError: (err) => {
+      toast({
+        title: "Interpret failed",
+        description: err instanceof ApiError ? err.message : "Please try again.",
+        variant: "destructive",
+      });
+    },
+  });
+
+  const dismissInterpMutation = useMutation({
+    mutationFn: async (interpretationID: string) => {
+      if (!accessToken) throw new Error("Not authenticated");
+      return dismissInterpretation(accessToken, interpretationID);
+    },
+    onSuccess: async () => {
+      toast({ title: "Interpretation dismissed" });
+      await queryClient.invalidateQueries({ queryKey: ["project-interpretations"] });
+    },
+    onError: (err) => {
+      toast({
+        title: "Dismiss failed",
         description: err instanceof ApiError ? err.message : "Please try again.",
         variant: "destructive",
       });
@@ -516,6 +565,22 @@ export default function ProjectDetailPage() {
                   ? "Suggest issue"
                   : "Suggest (LLM off)"}
             </Button>
+            <Button
+              variant="outline"
+              disabled={!llmEnabled || interpretMutation.isPending}
+              title={
+                llmEnabled
+                  ? "Extract fact/decision candidates from project correspondence"
+                  : "Configure LLM_BASE_URL and LLM_MODEL on the API to enable interpret"
+              }
+              onClick={() => interpretMutation.mutate()}
+            >
+              {interpretMutation.isPending
+                ? "Interpreting…"
+                : llmEnabled
+                  ? "Interpret"
+                  : "Interpret (LLM off)"}
+            </Button>
             <Dialog open={pasteOpen} onOpenChange={setPasteOpen}>
               <DialogTrigger asChild>
                 <Button>
@@ -532,6 +597,12 @@ export default function ProjectDetailPage() {
                     queryKey: ["project-timeline", accessToken, id],
                   });
                   await queryClient.invalidateQueries({ queryKey: ["unassigned"] });
+                  // Backend may auto-run interpret; refresh shortly.
+                  window.setTimeout(() => {
+                    void queryClient.invalidateQueries({
+                      queryKey: ["project-interpretations"],
+                    });
+                  }, 800);
                 }}
               />
             </Dialog>
@@ -711,6 +782,28 @@ export default function ProjectDetailPage() {
         <aside className="space-y-6 lg:border-l lg:border-border/70 lg:pl-4">
           <div className="space-y-3">
             <h2 className="text-sm font-medium uppercase tracking-wider text-muted-foreground">
+              Interpretations
+            </h2>
+            {interpretationsQuery.isLoading ? (
+              <Loader2 className="h-4 w-4 animate-spin text-muted-foreground" />
+            ) : (interpretationsQuery.data ?? []).length === 0 ? (
+              <p className="text-xs text-muted-foreground">No pending interpretations.</p>
+            ) : (
+              <ul className="space-y-3">
+                {(interpretationsQuery.data ?? []).map((interp) => (
+                  <InterpretationRailItem
+                    key={interp.id}
+                    interpretation={interp}
+                    dismissing={dismissInterpMutation.isPending}
+                    onDismiss={() => dismissInterpMutation.mutate(interp.id)}
+                  />
+                ))}
+              </ul>
+            )}
+          </div>
+
+          <div className="space-y-3">
+            <h2 className="text-sm font-medium uppercase tracking-wider text-muted-foreground">
               Facts
             </h2>
             {factsQuery.isLoading ? (
@@ -769,6 +862,67 @@ export default function ProjectDetailPage() {
         </aside>
       </div>
     </div>
+  );
+}
+
+function InterpretationRailItem({
+  interpretation,
+  dismissing,
+  onDismiss,
+}: {
+  interpretation: Interpretation;
+  dismissing: boolean;
+  onDismiss: () => void;
+}) {
+  const candidates = interpretation.candidates ?? [];
+  return (
+    <li className="space-y-2 text-sm">
+      <p className="text-xs text-muted-foreground">
+        {candidates.length} candidate(s)
+        {typeof interpretation.confidence === "number"
+          ? ` · ${Math.round(interpretation.confidence * 100)}%`
+          : ""}
+        {interpretation.sources?.length
+          ? ` · ${interpretation.sources.length} source(s)`
+          : ""}
+      </p>
+      <ul className="space-y-1.5 border-l border-border/60 pl-2">
+        {candidates.length === 0 ? (
+          <li className="text-xs text-muted-foreground">Empty payload</li>
+        ) : (
+          candidates.map((c, idx) => (
+            <li key={`${interpretation.id}-${idx}`} className="text-xs">
+              <span className="font-medium uppercase tracking-wider text-muted-foreground">
+                {c.kind}
+              </span>
+              {c.kind === "fact" ? (
+                <span className="mt-0.5 block">
+                  {c.label ?? c.subject_key}
+                  {c.value != null
+                    ? `: ${typeof c.value === "object" ? JSON.stringify(c.value) : String(c.value)}`
+                    : ""}
+                  {c.unit ? ` ${c.unit}` : ""}
+                </span>
+              ) : (
+                <span className="mt-0.5 block">{c.statement || "(decision)"}</span>
+              )}
+              {c.reason ? (
+                <span className="mt-0.5 block text-muted-foreground">{c.reason}</span>
+              ) : null}
+            </li>
+          ))
+        )}
+      </ul>
+      <Button
+        size="sm"
+        variant="outline"
+        className="h-7 text-xs"
+        disabled={dismissing}
+        onClick={onDismiss}
+      >
+        Dismiss
+      </Button>
+    </li>
   );
 }
 

@@ -87,6 +87,7 @@ Open **`authorization_url`** from parsed JSON (`jq -r .authorization_url`) so `&
 | Suggest | `POST /api/projects/{id}/issues/suggest` (requires `LLM_BASE_URL` + `LLM_MODEL`; confirm via create) |
 | Facts (Wave 2a) | `GET/POST /api/projects/{id}/facts`, `GET /api/facts/{id}`, confirm/reject versions, evidence attach/detach |
 | Current position | `GET /api/projects/{id}/current-position` (active facts; decisions empty until 2d) |
+| Interpret (Wave 2b) | `POST /api/projects/{id}/interpret`, `GET /api/projects/{id}/interpretations`, `POST /api/interpretations/{id}/dismiss` (LLM; provisional only — does not write facts) |
 
 `GET /api/health` returns `{ "status": "ok", "llm": true|false }`.
 

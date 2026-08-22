@@ -814,6 +814,10 @@ func (r *Repository) InsertJobRun(ctx context.Context, id uuid.UUID, accountID u
 	if !finishedAt.IsZero() {
 		fin = formatRFC3339(finishedAt.UTC())
 	}
+	var account any
+	if accountID != uuid.Nil {
+		account = accountID.String()
+	}
 	_, err := r.db.ExecContext(ctx, `
 		INSERT INTO job_runs (id, account_id, job_type, trigger_kind, status, time_window_start, time_window_end,
 			started_at, finished_at, error_message, meta_json)
@@ -824,7 +828,7 @@ func (r *Repository) InsertJobRun(ctx context.Context, id uuid.UUID, accountID u
 			finished_at = excluded.finished_at,
 			error_message = excluded.error_message,
 			meta_json = excluded.meta_json`,
-		id.String(), accountID.String(), jobType, trigger, status,
+		id.String(), account, jobType, trigger, status,
 		formatRFC3339(startedAt.UTC()), fin, nullStr(errMsg), metaJSON,
 	)
 	return err

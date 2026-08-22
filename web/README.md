@@ -37,7 +37,7 @@ npm run build   # production bundle
 | **Auth** | Register / login, or Microsoft/Google OAuth per environment config. |
 | **Accounts** | Connect mailbox (M365 work/personal), sync, delete account. |
 | **Inbox** | List/filter by category and **project**, open message, HTML body refresh via sync, create draft, **manual forward**, **project assign** control. |
-| **Projects** | Create with code + keywords; open timeline; paste correspondence; **Current position** strip; Facts rail (add/confirm/reject versions); issues rail; suggest issue (when LLM is on). |
+| **Projects** | Create with code + keywords; open timeline; paste correspondence; **Current position** strip; **Interpretations** inbox (LLM; dismiss); Facts rail (add/confirm/reject versions); issues rail; suggest issue / interpret (when LLM is on). |
 | **Unassigned** | Queue of mail/pastes without a committed project; assign to project. |
 | **People** | Contacts from mail; merge suggestions. |
 | **Today** | Summary snapshot, action items (mark done), FYI dismiss, refresh summary, draft shortcuts. |
@@ -63,6 +63,7 @@ Use this after backend (`svc`) and worker are up, with a real or test M365 accou
 8. **Forwarding (manual)** — From Inbox detail, **Forward** → pick allowlisted address → confirm; verify toast and that Graph forward succeeds for that message.
 10. **Projects** — Create `DC01` with keywords; sync/assign mail; paste a Teams note; create issue Pump P-03; attach items; delete a source message and confirm the issue remains.
 10b. **Facts** — Add `pump.p03.duty_kw` = 75 kW (confirm); propose 90 kW and confirm with supersede; Current position shows 90 kW; history shows 75 kW superseded; delete evidence message and confirm the fact remains.
+10c. **Interpret** — With LLM on, paste/assign or click Interpret; pending candidates appear; dismiss without creating a fact.
 11. **Unassigned** — Confirm badge/count and assign remaining items.
 12. **Suggest issue** — With LLM configured, propose from unassigned timeline items and confirm create; without LLM, the button stays disabled.
 
