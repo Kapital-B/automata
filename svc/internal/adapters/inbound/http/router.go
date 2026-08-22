@@ -95,6 +95,7 @@ func (h *Handlers) Routes() http.Handler {
 	r.Patch("/api/projects/{id}/member", h.updateProjectMember)
 	r.Get("/api/projects/{id}/timeline", h.getProjectTimeline)
 	r.Get("/api/projects/{id}/issues", h.listProjectIssues)
+	r.Post("/api/projects/{id}/issues/suggest", h.suggestProjectIssue)
 	r.Post("/api/projects/{id}/issues", h.createProjectIssue)
 	r.Get("/api/issues/{id}", h.getIssue)
 	r.Patch("/api/issues/{id}", h.updateIssue)

@@ -120,6 +120,7 @@ func main() {
 		Manuals:     repo,
 		Contacts:    repo,
 		Messages:    repo,
+		Timeline:    repo,
 	}
 	assignSvc := &appprojects.AssignService{
 		Users:       repo,
@@ -158,6 +159,7 @@ func main() {
 			Model:   cfg.LLMModel,
 			APIKey:  cfg.LLMAPIKey,
 		}
+		issueSvc.LLM = llm
 		categorizeSvc = &appmessages.CategorizeService{
 			Messages: repo,
 			LLM:      llm,

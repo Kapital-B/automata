@@ -29,6 +29,7 @@ import {
   getProjectTimeline,
   listContacts,
   listProjectIssues,
+  suggestProjectIssue,
   updateProject,
   updateProjectMember,
   type IssueListItem,
@@ -62,6 +63,11 @@ export default function ProjectDetailPage() {
   const [pasteOpen, setPasteOpen] = useState(false);
   const [createIssueOpen, setCreateIssueOpen] = useState(false);
   const [newIssueTitle, setNewIssueTitle] = useState("");
+  const [newIssueNote, setNewIssueNote] = useState("");
+  const [pendingItemRefs, setPendingItemRefs] = useState<
+    { message_id?: string; manual_item_id?: string }[]
+  >([]);
+  const [suggestMeta, setSuggestMeta] = useState<string | null>(null);
 
   const projectQuery = useQuery({
     queryKey: ["project", accessToken, id],
@@ -87,13 +93,21 @@ export default function ProjectDetailPage() {
   const createIssueMutation = useMutation({
     mutationFn: async () => {
       if (!accessToken || !id) throw new Error("Not authenticated");
-      return createProjectIssue(accessToken, id, { title: newIssueTitle.trim() });
+      return createProjectIssue(accessToken, id, {
+        title: newIssueTitle.trim(),
+        current_position_note: newIssueNote.trim() || undefined,
+        item_refs: pendingItemRefs.length > 0 ? pendingItemRefs : undefined,
+      });
     },
     onSuccess: async () => {
       toast({ title: "Issue created" });
       setCreateIssueOpen(false);
       setNewIssueTitle("");
+      setNewIssueNote("");
+      setPendingItemRefs([]);
+      setSuggestMeta(null);
       await queryClient.invalidateQueries({ queryKey: ["project-issues"] });
+      await queryClient.invalidateQueries({ queryKey: ["project-timeline"] });
     },
     onError: (err) => {
       toast({
@@ -104,6 +118,35 @@ export default function ProjectDetailPage() {
     },
   });
 
+  const suggestIssueMutation = useMutation({
+    mutationFn: async () => {
+      if (!accessToken || !id) throw new Error("Not authenticated");
+      return suggestProjectIssue(accessToken, id);
+    },
+    onSuccess: (res) => {
+      setNewIssueTitle(res.title);
+      setPendingItemRefs(res.item_refs ?? []);
+      const conf = typeof res.confidence === "number" ? Math.round(res.confidence * 100) : null;
+      setSuggestMeta(
+        [
+          conf != null ? `${conf}% confidence` : null,
+          res.reason?.trim() || null,
+          res.item_refs?.length ? `${res.item_refs.length} item(s) pre-selected` : null,
+        ]
+          .filter(Boolean)
+          .join(" · ") || null,
+      );
+      setCreateIssueOpen(true);
+      toast({ title: "Suggestion ready", description: "Review and create to confirm." });
+    },
+    onError: (err) => {
+      toast({
+        title: "Suggest failed",
+        description: err instanceof ApiError ? err.message : "Please try again.",
+        variant: "destructive",
+      });
+    },
+  });
   const attachMutation = useMutation({
     mutationFn: async (args: {
       issueID: string;
@@ -217,7 +260,16 @@ export default function ProjectDetailPage() {
         description="Correspondence timeline with an issues rail for trails."
         actions={
           <div className="flex flex-wrap gap-2">
-            <Dialog open={createIssueOpen} onOpenChange={setCreateIssueOpen}>
+            <Dialog
+              open={createIssueOpen}
+              onOpenChange={(open) => {
+                setCreateIssueOpen(open);
+                if (!open) {
+                  setSuggestMeta(null);
+                  setPendingItemRefs([]);
+                }
+              }}
+            >
               <DialogTrigger asChild>
                 <Button variant="outline">New issue</Button>
               </DialogTrigger>
@@ -225,14 +277,23 @@ export default function ProjectDetailPage() {
                 <DialogHeader>
                   <DialogTitle>Create issue</DialogTitle>
                   <DialogDescription>
-                    Default assignee is you. Attach correspondence from the timeline.
+                    Default assignee is you. Confirm to create — suggestions are never auto-saved.
                   </DialogDescription>
                 </DialogHeader>
                 <div className="space-y-3">
+                  {suggestMeta ? (
+                    <p className="text-xs text-muted-foreground">{suggestMeta}</p>
+                  ) : null}
                   <Input
                     value={newIssueTitle}
                     onChange={(e) => setNewIssueTitle(e.target.value)}
                     placeholder="Pump P-03 Sizing"
+                  />
+                  <Textarea
+                    value={newIssueNote}
+                    onChange={(e) => setNewIssueNote(e.target.value)}
+                    placeholder="Optional current position note"
+                    rows={2}
                   />
                   <Button
                     className="w-full"
@@ -244,6 +305,13 @@ export default function ProjectDetailPage() {
                 </div>
               </DialogContent>
             </Dialog>
+            <Button
+              variant="outline"
+              disabled={suggestIssueMutation.isPending}
+              onClick={() => suggestIssueMutation.mutate()}
+            >
+              {suggestIssueMutation.isPending ? "Suggesting…" : "Suggest issue"}
+            </Button>
             <Dialog open={pasteOpen} onOpenChange={setPasteOpen}>
               <DialogTrigger asChild>
                 <Button>

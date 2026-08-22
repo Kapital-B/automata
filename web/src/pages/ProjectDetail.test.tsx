@@ -33,6 +33,7 @@ vi.mock("@/lib/auth", async () => {
     listContacts: vi.fn(),
     listProjectIssues: vi.fn(),
     createProjectIssue: vi.fn(),
+    suggestProjectIssue: vi.fn(),
     addIssueItem: vi.fn(),
     updateProject: vi.fn(),
     updateProjectMember: vi.fn(),
@@ -45,6 +46,7 @@ const createManualItem = vi.mocked(auth.createManualItem);
 const listContacts = vi.mocked(auth.listContacts);
 const listProjectIssues = vi.mocked(auth.listProjectIssues);
 const createProjectIssue = vi.mocked(auth.createProjectIssue);
+const suggestProjectIssue = vi.mocked(auth.suggestProjectIssue);
 const addIssueItem = vi.mocked(auth.addIssueItem);
 
 describe("Project timeline UI", () => {
@@ -55,9 +57,16 @@ describe("Project timeline UI", () => {
     listContacts.mockReset();
     listProjectIssues.mockReset();
     createProjectIssue.mockReset();
+    suggestProjectIssue.mockReset();
     addIssueItem.mockReset();
     listContacts.mockResolvedValue([]);
     listProjectIssues.mockResolvedValue([]);
+    suggestProjectIssue.mockResolvedValue({
+      title: "Pump P-03",
+      item_refs: [{ manual_item_id: "man1" }],
+      confidence: 0.9,
+      reason: "mentions P-03",
+    });
     getProject.mockResolvedValue({
       id: "p1",
       organisation_id: "o1",
@@ -90,6 +99,47 @@ describe("Project timeline UI", () => {
         message_id: "msg1",
       },
     ]);
+  });
+
+  it("suggests an issue and creates with item refs on confirm", async () => {
+    const client = new QueryClient({
+      defaultOptions: { queries: { retry: false }, mutations: { retry: false } },
+    });
+    createProjectIssue.mockResolvedValue({
+      id: "iss1",
+      organisation_id: "o1",
+      project_id: "p1",
+      title: "Pump P-03",
+      current_position_note: "",
+      status: "open",
+      awaiting_me: false,
+      created_at: "2026-03-03T00:00:00Z",
+      updated_at: "2026-03-03T00:00:00Z",
+      items: [],
+    });
+
+    render(
+      <QueryClientProvider client={client}>
+        <MemoryRouter initialEntries={["/projects/p1"]}>
+          <Routes>
+            <Route path="/projects/:id" element={<ProjectDetailPage />} />
+          </Routes>
+        </MemoryRouter>
+      </QueryClientProvider>,
+    );
+
+    expect(await screen.findByText("Cooling Upgrade")).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: /suggest issue/i }));
+    await waitFor(() => expect(suggestProjectIssue).toHaveBeenCalledWith("token", "p1"));
+    expect(await screen.findByDisplayValue("Pump P-03")).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: /^create$/i }));
+    await waitFor(() =>
+      expect(createProjectIssue).toHaveBeenCalledWith("token", "p1", {
+        title: "Pump P-03",
+        current_position_note: undefined,
+        item_refs: [{ manual_item_id: "man1" }],
+      }),
+    );
   });
 
   it("creates an issue from the project page", async () => {

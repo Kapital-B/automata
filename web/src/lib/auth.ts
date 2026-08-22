@@ -591,6 +591,30 @@ export async function listProjectIssues(accessToken: string, projectID: string) 
   });
 }
 
+export type IssueSuggestResult = {
+  title: string;
+  item_refs: { message_id?: string; manual_item_id?: string }[];
+  confidence: number;
+  reason?: string;
+};
+
+export async function suggestProjectIssue(
+  accessToken: string,
+  projectID: string,
+  opts?: { account_id?: string },
+) {
+  const params = new URLSearchParams();
+  if (opts?.account_id) params.set("account_id", opts.account_id);
+  const qs = params.toString();
+  return apiRequest<IssueSuggestResult>(
+    `/api/projects/${projectID}/issues/suggest${qs ? `?${qs}` : ""}`,
+    {
+      method: "POST",
+      headers: toAuthHeader(accessToken),
+    },
+  );
+}
+
 export async function createProjectIssue(
   accessToken: string,
   projectID: string,

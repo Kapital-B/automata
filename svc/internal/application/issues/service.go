@@ -30,6 +30,8 @@ type Service struct {
 	Manuals     driven.ManualItemRepository
 	Contacts    driven.ContactRepository
 	Messages    driven.MessageRepository
+	Timeline    driven.TimelineRepository
+	LLM         driven.LLMClient
 }
 
 func (s *Service) homeOrg(ctx context.Context, userID uuid.UUID) (uuid.UUID, error) {

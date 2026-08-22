@@ -44,6 +44,54 @@ func (h *Handlers) listProjectIssues(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, out)
 }
 
+func (h *Handlers) suggestProjectIssue(w http.ResponseWriter, r *http.Request) {
+	uid, ok := UserIDFromContext(r.Context())
+	if !ok {
+		writeJSON(w, http.StatusUnauthorized, map[string]string{"error": "unauthorized"})
+		return
+	}
+	if h.IssueSvc == nil {
+		writeJSON(w, http.StatusServiceUnavailable, map[string]string{"error": "issues not configured"})
+		return
+	}
+	projectID, err := uuid.Parse(chi.URLParam(r, "id"))
+	if err != nil {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "bad id"})
+		return
+	}
+	in := appissues.SuggestInput{}
+	if v := strings.TrimSpace(r.URL.Query().Get("account_id")); v != "" {
+		aid, err := uuid.Parse(v)
+		if err != nil {
+			writeJSON(w, http.StatusBadRequest, map[string]string{"error": "bad account_id"})
+			return
+		}
+		in.AccountID = &aid
+	}
+	res, err := h.IssueSvc.Suggest(r.Context(), uid, projectID, in)
+	if err != nil {
+		writeIssueError(w, err)
+		return
+	}
+	refs := make([]map[string]any, 0, len(res.ItemRefs))
+	for _, ref := range res.ItemRefs {
+		row := map[string]any{}
+		if ref.MessageID != nil {
+			row["message_id"] = ref.MessageID.String()
+		}
+		if ref.ManualItemID != nil {
+			row["manual_item_id"] = ref.ManualItemID.String()
+		}
+		refs = append(refs, row)
+	}
+	writeJSON(w, http.StatusOK, map[string]any{
+		"title":      res.Title,
+		"item_refs":  refs,
+		"confidence": res.Confidence,
+		"reason":     res.Reason,
+	})
+}
+
 func (h *Handlers) createProjectIssue(w http.ResponseWriter, r *http.Request) {
 	uid, ok := UserIDFromContext(r.Context())
 	if !ok {
@@ -313,6 +361,10 @@ func writeIssueError(w http.ResponseWriter, err error) {
 		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid item ref"})
 	case errors.Is(err, appissues.ErrInvalidStatus):
 		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid status"})
+	case errors.Is(err, appissues.ErrLLMUnavailable):
+		writeJSON(w, http.StatusServiceUnavailable, map[string]string{"error": "llm not configured"})
+	case errors.Is(err, appissues.ErrNothingToSuggest):
+		writeJSON(w, http.StatusUnprocessableEntity, map[string]string{"error": "no unassigned correspondence to suggest from"})
 	default:
 		writeJSON(w, http.StatusBadRequest, map[string]string{"error": err.Error()})
 	}
