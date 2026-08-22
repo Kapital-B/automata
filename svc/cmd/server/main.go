@@ -26,6 +26,7 @@ import (
 	appreconcile "github.com/Kapital-B/automata/svc/internal/application/reconcile"
 	appattention "github.com/Kapital-B/automata/svc/internal/application/attention"
 	appdecisions "github.com/Kapital-B/automata/svc/internal/application/decisions"
+	appprojectai "github.com/Kapital-B/automata/svc/internal/application/projectai"
 	appmessages "github.com/Kapital-B/automata/svc/internal/application/messages"
 	appprojects "github.com/Kapital-B/automata/svc/internal/application/projects"
 	"github.com/Kapital-B/automata/svc/internal/configuration"
@@ -180,6 +181,9 @@ func main() {
 	attentionSvc := &appattention.Service{
 		Users: repo, Projects: repo, Issues: repo, Facts: repo, Decisions: repo, Contradictions: repo,
 	}
+	projectAISvc := &appprojectai.Service{
+		Users: repo, Projects: repo, Facts: repo, Decisions: repo, Issues: repo, Timeline: repo, JobRuns: repo,
+	}
 	assignSvc := &appprojects.AssignService{
 		Users:       repo,
 		Projects:    repo,
@@ -219,6 +223,7 @@ func main() {
 		}
 		issueSvc.LLM = llm
 		interpretSvc.LLM = llm
+		projectAISvc.LLM = llm
 		categorizeSvc = &appmessages.CategorizeService{
 			Messages: repo,
 			LLM:      llm,
@@ -289,6 +294,7 @@ func main() {
 		ReconcileSvc:    reconcileSvc,
 		DecisionSvc:     decisionSvc,
 		AttentionSvc:    attentionSvc,
+		ProjectAISvc:    projectAISvc,
 		Accounts:        repo,
 		Messages:        repo,
 		JobRuns:         repo,

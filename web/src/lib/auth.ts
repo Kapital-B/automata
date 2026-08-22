@@ -1085,6 +1085,25 @@ export async function getProjectAttention(accessToken: string, projectID: string
   });
 }
 
+export type AskCitation = {
+  type: string;
+  id: string;
+};
+
+export type AskAnswer = {
+  answer: string;
+  citations: AskCitation[];
+  confidence: number;
+};
+
+export async function askProject(accessToken: string, projectID: string, question: string) {
+  return apiRequest<AskAnswer>(`/api/projects/${projectID}/ask`, {
+    method: "POST",
+    headers: toAuthHeader(accessToken),
+    body: JSON.stringify({ question }),
+  });
+}
+
 export async function createManualItem(
   accessToken: string,
   body: {

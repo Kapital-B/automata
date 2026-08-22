@@ -23,6 +23,7 @@ import (
 	appreconcile "github.com/Kapital-B/automata/svc/internal/application/reconcile"
 	appattention "github.com/Kapital-B/automata/svc/internal/application/attention"
 	appdecisions "github.com/Kapital-B/automata/svc/internal/application/decisions"
+	appprojectai "github.com/Kapital-B/automata/svc/internal/application/projectai"
 	appmessages "github.com/Kapital-B/automata/svc/internal/application/messages"
 	appprojects "github.com/Kapital-B/automata/svc/internal/application/projects"
 	"github.com/Kapital-B/automata/svc/internal/application/ports/driven"
@@ -50,6 +51,7 @@ type Handlers struct {
 	ReconcileSvc    *appreconcile.Service
 	DecisionSvc     *appdecisions.Service
 	AttentionSvc    *appattention.Service
+	ProjectAISvc    *appprojectai.Service
 	Accounts        driven.AccountRepository
 	Messages        driven.MessageRepository
 	JobRuns         driven.JobRunRepository
@@ -120,6 +122,7 @@ func (h *Handlers) Routes() http.Handler {
 	r.Patch("/api/decisions/{id}", h.patchDecision)
 	r.Get("/api/attention", h.listAttention)
 	r.Get("/api/projects/{id}/attention", h.listProjectAttention)
+	r.Post("/api/projects/{id}/ask", h.askProject)
 	r.Get("/api/facts/{id}", h.getFact)
 	r.Post("/api/fact-versions/{id}/confirm", h.confirmFactVersion)
 	r.Post("/api/fact-versions/{id}/reject", h.rejectFactVersion)

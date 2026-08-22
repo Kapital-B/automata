@@ -23,6 +23,7 @@ import { useAccountsData } from "@/hooks/useAccountsData";
 import {
   ApiError,
   addIssueItem,
+  askProject,
   confirmFactVersion,
   confirmDecision,
   createManualItem,
@@ -101,6 +102,12 @@ export default function ProjectDetailPage() {
   const [createDecisionOpen, setCreateDecisionOpen] = useState(false);
   const [decisionStatement, setDecisionStatement] = useState("");
   const [decisionConfirmNow, setDecisionConfirmNow] = useState(true);
+  const [askQuestion, setAskQuestion] = useState("");
+  const [askAnswer, setAskAnswer] = useState<{
+    answer: string;
+    citations: { type: string; id: string }[];
+    confidence: number;
+  } | null>(null);
 
   const projectQuery = useQuery({
     queryKey: ["project", accessToken, id],
@@ -476,6 +483,23 @@ export default function ProjectDetailPage() {
     onError: (err) => {
       toast({
         title: "Withdraw failed",
+        description: err instanceof ApiError ? err.message : "Please try again.",
+        variant: "destructive",
+      });
+    },
+  });
+
+  const askMutation = useMutation({
+    mutationFn: async () => {
+      if (!accessToken || !id) throw new Error("Not authenticated");
+      return askProject(accessToken, id, askQuestion.trim());
+    },
+    onSuccess: (res) => {
+      setAskAnswer(res);
+    },
+    onError: (err) => {
+      toast({
+        title: "Ask failed",
         description: err instanceof ApiError ? err.message : "Please try again.",
         variant: "destructive",
       });
@@ -902,6 +926,46 @@ export default function ProjectDetailPage() {
             ) : null}
           </div>
         )}
+      </section>
+
+      <section aria-label="Ask Project AI" className="space-y-2 border-b border-border/70 pb-4">
+        <h2 className="text-xs font-medium uppercase tracking-wider text-muted-foreground">
+          Ask Project AI
+        </h2>
+        <div className="flex flex-col gap-2 sm:flex-row">
+          <Input
+            value={askQuestion}
+            onChange={(e) => setAskQuestion(e.target.value)}
+            placeholder="Ask a grounded question about this project"
+            disabled={!llmEnabled || askMutation.isPending}
+            onKeyDown={(e) => {
+              if (e.key === "Enter" && askQuestion.trim()) askMutation.mutate();
+            }}
+          />
+          <Button
+            variant="outline"
+            disabled={!llmEnabled || !askQuestion.trim() || askMutation.isPending}
+            title={
+              llmEnabled
+                ? "Answer from project facts, decisions, and correspondence"
+                : "Configure LLM_BASE_URL and LLM_MODEL on the API"
+            }
+            onClick={() => askMutation.mutate()}
+          >
+            {askMutation.isPending ? "Asking…" : llmEnabled ? "Ask" : "Ask (LLM off)"}
+          </Button>
+        </div>
+        {askAnswer ? (
+          <div className="space-y-1 text-sm">
+            <p>{askAnswer.answer}</p>
+            {askAnswer.citations.length > 0 ? (
+              <p className="text-xs text-muted-foreground">
+                Citations:{" "}
+                {askAnswer.citations.map((c) => `${c.type}:${c.id.slice(0, 8)}`).join(", ")}
+              </p>
+            ) : null}
+          </div>
+        ) : null}
       </section>
 
       <div className="grid gap-8 lg:grid-cols-[minmax(0,1fr)_240px]">

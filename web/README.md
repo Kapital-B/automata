@@ -37,7 +37,7 @@ npm run build   # production bundle
 | **Auth** | Register / login, or Microsoft/Google OAuth per environment config. |
 | **Accounts** | Connect mailbox (M365 work/personal), sync, delete account. |
 | **Inbox** | List/filter by category and **project**, open message, HTML body refresh via sync, create draft, **manual forward**, **project assign** control. |
-| **Projects** | Create with code + keywords; open timeline; paste correspondence; **Current position** strip (facts + decisions); **Interpretations** inbox; **Reconcile** + **Contradictions**; Facts / Decisions rails; issues; suggest / interpret when LLM is on. |
+| **Projects** | Create with code + keywords; open timeline; paste correspondence; **Current position** strip (facts + decisions); **Ask Project AI**; **Interpretations** inbox; **Reconcile** + **Contradictions**; Facts / Decisions rails; issues; suggest / interpret when LLM is on. |
 | **Assistant** | Needs my input chip (real attention counts) plus mail action items. |
 | **Unassigned** | Queue of mail/pastes without a committed project; assign to project. |
 | **People** | Contacts from mail; merge suggestions. |
@@ -67,6 +67,7 @@ Use this after backend (`svc`) and worker are up, with a real or test M365 accou
 10c. **Interpret** — With LLM on, paste/assign or click Interpret; pending candidates appear; dismiss without creating a fact.
 10d. **Reconcile** — With pending interpretations, click Reconcile; compatible values reinforce; conflicting low-confidence claims open a contradiction; resolve with Keep proposed / Reject proposed.
 10e. **Decisions / Needs my input** — Add a decision and confirm; Assistant shows a Needs my input count for provisional facts/decisions and open contradictions.
+10f. **Ask Project AI** — With LLM on and an active fact (e.g. duty 90 kW), ask “What is Pump P-03 duty?” and confirm the answer cites a fact version.
 11. **Unassigned** — Confirm badge/count and assign remaining items.
 12. **Suggest issue** — With LLM configured, propose from unassigned timeline items and confirm create; without LLM, the button stays disabled.
 

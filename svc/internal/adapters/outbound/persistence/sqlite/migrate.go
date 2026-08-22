@@ -592,7 +592,7 @@ func extendJobRunTypes(db *sql.DB) error {
 	if err != nil {
 		return err
 	}
-	if strings.Contains(sqlText, "reconcile_project") {
+	if strings.Contains(sqlText, "project_ai") {
 		return nil
 	}
 
@@ -621,7 +621,7 @@ func extendJobRunTypes(db *sql.DB) error {
 			account_id TEXT REFERENCES accounts(id) ON DELETE SET NULL,
 			job_type TEXT NOT NULL CHECK (job_type IN (
 				'sync', 'summarize', 'categorize', 'forward_rules', 'draft_suggest',
-				'resolve_contacts', 'assign_projects', 'interpret_project', 'reconcile_project'
+				'resolve_contacts', 'assign_projects', 'interpret_project', 'reconcile_project', 'project_ai'
 			)),
 			trigger_kind TEXT NOT NULL CHECK (trigger_kind IN ('schedule', 'api')),
 			status TEXT NOT NULL CHECK (status IN ('pending', 'running', 'success', 'failed', 'cancelled')),
