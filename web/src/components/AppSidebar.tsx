@@ -1,21 +1,16 @@
 import { NavLink, useLocation } from "react-router-dom";
 import { useQuery } from "@tanstack/react-query";
 import {
-  Sparkles,
   Inbox,
   Forward,
   PenLine,
   Plug,
   History,
   Settings as SettingsIcon,
-  MessageSquare,
+  Home,
   Users,
   FolderKanban,
   CircleHelp,
-  Mail,
-  Slack,
-  Zap,
-  Server,
 } from "lucide-react";
 import {
   Sidebar,
@@ -33,31 +28,20 @@ import {
 import { cn } from "@/lib/utils";
 import { useAuth } from "@/components/auth/AuthProvider";
 import { useAccountsData } from "@/hooks/useAccountsData";
-import { getSummary, getUnassignedSummary, listDraftSuggestions, getAttention } from "@/lib/auth";
-
-const assistantNav = [
-  { title: "Assistant", url: "/", icon: MessageSquare, end: true },
-];
+import { getUnassignedSummary, listDraftSuggestions, getAttention } from "@/lib/auth";
 
 const primaryNav = [
-  { title: "Today", url: "/today", icon: Sparkles },
-  { title: "Inbox", url: "/inbox", icon: Inbox },
+  { title: "Home", url: "/", icon: Home, end: true, badge: "needsMe" as const },
   { title: "Projects", url: "/projects", icon: FolderKanban },
-  { title: "Unassigned", url: "/unassigned", icon: CircleHelp },
+  { title: "Triage", url: "/triage", icon: CircleHelp, badge: "triage" as const },
   { title: "People", url: "/people", icon: Users },
-  { title: "Drafts", url: "/drafts", icon: PenLine },
+];
+
+const moreNav = [
+  { title: "Inbox", url: "/inbox", icon: Inbox },
+  { title: "Drafts", url: "/drafts", icon: PenLine, badge: "drafts" as const },
   { title: "Rules", url: "/rules", icon: Forward },
-];
-
-const connectorsNav = [
-  { title: "Email", url: "/accounts", icon: Mail, status: "live" as const },
-  { title: "Slack", url: "/accounts", icon: Slack, status: "soon" as const },
-  { title: "Linear", url: "/accounts", icon: Zap, status: "soon" as const },
-  { title: "MCP servers", url: "/accounts", icon: Server, status: "soon" as const },
-];
-
-const systemNav = [
-  { title: "Accounts", url: "/accounts", icon: Plug },
+  { title: "Connectors", url: "/accounts", icon: Plug },
   { title: "Runs", url: "/runs", icon: History },
   { title: "Settings", url: "/settings", icon: SettingsIcon },
 ];
@@ -68,17 +52,11 @@ export function AppSidebar() {
   const location = useLocation();
   const { user, signOut, accessToken } = useAuth();
   const { accounts } = useAccountsData();
-  const connectedAccounts = accounts.filter((a) => a.status === "connected");
 
-  const summaryBadgeQuery = useQuery({
-    queryKey: ["sidebar", "summary-badge", accessToken],
-    queryFn: () => getSummary(accessToken!),
-    enabled: Boolean(accessToken) && connectedAccounts.length > 0,
-  });
   const draftsBadgeQuery = useQuery({
     queryKey: ["draft-suggestions", accessToken, "all"],
     queryFn: () => listDraftSuggestions(accessToken!),
-    enabled: Boolean(accessToken) && connectedAccounts.length > 0,
+    enabled: Boolean(accessToken) && accounts.some((a) => a.status === "connected"),
   });
   const unassignedBadgeQuery = useQuery({
     queryKey: ["unassigned-summary", accessToken],
@@ -90,9 +68,8 @@ export function AppSidebar() {
     queryFn: () => getAttention(accessToken!),
     enabled: Boolean(accessToken),
   });
-  const todayBadge = summaryBadgeQuery.data?.action_items?.length ?? 0;
   const draftsBadge = draftsBadgeQuery.data?.length ?? 0;
-  const unassignedBadge =
+  const triageBadge =
     (unassignedBadgeQuery.data?.unassigned ?? 0) +
     (unassignedBadgeQuery.data?.provisional ?? 0);
   const needsMeBadge = attentionBadgeQuery.data?.counts?.total ?? 0;
@@ -105,8 +82,15 @@ export function AppSidebar() {
       "flex items-center gap-3 rounded-md px-2 py-1.5 text-sm transition-colors",
       active
         ? "bg-sidebar-accent text-sidebar-accent-foreground font-medium"
-        : "text-sidebar-foreground/80 hover:bg-sidebar-accent/60 hover:text-sidebar-accent-foreground"
+        : "text-sidebar-foreground/80 hover:bg-sidebar-accent/60 hover:text-sidebar-accent-foreground",
     );
+
+  const badgeFor = (badge?: "needsMe" | "triage" | "drafts") => {
+    if (badge === "needsMe" && needsMeBadge > 0) return needsMeBadge;
+    if (badge === "triage" && triageBadge > 0) return triageBadge;
+    if (badge === "drafts" && draftsBadge > 0) return draftsBadge;
+    return null;
+  };
 
   return (
     <Sidebar collapsible="icon" className="border-r border-sidebar-border">
@@ -134,45 +118,7 @@ export function AppSidebar() {
         <SidebarGroup>
           {!collapsed && (
             <SidebarGroupLabel className="px-2 text-[10px] uppercase tracking-widest text-muted-foreground">
-              Assistant
-            </SidebarGroupLabel>
-          )}
-          <SidebarGroupContent>
-            <SidebarMenu>
-              {assistantNav.map((item) => (
-                <SidebarMenuItem key={item.title}>
-                  <SidebarMenuButton asChild>
-                    <NavLink to={item.url} end={item.end}>
-                      {({ isActive: a }) => (
-                        <span className={linkClass(a)}>
-                          <item.icon className="h-4 w-4 shrink-0" />
-                          {!collapsed && (
-                            <>
-                              <span className="flex-1">{item.title}</span>
-                              {needsMeBadge > 0 ? (
-                                <span
-                                  className="rounded-full border border-sidebar-border px-1.5 py-0.5 text-[10px] font-medium leading-none"
-                                  title="Needs my input"
-                                >
-                                  {needsMeBadge}
-                                </span>
-                              ) : null}
-                            </>
-                          )}
-                        </span>
-                      )}
-                    </NavLink>
-                  </SidebarMenuButton>
-                </SidebarMenuItem>
-              ))}
-            </SidebarMenu>
-          </SidebarGroupContent>
-        </SidebarGroup>
-
-        <SidebarGroup>
-          {!collapsed && (
-            <SidebarGroupLabel className="px-2 text-[10px] uppercase tracking-widest text-muted-foreground">
-              Workspace
+              Primary
             </SidebarGroupLabel>
           )}
           <SidebarGroupContent>
@@ -180,65 +126,34 @@ export function AppSidebar() {
               {primaryNav.map((item) => (
                 <SidebarMenuItem key={item.title}>
                   <SidebarMenuButton asChild>
-                    <NavLink to={item.url}>
-                      {({ isActive: a }) => (
-                        <span className={linkClass(a)}>
-                          <item.icon className="h-4 w-4 shrink-0" />
-                          {!collapsed && (
-                            <>
-                              <span className="flex-1">{item.title}</span>
-                              {item.title === "Today" && (
-                                <span className="rounded-full border border-sidebar-border px-1.5 py-0.5 text-[10px] font-medium leading-none">
-                                  {todayBadge}
-                                </span>
-                              )}
-                              {item.title === "Drafts" && (
-                                <span className="rounded-full border border-sidebar-border px-1.5 py-0.5 text-[10px] font-medium leading-none">
-                                  {draftsBadge}
-                                </span>
-                              )}
-                              {item.title === "Unassigned" && unassignedBadge > 0 && (
-                                <span className="rounded-full border border-sidebar-border px-1.5 py-0.5 text-[10px] font-medium leading-none">
-                                  {unassignedBadge}
-                                </span>
-                              )}
-                            </>
-                          )}
-                        </span>
-                      )}
-                    </NavLink>
-                  </SidebarMenuButton>
-                </SidebarMenuItem>
-              ))}
-            </SidebarMenu>
-          </SidebarGroupContent>
-        </SidebarGroup>
-
-        <SidebarGroup>
-          {!collapsed && (
-            <SidebarGroupLabel className="px-2 text-[10px] uppercase tracking-widest text-muted-foreground">
-              Connectors
-            </SidebarGroupLabel>
-          )}
-          <SidebarGroupContent>
-            <SidebarMenu>
-              {connectorsNav.map((item) => (
-                <SidebarMenuItem key={item.title}>
-                  <SidebarMenuButton asChild>
-                    <NavLink to={item.url}>
-                      <span className={linkClass(false)}>
-                        <item.icon className="h-4 w-4 shrink-0" />
-                        {!collapsed && (
-                          <>
-                            <span className="flex-1">{item.title}</span>
-                            {item.status === "soon" && (
-                              <span className="text-[9px] uppercase tracking-wider text-muted-foreground">
-                                soon
-                              </span>
+                    <NavLink to={item.url} end={item.end}>
+                      {({ isActive: a }) => {
+                        const count = badgeFor(item.badge);
+                        return (
+                          <span className={linkClass(a || isActive(item.url, item.end))}>
+                            <item.icon className="h-4 w-4 shrink-0" />
+                            {!collapsed && (
+                              <>
+                                <span className="flex-1">{item.title}</span>
+                                {count != null && (
+                                  <span
+                                    className="rounded-full border border-sidebar-border px-1.5 py-0.5 text-[10px] font-medium leading-none"
+                                    title={
+                                      item.badge === "needsMe"
+                                        ? "Needs my input"
+                                        : item.badge === "triage"
+                                          ? "Triage queue"
+                                          : undefined
+                                    }
+                                  >
+                                    {count}
+                                  </span>
+                                )}
+                              </>
                             )}
-                          </>
-                        )}
-                      </span>
+                          </span>
+                        );
+                      }}
                     </NavLink>
                   </SidebarMenuButton>
                 </SidebarMenuItem>
@@ -250,21 +165,33 @@ export function AppSidebar() {
         <SidebarGroup>
           {!collapsed && (
             <SidebarGroupLabel className="px-2 text-[10px] uppercase tracking-widest text-muted-foreground">
-              System
+              More
             </SidebarGroupLabel>
           )}
           <SidebarGroupContent>
             <SidebarMenu>
-              {systemNav.map((item) => (
+              {moreNav.map((item) => (
                 <SidebarMenuItem key={item.title}>
                   <SidebarMenuButton asChild>
                     <NavLink to={item.url}>
-                      {({ isActive: a }) => (
-                        <span className={linkClass(a || isActive(item.url))}>
-                          <item.icon className="h-4 w-4 shrink-0" />
-                          {!collapsed && <span>{item.title}</span>}
-                        </span>
-                      )}
+                      {({ isActive: a }) => {
+                        const count = badgeFor(item.badge);
+                        return (
+                          <span className={linkClass(a || isActive(item.url))}>
+                            <item.icon className="h-4 w-4 shrink-0" />
+                            {!collapsed && (
+                              <>
+                                <span className="flex-1">{item.title}</span>
+                                {count != null && (
+                                  <span className="rounded-full border border-sidebar-border px-1.5 py-0.5 text-[10px] font-medium leading-none">
+                                    {count}
+                                  </span>
+                                )}
+                              </>
+                            )}
+                          </span>
+                        );
+                      }}
                     </NavLink>
                   </SidebarMenuButton>
                 </SidebarMenuItem>
@@ -297,6 +224,13 @@ export function AppSidebar() {
                     )}
                   </li>
                 ))}
+                {accounts.length === 0 && (
+                  <li className="px-2 py-1.5 text-xs text-muted-foreground">
+                    <NavLink to="/accounts" className="underline-offset-2 hover:underline">
+                      Connect email
+                    </NavLink>
+                  </li>
+                )}
               </ul>
             </SidebarGroupContent>
           </SidebarGroup>

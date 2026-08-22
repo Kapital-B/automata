@@ -43,6 +43,24 @@ describe("buildAssistantSuggestions", () => {
     ];
     const out = buildAssistantSuggestions(state);
     expect(out[0]?.id).toBe("review-action-items");
+    expect(out[0]?.href).toBe("/");
     expect(out[1]?.id).toBe("open-source-messages");
+  });
+
+  it("points unassigned work at triage", () => {
+    const state = baseState();
+    state.connectedAccounts = [
+      {
+        id: "a1",
+        label: "Work",
+        primaryEmail: "work@example.com",
+        kind: "work",
+        status: "connected",
+        colorVar: "acct-1",
+      },
+    ];
+    state.unassignedCount = 3;
+    const out = buildAssistantSuggestions(state);
+    expect(out.some((s) => s.id === "work-unassigned" && s.href === "/triage")).toBe(true);
   });
 });

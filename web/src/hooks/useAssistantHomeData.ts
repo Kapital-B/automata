@@ -57,8 +57,8 @@ export function buildAssistantSuggestions(state: AssistantHomeState): AssistantS
     out.push({
       id: "review-action-items",
       title: `Review ${state.actionItems.length} open action item${state.actionItems.length === 1 ? "" : "s"}`,
-      description: "See the full list in Today.",
-      href: "/today",
+      description: "See the full list on Home.",
+      href: "/",
     });
     out.push({
       id: "open-source-messages",
@@ -73,7 +73,7 @@ export function buildAssistantSuggestions(state: AssistantHomeState): AssistantS
       id: "work-unassigned",
       title: `Clear ${state.unassignedCount} unassigned item${state.unassignedCount === 1 ? "" : "s"}`,
       description: "Assign mail and pastes to a project.",
-      href: "/unassigned",
+      href: "/triage",
     });
   }
 
@@ -83,14 +83,14 @@ export function buildAssistantSuggestions(state: AssistantHomeState): AssistantS
         id: "review-fyi",
         title: `Review ${state.fyi.length} FYI item${state.fyi.length === 1 ? "" : "s"}`,
         description: "Catch up on awareness items.",
-        href: "/today",
+        href: "/",
       });
     } else if (!state.summary?.snapshot) {
       out.push({
         id: "refresh-summary",
         title: "Refresh today's summary",
         description: "Generate a new summary snapshot.",
-        href: "/today",
+        href: "/",
       });
     }
   }

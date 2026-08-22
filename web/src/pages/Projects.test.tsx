@@ -53,7 +53,7 @@ function wrap(ui: React.ReactNode, path: string) {
       <MemoryRouter initialEntries={[path]}>
         <Routes>
           <Route path="/projects" element={<ProjectsPage />} />
-          <Route path="/unassigned" element={<UnassignedPage />} />
+          <Route path="/triage" element={<UnassignedPage />} />
         </Routes>
       </MemoryRouter>
     </QueryClientProvider>,
@@ -98,7 +98,7 @@ describe("Projects UI", () => {
     await waitFor(() => expect(createProject).toHaveBeenCalled());
   });
 
-  it("unassigned sections render and assign hits API", async () => {
+  it("triage sections render and assign hits API", async () => {
     listProjects.mockResolvedValue([
       {
         id: "p1",
@@ -143,7 +143,8 @@ describe("Projects UI", () => {
       },
     ]);
     assignMessageProject.mockResolvedValue({ status: "committed", project_id: "p1" });
-    wrap(<UnassignedPage />, "/unassigned");
+    wrap(<UnassignedPage />, "/triage");
+    expect(await screen.findByRole("heading", { name: "Triage" })).toBeInTheDocument();
     expect(await screen.findByText("Needs a home")).toBeInTheDocument();
     expect(screen.getByText("Maybe cooling")).toBeInTheDocument();
     expect(screen.getByText("Pasted Teams note")).toBeInTheDocument();

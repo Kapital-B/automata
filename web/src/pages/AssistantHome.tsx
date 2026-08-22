@@ -265,7 +265,7 @@ export default function AssistantHomePage({ accountFilter }: Props) {
             </div>
             <div className="flex gap-2">
               <Button asChild variant="outline" size="sm">
-                <Link to="/today">Review in Today</Link>
+                <Link to="/">Review on Home</Link>
               </Button>
               <Button asChild size="sm">
                 <Link to="/inbox">Show source messages</Link>
@@ -285,7 +285,7 @@ export default function AssistantHomePage({ accountFilter }: Props) {
         </div>
         <div className="grid gap-2 sm:grid-cols-2">
           {suggestions.map((s) => (
-            <Link key={s.id} to={s.href ?? "/today"} className="surface-card px-4 py-3 transition hover:border-foreground/30">
+            <Link key={s.id} to={s.href ?? "/"} className="surface-card px-4 py-3 transition hover:border-foreground/30">
               <p className="text-sm font-medium">{s.title}</p>
               <p className="mt-1 text-xs text-muted-foreground">{s.description}</p>
             </Link>
@@ -328,7 +328,7 @@ export default function AssistantHomePage({ accountFilter }: Props) {
               );
             })}
             <Button asChild variant="ghost" size="sm">
-              <Link to="/today">View all action items</Link>
+              <Link to="/">View all action items</Link>
             </Button>
           </div>
         )}
@@ -366,7 +366,7 @@ export default function AssistantHomePage({ accountFilter }: Props) {
               );
             })}
             <Button asChild variant="ghost" size="sm">
-              <Link to="/today">View all FYI</Link>
+              <Link to="/">View all FYI</Link>
             </Button>
           </div>
         )}

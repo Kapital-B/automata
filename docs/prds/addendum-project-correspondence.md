@@ -4,7 +4,7 @@
 **Owner:** Product (single-user / self-hosted context)  
 **Last updated:** 2026-08-21  
 **Parent PRD:** [docs/prds/initial.md](initial.md)  
-**Related addenda:** [AI-first assistant](addendum-ai-first-assistant.md)  
+**Related addenda:** [AI-first assistant](addendum-ai-first-assistant.md) · [Project-oriented UI shell](addendum-ui-project-shell.md)  
 **Source vision:** [AI Project Correspondence Agent](AI%20Project%20Correspondence%20Agent.pdf) (August 2026)
 
 This addendum freezes the first move from Automata’s mailbox-first product toward that vision. It does not replace the parent PRD. Mail accounts, provenance, explicit send approval, allowlisted forwarding, and auditable job runs remain non-negotiable.

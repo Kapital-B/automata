@@ -1,5 +1,5 @@
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import { BrowserRouter, Route, Routes } from "react-router-dom";
+import { BrowserRouter, Navigate, Route, Routes } from "react-router-dom";
 import { Toaster as Sonner } from "@/components/ui/sonner";
 import { Toaster } from "@/components/ui/toaster";
 import { TooltipProvider } from "@/components/ui/tooltip";
@@ -8,7 +8,6 @@ import { AuthProvider } from "@/components/auth/AuthProvider";
 import { ProtectedRoute } from "@/components/auth/ProtectedRoute";
 import Index from "./pages/Index.tsx";
 import NotFound from "./pages/NotFound.tsx";
-import TodayPage from "./pages/Today";
 import InboxPage from "./pages/Inbox";
 import AccountsPage from "./pages/Accounts";
 import PeoplePage from "./pages/People";
@@ -52,14 +51,7 @@ const App = () => (
             <Route path="/auth/error" element={<AuthErrorPage />} />
             <Route path="/accounts/connected" element={<AccountsConnectedPage />} />
             <Route path="/accounts/error" element={<AccountsErrorPage />} />
-            <Route
-              path="/today"
-              element={
-                <ProtectedRoute>
-                  <AppShell>{(ctx) => <TodayPage {...ctx} />}</AppShell>
-                </ProtectedRoute>
-              }
-            />
+            <Route path="/today" element={<Navigate to="/" replace />} />
             <Route
               path="/inbox"
               element={
@@ -109,13 +101,14 @@ const App = () => (
               }
             />
             <Route
-              path="/unassigned"
+              path="/triage"
               element={
                 <ProtectedRoute>
                   <AppShell>{() => <UnassignedPage />}</AppShell>
                 </ProtectedRoute>
               }
             />
+            <Route path="/unassigned" element={<Navigate to="/triage" replace />} />
             <Route
               path="/drafts"
               element={

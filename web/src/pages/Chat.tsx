@@ -180,8 +180,8 @@ export default function ChatPage({ accountFilter }: { accountFilter: AccountFilt
 
             <p className="mt-6 text-[11px] text-muted-foreground">
               Need the classic view?{" "}
-              <Link to="/today" className="underline underline-offset-2 hover:text-foreground">
-                Open the dashboard
+              <Link to="/" className="underline underline-offset-2 hover:text-foreground">
+                Open Home
               </Link>
             </p>
           </div>

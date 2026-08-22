@@ -89,7 +89,7 @@ export default function UnassignedPage() {
     <div className="space-y-8">
       <PageHeader
         eyebrow="Queue"
-        title="Unassigned"
+        title="Triage"
         description="Mail and pasted notes without a committed project, plus provisional suggestions."
       />
 

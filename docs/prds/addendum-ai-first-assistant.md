@@ -4,7 +4,7 @@
 **Owner:** Product (single-user / self-hosted context)  
 **Last updated:** 2026-04-28  
 **Parent PRD:** [docs/prds/initial.md](initial.md)  
-**Related addenda:** [Project correspondence intelligence](addendum-project-correspondence.md)  
+**Related addenda:** [Project correspondence intelligence](addendum-project-correspondence.md) · [Project-oriented UI shell](addendum-ui-project-shell.md) (supersedes this addendum for **navigation and landing composition**)  
 
 ## 1. Summary
 

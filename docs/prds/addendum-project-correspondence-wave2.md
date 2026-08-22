@@ -257,6 +257,8 @@ Each slice should be shippable. Do not start Ask Project AI before facts exist. 
 
 **Wave 3** (separate): live non-email connectors; enabling Path B (invite + optional contact↔profile link) — see [Wave 3 PRD](addendum-project-correspondence-wave3.md) and [Wave 3 spec](../specs/addendum-project-correspondence-wave3.md).
 
+**UI shell** (separate): project-first Home / Projects / Triage IA, including multi-project Ask — see [Project-oriented UI shell](addendum-ui-project-shell.md). Path B UI is deferred there as well.
+
 ---
 
 ## 11. Core acceptance scenario (Wave 2)

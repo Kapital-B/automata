@@ -134,7 +134,7 @@ describe("AssistantHomePage", () => {
       runs: [],
       latestRun: undefined,
       failedRuns: [],
-      suggestions: [{ id: "review-action-items", title: "Review 1 open action item", description: "See in Today", href: "/today" }],
+      suggestions: [{ id: "review-action-items", title: "Review 1 open action item", description: "See on Home", href: "/" }],
       isLoading: false,
       accountsError: null,
       summaryError: null,

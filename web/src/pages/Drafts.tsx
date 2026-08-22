@@ -111,7 +111,7 @@ export default function DraftsPage({ accountFilter }: Props) {
   return (
     <div className="space-y-6">
       <PageHeader
-        eyebrow="Assistant"
+        eyebrow="Mail"
         title="Drafts"
         description="AI-generated reply drafts. Stored locally — sending is always an explicit action."
       />
