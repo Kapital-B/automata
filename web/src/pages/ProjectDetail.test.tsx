@@ -569,4 +569,82 @@ describe("Project timeline UI", () => {
       }),
     );
   });
+
+  it("confirms a proposed decision", async () => {
+    const client = new QueryClient({
+      defaultOptions: { queries: { retry: false }, mutations: { retry: false } },
+    });
+    listProjectDecisions.mockResolvedValue([
+      {
+        id: "d1",
+        organisation_id: "o1",
+        project_id: "p1",
+        statement: "Proceed with 90 kW duty",
+        status: "proposed",
+        source: "user",
+        created_at: "2026-03-03T00:00:00Z",
+        updated_at: "2026-03-03T00:00:00Z",
+        evidence: [],
+      },
+    ]);
+    const confirmDecision = vi.mocked(auth.confirmDecision);
+    confirmDecision.mockResolvedValue({
+      id: "d1",
+      organisation_id: "o1",
+      project_id: "p1",
+      statement: "Proceed with 90 kW duty",
+      status: "accepted",
+      source: "user",
+      created_at: "2026-03-03T00:00:00Z",
+      updated_at: "2026-03-03T00:00:00Z",
+      evidence: [],
+    });
+
+    render(
+      <QueryClientProvider client={client}>
+        <MemoryRouter initialEntries={["/projects/p1"]}>
+          <Routes>
+            <Route path="/projects/:id" element={<ProjectDetailPage />} />
+          </Routes>
+        </MemoryRouter>
+      </QueryClientProvider>,
+    );
+
+    expect(await screen.findByRole("heading", { name: /^decisions$/i })).toBeInTheDocument();
+    expect(await screen.findByText(/Proceed with 90 kW duty/i)).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: /^confirm$/i }));
+    await waitFor(() => expect(confirmDecision).toHaveBeenCalledWith("token", "d1"));
+  });
+
+  it("asks Project AI and shows answer with citations", async () => {
+    const client = new QueryClient({
+      defaultOptions: { queries: { retry: false }, mutations: { retry: false } },
+    });
+    askProject.mockResolvedValue({
+      answer: "Pump P-03 duty is 90 kW",
+      citations: [{ type: "fact_version", id: "aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee" }],
+      confidence: 0.95,
+    });
+
+    render(
+      <QueryClientProvider client={client}>
+        <MemoryRouter initialEntries={["/projects/p1"]}>
+          <Routes>
+            <Route path="/projects/:id" element={<ProjectDetailPage />} />
+          </Routes>
+        </MemoryRouter>
+      </QueryClientProvider>,
+    );
+
+    expect(await screen.findByRole("region", { name: /ask project ai/i })).toBeInTheDocument();
+    fireEvent.change(screen.getByPlaceholderText(/ask a grounded question/i), {
+      target: { value: "What is Pump P-03 duty?" },
+    });
+    fireEvent.click(screen.getByRole("button", { name: /^ask$/i }));
+    await waitFor(() =>
+      expect(askProject).toHaveBeenCalledWith("token", "p1", "What is Pump P-03 duty?"),
+    );
+    expect(await screen.findByText(/Pump P-03 duty is 90 kW/i)).toBeInTheDocument();
+    expect(screen.getByText(/Citations:/i)).toBeInTheDocument();
+  });
 });

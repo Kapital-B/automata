@@ -13,6 +13,35 @@ vi.mock("@/hooks/useAssistantHomeData", () => ({
   useAssistantHomeData: vi.fn(),
 }));
 
+vi.mock("@/lib/auth", async () => {
+  const actual = await vi.importActual<typeof import("@/lib/auth")>("@/lib/auth");
+  return {
+    ...actual,
+    getAttention: vi.fn().mockResolvedValue({
+      items: [
+        {
+          id: "decision:d1",
+          why_me: "provisional_decision",
+          title: "Confirm decision: Proceed with 90 kW",
+          project_id: "p1",
+          project_name: "Cooling",
+          ref_type: "decision",
+          ref_id: "d1",
+        },
+      ],
+      counts: {
+        total: 1,
+        issue_assignee: 0,
+        member_role: 0,
+        provisional_fact: 0,
+        provisional_decision: 1,
+        open_contradiction: 0,
+        mail_action_item: 0,
+      },
+    }),
+  };
+});
+
 const mockedUseAssistantHomeData = vi.mocked(useAssistantHomeData);
 
 function renderPage() {
@@ -62,7 +91,7 @@ describe("AssistantHomePage", () => {
     expect(screen.getByRole("link", { name: "Open Accounts" })).toBeInTheDocument();
   });
 
-  it("renders attention and source cards from summary state", () => {
+  it("renders attention and source cards from summary state", async () => {
     mockedUseAssistantHomeData.mockReturnValue({
       activeAccountID: undefined,
       accounts: [
@@ -117,5 +146,7 @@ describe("AssistantHomePage", () => {
     expect(screen.getByText("Reply to invoice")).toBeInTheDocument();
     expect(screen.getByRole("link", { name: /Message m1/i })).toBeInTheDocument();
     expect(screen.queryByText(/Replies are mocked while we wire up the backend/i)).not.toBeInTheDocument();
+    expect(await screen.findByText("Needs my input")).toBeInTheDocument();
+    expect(await screen.findByText(/Confirm decision: Proceed with 90 kW/i)).toBeInTheDocument();
   });
 });
