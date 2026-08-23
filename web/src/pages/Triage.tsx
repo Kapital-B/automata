@@ -21,11 +21,11 @@ import {
 import type { UiAccount } from "@/lib/accounts";
 import { toast } from "@/hooks/use-toast";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { Inbox, Loader2 } from "lucide-react";
+import { CheckCircle2, FolderKanban, Inbox, Loader2 } from "lucide-react";
 import { useMemo, useState } from "react";
 import { Link } from "react-router-dom";
 
-export default function UnassignedPage() {
+export default function TriagePage() {
   const { accessToken } = useAuth();
   const queryClient = useQueryClient();
   const { accounts } = useAccountsData();
@@ -90,7 +90,7 @@ export default function UnassignedPage() {
       <PageHeader
         eyebrow="Queue"
         title="Triage"
-        description="Mail and pasted notes without a committed project, plus provisional suggestions."
+        description="File mail and pastes into a project. Confirm provisional suggestions or assign items that still need a home."
       />
 
       {unassignedQuery.isLoading ? (
@@ -102,8 +102,29 @@ export default function UnassignedPage() {
         <p className="text-sm text-destructive">
           {unassignedQuery.error instanceof ApiError
             ? unassignedQuery.error.message
-            : "Could not load unassigned items."}
+            : "Could not load triage items."}
         </p>
+      ) : provisional.length === 0 && plain.length === 0 ? (
+        <div className="space-y-4 border-y border-border/70 py-8">
+          <div className="flex items-start gap-3 text-sm text-muted-foreground">
+            <CheckCircle2 className="mt-0.5 h-4 w-4 shrink-0 text-success" />
+            <div className="space-y-1">
+              <p className="font-medium text-foreground">Triage is clear</p>
+              <p>Nothing waiting to be filed. Sync mail or paste correspondence from a project.</p>
+            </div>
+          </div>
+          <div className="flex flex-wrap gap-2">
+            <Button asChild variant="outline" size="sm">
+              <Link to="/projects">
+                <FolderKanban className="mr-1.5 h-3.5 w-3.5" />
+                Projects
+              </Link>
+            </Button>
+            <Button asChild variant="outline" size="sm">
+              <Link to="/">Back to Home</Link>
+            </Button>
+          </div>
+        </div>
       ) : (
         <>
           <Section
@@ -116,8 +137,8 @@ export default function UnassignedPage() {
             onAssign={(args) => assignMutation.mutate(args)}
           />
           <Section
-            title="Unassigned"
-            empty="Queue is clear — sync mail or paste correspondence from a project."
+            title="Needs filing"
+            empty="Nothing left to file."
             items={plain}
             projects={projectsQuery.data ?? []}
             accountFor={accountFor}

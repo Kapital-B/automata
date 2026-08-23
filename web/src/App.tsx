@@ -15,7 +15,7 @@ import PersonDetailPage from "./pages/PersonDetail";
 import ProjectsPage from "./pages/Projects";
 import ProjectDetailPage from "./pages/ProjectDetail";
 import IssueDetailPage from "./pages/IssueDetail";
-import UnassignedPage from "./pages/Unassigned";
+import TriagePage from "./pages/Triage";
 import RulesPage from "./pages/Rules";
 import DraftsPage from "./pages/Drafts";
 import RunsPage from "./pages/Runs";
@@ -104,7 +104,7 @@ const App = () => (
               path="/triage"
               element={
                 <ProtectedRoute>
-                  <AppShell>{() => <UnassignedPage />}</AppShell>
+                  <AppShell>{() => <TriagePage />}</AppShell>
                 </ProtectedRoute>
               }
             />

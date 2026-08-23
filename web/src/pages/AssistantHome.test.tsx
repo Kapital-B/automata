@@ -208,6 +208,9 @@ describe("AssistantHomePage", () => {
 
     expect(screen.getByText(/3 items waiting to be assigned/i)).toBeInTheDocument();
     expect(screen.getByRole("link", { name: /2 drafts ready/i })).toHaveAttribute("href", "/drafts");
+    expect(
+      screen.getByRole("link", { name: /Confirm decision: Proceed with 90 kW/i }),
+    ).toHaveAttribute("href", "/projects/p1?mode=position");
   });
 
   it("asks across projects and shows cited answer", async () => {

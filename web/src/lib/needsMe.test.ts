@@ -8,7 +8,7 @@ describe("needsMe helpers", () => {
     expect(whyMeLabel("mail_action_item")).toBe("Mail action");
   });
 
-  it("deep-links issues and falls back to project", () => {
+  it("deep-links Needs me into Position or Open (U5)", () => {
     expect(
       attentionHref({
         id: "issue:1",
@@ -19,6 +19,7 @@ describe("needsMe helpers", () => {
         ref_id: "i1",
       }),
     ).toBe("/projects/p1/issues/i1");
+
     expect(
       attentionHref({
         id: "decision:1",
@@ -28,7 +29,41 @@ describe("needsMe helpers", () => {
         ref_type: "decision",
         ref_id: "d1",
       }),
-    ).toBe("/projects/p1");
+    ).toBe("/projects/p1?mode=position");
+
+    expect(
+      attentionHref({
+        id: "contradiction:c1",
+        why_me: "open_contradiction",
+        title: "Duty conflict",
+        project_id: "p1",
+        project_name: "Cooling",
+        ref_type: "contradiction",
+        ref_id: "c1",
+      }),
+    ).toBe("/projects/p1?mode=position");
+
+    expect(
+      attentionHref({
+        id: "fact-version:v1",
+        why_me: "provisional_fact",
+        title: "Confirm fact: Duty",
+        project_id: "p1",
+        ref_type: "fact_version",
+        ref_id: "v1",
+      }),
+    ).toBe("/projects/p1?mode=position");
+
+    expect(
+      attentionHref({
+        id: "issue-role:1",
+        why_me: "member_role",
+        title: "Awaiting input",
+        project_id: "p1",
+        ref_type: "issue",
+        ref_id: "",
+      }),
+    ).toBe("/projects/p1?mode=open");
   });
 
   it("merges attention and mail into one ranked list", () => {
@@ -68,6 +103,8 @@ describe("needsMe helpers", () => {
       "decision:d1",
       "mail:a1",
     ]);
+    expect(rows[0]?.href).toBe("/projects/p1?mode=position");
+    expect(rows[1]?.href).toBe("/projects/p1?mode=position");
     expect(rows[2]?.href).toContain("/inbox?");
     expect(rows[2]?.kind).toBe("mail");
   });

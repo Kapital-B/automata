@@ -3,7 +3,7 @@ import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { MemoryRouter, Route, Routes } from "react-router-dom";
 import { beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 import ProjectsPage from "@/pages/Projects";
-import UnassignedPage from "@/pages/Unassigned";
+import TriagePage from "@/pages/Triage";
 import * as auth from "@/lib/auth";
 
 beforeAll(() => {
@@ -53,7 +53,7 @@ function wrap(ui: React.ReactNode, path: string) {
       <MemoryRouter initialEntries={[path]}>
         <Routes>
           <Route path="/projects" element={<ProjectsPage />} />
-          <Route path="/triage" element={<UnassignedPage />} />
+          <Route path="/triage" element={<TriagePage />} />
         </Routes>
       </MemoryRouter>
     </QueryClientProvider>,
@@ -143,7 +143,7 @@ describe("Projects UI", () => {
       },
     ]);
     assignMessageProject.mockResolvedValue({ status: "committed", project_id: "p1" });
-    wrap(<UnassignedPage />, "/triage");
+    wrap(<TriagePage />, "/triage");
     expect(await screen.findByRole("heading", { name: "Triage" })).toBeInTheDocument();
     expect(await screen.findByText("Needs a home")).toBeInTheDocument();
     expect(screen.getByText("Maybe cooling")).toBeInTheDocument();
@@ -151,5 +151,14 @@ describe("Projects UI", () => {
     expect(screen.getByText(/Needs confirmation/i)).toBeInTheDocument();
     expect(screen.getAllByRole("button", { name: /assign thread/i }).length).toBeGreaterThan(0);
     expect(screen.getAllByRole("button", { name: /this message only/i }).length).toBeGreaterThan(0);
+  });
+
+  it("shows a clear empty state when triage has nothing to file", async () => {
+    listProjects.mockResolvedValue([]);
+    listUnassigned.mockResolvedValue([]);
+    wrap(<TriagePage />, "/triage");
+    expect(await screen.findByText(/Triage is clear/i)).toBeInTheDocument();
+    expect(screen.getByRole("link", { name: /^Projects$/i })).toHaveAttribute("href", "/projects");
+    expect(screen.getByRole("link", { name: /Back to Home/i })).toHaveAttribute("href", "/");
   });
 });
