@@ -142,15 +142,24 @@ describe("AssistantHomePage", () => {
           ref_type: "decision",
           ref_id: "d1",
         },
+        {
+          id: "mail:i1",
+          why_me: "mail_action_item",
+          title: "Reply to invoice",
+          ref_type: "action_item",
+          ref_id: "i1",
+          account_id: "a1",
+          message_id: "m1",
+        },
       ],
       counts: {
-        total: 1,
+        total: 2,
         issue_assignee: 0,
         member_role: 0,
         provisional_fact: 0,
         provisional_decision: 1,
         open_contradiction: 0,
-        mail_action_item: 0,
+        mail_action_item: 1,
       },
     });
     listProjects.mockResolvedValue([
@@ -179,21 +188,7 @@ describe("AssistantHomePage", () => {
       ],
       decisions: [],
     });
-    mockedUseAssistantHomeData.mockReturnValue(
-      baseMailState({
-        actionItems: [
-          {
-            id: "i1",
-            account_id: "a1",
-            message_id: "m1",
-            text: "Reply to invoice",
-            created_at: "2026-08-01T00:00:00Z",
-            is_overdue: false,
-          },
-        ],
-        draftsReady: 2,
-      }),
-    );
+    mockedUseAssistantHomeData.mockReturnValue(baseMailState({ draftsReady: 2 }));
     renderPage();
 
     expect(await screen.findByRole("heading", { name: "Needs my input" })).toBeInTheDocument();
@@ -211,6 +206,10 @@ describe("AssistantHomePage", () => {
     expect(
       screen.getByRole("link", { name: /Confirm decision: Proceed with 90 kW/i }),
     ).toHaveAttribute("href", "/projects/p1?mode=position");
+    expect(screen.getByRole("link", { name: /Reply to invoice/i })).toHaveAttribute(
+      "href",
+      "/inbox?message_id=m1&account_id=a1",
+    );
   });
 
   it("asks across projects and shows cited answer", async () => {

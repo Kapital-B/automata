@@ -90,9 +90,9 @@ Open **`authorization_url`** from parsed JSON (`jq -r .authorization_url`) so `&
 | Interpret (Wave 2b) | `POST /api/projects/{id}/interpret`, `GET /api/projects/{id}/interpretations`, `POST /api/interpretations/{id}/dismiss` (LLM; provisional only — does not write facts) |
 | Reconcile (Wave 2c) | `POST /api/projects/{id}/reconcile`, `GET /api/projects/{id}/contradictions`, `POST /api/contradictions/{id}/resolve` (applies fact candidates; opens contradictions when unsafe) |
 | Decisions (Wave 2d) | `GET/POST /api/projects/{id}/decisions`, `POST /api/decisions/{id}/confirm`, `POST /api/decisions/{id}/withdraw`, `PATCH /api/decisions/{id}` |
-| Needs My Input (Wave 2d) | `GET /api/attention`, `GET /api/projects/{id}/attention` (derived `why_me` items + counts) |
+| Needs My Input (Wave 2d) | `GET /api/attention` (project items + open mail action items), `GET /api/projects/{id}/attention` (derived `why_me` items + counts) |
 | Ask Project AI (Wave 2e) | `POST /api/projects/{id}/ask` `{ "question" }` → answer + validated citations |
-| Ask across projects (UI U4) | `POST /api/ask` `{ "question" }` → cross-project answer + project-scoped citations |
+| Ask across projects (UI U4) | `POST /api/ask` `{ "question" }` → cross-project answer + project-scoped citations (capped to recent + open-attention projects) |
 
 `GET /api/health` returns `{ "status": "ok", "llm": true|false }`.
 

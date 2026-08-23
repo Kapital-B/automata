@@ -5,7 +5,6 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"sort"
 	"strings"
 	"time"
 
@@ -30,9 +29,30 @@ type Service struct {
 	Timeline    driven.TimelineRepository
 	JobRuns     driven.JobRunRepository
 	LLM         driven.LLMClient
+	Attention   AttentionProjects
+}
+
+// AttentionProjects reports home-org projects that currently need operator input.
+type AttentionProjects interface {
+	ProjectIDsNeedingInput(ctx context.Context, userID uuid.UUID) (map[uuid.UUID]struct{}, error)
 }
 
 const maxAskAcrossProjects = 8
+
+type contextLimits struct {
+	Facts     int
+	Decisions int
+	Issues    int
+	Timeline  int
+}
+
+func singleAskLimits() contextLimits {
+	return contextLimits{Facts: 40, Decisions: 24, Issues: 24, Timeline: 12}
+}
+
+func acrossAskLimits() contextLimits {
+	return contextLimits{Facts: 16, Decisions: 8, Issues: 8, Timeline: 6}
+}
 
 type Citation struct {
 	Type        string `json:"type"`
@@ -151,7 +171,7 @@ func (s *Service) Ask(ctx context.Context, userID, projectID uuid.UUID, question
 		return nil, ErrNotFound
 	}
 
-	pack, err := s.buildContext(ctx, userID, orgID, *p)
+	pack, err := s.buildContext(ctx, userID, orgID, *p, singleAskLimits())
 	if err != nil {
 		return nil, err
 	}
@@ -181,33 +201,40 @@ func (s *Service) AskAcross(ctx context.Context, userID uuid.UUID, question stri
 		}
 		accessible = append(accessible, p)
 	}
-	sort.SliceStable(accessible, func(i, j int) bool {
-		return accessible[i].UpdatedAt.After(accessible[j].UpdatedAt)
-	})
-	if len(accessible) > maxAskAcrossProjects {
-		accessible = accessible[:maxAskAcrossProjects]
+	prefer := map[uuid.UUID]struct{}{}
+	if s.Attention != nil {
+		ids, err := s.Attention.ProjectIDsNeedingInput(ctx, userID)
+		if err != nil {
+			return nil, err
+		}
+		prefer = ids
 	}
+	selected := SelectAskAcrossProjects(accessible, prefer, maxAskAcrossProjects)
 
 	combined := newContextPack()
 	var b strings.Builder
 	b.WriteString("MULTI-PROJECT CONTEXT\n")
 	b.WriteString("Each PROJECT block is isolated. Never blend evidence across projects without citing which project.\n\n")
-	if len(accessible) == 0 {
+	if len(selected) == 0 {
 		b.WriteString("(no accessible projects)\n")
 	}
-	for _, p := range accessible {
-		pack, err := s.buildContext(ctx, userID, orgID, p)
+	projectIDs := make([]string, 0, len(selected))
+	for _, p := range selected {
+		pack, err := s.buildContext(ctx, userID, orgID, p, acrossAskLimits())
 		if err != nil {
 			return nil, err
 		}
 		combined.mergeFrom(pack)
 		fmt.Fprintf(&b, "==== PROJECT code=%s id=%s name=%q ====\n%s\n", p.Code, p.ID.String(), p.Name, pack.Prompt)
+		projectIDs = append(projectIDs, p.ID.String())
 	}
 	combined.Prompt = b.String()
 
 	return s.runAsk(ctx, q, combined, map[string]any{
 		"scope":         "across",
-		"project_count": len(accessible),
+		"project_count": len(selected),
+		"project_ids":   projectIDs,
+		"capped":        len(accessible) > len(selected),
 	}, true)
 }
 
@@ -278,7 +305,7 @@ func (s *Service) runAsk(ctx context.Context, question string, pack *contextPack
 	return out, nil
 }
 
-func (s *Service) buildContext(ctx context.Context, userID, orgID uuid.UUID, project driven.ProjectRow) (*contextPack, error) {
+func (s *Service) buildContext(ctx context.Context, userID, orgID uuid.UUID, project driven.ProjectRow, limits contextLimits) (*contextPack, error) {
 	pack := newContextPack()
 	var b strings.Builder
 	fmt.Fprintf(&b, "Project: %s code=%s (%s)\n\n", project.Name, project.Code, project.ID.String())
@@ -288,6 +315,7 @@ func (s *Service) buildContext(ctx context.Context, userID, orgID uuid.UUID, pro
 	if err != nil {
 		return nil, err
 	}
+	factCount := 0
 	for _, f := range facts {
 		active, err := s.Facts.GetActiveFactVersion(ctx, f.ID)
 		if err != nil {
@@ -296,6 +324,10 @@ func (s *Service) buildContext(ctx context.Context, userID, orgID uuid.UUID, pro
 		if active == nil {
 			continue
 		}
+		if limits.Facts > 0 && factCount >= limits.Facts {
+			break
+		}
+		factCount++
 		pack.noteCite("fact_version", active.ID.String(), project)
 		unit := ""
 		if active.Unit != nil {
@@ -322,7 +354,10 @@ func (s *Service) buildContext(ctx context.Context, userID, orgID uuid.UUID, pro
 		if err != nil {
 			return nil, err
 		}
-		for _, d := range decs {
+		for i, d := range decs {
+			if limits.Decisions > 0 && i >= limits.Decisions {
+				break
+			}
 			pack.noteCite("decision", d.ID.String(), project)
 			fmt.Fprintf(&b, "- decision_id=%s statement=%q\n", d.ID.String(), d.Statement)
 		}
@@ -333,17 +368,26 @@ func (s *Service) buildContext(ctx context.Context, userID, orgID uuid.UUID, pro
 	if err != nil {
 		return nil, err
 	}
+	issueCount := 0
 	for _, iss := range issues {
 		if iss.Status == "resolved" {
 			continue
 		}
+		if limits.Issues > 0 && issueCount >= limits.Issues {
+			break
+		}
+		issueCount++
 		pack.noteCite("issue", iss.ID.String(), project)
 		fmt.Fprintf(&b, "- issue_id=%s title=%q status=%s\n", iss.ID.String(), iss.Title, iss.Status)
 	}
 
 	b.WriteString("\n## Recent correspondence snippets\n")
 	if s.Timeline != nil {
-		items, err := s.Timeline.ListProjectTimeline(ctx, userID, orgID, project.ID, driven.TimelineFilter{Limit: 12})
+		timelineLimit := limits.Timeline
+		if timelineLimit <= 0 {
+			timelineLimit = 12
+		}
+		items, err := s.Timeline.ListProjectTimeline(ctx, userID, orgID, project.ID, driven.TimelineFilter{Limit: timelineLimit})
 		if err == nil {
 			for _, it := range items {
 				snip := strings.TrimSpace(it.Snippet)

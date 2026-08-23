@@ -1039,10 +1039,12 @@ export type AttentionItem = {
   id: string;
   why_me: string;
   title: string;
-  project_id: string;
+  project_id?: string;
   project_name?: string;
   ref_type: string;
   ref_id: string;
+  account_id?: string;
+  message_id?: string;
 };
 
 export type AttentionResult = {

@@ -221,8 +221,8 @@ Where the two conflict on chrome: **this document wins**.
 
 ## 14. Open implementation notes
 
-- Prefer extending attention merge on the server (`GET /api/attention` includes mail action items) so Home has one fetch — optional follow-up.  
-- Multi-project Ask context budget: cap projects (e.g. recent + those with open attention) rather than dumping entire org.  
+- Attention merge on the server (`GET /api/attention` includes mail action items) so Home has one fetch — **done 2026-08-23**.  
+- Multi-project Ask context budget: cap projects (recent + those with open attention) rather than dumping entire org — **done 2026-08-23**.  
 - Visual language: workbench clarity; avoid generic “AI purple” chrome; brand-first Home per product design rules.
 
 ---

@@ -191,9 +191,11 @@ func main() {
 	}
 	attentionSvc := &appattention.Service{
 		Users: repo, Projects: repo, Issues: repo, Facts: repo, Decisions: repo, Contradictions: repo,
+		Summaries: repo,
 	}
 	projectAISvc := &appprojectai.Service{
 		Users: repo, Projects: repo, Facts: repo, Decisions: repo, Issues: repo, Timeline: repo, JobRuns: repo,
+		Attention: attentionSvc,
 	}
 	assignSvc := &appprojects.AssignService{
 		Users:       repo,

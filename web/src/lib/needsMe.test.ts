@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import type { AttentionItem, SummaryActionItem } from "@/lib/auth";
+import type { AttentionItem } from "@/lib/auth";
 import { attentionHref, mergeNeedsMeRows, whyMeLabel } from "@/lib/needsMe";
 
 describe("needsMe helpers", () => {
@@ -64,9 +64,21 @@ describe("needsMe helpers", () => {
         ref_id: "",
       }),
     ).toBe("/projects/p1?mode=open");
+
+    expect(
+      attentionHref({
+        id: "mail:a1",
+        why_me: "mail_action_item",
+        title: "Reply to invoice",
+        ref_type: "action_item",
+        ref_id: "a1",
+        account_id: "acc1",
+        message_id: "m1",
+      }),
+    ).toBe("/inbox?message_id=m1&account_id=acc1");
   });
 
-  it("merges attention and mail into one ranked list", () => {
+  it("maps a server-merged attention list including mail", () => {
     const attention: AttentionItem[] = [
       {
         id: "decision:d1",
@@ -86,18 +98,17 @@ describe("needsMe helpers", () => {
         ref_type: "contradiction",
         ref_id: "c1",
       },
-    ];
-    const mail: SummaryActionItem[] = [
       {
-        id: "a1",
+        id: "mail:a1",
+        why_me: "mail_action_item",
+        title: "Reply to invoice",
+        ref_type: "action_item",
+        ref_id: "a1",
         account_id: "acc1",
         message_id: "m1",
-        text: "Reply to invoice",
-        created_at: "2026-08-01T00:00:00Z",
-        is_overdue: false,
       },
     ];
-    const rows = mergeNeedsMeRows(attention, mail);
+    const rows = mergeNeedsMeRows(attention);
     expect(rows.map((r) => r.id)).toEqual([
       "contradiction:c1",
       "decision:d1",

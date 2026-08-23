@@ -44,10 +44,8 @@ export default function AssistantHomePage({ accountFilter }: Props) {
   const [askAnswer, setAskAnswer] = useState<AskAnswer | null>(null);
   const {
     connectedAccounts,
-    actionItems,
     fyi,
     draftsReady,
-    isLoading: mailLoading,
     accountsError,
   } = useAssistantHomeData(accountFilter);
 
@@ -87,7 +85,7 @@ export default function AssistantHomePage({ accountFilter }: Props) {
     })),
   });
 
-  const needsMe = mergeNeedsMeRows(attentionQuery.data?.items ?? [], actionItems);
+  const needsMe = mergeNeedsMeRows(attentionQuery.data?.items ?? []);
   const triageCount =
     (triageQuery.data?.unassigned ?? 0) + (triageQuery.data?.provisional ?? 0);
 
@@ -97,6 +95,7 @@ export default function AssistantHomePage({ accountFilter }: Props) {
       return markActionItemDone(accessToken, id);
     },
     onSuccess: () => {
+      void queryClient.invalidateQueries({ queryKey: ["attention"] });
       void queryClient.invalidateQueries({ queryKey: ["summary"] });
       void queryClient.invalidateQueries({ queryKey: ["draft-suggestions"] });
     },
@@ -126,9 +125,7 @@ export default function AssistantHomePage({ accountFilter }: Props) {
     },
   });
 
-  const loading =
-    Boolean(accessToken) &&
-    (attentionQuery.isLoading || projectsQuery.isLoading || mailLoading);
+  const loading = Boolean(accessToken) && (attentionQuery.isLoading || projectsQuery.isLoading);
 
   if (loading) {
     return (

@@ -2,6 +2,7 @@ package attention
 
 import (
 	"context"
+	"sort"
 	"strings"
 
 	"github.com/Kapital-B/automata/svc/internal/application/ports/driven"
@@ -25,10 +26,12 @@ type Item struct {
 	ID          string `json:"id"`
 	WhyMe       string `json:"why_me"`
 	Title       string `json:"title"`
-	ProjectID   string `json:"project_id"`
+	ProjectID   string `json:"project_id,omitempty"`
 	ProjectName string `json:"project_name,omitempty"`
 	RefType     string `json:"ref_type"`
 	RefID       string `json:"ref_id"`
+	AccountID   string `json:"account_id,omitempty"`
+	MessageID   string `json:"message_id,omitempty"`
 }
 
 type Counts struct {
@@ -53,6 +56,7 @@ type Service struct {
 	Facts          driven.FactRepository
 	Decisions      driven.DecisionRepository
 	Contradictions driven.ContradictionRepository
+	Summaries      driven.SummaryRepository
 }
 
 func (s *Service) homeOrg(ctx context.Context, userID uuid.UUID) (uuid.UUID, error) {
@@ -80,7 +84,34 @@ func (s *Service) ForUser(ctx context.Context, userID uuid.UUID) (*Result, error
 		}
 		out.Items = append(out.Items, part.Items...)
 	}
+	if err := s.appendMailItems(ctx, userID, out); err != nil {
+		return nil, err
+	}
+	sortItems(out.Items)
 	out.Counts = countItems(out.Items)
+	return out, nil
+}
+
+// ProjectIDsNeedingInput returns home-org projects that currently have project-scoped attention.
+func (s *Service) ProjectIDsNeedingInput(ctx context.Context, userID uuid.UUID) (map[uuid.UUID]struct{}, error) {
+	res, err := s.ForUser(ctx, userID)
+	if err != nil {
+		return nil, err
+	}
+	out := make(map[uuid.UUID]struct{})
+	if res == nil {
+		return out, nil
+	}
+	for _, it := range res.Items {
+		if it.WhyMe == WhyMailActionItem || strings.TrimSpace(it.ProjectID) == "" {
+			continue
+		}
+		id, err := uuid.Parse(it.ProjectID)
+		if err != nil {
+			continue
+		}
+		out[id] = struct{}{}
+	}
 	return out, nil
 }
 
@@ -104,8 +135,35 @@ func (s *Service) ForProject(ctx context.Context, userID, projectID uuid.UUID) (
 	if err != nil {
 		return nil, err
 	}
+	sortItems(out.Items)
 	out.Counts = countItems(out.Items)
 	return out, nil
+}
+
+func (s *Service) appendMailItems(ctx context.Context, userID uuid.UUID, out *Result) error {
+	if s == nil || s.Summaries == nil || out == nil {
+		return nil
+	}
+	items, err := s.Summaries.ListOpenActionItems(ctx, userID, nil)
+	if err != nil {
+		return err
+	}
+	for _, it := range items {
+		title := strings.TrimSpace(it.Text)
+		if title == "" {
+			title = "Open mail action"
+		}
+		out.Items = append(out.Items, Item{
+			ID:        "mail:" + it.ID.String(),
+			WhyMe:     WhyMailActionItem,
+			Title:     title,
+			RefType:   "action_item",
+			RefID:     it.ID.String(),
+			AccountID: it.AccountID.String(),
+			MessageID: it.MessageID.String(),
+		})
+	}
+	return nil
 }
 
 func (s *Service) forProject(ctx context.Context, userID, orgID uuid.UUID, p driven.ProjectRow, m *driven.ProjectMemberRow) (*Result, error) {
@@ -203,6 +261,31 @@ func memberTouchesRole(m *driven.ProjectMemberRow) bool {
 		return true
 	}
 	return true // any member can see awaiting_input as role-aware attention
+}
+
+func sortItems(items []Item) {
+	rank := map[string]int{
+		WhyOpenContradiction:   0,
+		WhyProvisionalDecision: 1,
+		WhyProvisionalFact:     2,
+		WhyIssueAssignee:       3,
+		WhyMemberRole:          4,
+		WhyMailActionItem:      5,
+	}
+	sort.SliceStable(items, func(i, j int) bool {
+		ri, okI := rank[items[i].WhyMe]
+		if !okI {
+			ri = 50
+		}
+		rj, okJ := rank[items[j].WhyMe]
+		if !okJ {
+			rj = 50
+		}
+		if ri != rj {
+			return ri < rj
+		}
+		return items[i].Title < items[j].Title
+	})
 }
 
 func countItems(items []Item) Counts {
