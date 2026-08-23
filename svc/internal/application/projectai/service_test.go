@@ -4,6 +4,7 @@ import (
 	"context"
 	"database/sql"
 	"encoding/json"
+	"strings"
 	"testing"
 	"time"
 
@@ -76,6 +77,71 @@ func TestAskCitesActiveFact(t *testing.T) {
 	}
 	if ans.Answer == "" || len(ans.Citations) == 0 || ans.Citations[0].ID != vid {
 		t.Fatalf("unexpected answer: %+v", ans)
+	}
+	if ans.Citations[0].ProjectCode != "DC01" {
+		t.Fatalf("want project_code DC01 on citation, got %+v", ans.Citations[0])
+	}
+}
+
+func TestAskAcrossCitesProjectFact(t *testing.T) {
+	db, err := sql.Open("sqlite", "file:askacross1?mode=memory&cache=shared")
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = db.Close() })
+	if _, err := db.Exec(`PRAGMA foreign_keys=ON`); err != nil {
+		t.Fatal(err)
+	}
+	if err := sqlite.Migrate(db); err != nil {
+		t.Fatal(err)
+	}
+	repo := sqlite.NewRepository(db, 15*time.Minute)
+	authSvc := auth.NewService(repo, repo, repo, nil, nil, []byte("abcdefghijklmnopqrstuvwxyz123456"), time.Hour, 30*24*time.Hour)
+	projectSvc := &appprojects.Service{
+		Users: repo, Projects: repo, Assignments: repo, Manuals: repo, Timeline: repo, Contacts: repo, Messages: repo,
+	}
+	factSvc := &appfacts.Service{
+		Users: repo, Projects: repo, Facts: repo, Issues: repo, Assignments: repo, Manuals: repo, Messages: repo,
+	}
+	askSvc := &appprojectai.Service{
+		Users: repo, Projects: repo, Facts: repo, Decisions: repo, Issues: repo, Timeline: repo, JobRuns: repo,
+	}
+	userID, err := authSvc.Register(context.Background(), "askacross@example.com", "password123")
+	if err != nil {
+		t.Fatal(err)
+	}
+	ctx := context.Background()
+	proj, err := projectSvc.Create(ctx, userID, appprojects.CreateProjectInput{Name: "Cooling", Code: "DC01"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, err = projectSvc.Create(ctx, userID, appprojects.CreateProjectInput{Name: "Other", Code: "OT01"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	view, err := factSvc.Create(ctx, userID, proj.ID, appfacts.CreateInput{
+		SubjectKey: "pump.p03.duty_kw", Label: "Pump P-03 duty", Value: 90.0, Unit: strPtr("kW"), Confirm: true,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	vid := view.Versions[0].Version.ID.String()
+	payload, _ := json.Marshal(map[string]any{
+		"schema_version": 1,
+		"answer":         "On DC01, Pump P-03 duty is 90 kW",
+		"citations":      []map[string]string{{"type": "fact_version", "id": vid}},
+		"confidence":     0.95,
+	})
+	askSvc.LLM = &fakeLLM{content: string(payload)}
+	ans, err := askSvc.AskAcross(ctx, userID, "What is Pump P-03 duty?")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(ans.Answer, "90") || len(ans.Citations) == 0 {
+		t.Fatalf("unexpected answer: %+v", ans)
+	}
+	if ans.Citations[0].ID != vid || ans.Citations[0].ProjectCode != "DC01" {
+		t.Fatalf("citation %+v", ans.Citations[0])
 	}
 }
 

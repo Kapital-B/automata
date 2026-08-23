@@ -3,27 +3,45 @@ import { useMutation, useQueries, useQuery, useQueryClient } from "@tanstack/rea
 import { CheckCircle2, FolderKanban, Inbox, Loader2, PenLine, Plug } from "lucide-react";
 import type { AccountFilter } from "@/components/AppShell";
 import { Button } from "@/components/ui/button";
+import { Input } from "@/components/ui/input";
 import { useAuth } from "@/components/auth/AuthProvider";
 import { relativeTime } from "@/lib/accounts";
 import {
+  ApiError,
+  askAcross,
+  getApiHealth,
   getAttention,
   getCurrentPosition,
   getUnassignedSummary,
   listProjects,
   markActionItemDone,
+  type AskAnswer,
+  type AskCitation,
   type ProjectListItem,
 } from "@/lib/auth";
 import { mergeNeedsMeRows } from "@/lib/needsMe";
 import { toast } from "@/hooks/use-toast";
 import { useAssistantHomeData } from "@/hooks/useAssistantHomeData";
+import { useState } from "react";
 
 type Props = {
   accountFilter: AccountFilter;
 };
 
+function citationHref(c: AskCitation): string | undefined {
+  if (!c.project_id) return undefined;
+  if (c.type === "issue") return `/projects/${c.project_id}/issues/${c.id}`;
+  if (c.type === "fact_version" || c.type === "decision") {
+    return `/projects/${c.project_id}?mode=position`;
+  }
+  return `/projects/${c.project_id}`;
+}
+
 export default function AssistantHomePage({ accountFilter }: Props) {
   const { accessToken } = useAuth();
   const queryClient = useQueryClient();
+  const [askQuestion, setAskQuestion] = useState("");
+  const [askAnswer, setAskAnswer] = useState<AskAnswer | null>(null);
   const {
     connectedAccounts,
     actionItems,
@@ -48,6 +66,12 @@ export default function AssistantHomePage({ accountFilter }: Props) {
     queryFn: () => getUnassignedSummary(accessToken!),
     enabled: Boolean(accessToken),
   });
+  const healthQuery = useQuery({
+    queryKey: ["api-health"],
+    queryFn: () => getApiHealth(),
+    staleTime: 60_000,
+  });
+  const llmEnabled = healthQuery.data?.llm === true;
 
   const recentProjects = (projectsQuery.data ?? [])
     .slice()
@@ -80,6 +104,23 @@ export default function AssistantHomePage({ accountFilter }: Props) {
       toast({
         title: "Could not mark action item done",
         description: err instanceof Error ? err.message : "Please try again.",
+        variant: "destructive",
+      });
+    },
+  });
+
+  const askMutation = useMutation({
+    mutationFn: async () => {
+      if (!accessToken) throw new Error("Not authenticated");
+      return askAcross(accessToken, askQuestion.trim());
+    },
+    onSuccess: (res) => {
+      setAskAnswer(res);
+    },
+    onError: (err) => {
+      toast({
+        title: "Ask failed",
+        description: err instanceof ApiError ? err.message : "Please try again.",
         variant: "destructive",
       });
     },
@@ -184,6 +225,70 @@ export default function AssistantHomePage({ accountFilter }: Props) {
             ))}
           </ul>
         )}
+      </section>
+
+      <section aria-label="Ask across projects" className="space-y-3">
+        <div className="space-y-1">
+          <h2 className="font-display text-xl">Ask across projects</h2>
+          <p className="text-sm text-muted-foreground">
+            Grounded answers from your project facts and decisions — with citations.
+          </p>
+        </div>
+        <div className="flex flex-col gap-2 sm:flex-row">
+          <Input
+            value={askQuestion}
+            onChange={(e) => setAskQuestion(e.target.value)}
+            placeholder="Ask across projects…"
+            disabled={!llmEnabled || askMutation.isPending}
+            onKeyDown={(e) => {
+              if (e.key === "Enter" && askQuestion.trim()) askMutation.mutate();
+            }}
+          />
+          <Button
+            variant="outline"
+            disabled={!llmEnabled || !askQuestion.trim() || askMutation.isPending}
+            title={
+              llmEnabled
+                ? "Answer from structured project state across your projects"
+                : "Configure LLM_BASE_URL and LLM_MODEL on the API"
+            }
+            onClick={() => askMutation.mutate()}
+          >
+            {askMutation.isPending ? "Asking…" : llmEnabled ? "Ask" : "Ask (LLM off)"}
+          </Button>
+        </div>
+        {askAnswer ? (
+          <div className="space-y-2 border-t border-border/70 pt-3 text-sm">
+            <p>{askAnswer.answer}</p>
+            {askAnswer.citations.length > 0 ? (
+              <ul className="space-y-1 text-xs text-muted-foreground">
+                {askAnswer.citations.map((c) => {
+                  const href = citationHref(c);
+                  const label = [
+                    c.project_code,
+                    c.type,
+                    c.id.slice(0, 8),
+                  ]
+                    .filter(Boolean)
+                    .join(" · ");
+                  return (
+                    <li key={`${c.type}:${c.id}`}>
+                      {href ? (
+                        <Link to={href} className="hover:underline">
+                          {label}
+                        </Link>
+                      ) : (
+                        label
+                      )}
+                    </li>
+                  );
+                })}
+              </ul>
+            ) : (
+              <p className="text-xs text-muted-foreground">No citations returned.</p>
+            )}
+          </div>
+        ) : null}
       </section>
 
       <section className="space-y-4" aria-labelledby="home-recent-heading">

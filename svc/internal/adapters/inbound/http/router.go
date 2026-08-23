@@ -122,6 +122,7 @@ func (h *Handlers) Routes() http.Handler {
 	r.Patch("/api/decisions/{id}", h.patchDecision)
 	r.Get("/api/attention", h.listAttention)
 	r.Get("/api/projects/{id}/attention", h.listProjectAttention)
+	r.Post("/api/ask", h.askAcross)
 	r.Post("/api/projects/{id}/ask", h.askProject)
 	r.Get("/api/facts/{id}", h.getFact)
 	r.Post("/api/fact-versions/{id}/confirm", h.confirmFactVersion)

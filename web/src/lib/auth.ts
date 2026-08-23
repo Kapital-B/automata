@@ -1088,6 +1088,9 @@ export async function getProjectAttention(accessToken: string, projectID: string
 export type AskCitation = {
   type: string;
   id: string;
+  project_id?: string;
+  project_code?: string;
+  project_name?: string;
 };
 
 export type AskAnswer = {
@@ -1098,6 +1101,14 @@ export type AskAnswer = {
 
 export async function askProject(accessToken: string, projectID: string, question: string) {
   return apiRequest<AskAnswer>(`/api/projects/${projectID}/ask`, {
+    method: "POST",
+    headers: toAuthHeader(accessToken),
+    body: JSON.stringify({ question }),
+  });
+}
+
+export async function askAcross(accessToken: string, question: string) {
+  return apiRequest<AskAnswer>("/api/ask", {
     method: "POST",
     headers: toAuthHeader(accessToken),
     body: JSON.stringify({ question }),

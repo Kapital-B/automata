@@ -35,17 +35,46 @@ func (h *Handlers) askProject(w http.ResponseWriter, r *http.Request) {
 	}
 	ans, err := h.ProjectAISvc.Ask(r.Context(), uid, projectID, strings.TrimSpace(body.Question))
 	if err != nil {
-		switch {
-		case errors.Is(err, appprojectai.ErrNotFound):
-			writeJSON(w, http.StatusNotFound, map[string]string{"error": "not found"})
-		case errors.Is(err, appprojectai.ErrLLMUnavailable):
-			writeJSON(w, http.StatusServiceUnavailable, map[string]string{"error": err.Error()})
-		case errors.Is(err, appprojectai.ErrEmptyQuestion):
-			writeJSON(w, http.StatusBadRequest, map[string]string{"error": err.Error()})
-		default:
-			writeJSON(w, http.StatusBadRequest, map[string]string{"error": err.Error()})
-		}
+		writeAskError(w, err)
 		return
 	}
 	writeJSON(w, http.StatusOK, ans)
+}
+
+func (h *Handlers) askAcross(w http.ResponseWriter, r *http.Request) {
+	uid, ok := UserIDFromContext(r.Context())
+	if !ok {
+		writeJSON(w, http.StatusUnauthorized, map[string]string{"error": "unauthorized"})
+		return
+	}
+	if h.ProjectAISvc == nil {
+		writeJSON(w, http.StatusServiceUnavailable, map[string]string{"error": "ask not configured"})
+		return
+	}
+	var body struct {
+		Question string `json:"question"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "bad json"})
+		return
+	}
+	ans, err := h.ProjectAISvc.AskAcross(r.Context(), uid, strings.TrimSpace(body.Question))
+	if err != nil {
+		writeAskError(w, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, ans)
+}
+
+func writeAskError(w http.ResponseWriter, err error) {
+	switch {
+	case errors.Is(err, appprojectai.ErrNotFound):
+		writeJSON(w, http.StatusNotFound, map[string]string{"error": "not found"})
+	case errors.Is(err, appprojectai.ErrLLMUnavailable):
+		writeJSON(w, http.StatusServiceUnavailable, map[string]string{"error": err.Error()})
+	case errors.Is(err, appprojectai.ErrEmptyQuestion):
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": err.Error()})
+	default:
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": err.Error()})
+	}
 }

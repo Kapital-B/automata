@@ -1,5 +1,5 @@
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import { render, screen } from "@testing-library/react";
+import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { MemoryRouter } from "react-router-dom";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import AssistantHomePage from "@/pages/AssistantHome";
@@ -23,6 +23,8 @@ vi.mock("@/lib/auth", async () => {
     getUnassignedSummary: vi.fn(),
     getCurrentPosition: vi.fn(),
     markActionItemDone: vi.fn(),
+    getApiHealth: vi.fn(),
+    askAcross: vi.fn(),
   };
 });
 
@@ -31,6 +33,8 @@ const getAttention = vi.mocked(auth.getAttention);
 const listProjects = vi.mocked(auth.listProjects);
 const getUnassignedSummary = vi.mocked(auth.getUnassignedSummary);
 const getCurrentPosition = vi.mocked(auth.getCurrentPosition);
+const getApiHealth = vi.mocked(auth.getApiHealth);
+const askAcross = vi.mocked(auth.askAcross);
 
 function renderPage() {
   const client = new QueryClient({
@@ -90,13 +94,15 @@ function baseMailState(overrides: Partial<ReturnType<typeof useAssistantHomeData
   };
 }
 
-describe("AssistantHomePage U2", () => {
+describe("AssistantHomePage", () => {
   beforeEach(() => {
     mockedUseAssistantHomeData.mockReset();
     getAttention.mockReset();
     listProjects.mockReset();
     getUnassignedSummary.mockReset();
     getCurrentPosition.mockReset();
+    getApiHealth.mockReset();
+    askAcross.mockReset();
     getAttention.mockResolvedValue({
       items: [],
       counts: {
@@ -112,6 +118,7 @@ describe("AssistantHomePage U2", () => {
     listProjects.mockResolvedValue([]);
     getUnassignedSummary.mockResolvedValue({ unassigned: 0, provisional: 0 });
     getCurrentPosition.mockResolvedValue({ facts: [], decisions: [] });
+    getApiHealth.mockResolvedValue({ status: "ok", llm: true });
   });
 
   it("shows empty Needs my input with Projects and Triage CTAs", async () => {
@@ -201,5 +208,34 @@ describe("AssistantHomePage U2", () => {
 
     expect(screen.getByText(/3 items waiting to be assigned/i)).toBeInTheDocument();
     expect(screen.getByRole("link", { name: /2 drafts ready/i })).toHaveAttribute("href", "/drafts");
+  });
+
+  it("asks across projects and shows cited answer", async () => {
+    mockedUseAssistantHomeData.mockReturnValue(baseMailState());
+    askAcross.mockResolvedValue({
+      answer: "Pump P-03 duty is 90 kW on DC01",
+      citations: [
+        {
+          type: "fact_version",
+          id: "aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee",
+          project_id: "p1",
+          project_code: "DC01",
+          project_name: "Cooling",
+        },
+      ],
+      confidence: 0.9,
+    });
+    renderPage();
+    expect(await screen.findByRole("region", { name: /ask across projects/i })).toBeInTheDocument();
+    fireEvent.change(screen.getByPlaceholderText(/ask across projects/i), {
+      target: { value: "What is pump duty?" },
+    });
+    fireEvent.click(screen.getByRole("button", { name: /^Ask$/i }));
+    await waitFor(() => expect(askAcross).toHaveBeenCalledWith("token", "What is pump duty?"));
+    expect(await screen.findByText(/Pump P-03 duty is 90 kW on DC01/i)).toBeInTheDocument();
+    expect(screen.getByRole("link", { name: /DC01 · fact_version · aaaaaaaa/i })).toHaveAttribute(
+      "href",
+      "/projects/p1?mode=position",
+    );
   });
 });

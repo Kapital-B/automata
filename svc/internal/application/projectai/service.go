@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"sort"
 	"strings"
 	"time"
 
@@ -31,9 +32,14 @@ type Service struct {
 	LLM         driven.LLMClient
 }
 
+const maxAskAcrossProjects = 8
+
 type Citation struct {
-	Type string `json:"type"`
-	ID   string `json:"id"`
+	Type        string `json:"type"`
+	ID          string `json:"id"`
+	ProjectID   string `json:"project_id,omitempty"`
+	ProjectCode string `json:"project_code,omitempty"`
+	ProjectName string `json:"project_name,omitempty"`
 }
 
 type Answer struct {
@@ -55,7 +61,69 @@ type contextPack struct {
 	Issues       map[string]struct{}
 	Messages     map[string]struct{}
 	ManualItems  map[string]struct{}
+	CiteMeta     map[string]Citation
 	Prompt       string
+}
+
+func newContextPack() *contextPack {
+	return &contextPack{
+		FactVersions: map[string]struct{}{},
+		Decisions:    map[string]struct{}{},
+		Issues:       map[string]struct{}{},
+		Messages:     map[string]struct{}{},
+		ManualItems:  map[string]struct{}{},
+		CiteMeta:     map[string]Citation{},
+	}
+}
+
+func (p *contextPack) noteCite(typ, id string, project driven.ProjectRow) {
+	if p == nil || id == "" {
+		return
+	}
+	key := typ + ":" + id
+	p.CiteMeta[key] = Citation{
+		Type:        typ,
+		ID:          id,
+		ProjectID:   project.ID.String(),
+		ProjectCode: project.Code,
+		ProjectName: project.Name,
+	}
+	switch typ {
+	case "fact_version":
+		p.FactVersions[id] = struct{}{}
+	case "decision":
+		p.Decisions[id] = struct{}{}
+	case "issue":
+		p.Issues[id] = struct{}{}
+	case "message":
+		p.Messages[id] = struct{}{}
+	case "manual_item":
+		p.ManualItems[id] = struct{}{}
+	}
+}
+
+func (p *contextPack) mergeFrom(other *contextPack) {
+	if other == nil {
+		return
+	}
+	for k, v := range other.FactVersions {
+		p.FactVersions[k] = v
+	}
+	for k, v := range other.Decisions {
+		p.Decisions[k] = v
+	}
+	for k, v := range other.Issues {
+		p.Issues[k] = v
+	}
+	for k, v := range other.Messages {
+		p.Messages[k] = v
+	}
+	for k, v := range other.ManualItems {
+		p.ManualItems[k] = v
+	}
+	for k, v := range other.CiteMeta {
+		p.CiteMeta[k] = v
+	}
 }
 
 func (s *Service) HasLLM() bool {
@@ -83,21 +151,78 @@ func (s *Service) Ask(ctx context.Context, userID, projectID uuid.UUID, question
 		return nil, ErrNotFound
 	}
 
-	pack, err := s.buildContext(ctx, userID, orgID, projectID, p.Name)
+	pack, err := s.buildContext(ctx, userID, orgID, *p)
 	if err != nil {
 		return nil, err
 	}
 
+	return s.runAsk(ctx, q, pack, map[string]any{"project_id": projectID.String()}, false)
+}
+
+// AskAcross answers a question over the caller's accessible home-org projects.
+func (s *Service) AskAcross(ctx context.Context, userID uuid.UUID, question string) (*Answer, error) {
+	q := strings.TrimSpace(question)
+	if q == "" {
+		return nil, ErrEmptyQuestion
+	}
+	orgID, err := s.Users.GetHomeOrganisationID(ctx, userID)
+	if err != nil {
+		return nil, err
+	}
+	projects, err := s.Projects.ListProjects(ctx, orgID, driven.ProjectListFilter{Limit: 200})
+	if err != nil {
+		return nil, err
+	}
+	accessible := make([]driven.ProjectRow, 0, len(projects))
+	for _, p := range projects {
+		m, err := s.Projects.GetProjectMember(ctx, p.ID, userID)
+		if err != nil || m == nil {
+			continue
+		}
+		accessible = append(accessible, p)
+	}
+	sort.SliceStable(accessible, func(i, j int) bool {
+		return accessible[i].UpdatedAt.After(accessible[j].UpdatedAt)
+	})
+	if len(accessible) > maxAskAcrossProjects {
+		accessible = accessible[:maxAskAcrossProjects]
+	}
+
+	combined := newContextPack()
+	var b strings.Builder
+	b.WriteString("MULTI-PROJECT CONTEXT\n")
+	b.WriteString("Each PROJECT block is isolated. Never blend evidence across projects without citing which project.\n\n")
+	if len(accessible) == 0 {
+		b.WriteString("(no accessible projects)\n")
+	}
+	for _, p := range accessible {
+		pack, err := s.buildContext(ctx, userID, orgID, p)
+		if err != nil {
+			return nil, err
+		}
+		combined.mergeFrom(pack)
+		fmt.Fprintf(&b, "==== PROJECT code=%s id=%s name=%q ====\n%s\n", p.Code, p.ID.String(), p.Name, pack.Prompt)
+	}
+	combined.Prompt = b.String()
+
+	return s.runAsk(ctx, q, combined, map[string]any{
+		"scope":         "across",
+		"project_count": len(accessible),
+	}, true)
+}
+
+func (s *Service) runAsk(ctx context.Context, question string, pack *contextPack, jobMeta map[string]any, multi bool) (*Answer, error) {
 	now := time.Now().UTC()
 	runID := uuid.New()
+	jobType := "project_ai"
 	if s.JobRuns != nil {
-		meta, _ := json.Marshal(map[string]any{"project_id": projectID.String()})
-		_ = s.JobRuns.InsertJobRun(ctx, runID, uuid.Nil, "project_ai", "api", "running", now, now, nil, string(meta))
+		meta, _ := json.Marshal(jobMeta)
+		_ = s.JobRuns.InsertJobRun(ctx, runID, uuid.Nil, jobType, "api", "running", now, now, nil, string(meta))
 	}
 
 	var out *Answer
 	if s.LLM == nil {
-		out = s.heuristicAnswer(q, pack)
+		out = s.heuristicAnswer(question, pack)
 		if s.JobRuns != nil {
 			fin := time.Now().UTC()
 			_ = s.JobRuns.UpdateJobRunStatus(ctx, runID, "failed", &fin, strPtr("llm not configured"), "{}")
@@ -108,9 +233,9 @@ func (s *Service) Ask(ctx context.Context, userID, projectID uuid.UUID, question
 		return nil, ErrLLMUnavailable
 	}
 
-	parsed, err := s.callAskLLM(ctx, pack.Prompt, q)
+	parsed, err := s.callAskLLM(ctx, pack.Prompt, question, multi)
 	if err != nil {
-		if h := s.heuristicAnswer(q, pack); h != nil {
+		if h := s.heuristicAnswer(question, pack); h != nil {
 			out = h
 		} else {
 			if s.JobRuns != nil {
@@ -126,11 +251,15 @@ func (s *Service) Ask(ctx context.Context, userID, projectID uuid.UUID, question
 			Confidence: parsed.Confidence,
 		}
 		if out.Answer == "" {
-			out.Answer = "I do not have enough grounded context in this project to answer that."
+			if multi {
+				out.Answer = "I do not have enough grounded context across your projects to answer that."
+			} else {
+				out.Answer = "I do not have enough grounded context in this project to answer that."
+			}
 			out.Confidence = 0
 		}
 		if len(out.Citations) == 0 {
-			if h := s.heuristicAnswer(q, pack); h != nil {
+			if h := s.heuristicAnswer(question, pack); h != nil {
 				out = h
 			}
 		}
@@ -138,28 +267,24 @@ func (s *Service) Ask(ctx context.Context, userID, projectID uuid.UUID, question
 
 	if s.JobRuns != nil {
 		fin := time.Now().UTC()
-		meta, _ := json.Marshal(map[string]any{
-			"project_id": projectID.String(),
-			"citations":  len(out.Citations),
-		})
-		_ = s.JobRuns.UpdateJobRunStatus(ctx, runID, "success", &fin, nil, string(meta))
+		meta := map[string]any{}
+		for k, v := range jobMeta {
+			meta[k] = v
+		}
+		meta["citations"] = len(out.Citations)
+		raw, _ := json.Marshal(meta)
+		_ = s.JobRuns.UpdateJobRunStatus(ctx, runID, "success", &fin, nil, string(raw))
 	}
 	return out, nil
 }
 
-func (s *Service) buildContext(ctx context.Context, userID, orgID, projectID uuid.UUID, projectName string) (*contextPack, error) {
-	pack := &contextPack{
-		FactVersions: map[string]struct{}{},
-		Decisions:    map[string]struct{}{},
-		Issues:       map[string]struct{}{},
-		Messages:     map[string]struct{}{},
-		ManualItems:  map[string]struct{}{},
-	}
+func (s *Service) buildContext(ctx context.Context, userID, orgID uuid.UUID, project driven.ProjectRow) (*contextPack, error) {
+	pack := newContextPack()
 	var b strings.Builder
-	fmt.Fprintf(&b, "Project: %s (%s)\n\n", projectName, projectID.String())
+	fmt.Fprintf(&b, "Project: %s code=%s (%s)\n\n", project.Name, project.Code, project.ID.String())
 
 	b.WriteString("## Active facts\n")
-	facts, err := s.Facts.ListFactsByProject(ctx, orgID, projectID)
+	facts, err := s.Facts.ListFactsByProject(ctx, orgID, project.ID)
 	if err != nil {
 		return nil, err
 	}
@@ -171,7 +296,7 @@ func (s *Service) buildContext(ctx context.Context, userID, orgID, projectID uui
 		if active == nil {
 			continue
 		}
-		pack.FactVersions[active.ID.String()] = struct{}{}
+		pack.noteCite("fact_version", active.ID.String(), project)
 		unit := ""
 		if active.Unit != nil {
 			unit = " " + *active.Unit
@@ -181,11 +306,11 @@ func (s *Service) buildContext(ctx context.Context, userID, orgID, projectID uui
 		ev, _ := s.Facts.ListFactEvidence(ctx, active.ID)
 		for _, e := range ev {
 			if e.MessageID != nil {
-				pack.Messages[e.MessageID.String()] = struct{}{}
+				pack.noteCite("message", e.MessageID.String(), project)
 				fmt.Fprintf(&b, "  evidence message_id=%s\n", e.MessageID.String())
 			}
 			if e.ManualItemID != nil {
-				pack.ManualItems[e.ManualItemID.String()] = struct{}{}
+				pack.noteCite("manual_item", e.ManualItemID.String(), project)
 				fmt.Fprintf(&b, "  evidence manual_item_id=%s\n", e.ManualItemID.String())
 			}
 		}
@@ -193,18 +318,18 @@ func (s *Service) buildContext(ctx context.Context, userID, orgID, projectID uui
 
 	b.WriteString("\n## Accepted decisions\n")
 	if s.Decisions != nil {
-		decs, err := s.Decisions.ListDecisionsByProject(ctx, orgID, projectID, string(domaindec.StatusAccepted))
+		decs, err := s.Decisions.ListDecisionsByProject(ctx, orgID, project.ID, string(domaindec.StatusAccepted))
 		if err != nil {
 			return nil, err
 		}
 		for _, d := range decs {
-			pack.Decisions[d.ID.String()] = struct{}{}
+			pack.noteCite("decision", d.ID.String(), project)
 			fmt.Fprintf(&b, "- decision_id=%s statement=%q\n", d.ID.String(), d.Statement)
 		}
 	}
 
 	b.WriteString("\n## Open issues\n")
-	issues, err := s.Issues.ListIssuesByProject(ctx, orgID, projectID)
+	issues, err := s.Issues.ListIssuesByProject(ctx, orgID, project.ID)
 	if err != nil {
 		return nil, err
 	}
@@ -212,13 +337,13 @@ func (s *Service) buildContext(ctx context.Context, userID, orgID, projectID uui
 		if iss.Status == "resolved" {
 			continue
 		}
-		pack.Issues[iss.ID.String()] = struct{}{}
+		pack.noteCite("issue", iss.ID.String(), project)
 		fmt.Fprintf(&b, "- issue_id=%s title=%q status=%s\n", iss.ID.String(), iss.Title, iss.Status)
 	}
 
 	b.WriteString("\n## Recent correspondence snippets\n")
 	if s.Timeline != nil {
-		items, err := s.Timeline.ListProjectTimeline(ctx, userID, orgID, projectID, driven.TimelineFilter{Limit: 12})
+		items, err := s.Timeline.ListProjectTimeline(ctx, userID, orgID, project.ID, driven.TimelineFilter{Limit: 12})
 		if err == nil {
 			for _, it := range items {
 				snip := strings.TrimSpace(it.Snippet)
@@ -229,11 +354,11 @@ func (s *Service) buildContext(ctx context.Context, userID, orgID, projectID uui
 					snip = snip[:237] + "…"
 				}
 				if it.MessageID != nil {
-					pack.Messages[it.MessageID.String()] = struct{}{}
+					pack.noteCite("message", it.MessageID.String(), project)
 					fmt.Fprintf(&b, "- message_id=%s %q\n", it.MessageID.String(), snip)
 				}
 				if it.ManualItemID != nil {
-					pack.ManualItems[it.ManualItemID.String()] = struct{}{}
+					pack.noteCite("manual_item", it.ManualItemID.String(), project)
 					fmt.Fprintf(&b, "- manual_item_id=%s %q\n", it.ManualItemID.String(), snip)
 				}
 			}
@@ -244,7 +369,7 @@ func (s *Service) buildContext(ctx context.Context, userID, orgID, projectID uui
 	return pack, nil
 }
 
-func (s *Service) callAskLLM(ctx context.Context, contextText, question string) (*askLLMPayload, error) {
+func (s *Service) callAskLLM(ctx context.Context, contextText, question string, multi bool) (*askLLMPayload, error) {
 	tryDecode := func(content string) (*askLLMPayload, error) {
 		var out askLLMPayload
 		if err := json.Unmarshal([]byte(normalizeJSON(content)), &out); err != nil {
@@ -252,11 +377,15 @@ func (s *Service) callAskLLM(ctx context.Context, contextText, question string) 
 		}
 		return &out, nil
 	}
+	system := "You are Project AI. Never invent facts. JSON only."
+	if multi {
+		system = "You are Automata Project AI answering across multiple projects. Never invent facts. Never blend evidence across PROJECT blocks without naming the project. JSON only."
+	}
 	user := "Answer using ONLY the context below. Cite ids from the context. If insufficient, say so.\n\nContext:\n" +
 		contextText + "\n\nQuestion: " + question +
 		"\n\nReturn JSON: {\"schema_version\":1,\"answer\":\"\",\"citations\":[{\"type\":\"fact_version|decision|issue|message|manual_item\",\"id\":\"uuid\"}],\"confidence\":0.0}"
 	resp, err := s.LLM.ChatCompletion(ctx, []driven.LLMMessage{
-		{Role: "system", Content: "You are Project AI. Never invent facts. JSON only."},
+		{Role: "system", Content: system},
 		{Role: "user", Content: user},
 	})
 	if err != nil {
@@ -302,9 +431,13 @@ func (s *Service) heuristicAnswer(question string, pack *contextPack) *Answer {
 		if label != "" {
 			ans = label + " is " + val
 		}
+		cite := Citation{Type: "fact_version", ID: vid}
+		if meta, ok := pack.CiteMeta["fact_version:"+vid]; ok {
+			cite = meta
+		}
 		return &Answer{
 			Answer:     ans,
-			Citations:  []Citation{{Type: "fact_version", ID: vid}},
+			Citations:  []Citation{cite},
 			Confidence: 0.85,
 		}
 	}
@@ -388,7 +521,11 @@ func filterCitations(in []Citation, pack *contextPack) []Citation {
 			continue
 		}
 		seen[key] = struct{}{}
-		out = append(out, Citation{Type: typ, ID: id})
+		cite := Citation{Type: typ, ID: id}
+		if meta, found := pack.CiteMeta[key]; found {
+			cite = meta
+		}
+		out = append(out, cite)
 	}
 	return out
 }
