@@ -33,17 +33,20 @@ func (r *Repository) CreateInterpretation(ctx context.Context, row driven.Interp
 }
 
 func (r *Repository) AddInterpretationSource(ctx context.Context, row driven.InterpretationSourceRow) error {
-	var msgID, manualID any
+	var msgID, manualID, connectorMessageID any
 	if row.MessageID != nil {
 		msgID = row.MessageID.String()
 	}
 	if row.ManualItemID != nil {
 		manualID = row.ManualItemID.String()
 	}
+	if row.ConnectorMessageID != nil {
+		connectorMessageID = row.ConnectorMessageID.String()
+	}
 	_, err := r.db.ExecContext(ctx, `
-		INSERT INTO interpretation_sources (id, interpretation_id, message_id, manual_item_id)
-		VALUES (?, ?, ?, ?)
-	`, row.ID.String(), row.InterpretationID.String(), msgID, manualID)
+		INSERT INTO interpretation_sources (id, interpretation_id, message_id, manual_item_id, connector_message_id)
+		VALUES (?, ?, ?, ?, ?)
+	`, row.ID.String(), row.InterpretationID.String(), msgID, manualID, connectorMessageID)
 	return err
 }
 
@@ -100,7 +103,7 @@ func (r *Repository) UpdateInterpretationStatus(ctx context.Context, organisatio
 
 func (r *Repository) ListInterpretationSources(ctx context.Context, interpretationID uuid.UUID) ([]driven.InterpretationSourceRow, error) {
 	rows, err := r.db.QueryContext(ctx, `
-		SELECT id, interpretation_id, message_id, manual_item_id
+		SELECT id, interpretation_id, message_id, manual_item_id, connector_message_id
 		FROM interpretation_sources WHERE interpretation_id = ?
 	`, interpretationID.String())
 	if err != nil {
@@ -175,8 +178,8 @@ func scanInterpretationRow(s rowScanner) (*driven.InterpretationRow, error) {
 
 func scanInterpretationSource(s rowScanner) (*driven.InterpretationSourceRow, error) {
 	var idStr, interpStr string
-	var msg, manual sql.NullString
-	if err := s.Scan(&idStr, &interpStr, &msg, &manual); err != nil {
+	var msg, manual, connectorMessage sql.NullString
+	if err := s.Scan(&idStr, &interpStr, &msg, &manual, &connectorMessage); err != nil {
 		return nil, err
 	}
 	id, err := uuid.Parse(idStr)
@@ -201,6 +204,13 @@ func scanInterpretationSource(s rowScanner) (*driven.InterpretationSourceRow, er
 			return nil, err
 		}
 		row.ManualItemID = &mid
+	}
+	if connectorMessage.Valid && connectorMessage.String != "" {
+		id, err := uuid.Parse(connectorMessage.String)
+		if err != nil {
+			return nil, err
+		}
+		row.ConnectorMessageID = &id
 	}
 	return row, nil
 }

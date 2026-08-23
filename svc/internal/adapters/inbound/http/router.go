@@ -15,18 +15,19 @@ import (
 
 	asynqadapter "github.com/Kapital-B/automata/svc/internal/adapters/inbound/asynq"
 	appaccounts "github.com/Kapital-B/automata/svc/internal/application/accounts"
+	appattention "github.com/Kapital-B/automata/svc/internal/application/attention"
 	"github.com/Kapital-B/automata/svc/internal/application/auth"
+	appconnectors "github.com/Kapital-B/automata/svc/internal/application/connectors"
 	appcontacts "github.com/Kapital-B/automata/svc/internal/application/contacts"
+	appdecisions "github.com/Kapital-B/automata/svc/internal/application/decisions"
 	appfacts "github.com/Kapital-B/automata/svc/internal/application/facts"
 	appinterpret "github.com/Kapital-B/automata/svc/internal/application/interpret"
 	appissues "github.com/Kapital-B/automata/svc/internal/application/issues"
-	appreconcile "github.com/Kapital-B/automata/svc/internal/application/reconcile"
-	appattention "github.com/Kapital-B/automata/svc/internal/application/attention"
-	appdecisions "github.com/Kapital-B/automata/svc/internal/application/decisions"
-	appprojectai "github.com/Kapital-B/automata/svc/internal/application/projectai"
 	appmessages "github.com/Kapital-B/automata/svc/internal/application/messages"
-	appprojects "github.com/Kapital-B/automata/svc/internal/application/projects"
 	"github.com/Kapital-B/automata/svc/internal/application/ports/driven"
+	appprojectai "github.com/Kapital-B/automata/svc/internal/application/projectai"
+	appprojects "github.com/Kapital-B/automata/svc/internal/application/projects"
+	appreconcile "github.com/Kapital-B/automata/svc/internal/application/reconcile"
 	domainacc "github.com/Kapital-B/automata/svc/internal/domain/accounts"
 	"github.com/go-chi/chi/v5"
 	"github.com/google/uuid"
@@ -34,46 +35,48 @@ import (
 
 // Handlers holds wired application services for HTTP.
 type Handlers struct {
-	Log             *slog.Logger
-	AccountSvc      *appaccounts.Service
-	SyncSvc         *appmessages.SyncService
-	CategorizeSvc   *appmessages.CategorizeService
-	SummarizeSvc    *appmessages.SummarizeService
-	AutoDraftSvc    *appmessages.AutoDraftService
-	DraftsSvc       *appmessages.DraftLifecycleService
-	ForwardRulesSvc *appmessages.ForwardRulesService
-	AuthSvc         *auth.Service
-	ContactSvc      *appcontacts.Service
-	ProjectSvc      *appprojects.Service
-	IssueSvc        *appissues.Service
-	FactSvc         *appfacts.Service
-	InterpretSvc    *appinterpret.Service
-	ReconcileSvc    *appreconcile.Service
-	DecisionSvc     *appdecisions.Service
-	AttentionSvc    *appattention.Service
-	ProjectAISvc    *appprojectai.Service
-	Accounts        driven.AccountRepository
-	Messages        driven.MessageRepository
-	JobRuns         driven.JobRunRepository
-	Summaries       driven.SummaryRepository
-	Forwards        driven.ForwardRepository
-	Schedules       driven.ScheduleRepository
-	OAuthStates     driven.OAuthStateRepository
-	Users           driven.UserRepository
-	Contacts        driven.ContactRepository
-	Projects        driven.ProjectRepository
-	Assignments     driven.AssignmentRepository
-	Issues          driven.IssueRepository
-	Dashboard       string
-	SuccessPath     string
-	ErrorPath       string
-	AuthSuccessPath string
-	AuthErrorPath   string
-	StateTTL        time.Duration
-	JWTSecret       []byte
-	JWTTTL          time.Duration
-	DefaultUserID   uuid.UUID // dev fallback when no Bearer token
-	JobQueue        *asynqadapter.QueueClient
+	Log                  *slog.Logger
+	AccountSvc           *appaccounts.Service
+	ConnectorSvc         *appconnectors.Service
+	SyncSvc              *appmessages.SyncService
+	CategorizeSvc        *appmessages.CategorizeService
+	SummarizeSvc         *appmessages.SummarizeService
+	AutoDraftSvc         *appmessages.AutoDraftService
+	DraftsSvc            *appmessages.DraftLifecycleService
+	ForwardRulesSvc      *appmessages.ForwardRulesService
+	AuthSvc              *auth.Service
+	ContactSvc           *appcontacts.Service
+	ProjectSvc           *appprojects.Service
+	IssueSvc             *appissues.Service
+	FactSvc              *appfacts.Service
+	InterpretSvc         *appinterpret.Service
+	ReconcileSvc         *appreconcile.Service
+	DecisionSvc          *appdecisions.Service
+	AttentionSvc         *appattention.Service
+	ProjectAISvc         *appprojectai.Service
+	Accounts             driven.AccountRepository
+	Messages             driven.MessageRepository
+	JobRuns              driven.JobRunRepository
+	Summaries            driven.SummaryRepository
+	Forwards             driven.ForwardRepository
+	Schedules            driven.ScheduleRepository
+	OAuthStates          driven.OAuthStateRepository
+	Users                driven.UserRepository
+	Contacts             driven.ContactRepository
+	Projects             driven.ProjectRepository
+	Assignments          driven.AssignmentRepository
+	Issues               driven.IssueRepository
+	Dashboard            string
+	SuccessPath          string
+	ConnectorSuccessPath string
+	ErrorPath            string
+	AuthSuccessPath      string
+	AuthErrorPath        string
+	StateTTL             time.Duration
+	JWTSecret            []byte
+	JWTTTL               time.Duration
+	DefaultUserID        uuid.UUID // dev fallback when no Bearer token
+	JobQueue             *asynqadapter.QueueClient
 }
 
 func (h *Handlers) Routes() http.Handler {
@@ -175,6 +178,13 @@ func (h *Handlers) Routes() http.Handler {
 	r.Patch("/api/forward-rules/{id}", h.updateForwardRule)
 	r.Delete("/api/forward-rules/{id}", h.deleteForwardRule)
 	r.Post("/api/accounts/{id}/forward-rules/run", h.runForwardRules)
+	r.Get("/api/connectors", h.listConnectors)
+	r.Post("/api/connectors", h.startConnectorConnect)
+	r.Get("/api/connectors/callback", h.connectorOAuthCallback)
+	r.Delete("/api/connectors/{id}", h.deleteConnector)
+	r.Post("/api/connectors/{id}/sync", h.syncConnector)
+	r.Get("/api/connectors/{id}/bindings", h.listConnectorBindings)
+	r.Post("/api/connectors/{id}/bindings", h.createConnectorBinding)
 	r.Get("/api/drafts", h.listDrafts)
 	r.Get("/api/drafts/{id}/attempts", h.listDraftAttempts)
 	r.Patch("/api/drafts/{id}", h.saveDraft)

@@ -411,7 +411,7 @@ export type TimelineContact = {
 };
 
 export type TimelineItem = {
-  source: "mail" | "manual";
+  source: "mail" | "manual" | "slack";
   occurred_at: string;
   title: string;
   snippet: string;
@@ -420,9 +420,36 @@ export type TimelineItem = {
   account_label?: string;
   message_id?: string;
   manual_item_id?: string;
+  connector_message_id?: string;
+  connector_account_id?: string;
   channel?: string;
   body_text?: string;
   issue_id?: string;
+};
+
+export type ConnectorAccount = {
+  id: string;
+  provider: string;
+  label: string;
+  connection_status: string;
+  external_tenant_id?: string;
+  last_error?: string;
+  last_synced_at?: string;
+  scopes?: string[];
+  created_at: string;
+  updated_at: string;
+};
+
+export type ConnectorBinding = {
+  id: string;
+  connector_account_id: string;
+  organisation_id: string;
+  external_channel_id: string;
+  project_id?: string;
+  label: string;
+  sync_cursor?: string;
+  created_at: string;
+  updated_at: string;
 };
 
 export type IssueListItem = {
@@ -1181,6 +1208,58 @@ export async function syncAccount(accessToken: string, accountID: string) {
   return apiRequest<SyncAccountResponse>(`/api/accounts/${accountID}/sync`, {
     method: "POST",
     headers: toAuthHeader(accessToken),
+  });
+}
+
+export async function listConnectors(accessToken: string) {
+  return apiRequest<ConnectorAccount[]>("/api/connectors", {
+    headers: toAuthHeader(accessToken),
+  });
+}
+
+export async function startConnectorConnect(accessToken: string, provider: "slack") {
+  return apiRequest<OAuthStartResponse>("/api/connectors", {
+    method: "POST",
+    headers: toAuthHeader(accessToken),
+    body: JSON.stringify({ provider }),
+  });
+}
+
+export async function deleteConnector(accessToken: string, connectorID: string) {
+  const response = await fetch(`${API_BASE_URL}/api/connectors/${connectorID}`, {
+    method: "DELETE",
+    headers: {
+      "Content-Type": "application/json",
+      ...toAuthHeader(accessToken),
+    },
+  });
+  if (!response.ok) {
+    await parseApiError(response);
+  }
+}
+
+export async function syncConnector(accessToken: string, connectorID: string) {
+  return apiRequest<SyncAccountResponse>(`/api/connectors/${connectorID}/sync`, {
+    method: "POST",
+    headers: toAuthHeader(accessToken),
+  });
+}
+
+export async function listConnectorBindings(accessToken: string, connectorID: string) {
+  return apiRequest<ConnectorBinding[]>(`/api/connectors/${connectorID}/bindings`, {
+    headers: toAuthHeader(accessToken),
+  });
+}
+
+export async function createConnectorBinding(
+  accessToken: string,
+  connectorID: string,
+  body: { external_channel_id: string; project_id?: string; label?: string },
+) {
+  return apiRequest<ConnectorBinding>(`/api/connectors/${connectorID}/bindings`, {
+    method: "POST",
+    headers: toAuthHeader(accessToken),
+    body: JSON.stringify(body),
   });
 }
 

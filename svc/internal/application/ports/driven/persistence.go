@@ -25,6 +25,51 @@ type AccountRow struct {
 	LastSyncedAt      *time.Time
 }
 
+// ConnectorAccountRow is a connected non-mail provider account.
+type ConnectorAccountRow struct {
+	ID               uuid.UUID
+	UserID           uuid.UUID
+	Provider         string
+	Label            string
+	ExternalTenantID *string
+	ConnectionStatus string
+	LastError        *string
+	Scopes           []string
+	LastSyncedAt     *time.Time
+	CreatedAt        time.Time
+	UpdatedAt        time.Time
+}
+
+// ConnectorBindingRow assigns one provider channel to a project.
+type ConnectorBindingRow struct {
+	ID                 uuid.UUID
+	ConnectorAccountID uuid.UUID
+	OrganisationID     uuid.UUID
+	ExternalChannelID  string
+	ProjectID          *uuid.UUID
+	Label              string
+	SyncCursor         *string
+	CreatedAt          time.Time
+	UpdatedAt          time.Time
+}
+
+// ConnectorMessageRow is one persisted provider event.
+type ConnectorMessageRow struct {
+	ID                 uuid.UUID
+	ConnectorAccountID uuid.UUID
+	OrganisationID     uuid.UUID
+	ProjectID          *uuid.UUID
+	ProviderEventID    string
+	ExternalChannelID  string
+	Title              string
+	BodyText           string
+	AuthorLabel        string
+	OccurredAt         time.Time
+	MetaJSON           string
+	CreatedAt          time.Time
+	UpdatedAt          time.Time
+}
+
 // MessageRow is a stored inbox message.
 type MessageRow struct {
 	ID                 uuid.UUID
@@ -249,6 +294,24 @@ type AccountRepository interface {
 	GetSyncDeltaLink(ctx context.Context, userID uuid.UUID, accountID uuid.UUID) (*string, error)
 	UpsertSyncState(ctx context.Context, userID uuid.UUID, accountID uuid.UUID, deltaLink *string, at time.Time) error
 	UpsertSyncStateTime(ctx context.Context, userID uuid.UUID, accountID uuid.UUID, at time.Time) error
+}
+
+// ConnectorRepository persists connector accounts, channel bindings, and events.
+type ConnectorRepository interface {
+	InsertConnectorAccount(ctx context.Context, row ConnectorAccountRow, tokenCiphertext []byte) error
+	GetConnectorAccount(ctx context.Context, userID, id uuid.UUID) (*ConnectorAccountRow, error)
+	ListConnectorAccounts(ctx context.Context, userID uuid.UUID) ([]ConnectorAccountRow, error)
+	DeleteConnectorAccount(ctx context.Context, userID, id uuid.UUID) error
+	GetConnectorTokenCipher(ctx context.Context, userID, id uuid.UUID) ([]byte, error)
+	UpdateConnectorToken(ctx context.Context, userID, id uuid.UUID, tokenCiphertext []byte, scopes []string, status string, lastError *string, lastSyncedAt *time.Time) error
+	CreateConnectorBinding(ctx context.Context, row ConnectorBindingRow) error
+	GetConnectorBinding(ctx context.Context, userID, id uuid.UUID) (*ConnectorBindingRow, error)
+	ListConnectorBindings(ctx context.Context, userID, connectorAccountID uuid.UUID) ([]ConnectorBindingRow, error)
+	DeleteConnectorBinding(ctx context.Context, userID, id uuid.UUID) error
+	UpdateConnectorBindingCursor(ctx context.Context, userID, id uuid.UUID, cursor *string, updatedAt time.Time) error
+	UpsertConnectorMessage(ctx context.Context, row ConnectorMessageRow) error
+	ListConnectorMessagesForProject(ctx context.Context, userID, organisationID, projectID uuid.UUID) ([]ConnectorMessageRow, error)
+	GetConnectorMessage(ctx context.Context, userID, id uuid.UUID) (*ConnectorMessageRow, error)
 }
 
 // MessageRepository stores Graph messages.
@@ -499,23 +562,25 @@ type TimelineContact struct {
 
 // TimelineItem is one row on a project timeline.
 type TimelineItem struct {
-	Source       string // mail | manual
-	OccurredAt   time.Time
-	Title        string
-	Snippet      string
-	Contacts     []TimelineContact
-	AccountID    *uuid.UUID
-	AccountLabel string
-	MessageID    *uuid.UUID
-	ManualItemID *uuid.UUID
-	Channel      string
-	BodyText     string // manual evidence; empty for mail list view
-	IssueID      *uuid.UUID
+	Source             string // mail | manual | slack
+	OccurredAt         time.Time
+	Title              string
+	Snippet            string
+	Contacts           []TimelineContact
+	AccountID          *uuid.UUID
+	AccountLabel       string
+	MessageID          *uuid.UUID
+	ManualItemID       *uuid.UUID
+	ConnectorMessageID *uuid.UUID
+	ConnectorAccountID *uuid.UUID
+	Channel            string
+	BodyText           string // manual evidence; empty for mail list view
+	IssueID            *uuid.UUID
 }
 
 // TimelineFilter narrows timeline listing.
 type TimelineFilter struct {
-	Source            string // mail | manual | all
+	Source            string // mail | manual | slack | all
 	UnassignedToIssue bool
 	Limit             int
 	Offset            int
@@ -523,16 +588,16 @@ type TimelineFilter struct {
 
 // IssueRow is a persisted project issue.
 type IssueRow struct {
-	ID                   uuid.UUID
-	OrganisationID       uuid.UUID
-	ProjectID            uuid.UUID
-	Title                string
-	CurrentPositionNote  string
-	Status               string
-	AssigneeUserID       *uuid.UUID
-	AssigneeContactID    *uuid.UUID
-	CreatedAt            time.Time
-	UpdatedAt            time.Time
+	ID                  uuid.UUID
+	OrganisationID      uuid.UUID
+	ProjectID           uuid.UUID
+	Title               string
+	CurrentPositionNote string
+	Status              string
+	AssigneeUserID      *uuid.UUID
+	AssigneeContactID   *uuid.UUID
+	CreatedAt           time.Time
+	UpdatedAt           time.Time
 }
 
 // IssueItemRow links correspondence to an issue.
@@ -632,10 +697,11 @@ type InterpretationRow struct {
 
 // InterpretationSourceRow links correspondence used as interpret input.
 type InterpretationSourceRow struct {
-	ID               uuid.UUID
-	InterpretationID uuid.UUID
-	MessageID        *uuid.UUID
-	ManualItemID     *uuid.UUID
+	ID                 uuid.UUID
+	InterpretationID   uuid.UUID
+	MessageID          *uuid.UUID
+	ManualItemID       *uuid.UUID
+	ConnectorMessageID *uuid.UUID
 }
 
 // InterpretationRepository persists interpretation candidates and sources.

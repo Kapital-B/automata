@@ -29,10 +29,11 @@ func (h *Handlers) interpretProject(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	var body struct {
-		AccountID     *string  `json:"account_id"`
-		MessageIDs    []string `json:"message_ids"`
-		ManualItemIDs []string `json:"manual_item_ids"`
-		Async         *bool    `json:"async"`
+		AccountID           *string  `json:"account_id"`
+		MessageIDs          []string `json:"message_ids"`
+		ManualItemIDs       []string `json:"manual_item_ids"`
+		ConnectorMessageIDs []string `json:"connector_message_ids"`
+		Async               *bool    `json:"async"`
 	}
 	dec := json.NewDecoder(r.Body)
 	if err := dec.Decode(&body); err != nil && !errors.Is(err, io.EOF) {
@@ -67,6 +68,14 @@ func (h *Handlers) interpretProject(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		in.ManualItemIDs = append(in.ManualItemIDs, id)
+	}
+	for _, idStr := range body.ConnectorMessageIDs {
+		id, err := uuid.Parse(strings.TrimSpace(idStr))
+		if err != nil {
+			writeJSON(w, http.StatusBadRequest, map[string]string{"error": "bad connector_message_id"})
+			return
+		}
+		in.ConnectorMessageIDs = append(in.ConnectorMessageIDs, id)
 	}
 	view, err := h.InterpretSvc.Run(r.Context(), uid, projectID, in)
 	if err != nil {
@@ -173,17 +182,21 @@ func interpretationJSON(v appinterpret.InterpretationView) map[string]any {
 		if src.ManualItemID != nil {
 			srow["manual_item_id"] = src.ManualItemID.String()
 		}
+		if src.ConnectorMessageID != nil {
+			srow["connector_message_id"] = src.ConnectorMessageID.String()
+		}
 		sources = append(sources, srow)
 	}
 	out["sources"] = sources
 	candidates := make([]map[string]any, 0, len(v.Candidates))
 	for _, c := range v.Candidates {
 		crow := map[string]any{
-			"kind":            c.Kind,
-			"confidence":      c.Confidence,
-			"reason":          c.Reason,
-			"message_ids":     c.MessageIDs,
-			"manual_item_ids": c.ManualItemIDs,
+			"kind":                  c.Kind,
+			"confidence":            c.Confidence,
+			"reason":                c.Reason,
+			"message_ids":           c.MessageIDs,
+			"manual_item_ids":       c.ManualItemIDs,
+			"connector_message_ids": c.ConnectorMessageIDs,
 		}
 		if c.SubjectKey != "" {
 			crow["subject_key"] = c.SubjectKey

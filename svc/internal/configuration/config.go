@@ -29,6 +29,11 @@ type Config struct {
 	GoogleClientID             string
 	GoogleClientSecret         string
 	GoogleRedirectURI          string
+	SlackClientID              string
+	SlackClientSecret          string
+	SlackRedirectURI           string
+	SlackMode                  string
+	SlackSuccessPath           string
 	AuthSuccessPath            string
 	AuthErrorPath              string
 	DefaultUserID              uuid.UUID
@@ -174,6 +179,11 @@ func Load() (Config, error) {
 		GoogleClientID:             os.Getenv("GOOGLE_CLIENT_ID"),
 		GoogleClientSecret:         os.Getenv("GOOGLE_CLIENT_SECRET"),
 		GoogleRedirectURI:          getenv("GOOGLE_REDIRECT_URI", publicAPI+"/api/auth/google/callback"),
+		SlackClientID:              os.Getenv("SLACK_CLIENT_ID"),
+		SlackClientSecret:          os.Getenv("SLACK_CLIENT_SECRET"),
+		SlackRedirectURI:           getenv("SLACK_REDIRECT_URI", publicAPI+"/api/connectors/callback"),
+		SlackMode:                  os.Getenv("SLACK_MODE"),
+		SlackSuccessPath:           getenv("SLACK_SUCCESS_PATH", "/accounts?connector=slack"),
 		AuthSuccessPath:            getenv("AUTH_SUCCESS_PATH", "/auth/callback"),
 		AuthErrorPath:              getenv("AUTH_ERROR_PATH", "/auth/error"),
 		DefaultUserID:              defaultUID,
@@ -194,6 +204,10 @@ func Load() (Config, error) {
 	}
 	if cfg.GoogleClientID != "" && (cfg.GoogleClientSecret == "" || cfg.GoogleRedirectURI == "") {
 		return Config{}, fmt.Errorf("GOOGLE_CLIENT_ID set: also require GOOGLE_CLIENT_SECRET and GOOGLE_REDIRECT_URI")
+	}
+	if cfg.SlackClientID != "" && !strings.EqualFold(cfg.SlackMode, "fake") &&
+		(cfg.SlackClientSecret == "" || cfg.SlackRedirectURI == "") {
+		return Config{}, fmt.Errorf("SLACK_CLIENT_ID set: also require SLACK_CLIENT_SECRET and SLACK_REDIRECT_URI")
 	}
 	if cfg.LLMBaseURL != "" && cfg.LLMModel == "" {
 		return Config{}, fmt.Errorf("LLM_BASE_URL set: also require LLM_MODEL")

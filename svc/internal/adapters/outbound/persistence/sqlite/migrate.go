@@ -3,6 +3,7 @@ package sqlite
 import (
 	"database/sql"
 	"embed"
+	"errors"
 	"strings"
 
 	"github.com/google/uuid"
@@ -71,6 +72,12 @@ func Migrate(db *sql.DB) error {
 		}
 		if e.Name() == "022_decisions.sql" {
 			if err := migrateDecisions(db); err != nil {
+				return err
+			}
+			continue
+		}
+		if e.Name() == "023_connectors.sql" {
+			if err := migrateConnectors(db); err != nil {
 				return err
 			}
 			continue
@@ -592,7 +599,7 @@ func extendJobRunTypes(db *sql.DB) error {
 	if err != nil {
 		return err
 	}
-	if strings.Contains(sqlText, "project_ai") {
+	if strings.Contains(sqlText, "sync_slack") {
 		return nil
 	}
 
@@ -621,7 +628,8 @@ func extendJobRunTypes(db *sql.DB) error {
 			account_id TEXT REFERENCES accounts(id) ON DELETE SET NULL,
 			job_type TEXT NOT NULL CHECK (job_type IN (
 				'sync', 'summarize', 'categorize', 'forward_rules', 'draft_suggest',
-				'resolve_contacts', 'assign_projects', 'interpret_project', 'reconcile_project', 'project_ai'
+				'resolve_contacts', 'assign_projects', 'interpret_project', 'reconcile_project', 'project_ai',
+				'sync_slack'
 			)),
 			trigger_kind TEXT NOT NULL CHECK (trigger_kind IN ('schedule', 'api')),
 			status TEXT NOT NULL CHECK (status IN ('pending', 'running', 'success', 'failed', 'cancelled')),
@@ -912,4 +920,194 @@ func migrateDecisions(db *sql.DB) error {
 		}
 	}
 	return nil
+}
+
+// migrateConnectors adds Slack/live connector tables and extends oauth + interpret sources.
+func migrateConnectors(db *sql.DB) error {
+	statements := []string{
+		`CREATE TABLE IF NOT EXISTS connector_accounts (
+			id TEXT PRIMARY KEY NOT NULL,
+			user_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+			provider TEXT NOT NULL CHECK (provider IN ('slack', 'teams', 'whatsapp', 'sms')),
+			label TEXT NOT NULL,
+			external_tenant_id TEXT,
+			connection_status TEXT NOT NULL CHECK (connection_status IN ('connected', 'error', 'disconnected')),
+			last_error TEXT,
+			scopes_json TEXT NOT NULL DEFAULT '[]',
+			token_ciphertext BLOB NOT NULL,
+			last_synced_at TEXT,
+			created_at TEXT NOT NULL,
+			updated_at TEXT NOT NULL
+		)`,
+		`CREATE INDEX IF NOT EXISTS idx_connector_accounts_user ON connector_accounts(user_id)`,
+		`CREATE TABLE IF NOT EXISTS connector_bindings (
+			id TEXT PRIMARY KEY NOT NULL,
+			connector_account_id TEXT NOT NULL REFERENCES connector_accounts(id) ON DELETE CASCADE,
+			organisation_id TEXT NOT NULL REFERENCES organisations(id) ON DELETE CASCADE,
+			external_channel_id TEXT NOT NULL,
+			project_id TEXT REFERENCES projects(id) ON DELETE SET NULL,
+			label TEXT NOT NULL DEFAULT '',
+			sync_cursor TEXT,
+			created_at TEXT NOT NULL,
+			updated_at TEXT NOT NULL,
+			UNIQUE (connector_account_id, external_channel_id)
+		)`,
+		`CREATE INDEX IF NOT EXISTS idx_connector_bindings_account ON connector_bindings(connector_account_id)`,
+		`CREATE INDEX IF NOT EXISTS idx_connector_bindings_project ON connector_bindings(project_id)`,
+		`CREATE TABLE IF NOT EXISTS connector_messages (
+			id TEXT PRIMARY KEY NOT NULL,
+			connector_account_id TEXT NOT NULL REFERENCES connector_accounts(id) ON DELETE CASCADE,
+			organisation_id TEXT NOT NULL REFERENCES organisations(id) ON DELETE CASCADE,
+			project_id TEXT REFERENCES projects(id) ON DELETE SET NULL,
+			provider_event_id TEXT NOT NULL,
+			external_channel_id TEXT NOT NULL,
+			title TEXT NOT NULL,
+			body_text TEXT NOT NULL,
+			author_label TEXT NOT NULL DEFAULT '',
+			occurred_at TEXT NOT NULL,
+			meta_json TEXT NOT NULL DEFAULT '{}',
+			created_at TEXT NOT NULL,
+			updated_at TEXT NOT NULL,
+			UNIQUE (connector_account_id, provider_event_id)
+		)`,
+		`CREATE INDEX IF NOT EXISTS idx_connector_messages_project_occurred
+			ON connector_messages(project_id, occurred_at DESC)`,
+		`CREATE INDEX IF NOT EXISTS idx_connector_messages_account
+			ON connector_messages(connector_account_id)`,
+	}
+	for _, stmt := range statements {
+		if _, err := db.Exec(stmt); err != nil {
+			return err
+		}
+	}
+	if err := extendOAuthStatesForSlack(db); err != nil {
+		return err
+	}
+	return extendInterpretationSourcesForConnectors(db)
+}
+
+func extendOAuthStatesForSlack(db *sql.DB) error {
+	var sqlText string
+	err := db.QueryRow(`SELECT sql FROM sqlite_master WHERE type='table' AND name='oauth_states'`).Scan(&sqlText)
+	if err != nil {
+		return err
+	}
+	if strings.Contains(sqlText, "slack_connector") {
+		return nil
+	}
+
+	var foreignKeys int
+	if err := db.QueryRow(`PRAGMA foreign_keys`).Scan(&foreignKeys); err != nil {
+		return err
+	}
+	if _, err := db.Exec(`PRAGMA foreign_keys=OFF`); err != nil {
+		return err
+	}
+	defer func() {
+		if foreignKeys != 0 {
+			_, _ = db.Exec(`PRAGMA foreign_keys=ON`)
+		}
+	}()
+
+	tx, err := db.Begin()
+	if err != nil {
+		return err
+	}
+	defer func() { _ = tx.Rollback() }()
+
+	if _, err := tx.Exec(`
+		CREATE TABLE oauth_states_new (
+			state TEXT PRIMARY KEY NOT NULL,
+			flow TEXT NOT NULL CHECK (flow IN ('m365_mail', 'auth_microsoft', 'auth_google', 'slack_connector')),
+			user_id TEXT REFERENCES users(id) ON DELETE CASCADE,
+			payload_json TEXT NOT NULL DEFAULT '{}',
+			created_at TEXT NOT NULL
+		)
+	`); err != nil {
+		return err
+	}
+	if _, err := tx.Exec(`
+		INSERT INTO oauth_states_new (state, flow, user_id, payload_json, created_at)
+		SELECT state, flow, user_id, payload_json, created_at FROM oauth_states
+	`); err != nil {
+		return err
+	}
+	if _, err := tx.Exec(`DROP TABLE oauth_states`); err != nil {
+		return err
+	}
+	if _, err := tx.Exec(`ALTER TABLE oauth_states_new RENAME TO oauth_states`); err != nil {
+		return err
+	}
+	return tx.Commit()
+}
+
+func extendInterpretationSourcesForConnectors(db *sql.DB) error {
+	var sqlText string
+	err := db.QueryRow(`SELECT sql FROM sqlite_master WHERE type='table' AND name='interpretation_sources'`).Scan(&sqlText)
+	if err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			return nil
+		}
+		return err
+	}
+	if strings.Contains(sqlText, "connector_message_id") {
+		return nil
+	}
+
+	var foreignKeys int
+	if err := db.QueryRow(`PRAGMA foreign_keys`).Scan(&foreignKeys); err != nil {
+		return err
+	}
+	if _, err := db.Exec(`PRAGMA foreign_keys=OFF`); err != nil {
+		return err
+	}
+	defer func() {
+		if foreignKeys != 0 {
+			_, _ = db.Exec(`PRAGMA foreign_keys=ON`)
+		}
+	}()
+
+	tx, err := db.Begin()
+	if err != nil {
+		return err
+	}
+	defer func() { _ = tx.Rollback() }()
+
+	if _, err := tx.Exec(`
+		CREATE TABLE interpretation_sources_new (
+			id TEXT PRIMARY KEY NOT NULL,
+			interpretation_id TEXT NOT NULL REFERENCES interpretations(id) ON DELETE CASCADE,
+			message_id TEXT REFERENCES messages(id) ON DELETE CASCADE,
+			manual_item_id TEXT REFERENCES manual_items(id) ON DELETE CASCADE,
+			connector_message_id TEXT REFERENCES connector_messages(id) ON DELETE CASCADE,
+			CHECK (
+				(message_id IS NOT NULL AND manual_item_id IS NULL AND connector_message_id IS NULL) OR
+				(message_id IS NULL AND manual_item_id IS NOT NULL AND connector_message_id IS NULL) OR
+				(message_id IS NULL AND manual_item_id IS NULL AND connector_message_id IS NOT NULL)
+			)
+		)
+	`); err != nil {
+		return err
+	}
+	if _, err := tx.Exec(`
+		INSERT INTO interpretation_sources_new (id, interpretation_id, message_id, manual_item_id, connector_message_id)
+		SELECT id, interpretation_id, message_id, manual_item_id, NULL FROM interpretation_sources
+	`); err != nil {
+		return err
+	}
+	if _, err := tx.Exec(`DROP TABLE interpretation_sources`); err != nil {
+		return err
+	}
+	if _, err := tx.Exec(`ALTER TABLE interpretation_sources_new RENAME TO interpretation_sources`); err != nil {
+		return err
+	}
+	if _, err := tx.Exec(`CREATE INDEX IF NOT EXISTS idx_interpretation_sources_manual ON interpretation_sources(manual_item_id)
+		WHERE manual_item_id IS NOT NULL`); err != nil {
+		return err
+	}
+	if _, err := tx.Exec(`CREATE INDEX IF NOT EXISTS idx_interpretation_sources_connector ON interpretation_sources(connector_message_id)
+		WHERE connector_message_id IS NOT NULL`); err != nil {
+		return err
+	}
+	return tx.Commit()
 }

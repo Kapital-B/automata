@@ -863,12 +863,16 @@ func (r *Repository) ListJobRuns(ctx context.Context, userID uuid.UUID, filter d
 
 	var b strings.Builder
 	b.WriteString(`
-		SELECT j.id, j.account_id, a.label, j.job_type, j.trigger_kind, j.status,
+		SELECT j.id, j.account_id, COALESCE(a.label, ca.label), j.job_type, j.trigger_kind, j.status,
 			j.time_window_start, j.time_window_end, j.started_at, j.finished_at, j.error_message, j.meta_json
 		FROM job_runs j
 		LEFT JOIN accounts a ON a.id = j.account_id
-		WHERE a.user_id = ?`)
-	args := []any{userID.String()}
+		LEFT JOIN connector_accounts ca ON ca.id = CASE
+			WHEN json_valid(j.meta_json) THEN json_extract(j.meta_json, '$.connector_account_id')
+			ELSE NULL
+		END
+		WHERE (a.user_id = ? OR ca.user_id = ?)`)
+	args := []any{userID.String(), userID.String()}
 	if filter.AccountID != nil {
 		b.WriteString(` AND j.account_id = ?`)
 		args = append(args, filter.AccountID.String())
@@ -899,12 +903,16 @@ func (r *Repository) ListJobRuns(ctx context.Context, userID uuid.UUID, filter d
 
 func (r *Repository) GetJobRun(ctx context.Context, userID uuid.UUID, id uuid.UUID) (*driven.JobRunRow, error) {
 	row := r.db.QueryRowContext(ctx, `
-		SELECT j.id, j.account_id, a.label, j.job_type, j.trigger_kind, j.status,
+		SELECT j.id, j.account_id, COALESCE(a.label, ca.label), j.job_type, j.trigger_kind, j.status,
 			j.time_window_start, j.time_window_end, j.started_at, j.finished_at, j.error_message, j.meta_json
 		FROM job_runs j
 		LEFT JOIN accounts a ON a.id = j.account_id
-		WHERE j.id = ? AND a.user_id = ?`,
-		id.String(), userID.String(),
+		LEFT JOIN connector_accounts ca ON ca.id = CASE
+			WHEN json_valid(j.meta_json) THEN json_extract(j.meta_json, '$.connector_account_id')
+			ELSE NULL
+		END
+		WHERE j.id = ? AND (a.user_id = ? OR ca.user_id = ?)`,
+		id.String(), userID.String(), userID.String(),
 	)
 	item, err := scanJobRunRow(row)
 	if err != nil {

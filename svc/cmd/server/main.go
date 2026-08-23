@@ -17,18 +17,20 @@ import (
 	"github.com/Kapital-B/automata/svc/internal/adapters/outbound/microsoft"
 	"github.com/Kapital-B/automata/svc/internal/adapters/outbound/persistence/sqlite"
 	"github.com/Kapital-B/automata/svc/internal/adapters/outbound/security"
+	slackadapter "github.com/Kapital-B/automata/svc/internal/adapters/outbound/slack"
 	appaccounts "github.com/Kapital-B/automata/svc/internal/application/accounts"
+	appattention "github.com/Kapital-B/automata/svc/internal/application/attention"
 	"github.com/Kapital-B/automata/svc/internal/application/auth"
+	appconnectors "github.com/Kapital-B/automata/svc/internal/application/connectors"
 	appcontacts "github.com/Kapital-B/automata/svc/internal/application/contacts"
+	appdecisions "github.com/Kapital-B/automata/svc/internal/application/decisions"
 	appfacts "github.com/Kapital-B/automata/svc/internal/application/facts"
 	appinterpret "github.com/Kapital-B/automata/svc/internal/application/interpret"
 	appissues "github.com/Kapital-B/automata/svc/internal/application/issues"
-	appreconcile "github.com/Kapital-B/automata/svc/internal/application/reconcile"
-	appattention "github.com/Kapital-B/automata/svc/internal/application/attention"
-	appdecisions "github.com/Kapital-B/automata/svc/internal/application/decisions"
-	appprojectai "github.com/Kapital-B/automata/svc/internal/application/projectai"
 	appmessages "github.com/Kapital-B/automata/svc/internal/application/messages"
+	appprojectai "github.com/Kapital-B/automata/svc/internal/application/projectai"
 	appprojects "github.com/Kapital-B/automata/svc/internal/application/projects"
+	appreconcile "github.com/Kapital-B/automata/svc/internal/application/reconcile"
 	"github.com/Kapital-B/automata/svc/internal/configuration"
 	"github.com/go-chi/cors"
 	"github.com/google/uuid"
@@ -99,6 +101,14 @@ func main() {
 		ErrorPath:   cfg.OAuthErrorPath,
 		StateTTL:    cfg.OAuthStateTTL,
 	})
+	slackClient := &slackadapter.Client{
+		ClientID: cfg.SlackClientID, ClientSecret: cfg.SlackClientSecret,
+		RedirectURI: cfg.SlackRedirectURI, Mode: cfg.SlackMode,
+	}
+	connectorSvc := &appconnectors.Service{
+		Connectors: repo, OAuthState: repo, Users: repo, Projects: repo,
+		Slack: slackClient, Vault: vault, JobRuns: repo,
+	}
 
 	resolveSvc := &appcontacts.ResolveService{
 		Users:    repo,
@@ -156,6 +166,7 @@ func main() {
 		Assignments:     repo,
 		Manuals:         repo,
 		Messages:        repo,
+		Connectors:      repo,
 		JobRuns:         repo,
 	}
 	projectSvc.AfterProjectCorrespondence = func(ctx context.Context, userID, projectID uuid.UUID, messageID, manualItemID *uuid.UUID) {
@@ -277,46 +288,48 @@ func main() {
 	authSvc := auth.NewService(repo, repo, repo, msAuthOAuth, googleClient, cfg.JWTSecret, cfg.JWTTTL, cfg.RefreshTTL)
 
 	h := &httphandler.Handlers{
-		Log:             log,
-		AccountSvc:      accountSvc,
-		SyncSvc:         syncSvc,
-		CategorizeSvc:   categorizeSvc,
-		SummarizeSvc:    summarizeSvc,
-		AutoDraftSvc:    autoDraftSvc,
-		DraftsSvc:       draftsSvc,
-		ForwardRulesSvc: forwardRulesSvc,
-		AuthSvc:         authSvc,
-		ContactSvc:      contactSvc,
-		ProjectSvc:      projectSvc,
-		IssueSvc:        issueSvc,
-		FactSvc:         factSvc,
-		InterpretSvc:    interpretSvc,
-		ReconcileSvc:    reconcileSvc,
-		DecisionSvc:     decisionSvc,
-		AttentionSvc:    attentionSvc,
-		ProjectAISvc:    projectAISvc,
-		Accounts:        repo,
-		Messages:        repo,
-		JobRuns:         repo,
-		Summaries:       repo,
-		Forwards:        repo,
-		Schedules:       repo,
-		OAuthStates:     repo,
-		Users:           repo,
-		Contacts:        repo,
-		Projects:        repo,
-		Assignments:     repo,
-		Issues:          repo,
-		Dashboard:       cfg.DashboardBaseURL,
-		SuccessPath:     cfg.OAuthSuccessPath,
-		ErrorPath:       cfg.OAuthErrorPath,
-		AuthSuccessPath: cfg.AuthSuccessPath,
-		AuthErrorPath:   cfg.AuthErrorPath,
-		StateTTL:        cfg.OAuthStateTTL,
-		JWTSecret:       cfg.JWTSecret,
-		JWTTTL:          cfg.JWTTTL,
-		DefaultUserID:   cfg.DefaultUserID,
-		JobQueue:        queueClient,
+		Log:                  log,
+		AccountSvc:           accountSvc,
+		ConnectorSvc:         connectorSvc,
+		SyncSvc:              syncSvc,
+		CategorizeSvc:        categorizeSvc,
+		SummarizeSvc:         summarizeSvc,
+		AutoDraftSvc:         autoDraftSvc,
+		DraftsSvc:            draftsSvc,
+		ForwardRulesSvc:      forwardRulesSvc,
+		AuthSvc:              authSvc,
+		ContactSvc:           contactSvc,
+		ProjectSvc:           projectSvc,
+		IssueSvc:             issueSvc,
+		FactSvc:              factSvc,
+		InterpretSvc:         interpretSvc,
+		ReconcileSvc:         reconcileSvc,
+		DecisionSvc:          decisionSvc,
+		AttentionSvc:         attentionSvc,
+		ProjectAISvc:         projectAISvc,
+		Accounts:             repo,
+		Messages:             repo,
+		JobRuns:              repo,
+		Summaries:            repo,
+		Forwards:             repo,
+		Schedules:            repo,
+		OAuthStates:          repo,
+		Users:                repo,
+		Contacts:             repo,
+		Projects:             repo,
+		Assignments:          repo,
+		Issues:               repo,
+		Dashboard:            cfg.DashboardBaseURL,
+		SuccessPath:          cfg.OAuthSuccessPath,
+		ConnectorSuccessPath: cfg.SlackSuccessPath,
+		ErrorPath:            cfg.OAuthErrorPath,
+		AuthSuccessPath:      cfg.AuthSuccessPath,
+		AuthErrorPath:        cfg.AuthErrorPath,
+		StateTTL:             cfg.OAuthStateTTL,
+		JWTSecret:            cfg.JWTSecret,
+		JWTTTL:               cfg.JWTTTL,
+		DefaultUserID:        cfg.DefaultUserID,
+		JobQueue:             queueClient,
 	}
 
 	go func() {

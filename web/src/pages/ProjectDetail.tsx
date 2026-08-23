@@ -105,7 +105,7 @@ export default function ProjectDetailPage() {
   const queryClient = useQueryClient();
   const navigate = useNavigate();
   const { accounts } = useAccountsData();
-  const [sourceFilter, setSourceFilter] = useState<"all" | "mail" | "manual">("all");
+  const [sourceFilter, setSourceFilter] = useState<"all" | "mail" | "manual" | "slack">("all");
   const [unassignedToIssue, setUnassignedToIssue] = useState(false);
   const [pasteOpen, setPasteOpen] = useState(false);
   const [createIssueOpen, setCreateIssueOpen] = useState(false);
@@ -977,14 +977,14 @@ export default function ProjectDetailPage() {
       {mode === "trail" ? (
         <div className="space-y-4" role="tabpanel" aria-label="Trail">
           <div className="flex flex-wrap gap-2">
-            {(["all", "mail", "manual"] as const).map((s) => (
+            {(["all", "mail", "manual", "slack"] as const).map((s) => (
               <Button
                 key={s}
                 size="sm"
                 variant={sourceFilter === s ? "default" : "outline"}
                 onClick={() => setSourceFilter(s)}
               >
-                {s === "all" ? "All" : s === "mail" ? "Mail" : "Manual"}
+                {s === "all" ? "All" : s === "mail" ? "Mail" : s === "manual" ? "Manual" : "Slack"}
               </Button>
             ))}
             <Button
@@ -1003,7 +1003,7 @@ export default function ProjectDetailPage() {
             </div>
           ) : items.length === 0 ? (
             <p className="py-8 text-sm text-muted-foreground">
-              No correspondence yet. Assign mail to this project or paste a Teams/WhatsApp note.
+              No correspondence yet. Assign mail, sync Slack, or paste a Teams/WhatsApp note.
             </p>
           ) : (
             <ol className="divide-y divide-border/70 border-y border-border/70">
@@ -1012,6 +1012,7 @@ export default function ProjectDetailPage() {
                   key={
                     item.message_id ??
                     item.manual_item_id ??
+                    item.connector_message_id ??
                     `${item.source}-${item.occurred_at}-${item.title}`
                   }
                   item={item}
@@ -1585,6 +1586,9 @@ function TimelineRow({
         {item.channel ? <span>· {item.channel}</span> : null}
         <span>· {when}</span>
         {item.source === "mail" ? <AccountBadge account={account} /> : null}
+        {item.source === "slack" && item.account_label ? (
+          <span className="rounded border border-border/70 px-1.5 py-0.5">{item.account_label}</span>
+        ) : null}
         {item.issue_id ? (
           <Link
             to={`/projects/${projectID}/issues/${item.issue_id}`}
@@ -1606,10 +1610,10 @@ function TimelineRow({
       )}
       {contactLabel ? <p className="text-xs text-muted-foreground">{contactLabel}</p> : null}
       {item.snippet ? <p className="text-sm text-foreground/85">{item.snippet}</p> : null}
-      {item.source === "manual" && item.body_text ? (
+      {(item.source === "manual" || item.source === "slack") && item.body_text ? (
         <div>
           <Button size="sm" variant="ghost" className="h-7 px-2" onClick={() => setExpanded((v) => !v)}>
-            {expanded ? "Hide paste" : "Show full paste"}
+            {expanded ? "Hide full text" : item.source === "slack" ? "Show full message" : "Show full paste"}
           </Button>
           {expanded ? (
             <pre className="mt-2 whitespace-pre-wrap rounded-md bg-muted/40 p-3 text-xs">

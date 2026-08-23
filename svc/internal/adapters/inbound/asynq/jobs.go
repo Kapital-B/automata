@@ -8,6 +8,7 @@ import (
 	"strings"
 	"time"
 
+	appconnectors "github.com/Kapital-B/automata/svc/internal/application/connectors"
 	appmessages "github.com/Kapital-B/automata/svc/internal/application/messages"
 	"github.com/Kapital-B/automata/svc/internal/application/ports/driven"
 	"github.com/google/uuid"
@@ -26,20 +27,22 @@ const (
 	TypeSummarizeV1  = "summarize:v1"
 	TypeDraftV1      = "draft_suggest:v1"
 	TypeForwardV1    = "forward_rules:v1"
+	TypeSyncSlackV1  = "sync_slack:v1"
 )
 
 type TaskPayload struct {
-	SchemaVersion  int        `json:"schema_version"`
-	RunID          uuid.UUID  `json:"run_id"`
-	UserID         uuid.UUID  `json:"user_id"`
-	AccountID      uuid.UUID  `json:"account_id"`
-	TriggerKind    string     `json:"trigger_kind"`
-	MessageID      *uuid.UUID `json:"message_id,omitempty"`
-	Force          bool       `json:"force,omitempty"`
-	Recategorize   bool       `json:"recategorize,omitempty"`
-	RemainingJobs  []string   `json:"remaining_jobs,omitempty"`
-	ScheduleID     *uuid.UUID `json:"schedule_id,omitempty"`
-	ChainStartedAt *time.Time `json:"chain_started_at,omitempty"`
+	SchemaVersion      int        `json:"schema_version"`
+	RunID              uuid.UUID  `json:"run_id"`
+	UserID             uuid.UUID  `json:"user_id"`
+	AccountID          uuid.UUID  `json:"account_id"`
+	ConnectorAccountID uuid.UUID  `json:"connector_account_id,omitempty"`
+	TriggerKind        string     `json:"trigger_kind"`
+	MessageID          *uuid.UUID `json:"message_id,omitempty"`
+	Force              bool       `json:"force,omitempty"`
+	Recategorize       bool       `json:"recategorize,omitempty"`
+	RemainingJobs      []string   `json:"remaining_jobs,omitempty"`
+	ScheduleID         *uuid.UUID `json:"schedule_id,omitempty"`
+	ChainStartedAt     *time.Time `json:"chain_started_at,omitempty"`
 }
 
 type QueueClient struct {
@@ -81,6 +84,10 @@ func (q *QueueClient) EnqueueForwardRules(ctx context.Context, payload TaskPaylo
 	return q.enqueue(ctx, TypeForwardV1, QueueForward, payload, false)
 }
 
+func (q *QueueClient) EnqueueSyncSlack(ctx context.Context, payload TaskPayload) error {
+	return q.enqueue(ctx, TypeSyncSlackV1, QueueSync, payload, true)
+}
+
 func (q *QueueClient) enqueue(ctx context.Context, taskType string, queue string, payload TaskPayload, uniqueSync bool) error {
 	if q == nil || q.client == nil {
 		return fmt.Errorf("queue client not configured")
@@ -108,6 +115,7 @@ type WorkerDeps struct {
 	SummarizeSvc    *appmessages.SummarizeService
 	AutoDraftSvc    *appmessages.AutoDraftService
 	ForwardRulesSvc *appmessages.ForwardRulesService
+	ConnectorSync   *appconnectors.Service
 	JobRuns         driven.JobRunRepository
 	GlobalSemaphore chan struct{}
 	Queue           *QueueClient
@@ -129,6 +137,9 @@ func NewWorkerMux(deps WorkerDeps) *asynq.ServeMux {
 	})
 	mux.HandleFunc(TypeForwardV1, func(ctx context.Context, task *asynq.Task) error {
 		return handleForwardRules(ctx, task, deps)
+	})
+	mux.HandleFunc(TypeSyncSlackV1, func(ctx context.Context, task *asynq.Task) error {
+		return handleSyncSlack(ctx, task, deps)
 	})
 	return mux
 }
@@ -282,6 +293,33 @@ func handleForwardRules(ctx context.Context, task *asynq.Task, deps WorkerDeps) 
 	}
 	deps.Log.Info("job success", "job_type", "forward_rules", "run_id", p.RunID, "account_id", p.AccountID)
 	maybeEnqueueNext(ctx, deps, p)
+	return nil
+}
+
+func handleSyncSlack(ctx context.Context, task *asynq.Task, deps WorkerDeps) error {
+	if deps.ConnectorSync == nil {
+		return fmt.Errorf("connector sync service not configured")
+	}
+	var p TaskPayload
+	if err := json.Unmarshal(task.Payload(), &p); err != nil {
+		return err
+	}
+	if p.ConnectorAccountID == uuid.Nil {
+		return fmt.Errorf("connector_account_id is required")
+	}
+	if err := acquire(deps.GlobalSemaphore); err != nil {
+		return err
+	}
+	defer release(deps.GlobalSemaphore)
+	deps.Log.Info("job start", "job_type", "sync_slack", "run_id", p.RunID, "connector_account_id", p.ConnectorAccountID)
+	_, err := deps.ConnectorSync.SyncConnectorWithOptions(ctx, p.UserID, p.ConnectorAccountID, appconnectors.SyncOptions{
+		RunID: &p.RunID, Trigger: p.TriggerKind,
+	})
+	if err != nil {
+		deps.Log.Error("job failed", "job_type", "sync_slack", "run_id", p.RunID, "connector_account_id", p.ConnectorAccountID, "err", err)
+		return err
+	}
+	deps.Log.Info("job success", "job_type", "sync_slack", "run_id", p.RunID, "connector_account_id", p.ConnectorAccountID)
 	return nil
 }
 

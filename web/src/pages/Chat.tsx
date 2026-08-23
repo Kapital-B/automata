@@ -36,9 +36,14 @@ const SUGGESTIONS = [
   },
 ];
 
-const CONNECTORS = [
+const CONNECTORS: {
+  name: string;
+  status: "connected" | "live" | "soon";
+  icon: typeof Mail;
+  href?: string;
+}[] = [
   { name: "Email", status: "connected", icon: Mail },
-  { name: "Slack", status: "soon", icon: Slack },
+  { name: "Slack", status: "live", icon: Slack, href: "/accounts" },
   { name: "Linear", status: "soon", icon: Zap },
   { name: "MCP servers", status: "soon", icon: Plug },
 ];
@@ -140,23 +145,35 @@ export default function ChatPage({ accountFilter }: { accountFilter: AccountFilt
 
             {/* Connector status row */}
             <div className="mt-6 flex flex-wrap items-center justify-center gap-2">
-              {CONNECTORS.map((c) => (
-                <span
-                  key={c.name}
-                  className={cn(
-                    "inline-flex items-center gap-1.5 rounded-full border px-2.5 py-1 text-[11px]",
-                    c.status === "connected"
-                      ? "border-success/30 bg-success/10 text-success"
-                      : "border-border bg-card text-muted-foreground"
-                  )}
-                >
-                  <c.icon className="h-3 w-3" />
-                  {c.name}
-                  {c.status !== "connected" && (
-                    <span className="text-[10px] uppercase tracking-wider opacity-70">soon</span>
-                  )}
-                </span>
-              ))}
+              {CONNECTORS.map((c) => {
+                const chipClass = cn(
+                  "inline-flex items-center gap-1.5 rounded-full border px-2.5 py-1 text-[11px]",
+                  c.status === "connected" || c.status === "live"
+                    ? "border-success/30 bg-success/10 text-success"
+                    : "border-border bg-card text-muted-foreground",
+                );
+                const body = (
+                  <>
+                    <c.icon className="h-3 w-3" />
+                    {c.name}
+                    {c.status === "soon" && (
+                      <span className="text-[10px] uppercase tracking-wider opacity-70">soon</span>
+                    )}
+                    {c.status === "live" && (
+                      <span className="text-[10px] uppercase tracking-wider opacity-70">live</span>
+                    )}
+                  </>
+                );
+                return c.href ? (
+                  <Link key={c.name} to={c.href} className={chipClass}>
+                    {body}
+                  </Link>
+                ) : (
+                  <span key={c.name} className={chipClass}>
+                    {body}
+                  </span>
+                );
+              })}
             </div>
 
             {/* Suggestions */}

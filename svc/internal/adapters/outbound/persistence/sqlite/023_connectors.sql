@@ -1,0 +1,1 @@
+-- Wave 3d: Slack / live connectors (stub applied in migrate.go)

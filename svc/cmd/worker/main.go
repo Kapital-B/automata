@@ -11,6 +11,8 @@ import (
 	"github.com/Kapital-B/automata/svc/internal/adapters/outbound/microsoft"
 	"github.com/Kapital-B/automata/svc/internal/adapters/outbound/persistence/sqlite"
 	"github.com/Kapital-B/automata/svc/internal/adapters/outbound/security"
+	slackadapter "github.com/Kapital-B/automata/svc/internal/adapters/outbound/slack"
+	appconnectors "github.com/Kapital-B/automata/svc/internal/application/connectors"
 	appcontacts "github.com/Kapital-B/automata/svc/internal/application/contacts"
 	appmessages "github.com/Kapital-B/automata/svc/internal/application/messages"
 	appprojects "github.com/Kapital-B/automata/svc/internal/application/projects"
@@ -76,6 +78,14 @@ func main() {
 			Messages:    repo,
 			JobRuns:     repo,
 		},
+	}
+	slackClient := &slackadapter.Client{
+		ClientID: cfg.SlackClientID, ClientSecret: cfg.SlackClientSecret,
+		RedirectURI: cfg.SlackRedirectURI, Mode: cfg.SlackMode,
+	}
+	connectorSvc := &appconnectors.Service{
+		Connectors: repo, OAuthState: repo, Users: repo, Projects: repo,
+		Slack: slackClient, Vault: vault, JobRuns: repo,
 	}
 	var categorizeSvc *appmessages.CategorizeService
 	var summarizeSvc *appmessages.SummarizeService
@@ -148,6 +158,7 @@ func main() {
 		SummarizeSvc:    summarizeSvc,
 		AutoDraftSvc:    autoDraftSvc,
 		ForwardRulesSvc: forwardRulesSvc,
+		ConnectorSync:   connectorSvc,
 		JobRuns:         repo,
 		GlobalSemaphore: sem,
 		Queue:           queueClient,

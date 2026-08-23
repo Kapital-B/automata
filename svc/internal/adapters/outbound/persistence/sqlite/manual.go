@@ -222,6 +222,34 @@ func (r *Repository) ListProjectTimeline(ctx context.Context, userID, organisati
 			out = append(out, item)
 		}
 	}
+	if source == "all" || source == "slack" {
+		messages, err := r.ListConnectorMessagesForProject(ctx, userID, organisationID, projectID)
+		if err != nil {
+			return nil, err
+		}
+		accountLabels := map[uuid.UUID]string{}
+		for _, message := range messages {
+			label, ok := accountLabels[message.ConnectorAccountID]
+			if !ok {
+				account, err := r.GetConnectorAccount(ctx, userID, message.ConnectorAccountID)
+				if err != nil {
+					return nil, err
+				}
+				if account != nil {
+					label = account.Label
+				}
+				accountLabels[message.ConnectorAccountID] = label
+			}
+			messageID := message.ID
+			accountID := message.ConnectorAccountID
+			out = append(out, driven.TimelineItem{
+				Source: "slack", OccurredAt: message.OccurredAt, Title: message.Title,
+				Snippet: snippetText(message.BodyText, 160), BodyText: message.BodyText,
+				AccountLabel: label, ConnectorMessageID: &messageID,
+				ConnectorAccountID: &accountID, Channel: message.ExternalChannelID,
+			})
+		}
+	}
 
 	if filter.UnassignedToIssue {
 		filtered := make([]driven.TimelineItem, 0, len(out))

@@ -16,11 +16,11 @@ import (
 )
 
 var (
-	ErrNotFound            = errors.New("not found")
-	ErrLLMUnavailable      = errors.New("llm not configured")
-	ErrMixedAccounts       = errors.New("cannot mix mail account_id values in one interpret call")
-	ErrNothingToInterpret  = errors.New("no correspondence to interpret")
-	ErrNotPending          = errors.New("interpretation is not pending")
+	ErrNotFound           = errors.New("not found")
+	ErrLLMUnavailable     = errors.New("llm not configured")
+	ErrMixedAccounts      = errors.New("cannot mix mail account_id values in one interpret call")
+	ErrNothingToInterpret = errors.New("no correspondence to interpret")
+	ErrNotPending         = errors.New("interpretation is not pending")
 )
 
 // Service runs Stage A interpret and manages pending candidates.
@@ -33,6 +33,7 @@ type Service struct {
 	Assignments     driven.AssignmentRepository
 	Manuals         driven.ManualItemRepository
 	Messages        driven.MessageRepository
+	Connectors      driven.ConnectorRepository
 	JobRuns         driven.JobRunRepository
 	LLM             driven.LLMClient
 }
@@ -46,10 +47,11 @@ func (s *Service) homeOrg(ctx context.Context, userID uuid.UUID) (uuid.UUID, err
 }
 
 type RunInput struct {
-	AccountID     *uuid.UUID
-	MessageIDs    []uuid.UUID
-	ManualItemIDs []uuid.UUID
-	Trigger       string // api | schedule (stored on job_runs)
+	AccountID           *uuid.UUID
+	MessageIDs          []uuid.UUID
+	ManualItemIDs       []uuid.UUID
+	ConnectorMessageIDs []uuid.UUID
+	Trigger             string // api | schedule (stored on job_runs)
 }
 
 type InterpretationView struct {
@@ -59,16 +61,17 @@ type InterpretationView struct {
 }
 
 type CandidateView struct {
-	Kind          string
-	SubjectKey    string
-	Label         string
-	Value         any
-	Unit          string
-	Statement     string
-	MessageIDs    []string
-	ManualItemIDs []string
-	Confidence    float64
-	Reason        string
+	Kind                string
+	SubjectKey          string
+	Label               string
+	Value               any
+	Unit                string
+	Statement           string
+	MessageIDs          []string
+	ManualItemIDs       []string
+	ConnectorMessageIDs []string
+	Confidence          float64
+	Reason              string
 }
 
 type interpretLLMPayload struct {
@@ -78,25 +81,27 @@ type interpretLLMPayload struct {
 }
 
 type interpretCandidate struct {
-	Kind          string          `json:"kind"`
-	SubjectKey    string          `json:"subject_key"`
-	Label         string          `json:"label"`
-	Value         json.RawMessage `json:"value"`
-	Unit          string          `json:"unit"`
-	Statement     string          `json:"statement"`
-	MessageIDs    []string        `json:"message_ids"`
-	ManualItemIDs []string        `json:"manual_item_ids"`
-	Confidence    float64         `json:"confidence"`
-	Reason        string          `json:"reason"`
+	Kind                string          `json:"kind"`
+	SubjectKey          string          `json:"subject_key"`
+	Label               string          `json:"label"`
+	Value               json.RawMessage `json:"value"`
+	Unit                string          `json:"unit"`
+	Statement           string          `json:"statement"`
+	MessageIDs          []string        `json:"message_ids"`
+	ManualItemIDs       []string        `json:"manual_item_ids"`
+	ConnectorMessageIDs []string        `json:"connector_message_ids"`
+	Confidence          float64         `json:"confidence"`
+	Reason              string          `json:"reason"`
 }
 
 type interpretItem struct {
-	Source       string
-	Title        string
-	Snippet      string
-	MessageID    *uuid.UUID
-	ManualItemID *uuid.UUID
-	AccountID    *uuid.UUID
+	Source             string
+	Title              string
+	Snippet            string
+	MessageID          *uuid.UUID
+	ManualItemID       *uuid.UUID
+	ConnectorMessageID *uuid.UUID
+	AccountID          *uuid.UUID
 }
 
 func (s *Service) requireProjectMember(ctx context.Context, userID, projectID uuid.UUID) (uuid.UUID, error) {
@@ -209,6 +214,7 @@ func (s *Service) Run(ctx context.Context, userID, projectID uuid.UUID, in RunIn
 
 	allowedMsg := map[uuid.UUID]struct{}{}
 	allowedManual := map[uuid.UUID]struct{}{}
+	allowedConnector := map[uuid.UUID]struct{}{}
 	for _, it := range items {
 		if it.MessageID != nil {
 			allowedMsg[*it.MessageID] = struct{}{}
@@ -216,8 +222,11 @@ func (s *Service) Run(ctx context.Context, userID, projectID uuid.UUID, in RunIn
 		if it.ManualItemID != nil {
 			allowedManual[*it.ManualItemID] = struct{}{}
 		}
+		if it.ConnectorMessageID != nil {
+			allowedConnector[*it.ConnectorMessageID] = struct{}{}
+		}
 	}
-	candidates := sanitizeCandidates(parsed.Candidates, allowedMsg, allowedManual, projectID)
+	candidates := sanitizeCandidates(parsed.Candidates, allowedMsg, allowedManual, allowedConnector, projectID)
 
 	payload := interpretLLMPayload{
 		SchemaVersion: 1,
@@ -242,9 +251,9 @@ func (s *Service) Run(ctx context.Context, userID, projectID uuid.UUID, in RunIn
 		accForJob = *accountID
 	}
 	meta, _ := json.Marshal(map[string]any{
-		"project_id":       projectID.String(),
-		"candidate_count":  len(candidates),
-		"source_count":     len(items),
+		"project_id":      projectID.String(),
+		"candidate_count": len(candidates),
+		"source_count":    len(items),
 	})
 	if s.JobRuns != nil {
 		_ = s.JobRuns.InsertJobRun(ctx, runID, accForJob, "interpret_project", trigger, "success", now, now, nil, string(meta))
@@ -263,6 +272,7 @@ func (s *Service) Run(ctx context.Context, userID, projectID uuid.UUID, in RunIn
 		src := driven.InterpretationSourceRow{
 			ID: uuid.New(), InterpretationID: row.ID,
 			MessageID: it.MessageID, ManualItemID: it.ManualItemID,
+			ConnectorMessageID: it.ConnectorMessageID,
 		}
 		if err := s.Interpretations.AddInterpretationSource(ctx, src); err != nil {
 			return nil, err
@@ -281,7 +291,7 @@ func (s *Service) TryRunBestEffort(ctx context.Context, userID, projectID uuid.U
 }
 
 func (s *Service) resolveItems(ctx context.Context, userID, orgID, projectID uuid.UUID, in RunInput) ([]interpretItem, *uuid.UUID, error) {
-	explicit := len(in.MessageIDs) > 0 || len(in.ManualItemIDs) > 0
+	explicit := len(in.MessageIDs) > 0 || len(in.ManualItemIDs) > 0 || len(in.ConnectorMessageIDs) > 0
 	items := make([]interpretItem, 0)
 
 	if explicit {
@@ -336,6 +346,24 @@ func (s *Service) resolveItems(ctx context.Context, userID, orgID, projectID uui
 				ManualItemID: &manCopy,
 			})
 		}
+		for _, connectorMessageID := range in.ConnectorMessageIDs {
+			if s.Connectors == nil {
+				continue
+			}
+			message, err := s.Connectors.GetConnectorMessage(ctx, userID, connectorMessageID)
+			if err != nil {
+				return nil, nil, err
+			}
+			if message == nil || message.ProjectID == nil || *message.ProjectID != projectID ||
+				message.OrganisationID != orgID {
+				continue
+			}
+			id := connectorMessageID
+			items = append(items, interpretItem{
+				Source: "slack", Title: message.Title, Snippet: clampText(message.BodyText, 400),
+				ConnectorMessageID: &id,
+			})
+		}
 		if in.AccountID != nil && mailAccount != nil && *mailAccount != *in.AccountID {
 			return nil, nil, ErrMixedAccounts
 		}
@@ -354,6 +382,7 @@ func (s *Service) resolveItems(ctx context.Context, userID, orgID, projectID uui
 	var mailAccount *uuid.UUID
 	mailByAccount := map[uuid.UUID][]interpretItem{}
 	manuals := make([]interpretItem, 0)
+	connectors := make([]interpretItem, 0)
 	for _, it := range timeline {
 		if it.Source == "manual" && it.ManualItemID != nil {
 			manuals = append(manuals, interpretItem{
@@ -372,9 +401,16 @@ func (s *Service) resolveItems(ctx context.Context, userID, orgID, projectID uui
 			}
 			mailByAccount[*it.AccountID] = append(mailByAccount[*it.AccountID], c)
 		}
+		if it.Source == "slack" && it.ConnectorMessageID != nil {
+			connectors = append(connectors, interpretItem{
+				Source: "slack", Title: it.Title, Snippet: clampText(it.Snippet, 400),
+				ConnectorMessageID: it.ConnectorMessageID,
+			})
+		}
 	}
 	if in.AccountID != nil {
 		items = append(items, manuals...)
+		items = append(items, connectors...)
 		items = append(items, mailByAccount[*in.AccountID]...)
 		return items, in.AccountID, nil
 	}
@@ -392,6 +428,7 @@ func (s *Service) resolveItems(ctx context.Context, userID, orgID, projectID uui
 		}
 	}
 	items = append(items, manuals...)
+	items = append(items, connectors...)
 	items = append(items, chosenMail...)
 	mailAccount = chosenAcc
 	return items, mailAccount, nil
@@ -436,7 +473,8 @@ func (s *Service) buildView(ctx context.Context, row driven.InterpretationRow) (
 		cands = append(cands, CandidateView{
 			Kind: c.Kind, SubjectKey: c.SubjectKey, Label: c.Label, Value: value,
 			Unit: c.Unit, Statement: c.Statement, MessageIDs: c.MessageIDs,
-			ManualItemIDs: c.ManualItemIDs, Confidence: c.Confidence, Reason: c.Reason,
+			ManualItemIDs: c.ManualItemIDs, ConnectorMessageIDs: c.ConnectorMessageIDs,
+			Confidence: c.Confidence, Reason: c.Reason,
 		})
 	}
 	return &InterpretationView{Interpretation: row, Sources: sources, Candidates: cands}, nil
@@ -446,8 +484,8 @@ func buildInterpretPrompt(projectID uuid.UUID, name, code string, items []interp
 	var b strings.Builder
 	b.WriteString("Extract durable project fact and decision candidates from the correspondence below. ")
 	b.WriteString("Respond with a single JSON object only: ")
-	b.WriteString(`{"schema_version":1,"project_id":"` + projectID.String() + `","candidates":[{"kind":"fact|decision","subject_key":"a.b.c","label":"...","value":...,"unit":"","statement":"","message_ids":[],"manual_item_ids":[],"confidence":0..1,"reason":"..."}]}. `)
-	b.WriteString("subject_key must be lowercase dotted (e.g. pump.p03.duty_kw). Only use message_ids/manual_item_ids from the list. ")
+	b.WriteString(`{"schema_version":1,"project_id":"` + projectID.String() + `","candidates":[{"kind":"fact|decision","subject_key":"a.b.c","label":"...","value":...,"unit":"","statement":"","message_ids":[],"manual_item_ids":[],"connector_message_ids":[],"confidence":0..1,"reason":"..."}]}. `)
+	b.WriteString("subject_key must be lowercase dotted (e.g. pump.p03.duty_kw). Only use message_ids/manual_item_ids/connector_message_ids from the list. ")
 	b.WriteString("Prefer facts for measurable assertions and decisions for approvals/proceed-with language. ")
 	b.WriteString("If nothing durable, return an empty candidates array.\n\n")
 	b.WriteString("Project: " + name + " (" + code + ")\n")
@@ -464,6 +502,8 @@ func buildInterpretPrompt(projectID uuid.UUID, name, code string, items []interp
 			id = "message_id=" + it.MessageID.String()
 		} else if it.ManualItemID != nil {
 			id = "manual_item_id=" + it.ManualItemID.String()
+		} else if it.ConnectorMessageID != nil {
+			id = "connector_message_id=" + it.ConnectorMessageID.String()
 		}
 		fmt.Fprintf(&b, "%d. [%s] %s | %s | %s\n", i+1, it.Source, id, clampText(it.Title, 120), clampText(it.Snippet, 300))
 	}
@@ -501,7 +541,7 @@ func (s *Service) callInterpretLLM(ctx context.Context, prompt string) (*interpr
 
 func sanitizeCandidates(
 	raw []interpretCandidate,
-	allowedMsg, allowedManual map[uuid.UUID]struct{},
+	allowedMsg, allowedManual, allowedConnector map[uuid.UUID]struct{},
 	projectID uuid.UUID,
 ) []interpretCandidate {
 	out := make([]interpretCandidate, 0, len(raw))
@@ -552,6 +592,17 @@ func sanitizeCandidates(
 		}
 		c.MessageIDs = msgs
 		c.ManualItemIDs = mans
+		connectorIDs := make([]string, 0)
+		for _, idStr := range c.ConnectorMessageIDs {
+			id, err := uuid.Parse(strings.TrimSpace(idStr))
+			if err != nil {
+				continue
+			}
+			if _, ok := allowedConnector[id]; ok {
+				connectorIDs = append(connectorIDs, id.String())
+			}
+		}
+		c.ConnectorMessageIDs = connectorIDs
 		_ = projectID
 		out = append(out, c)
 	}

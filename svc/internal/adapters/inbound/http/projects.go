@@ -559,6 +559,15 @@ func (h *Handlers) getProjectTimeline(w http.ResponseWriter, r *http.Request) {
 			row["channel"] = it.Channel
 			row["body_text"] = it.BodyText
 		}
+		if it.ConnectorMessageID != nil {
+			row["connector_message_id"] = it.ConnectorMessageID.String()
+			row["channel"] = it.Channel
+			row["body_text"] = it.BodyText
+		}
+		if it.ConnectorAccountID != nil {
+			row["connector_account_id"] = it.ConnectorAccountID.String()
+			row["account_label"] = it.AccountLabel
+		}
 		if it.IssueID != nil {
 			row["issue_id"] = it.IssueID.String()
 		}
