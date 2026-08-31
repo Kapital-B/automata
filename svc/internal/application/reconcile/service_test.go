@@ -9,8 +9,8 @@ import (
 
 	"github.com/Kapital-B/automata/svc/internal/adapters/outbound/persistence/sqlite"
 	"github.com/Kapital-B/automata/svc/internal/application/auth"
-	appfacts "github.com/Kapital-B/automata/svc/internal/application/facts"
 	appdecisions "github.com/Kapital-B/automata/svc/internal/application/decisions"
+	appfacts "github.com/Kapital-B/automata/svc/internal/application/facts"
 	"github.com/Kapital-B/automata/svc/internal/application/ports/driven"
 	appprojects "github.com/Kapital-B/automata/svc/internal/application/projects"
 	appreconcile "github.com/Kapital-B/automata/svc/internal/application/reconcile"

@@ -43,9 +43,9 @@ func TestResolveMessageCreatesParticipants(t *testing.T) {
 	if err := repo.UpsertMessage(ctx, driven.MessageRow{
 		ID: msgID, AccountID: accountID, ProviderMessageID: "g1",
 		ReceivedAt: now, Subject: "Hello",
-		FromJSON: `{"name":"From","address":"from@acme.com"}`,
-		ToJSON:   `[{"name":"To","address":"to@acme.com"}]`,
-		CcJSON:   `[{"name":"Cc","address":"cc@acme.com"}]`,
+		FromJSON:  `{"name":"From","address":"from@acme.com"}`,
+		ToJSON:    `[{"name":"To","address":"to@acme.com"}]`,
+		CcJSON:    `[{"name":"Cc","address":"cc@acme.com"}]`,
 		CreatedAt: now, UpdatedAt: now,
 	}); err != nil {
 		t.Fatal(err)

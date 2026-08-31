@@ -1,171 +1,92 @@
 package main
 
 import (
-	"database/sql"
+	"context"
+	"errors"
 	"log/slog"
 	"os"
+	"sync"
 	"time"
 
-	asynqadapter "github.com/Kapital-B/automata/svc/internal/adapters/inbound/asynq"
-	llmadapter "github.com/Kapital-B/automata/svc/internal/adapters/outbound/llm"
-	"github.com/Kapital-B/automata/svc/internal/adapters/outbound/microsoft"
-	"github.com/Kapital-B/automata/svc/internal/adapters/outbound/persistence/sqlite"
-	"github.com/Kapital-B/automata/svc/internal/adapters/outbound/security"
-	slackadapter "github.com/Kapital-B/automata/svc/internal/adapters/outbound/slack"
-	appconnectors "github.com/Kapital-B/automata/svc/internal/application/connectors"
-	appcontacts "github.com/Kapital-B/automata/svc/internal/application/contacts"
-	appmessages "github.com/Kapital-B/automata/svc/internal/application/messages"
-	appprojects "github.com/Kapital-B/automata/svc/internal/application/projects"
+	"github.com/Kapital-B/automata/svc/internal/application/ports/driven"
+	"github.com/Kapital-B/automata/svc/internal/composition"
 	"github.com/Kapital-B/automata/svc/internal/configuration"
-	"github.com/hibiken/asynq"
-	_ "modernc.org/sqlite"
+	"github.com/aws/aws-lambda-go/events"
+	"github.com/aws/aws-lambda-go/lambda"
+	"github.com/google/uuid"
+)
+
+var (
+	workerOnce    sync.Once
+	workerInitErr error
+	workerRuntime *composition.Runtime
 )
 
 func main() {
-	log := slog.New(slog.NewJSONHandler(os.Stdout, &slog.HandlerOptions{Level: slog.LevelInfo}))
-	cfg, err := configuration.Load()
-	if err != nil {
-		log.Error("config", "err", err)
-		os.Exit(1)
-	}
-	db, err := sql.Open("sqlite", cfg.DatabaseURL)
-	if err != nil {
-		log.Error("db open", "err", err)
-		os.Exit(1)
-	}
-	defer db.Close()
-	db.SetMaxOpenConns(1)
-	db.SetConnMaxLifetime(time.Hour)
-	if _, err := db.Exec(`PRAGMA foreign_keys=ON`); err != nil {
-		log.Error("foreign keys", "err", err)
-		os.Exit(1)
-	}
-	if err := sqlite.Migrate(db); err != nil {
-		log.Error("migrate", "err", err)
-		os.Exit(1)
-	}
-	vault, err := security.NewAESGCMVault(cfg.EncryptionKey)
-	if err != nil {
-		log.Error("vault", "err", err)
-		os.Exit(1)
-	}
-	repo := sqlite.NewRepository(db, cfg.OAuthStateTTL)
-	queueClient := asynqadapter.NewQueueClient(cfg.RedisAddr, cfg.AsynqPrefix)
-	defer queueClient.Close()
-	graph := &microsoft.GraphClient{}
-	oauth := &microsoft.OAuth{
-		ClientID:     cfg.MSClientID,
-		ClientSecret: cfg.MSClientSecret,
-		RedirectURI:  cfg.MSRedirectURI,
-	}
-	syncSvc := &appmessages.SyncService{
-		Accounts: repo,
-		Messages: repo,
-		OAuth:    oauth,
-		Graph:    graph,
-		Vault:    vault,
-		JobRuns:  repo,
-		Resolve: &appcontacts.ResolveService{
-			Users:    repo,
-			Messages: repo,
-			Contacts: repo,
-		},
-		Assign: &appprojects.AssignService{
-			Users:       repo,
-			Projects:    repo,
-			Assignments: repo,
-			Contacts:    repo,
-			Messages:    repo,
-			JobRuns:     repo,
-		},
-	}
-	slackClient := &slackadapter.Client{
-		ClientID: cfg.SlackClientID, ClientSecret: cfg.SlackClientSecret,
-		RedirectURI: cfg.SlackRedirectURI, Mode: cfg.SlackMode,
-	}
-	connectorSvc := &appconnectors.Service{
-		Connectors: repo, OAuthState: repo, Users: repo, Projects: repo,
-		Slack: slackClient, Vault: vault, JobRuns: repo,
-	}
-	var categorizeSvc *appmessages.CategorizeService
-	var summarizeSvc *appmessages.SummarizeService
-	var autoDraftSvc *appmessages.AutoDraftService
-	var forwardRulesSvc *appmessages.ForwardRulesService
-	if cfg.LLMBaseURL != "" && cfg.LLMModel != "" {
-		llm := &llmadapter.OpenAIClient{
-			BaseURL: cfg.LLMBaseURL,
-			Model:   cfg.LLMModel,
-			APIKey:  cfg.LLMAPIKey,
+	lambda.Start(handle)
+}
+
+func handle(ctx context.Context, event events.DynamoDBEvent) (events.DynamoDBEventResponse, error) {
+	workerOnce.Do(func() {
+		log := slog.New(slog.NewJSONHandler(os.Stdout, &slog.HandlerOptions{Level: slog.LevelInfo}))
+		cfg, err := configuration.Load()
+		if err != nil {
+			log.Error("worker init failed", "err", err)
+			workerInitErr = err
+			return
 		}
-		categorizeSvc = &appmessages.CategorizeService{
-			Messages: repo,
-			LLM:      llm,
-			JobRuns:  repo,
+		workerRuntime, err = composition.Build(ctx, log, cfg, composition.Options{
+			EnableJobStore: true,
+			LeaseOwner:     "worker",
+		})
+		if err != nil {
+			log.Error("worker init failed", "err", err)
+			workerInitErr = err
 		}
-		summarizeSvc = &appmessages.SummarizeService{
-			Messages:  repo,
-			Summaries: repo,
-			LLM:       llm,
-			JobRuns:   repo,
-		}
-		autoDraftSvc = &appmessages.AutoDraftService{
-			Messages:   repo,
-			Summaries:  repo,
-			LLM:        llm,
-			JobRuns:    repo,
-			ModelLabel: cfg.LLMModel,
-		}
-		forwardRulesSvc = &appmessages.ForwardRulesService{
-			Messages:  repo,
-			Forwards:  repo,
-			Accounts:  repo,
-			OAuth:     oauth,
-			Graph:     graph,
-			Vault:     vault,
-			LLM:       llm,
-			JobRuns:   repo,
-			ModelName: cfg.LLMModel,
-		}
-	} else {
-		forwardRulesSvc = &appmessages.ForwardRulesService{
-			Messages: repo,
-			Forwards: repo,
-			Accounts: repo,
-			OAuth:    oauth,
-			Graph:    graph,
-			Vault:    vault,
-			JobRuns:  repo,
-		}
-	}
-	srv := asynq.NewServer(
-		asynq.RedisClientOpt{Addr: cfg.RedisAddr},
-		asynq.Config{
-			Concurrency: cfg.GlobalMaxConcurrentJobs,
-			Queues: map[string]int{
-				asynqadapter.QueueSync:       cfg.QueueSyncConcurrency,
-				asynqadapter.QueueCategorize: cfg.QueueCategorizeConcurrency,
-				asynqadapter.QueueSummarize:  cfg.QueueSummarizeConcurrency,
-				asynqadapter.QueueDraft:      cfg.QueueDraftConcurrency,
-				asynqadapter.QueueForward:    cfg.QueueForwardConcurrency,
-			},
-		},
-	)
-	sem := make(chan struct{}, cfg.GlobalMaxConcurrentJobs)
-	mux := asynqadapter.NewWorkerMux(asynqadapter.WorkerDeps{
-		Log:             log,
-		SyncSvc:         syncSvc,
-		CategorizeSvc:   categorizeSvc,
-		SummarizeSvc:    summarizeSvc,
-		AutoDraftSvc:    autoDraftSvc,
-		ForwardRulesSvc: forwardRulesSvc,
-		ConnectorSync:   connectorSvc,
-		JobRuns:         repo,
-		GlobalSemaphore: sem,
-		Queue:           queueClient,
 	})
-	log.Info("worker listening", "redis", cfg.RedisAddr)
-	if err := srv.Run(mux); err != nil {
-		log.Error("worker", "err", err)
-		os.Exit(1)
+	if workerInitErr != nil {
+		return events.DynamoDBEventResponse{}, errors.New("worker unavailable")
 	}
+	resp := events.DynamoDBEventResponse{
+		BatchItemFailures: make([]events.DynamoDBBatchItemFailure, 0),
+	}
+	for _, record := range event.Records {
+		if !shouldHandleRecord(record) {
+			continue
+		}
+		jobID, ok := streamString(record.Change.NewImage, "job_id")
+		if !ok {
+			continue
+		}
+		id, err := uuid.Parse(jobID)
+		if err != nil {
+			continue
+		}
+		if err := workerRuntime.Execution.HandleStreamRecord(ctx, id, time.Now().UTC()); err != nil && !errors.Is(err, driven.ErrJobConflict) {
+			resp.BatchItemFailures = append(resp.BatchItemFailures, events.DynamoDBBatchItemFailure{
+				ItemIdentifier: record.Change.SequenceNumber,
+			})
+		}
+	}
+	return resp, nil
+}
+
+func shouldHandleRecord(record events.DynamoDBEventRecord) bool {
+	entityType, ok := streamString(record.Change.NewImage, "entity_type")
+	if !ok || entityType != "job" {
+		return false
+	}
+	status, ok := streamString(record.Change.NewImage, "status")
+	if !ok {
+		return false
+	}
+	return status == driven.JobStatusPending || status == driven.JobStatusRunning
+}
+
+func streamString(values map[string]events.DynamoDBAttributeValue, key string) (string, bool) {
+	value, ok := values[key]
+	if !ok || value.DataType() != events.DataTypeString {
+		return "", false
+	}
+	return value.String(), true
 }

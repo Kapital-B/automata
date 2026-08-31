@@ -9,8 +9,8 @@ import (
 	"strings"
 	"time"
 
-	appfacts "github.com/Kapital-B/automata/svc/internal/application/facts"
 	appdecisions "github.com/Kapital-B/automata/svc/internal/application/decisions"
+	appfacts "github.com/Kapital-B/automata/svc/internal/application/facts"
 	"github.com/Kapital-B/automata/svc/internal/application/ports/driven"
 	domaincontr "github.com/Kapital-B/automata/svc/internal/domain/contradictions"
 	domaindec "github.com/Kapital-B/automata/svc/internal/domain/decisions"
@@ -20,7 +20,7 @@ import (
 )
 
 var (
-	ErrNotFound         = errors.New("not found")
+	ErrNotFound           = errors.New("not found")
 	ErrNothingToReconcile = errors.New("no pending interpretations to reconcile")
 	ErrInvalidResolution  = errors.New("invalid resolution")
 	ErrNotOpen            = errors.New("contradiction is not open")
@@ -42,7 +42,7 @@ type ReconcileInput struct {
 	InterpretationIDs []uuid.UUID // empty = all pending
 }
 
-type 	CandidateOutcome struct {
+type CandidateOutcome struct {
 	Kind            string `json:"kind"`
 	Outcome         string `json:"outcome"`
 	Subject         string `json:"subject_key,omitempty"`
@@ -336,8 +336,8 @@ func (s *Service) reconcileFactCandidate(ctx context.Context, userID, orgID, pro
 	now := time.Now().UTC()
 	contr := driven.ContradictionRow{
 		ID: uuid.New(), OrganisationID: orgID, ProjectID: projectID,
-		Status: string(domaincontr.StatusOpen),
-		Summary: fmt.Sprintf("%s: active %q vs proposed %q", subject, active.ValueText, candText),
+		Status:    string(domaincontr.StatusOpen),
+		Summary:   fmt.Sprintf("%s: active %q vs proposed %q", subject, active.ValueText, candText),
 		CreatedAt: now, UpdatedAt: now,
 	}
 	if err := s.Contradictions.CreateContradiction(ctx, contr); err != nil {

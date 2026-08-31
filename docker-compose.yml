@@ -1,9 +1,53 @@
-version: "3.9"
-
 services:
-  redis:
-    image: redis:7-alpine
-    container_name: automata-redis
+  floci:
+    image: floci/floci:1.6.0
+    container_name: automata-floci
+    environment:
+      FLOCI_HOSTNAME: floci
+      FLOCI_DEFAULT_REGION: us-east-1
+      FLOCI_DEFAULT_ACCOUNT_ID: "000000000000"
+      FLOCI_STORAGE_MODE: hybrid
+      FLOCI_STORAGE_PERSISTENT_PATH: /app/data
+      FLOCI_SERVICES_DOCKER_NETWORK: automata-local
+      FLOCI_SERVICES_LAMBDA_EXTRA_HOSTS: host.docker.internal:host-gateway
+      AWS_ACCESS_KEY_ID: test
+      AWS_SECRET_ACCESS_KEY: test
+      AWS_SESSION_TOKEN: test
+    volumes:
+      - floci-data:/app/data
+      - /var/run/docker.sock:/var/run/docker.sock
     ports:
-      - "6379:6379"
-    command: ["redis-server", "--save", "", "--appendonly", "no"]
+      - "4566:4566"
+    networks:
+      automata-local:
+        aliases:
+          - localstack
+
+  postgres:
+    image: postgres:16-alpine
+    container_name: automata-postgres
+    environment:
+      POSTGRES_USER: automata
+      POSTGRES_PASSWORD: automata
+      POSTGRES_DB: automata
+    ports:
+      - "5432:5432"
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U automata -d automata"]
+      interval: 5s
+      timeout: 5s
+      retries: 20
+    networks:
+      - automata-local
+
+networks:
+  automata-local:
+    name: automata-local
+
+volumes:
+  floci-data:
+
+# Bedrock local notes:
+# - Lambda containers should use AWS_ENDPOINT=http://floci:4566.
+# - For Floci Bedrock Runtime stubs or proxies, point BEDROCK_RUNTIME_ENDPOINT
+#   at the same runtime host unless you wire a separate proxy container.

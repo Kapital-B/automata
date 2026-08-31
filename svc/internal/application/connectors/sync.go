@@ -7,6 +7,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/Kapital-B/automata/svc/internal/application/jobkit"
 	"github.com/Kapital-B/automata/svc/internal/application/ports/driven"
 	"github.com/google/uuid"
 )
@@ -21,8 +22,111 @@ type SyncOptions struct {
 	Trigger string
 }
 
+type ConnectorSyncChunkResult struct {
+	MessagesUpserted int
+	NextCursor       *driven.JobCursor
+	Done             bool
+}
+
 func (s *Service) SyncConnector(ctx context.Context, userID, connectorAccountID uuid.UUID) (*SyncResult, error) {
 	return s.SyncConnectorWithOptions(ctx, userID, connectorAccountID, SyncOptions{})
+}
+
+func (s *Service) SyncConnectorChunk(ctx context.Context, run driven.RunContext) (*ConnectorSyncChunkResult, error) {
+	if s == nil || s.Connectors == nil || s.Slack == nil || s.Vault == nil {
+		return nil, fmt.Errorf("connector sync not configured")
+	}
+	connectorAccountID := uuid.Nil
+	if run.Payload.ConnectorAccountID != nil {
+		connectorAccountID = *run.Payload.ConnectorAccountID
+	}
+	if connectorAccountID == uuid.Nil {
+		return nil, fmt.Errorf("connector_account_id is required")
+	}
+	account, err := s.Connectors.GetConnectorAccount(ctx, run.UserID, connectorAccountID)
+	if err != nil {
+		return nil, err
+	}
+	if account == nil {
+		return nil, ErrNotFound
+	}
+	if account.Provider != "slack" {
+		return nil, fmt.Errorf("unsupported connector provider")
+	}
+	cipher, err := s.Connectors.GetConnectorTokenCipher(ctx, run.UserID, connectorAccountID)
+	if err != nil {
+		return nil, err
+	}
+	token, err := s.decryptToken(cipher)
+	if err != nil {
+		return nil, err
+	}
+	bindings, err := s.Connectors.ListConnectorBindings(ctx, run.UserID, connectorAccountID)
+	if err != nil {
+		return nil, err
+	}
+	offset := jobkit.DecodeOffsetCursor(run.Cursor)
+	if offset >= len(bindings) {
+		return &ConnectorSyncChunkResult{Done: true}, nil
+	}
+	binding := bindings[offset]
+	pageCursor := ""
+	if run.Cursor != nil && strings.Contains(run.Cursor.Value, "|") {
+		parts := strings.SplitN(run.Cursor.Value, "|", 2)
+		pageCursor = strings.TrimSpace(parts[1])
+	}
+	page, err := s.Slack.FetchHistory(ctx, token.AccessToken, binding.ExternalChannelID, pageCursor)
+	if err != nil {
+		return nil, err
+	}
+	upserted := 0
+	now := time.Now().UTC()
+	for _, message := range page.Messages {
+		title := binding.Label
+		if title == "" {
+			title = binding.ExternalChannelID
+		}
+		messageMeta, _ := json.Marshal(map[string]any{
+			"provider":   "slack",
+			"channel_id": binding.ExternalChannelID,
+		})
+		if err := s.Connectors.UpsertConnectorMessage(ctx, driven.ConnectorMessageRow{
+			ID:                 uuid.New(),
+			ConnectorAccountID: connectorAccountID,
+			OrganisationID:     binding.OrganisationID,
+			ProjectID:          binding.ProjectID,
+			ProviderEventID:    message.ProviderEventID,
+			ExternalChannelID:  binding.ExternalChannelID,
+			Title:              title,
+			BodyText:           message.Text,
+			AuthorLabel:        message.AuthorLabel,
+			OccurredAt:         message.OccurredAt,
+			MetaJSON:           string(messageMeta),
+			CreatedAt:          now,
+			UpdatedAt:          now,
+		}); err != nil {
+			return nil, err
+		}
+		upserted++
+	}
+	out := &ConnectorSyncChunkResult{MessagesUpserted: upserted}
+	if strings.TrimSpace(page.NextCursor) != "" {
+		out.NextCursor = &driven.JobCursor{Kind: "slack_history", Value: fmt.Sprintf("%d|%s", offset, strings.TrimSpace(page.NextCursor))}
+		return out, nil
+	}
+	nextOffset := offset + 1
+	if nextOffset >= len(bindings) {
+		finishedAt := time.Now().UTC()
+		if err := s.Connectors.UpdateConnectorToken(
+			ctx, run.UserID, connectorAccountID, cipher, account.Scopes, "connected", nil, &finishedAt,
+		); err != nil {
+			return nil, err
+		}
+		out.Done = true
+		return out, nil
+	}
+	out.NextCursor = &driven.JobCursor{Kind: "slack_history", Value: fmt.Sprintf("%d|", nextOffset)}
+	return out, nil
 }
 
 func (s *Service) SyncConnectorWithOptions(

@@ -348,8 +348,8 @@ func (r *Repository) ListMessages(ctx context.Context, userID uuid.UUID, filter 
 	if limit <= 0 {
 		limit = 50
 	}
-	if limit > 200 {
-		limit = 200
+	if limit > 500 {
+		limit = 500
 	}
 	offset := filter.Offset
 	if offset < 0 {
@@ -973,6 +973,9 @@ func (r *Repository) InsertSummarySnapshot(ctx context.Context, row driven.Summa
 	_, err := r.db.ExecContext(ctx, `
 		INSERT INTO summary_snapshots (id, user_id, account_id, run_id, window_start, window_end, general_summary, created_at)
 		VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+		ON CONFLICT(id) DO UPDATE SET
+			general_summary = excluded.general_summary,
+			created_at = excluded.created_at
 	`, row.ID.String(), row.UserID.String(), nullUUID(row.AccountID), row.RunID.String(),
 		formatRFC3339(row.WindowStart.UTC()), formatRFC3339(row.WindowEnd.UTC()), row.GeneralSummary, formatRFC3339(row.CreatedAt.UTC()))
 	return err
@@ -1029,6 +1032,12 @@ func (r *Repository) InsertActionItems(ctx context.Context, rows []driven.Action
 		_, err := tx.ExecContext(ctx, `
 			INSERT INTO action_items (id, user_id, account_id, message_id, run_id, text, due_at, status, actioned_at, created_at, updated_at)
 			VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+			ON CONFLICT(id) DO UPDATE SET
+				text = excluded.text,
+				due_at = excluded.due_at,
+				status = excluded.status,
+				actioned_at = excluded.actioned_at,
+				updated_at = excluded.updated_at
 		`, row.ID.String(), row.UserID.String(), row.AccountID.String(), row.MessageID.String(), row.RunID.String(), row.Text,
 			nullTimeStr(row.DueAt), row.Status, nullTimeStr(row.ActionedAt), formatRFC3339(row.CreatedAt.UTC()), formatRFC3339(row.UpdatedAt.UTC()))
 		if err != nil {
@@ -1102,6 +1111,9 @@ func (r *Repository) InsertFYI(ctx context.Context, rows []driven.FYIRow) error 
 		_, err := tx.ExecContext(ctx, `
 			INSERT INTO fyi_items (id, user_id, account_id, message_id, run_id, text, created_at)
 			VALUES (?, ?, ?, ?, ?, ?, ?)
+			ON CONFLICT(id) DO UPDATE SET
+				text = excluded.text,
+				created_at = excluded.created_at
 		`, row.ID.String(), row.UserID.String(), row.AccountID.String(), row.MessageID.String(), row.RunID.String(), row.Text, formatRFC3339(row.CreatedAt.UTC()))
 		if err != nil {
 			return err
@@ -1270,6 +1282,15 @@ func (r *Repository) InsertDraftSuggestions(ctx context.Context, rows []driven.D
 		_, err := tx.ExecContext(ctx, `
 			INSERT INTO draft_suggestions (id, user_id, account_id, message_id, action_item_id, run_id, subject, body, model, status, sent_at, discarded_at, updated_at, created_at)
 			VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+			ON CONFLICT(id) DO UPDATE SET
+				action_item_id = excluded.action_item_id,
+				subject = excluded.subject,
+				body = excluded.body,
+				model = excluded.model,
+				status = excluded.status,
+				sent_at = excluded.sent_at,
+				discarded_at = excluded.discarded_at,
+				updated_at = excluded.updated_at
 		`,
 			row.ID.String(), row.UserID.String(), row.AccountID.String(), row.MessageID.String(), row.ActionItemID.String(),
 			row.RunID.String(), row.Subject, row.Body, row.Model, "ready", nil, nil, formatRFC3339(row.CreatedAt.UTC()), formatRFC3339(row.CreatedAt.UTC()),
@@ -1279,6 +1300,50 @@ func (r *Repository) InsertDraftSuggestions(ctx context.Context, rows []driven.D
 		}
 	}
 	return tx.Commit()
+}
+
+func (r *Repository) UpsertSummaryJobChunk(ctx context.Context, row driven.SummaryJobChunkRow) error {
+	messageIDsJSON, _ := json.Marshal(uuidStrings(row.MessageIDs))
+	_, err := r.db.ExecContext(ctx, `
+		INSERT INTO summary_job_chunks (id, run_id, account_id, chunk_index, phase, message_ids_json, payload_json, created_at, updated_at)
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+		ON CONFLICT(id) DO UPDATE SET
+			message_ids_json = excluded.message_ids_json,
+			payload_json = excluded.payload_json,
+			updated_at = excluded.updated_at
+	`, row.ID.String(), row.RunID.String(), row.AccountID.String(), row.ChunkIndex, row.Phase, string(messageIDsJSON), row.PayloadJSON, formatRFC3339(row.CreatedAt.UTC()), formatRFC3339(row.UpdatedAt.UTC()))
+	return err
+}
+
+func (r *Repository) ListSummaryJobChunks(ctx context.Context, runID uuid.UUID) ([]driven.SummaryJobChunkRow, error) {
+	rows, err := r.db.QueryContext(ctx, `
+		SELECT id, run_id, account_id, chunk_index, phase, message_ids_json, payload_json, created_at, updated_at
+		FROM summary_job_chunks
+		WHERE run_id = ?
+		ORDER BY chunk_index ASC, created_at ASC
+	`, runID.String())
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	out := make([]driven.SummaryJobChunkRow, 0)
+	for rows.Next() {
+		var idStr, runIDStr, accountIDStr, phase, messageIDsJSON, payloadJSON, createdAt, updatedAt string
+		var item driven.SummaryJobChunkRow
+		if err := rows.Scan(&idStr, &runIDStr, &accountIDStr, &item.ChunkIndex, &phase, &messageIDsJSON, &payloadJSON, &createdAt, &updatedAt); err != nil {
+			return nil, err
+		}
+		item.Phase = phase
+		item.PayloadJSON = payloadJSON
+		item.ID, _ = uuid.Parse(idStr)
+		item.RunID, _ = uuid.Parse(runIDStr)
+		item.AccountID, _ = uuid.Parse(accountIDStr)
+		item.CreatedAt, _ = parseTime(createdAt)
+		item.UpdatedAt, _ = parseTime(updatedAt)
+		item.MessageIDs = parseUUIDStringsJSON(messageIDsJSON)
+		out = append(out, item)
+	}
+	return out, rows.Err()
 }
 
 func (r *Repository) ListDraftSuggestions(ctx context.Context, userID uuid.UUID, accountID *uuid.UUID, limit int) ([]driven.DraftSuggestionRow, error) {
@@ -1717,6 +1782,22 @@ func (r *Repository) MarkScheduleExecuted(ctx context.Context, id uuid.UUID, las
 	return err
 }
 
+func (r *Repository) MarkScheduleExecutedIfDue(ctx context.Context, id uuid.UUID, scheduledFor, lastRunAt, nextRunAt time.Time) (bool, error) {
+	res, err := r.db.ExecContext(ctx, `
+		UPDATE schedule_chains
+		SET last_run_at = ?, next_run_at = ?, updated_at = ?
+		WHERE id = ? AND next_run_at = ?
+	`, formatRFC3339(lastRunAt.UTC()), formatRFC3339(nextRunAt.UTC()), formatRFC3339(time.Now().UTC()), id.String(), formatRFC3339(scheduledFor.UTC()))
+	if err != nil {
+		return false, err
+	}
+	rows, err := res.RowsAffected()
+	if err != nil {
+		return false, err
+	}
+	return rows > 0, nil
+}
+
 // --- helpers ---
 
 func nullStr(p *string) any {
@@ -1732,6 +1813,34 @@ func nullStringPtr(ns sql.NullString) *string {
 	}
 	s := ns.String
 	return &s
+}
+
+func uuidStrings(ids []uuid.UUID) []string {
+	out := make([]string, 0, len(ids))
+	for _, id := range ids {
+		out = append(out, id.String())
+	}
+	return out
+}
+
+func parseUUIDStringsJSON(raw string) []uuid.UUID {
+	raw = strings.TrimSpace(raw)
+	if raw == "" {
+		return nil
+	}
+	var values []string
+	if err := json.Unmarshal([]byte(raw), &values); err != nil {
+		return nil
+	}
+	out := make([]uuid.UUID, 0, len(values))
+	for _, value := range values {
+		id, err := uuid.Parse(strings.TrimSpace(value))
+		if err != nil {
+			continue
+		}
+		out = append(out, id)
+	}
+	return out
 }
 
 func nullTimeStr(t *time.Time) any {

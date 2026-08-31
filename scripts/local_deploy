@@ -1,0 +1,75 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+TF_DIR="${ROOT_DIR}/svc/terraform/envs/local"
+
+if [ -f "${ROOT_DIR}/svc/local.env" ]; then
+  set -a
+  # shellcheck disable=SC1091
+  source "${ROOT_DIR}/svc/local.env"
+  set +a
+fi
+
+detect_arch() {
+  local raw="${LAMBDA_ARCH:-$(uname -m)}"
+  case "${raw}" in
+    amd64|x86_64) echo "amd64" ;;
+    arm64|aarch64) echo "arm64" ;;
+    *)
+      echo "unsupported architecture: ${raw}" >&2
+      exit 1
+      ;;
+  esac
+}
+
+export AWS_ACCESS_KEY_ID="${AWS_ACCESS_KEY_ID:-test}"
+export AWS_SECRET_ACCESS_KEY="${AWS_SECRET_ACCESS_KEY:-test}"
+export AWS_SESSION_TOKEN="${AWS_SESSION_TOKEN:-test}"
+export AWS_REGION="${AWS_REGION:-us-east-1}"
+
+LAMBDA_ARCH_VALUE="$(detect_arch)"
+
+terraform -chdir="${TF_DIR}" init
+terraform -chdir="${TF_DIR}" apply -auto-approve \
+  -var="lambda_architecture=${LAMBDA_ARCH_VALUE}" \
+  -var="app_public_url=${APP_PUBLIC_URL:-http://localhost:4566}" \
+  -var="dashboard_base_url=${DASHBOARD_BASE_URL:-http://localhost:5173}" \
+  -var="cors_origins_csv=${CORS_ORIGINS:-http://localhost:5173,http://127.0.0.1:5173}" \
+  -var="ms_client_id=${MS_CLIENT_ID:-}" \
+  -var="ms_client_secret=${MS_CLIENT_SECRET:-}" \
+  -var="ms_redirect_uri=${MS_REDIRECT_URI:-http://localhost:4566/restapis/placeholder/local/_user_request_/api/accounts/callback}" \
+  -var="ms_auth_redirect_uri=${MS_AUTH_REDIRECT_URI:-http://localhost:4566/restapis/placeholder/local/_user_request_/api/auth/microsoft/callback}" \
+  -var="google_client_id=${GOOGLE_CLIENT_ID:-}" \
+  -var="google_client_secret=${GOOGLE_CLIENT_SECRET:-}" \
+  -var="google_redirect_uri=${GOOGLE_REDIRECT_URI:-http://localhost:4566/restapis/placeholder/local/_user_request_/api/auth/google/callback}" \
+  -var="slack_mode=${SLACK_MODE:-fake}" \
+  -var="slack_client_id=${SLACK_CLIENT_ID:-}" \
+  -var="slack_client_secret=${SLACK_CLIENT_SECRET:-}" \
+  -var="slack_redirect_uri=${SLACK_REDIRECT_URI:-http://localhost:4566/restapis/placeholder/local/_user_request_/api/connectors/callback}" \
+  -var="encryption_key=${ENCRYPTION_KEY:-12345678901234567890123456789012}" \
+  -var="jwt_secret=${JWT_SECRET:-abcdefghijklmnopqrstuvwxyz123456}" \
+  -var="auth_default_user_id=${AUTH_DEFAULT_USER_ID:-a0000001-0000-4000-8000-000000000001}" \
+  -var="bedrock_model_id=${BEDROCK_MODEL_ID:-eu.amazon.nova-2-lite-v1:0}" \
+  -var="bedrock_runtime_endpoint=${BEDROCK_RUNTIME_ENDPOINT:-http://floci:4566}" \
+  -var="job_cursor_secret=${JOB_CURSOR_SECRET:-${JWT_SECRET:-abcdefghijklmnopqrstuvwxyz123456}}" \
+  -var="job_terminal_retention_days=${JOB_TERMINAL_RETENTION_DAYS:-30}" \
+  -var="job_lease_seconds=${JOB_LEASE_SECONDS:-960}" \
+  -var="job_pending_wake_after_seconds=${JOB_PENDING_WAKE_AFTER_SECONDS:-120}" \
+  "$@"
+
+MIGRATE_FUNCTION_NAME="$(terraform -chdir="${TF_DIR}" output -raw migrate_lambda_function_name)"
+API_GATEWAY_URL="$(terraform -chdir="${TF_DIR}" output -raw api_gateway_url)"
+
+INVOKE_OUT="$(mktemp)"
+trap 'rm -f "${INVOKE_OUT}"' EXIT
+aws --endpoint-url "http://localhost:4566" lambda invoke \
+  --function-name "${MIGRATE_FUNCTION_NAME}" \
+  "${INVOKE_OUT}" >/dev/null
+
+echo "migrate_result=$(cat "${INVOKE_OUT}")"
+echo "api_gateway_url=${API_GATEWAY_URL}"
+echo "ms_redirect_uri=${API_GATEWAY_URL}/api/accounts/callback"
+echo "ms_auth_redirect_uri=${API_GATEWAY_URL}/api/auth/microsoft/callback"
+echo "google_redirect_uri=${API_GATEWAY_URL}/api/auth/google/callback"
+echo "slack_redirect_uri=${API_GATEWAY_URL}/api/connectors/callback"

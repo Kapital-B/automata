@@ -46,7 +46,7 @@ type summarizePayload struct {
 
 const (
 	defaultSummarizeChunkSize = 12
-	minSummarizeChunkSize     = 3
+	minSummarizeChunkSize     = 12
 	maxSummarizeChunkSize     = 30
 	maxCombinedSummaryLen     = 2400
 	maxSubjectCharsDefault    = 120

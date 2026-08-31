@@ -31,13 +31,13 @@ type SuggestResult struct {
 }
 
 type suggestLLMPayload struct {
-	SchemaVersion  int      `json:"schema_version"`
-	ProjectID      string   `json:"project_id"`
-	IssueTitle     string   `json:"issue_title"`
-	MessageIDs     []string `json:"message_ids"`
-	ManualItemIDs  []string `json:"manual_item_ids"`
-	Confidence     float64  `json:"confidence"`
-	Reason         string   `json:"reason"`
+	SchemaVersion int      `json:"schema_version"`
+	ProjectID     string   `json:"project_id"`
+	IssueTitle    string   `json:"issue_title"`
+	MessageIDs    []string `json:"message_ids"`
+	ManualItemIDs []string `json:"manual_item_ids"`
+	Confidence    float64  `json:"confidence"`
+	Reason        string   `json:"reason"`
 }
 
 type suggestCandidate struct {

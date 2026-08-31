@@ -7,6 +7,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/Kapital-B/automata/svc/internal/application/jobkit"
 	"github.com/Kapital-B/automata/svc/internal/application/ports/driven"
 	domaincontacts "github.com/Kapital-B/automata/svc/internal/domain/contacts"
 	"github.com/google/uuid"
@@ -22,6 +23,12 @@ type ResolveService struct {
 type recipientPayload struct {
 	Name    string `json:"name"`
 	Address string `json:"address"`
+}
+
+type ResolveChunkResult struct {
+	MessagesProcessed int
+	NextCursor        *driven.JobCursor
+	Done              bool
 }
 
 // ResolveMessage resolves From/To/Cc on one stored message into the user's home organisation.
@@ -84,6 +91,43 @@ func (s *ResolveService) BackfillAccount(ctx context.Context, userID, accountID 
 		_ = s.resolveStoredMessage(ctx, orgID, msg)
 	}
 	return nil
+}
+
+func (s *ResolveService) ResolveAccountChunk(ctx context.Context, run driven.RunContext) (*ResolveChunkResult, error) {
+	if s == nil || s.Users == nil || s.Messages == nil || s.Contacts == nil {
+		return nil, fmt.Errorf("resolve service not configured")
+	}
+	if run.AccountID == nil || *run.AccountID == uuid.Nil {
+		return nil, fmt.Errorf("account_id is required")
+	}
+	orgID, err := s.Users.GetHomeOrganisationID(ctx, run.UserID)
+	if err != nil {
+		return nil, err
+	}
+	offset := jobkit.DecodeOffsetCursor(run.Cursor)
+	rows, err := s.Messages.ListMessages(ctx, run.UserID, driven.MessageListFilter{
+		AccountID: run.AccountID,
+		Limit:     101,
+		Offset:    offset,
+	})
+	if err != nil {
+		return nil, err
+	}
+	done := len(rows) <= 100
+	if len(rows) > 100 {
+		rows = rows[:100]
+	}
+	for i := range rows {
+		msg := rows[i]
+		if err := s.resolveStoredMessage(ctx, orgID, &msg); err != nil {
+			return nil, err
+		}
+	}
+	out := &ResolveChunkResult{MessagesProcessed: len(rows), Done: done}
+	if !done {
+		out.NextCursor = jobkit.EncodeOffsetCursor(offset + len(rows))
+	}
+	return out, nil
 }
 
 func (s *ResolveService) resolveStoredMessage(ctx context.Context, orgID uuid.UUID, msg *driven.MessageRow) error {
@@ -182,10 +226,10 @@ func (s *Service) List(ctx context.Context, userID uuid.UUID, filter driven.Cont
 }
 
 type ContactDetail struct {
-	Contact          driven.ContactRow
-	Identities       []driven.ContactIdentityRow
-	RecentMessages   []RecentMessageRef
-	SuggestedMerges  []driven.ContactRow
+	Contact         driven.ContactRow
+	Identities      []driven.ContactIdentityRow
+	RecentMessages  []RecentMessageRef
+	SuggestedMerges []driven.ContactRow
 }
 
 type RecentMessageRef struct {

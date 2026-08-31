@@ -117,6 +117,7 @@ type WorkerDeps struct {
 	ForwardRulesSvc *appmessages.ForwardRulesService
 	ConnectorSync   *appconnectors.Service
 	JobRuns         driven.JobRunRepository
+	Execution       driven.JobExecutionPort
 	GlobalSemaphore chan struct{}
 	Queue           *QueueClient
 }
@@ -149,6 +150,9 @@ func handleSync(ctx context.Context, task *asynq.Task, deps WorkerDeps) error {
 	if err := json.Unmarshal(task.Payload(), &p); err != nil {
 		return err
 	}
+	if deps.Execution != nil {
+		return deps.Execution.HandleStreamRecord(ctx, p.RunID, time.Now().UTC())
+	}
 	if err := acquire(deps.GlobalSemaphore); err != nil {
 		return err
 	}
@@ -177,6 +181,9 @@ func handleCategorize(ctx context.Context, task *asynq.Task, deps WorkerDeps) er
 	var p TaskPayload
 	if err := json.Unmarshal(task.Payload(), &p); err != nil {
 		return err
+	}
+	if deps.Execution != nil {
+		return deps.Execution.HandleStreamRecord(ctx, p.RunID, time.Now().UTC())
 	}
 	if err := acquire(deps.GlobalSemaphore); err != nil {
 		return err
@@ -208,6 +215,9 @@ func handleSummarize(ctx context.Context, task *asynq.Task, deps WorkerDeps) err
 	if err := json.Unmarshal(task.Payload(), &p); err != nil {
 		return err
 	}
+	if deps.Execution != nil {
+		return deps.Execution.HandleStreamRecord(ctx, p.RunID, time.Now().UTC())
+	}
 	if err := acquire(deps.GlobalSemaphore); err != nil {
 		return err
 	}
@@ -237,6 +247,9 @@ func handleDraftSuggest(ctx context.Context, task *asynq.Task, deps WorkerDeps) 
 	var p TaskPayload
 	if err := json.Unmarshal(task.Payload(), &p); err != nil {
 		return err
+	}
+	if deps.Execution != nil {
+		return deps.Execution.HandleStreamRecord(ctx, p.RunID, time.Now().UTC())
 	}
 	if err := acquire(deps.GlobalSemaphore); err != nil {
 		return err
@@ -275,6 +288,9 @@ func handleForwardRules(ctx context.Context, task *asynq.Task, deps WorkerDeps) 
 	if err := json.Unmarshal(task.Payload(), &p); err != nil {
 		return err
 	}
+	if deps.Execution != nil {
+		return deps.Execution.HandleStreamRecord(ctx, p.RunID, time.Now().UTC())
+	}
 	if err := acquire(deps.GlobalSemaphore); err != nil {
 		return err
 	}
@@ -303,6 +319,9 @@ func handleSyncSlack(ctx context.Context, task *asynq.Task, deps WorkerDeps) err
 	var p TaskPayload
 	if err := json.Unmarshal(task.Payload(), &p); err != nil {
 		return err
+	}
+	if deps.Execution != nil {
+		return deps.Execution.HandleStreamRecord(ctx, p.RunID, time.Now().UTC())
 	}
 	if p.ConnectorAccountID == uuid.Nil {
 		return fmt.Errorf("connector_account_id is required")

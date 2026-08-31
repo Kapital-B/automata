@@ -1,0 +1,242 @@
+name: Frontend CI
+
+on:
+  push:
+    branches: ["main"]
+    paths:
+      - "web/**"
+  pull_request:
+    branches: ["main"]
+    types: [opened, synchronize, reopened, ready_for_review]
+    paths:
+      - "web/**"
+
+permissions:
+  id-token: write
+  contents: read
+  pull-requests: write
+
+jobs:
+  quality:
+    name: Web quality checks
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: web
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+          cache: "npm"
+          cache-dependency-path: web/package-lock.json
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Run lint
+        run: npm run lint
+
+      - name: Run tests
+        run: npm run test
+
+  plan:
+    name: Plan (${{ matrix.env.name }})
+    needs: quality
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        env:
+          - name: dev
+            aws_region: "us-east-1"
+            backend_region: "eu-west-2"
+            state_key: "dev/automata_web.tfstate"
+            role_arn_var: "AUTOMATA_AWS_DEV_ROLE_ARN"
+            state_bucket_var: "AUTOMATA_AWS_DEV_STATE_BUCKET"
+            lock_table_var: "AUTOMATA_AWS_DEV_WEB_LOCK_TABLE"
+          - name: prod
+            aws_region: "us-east-1"
+            backend_region: "eu-west-2"
+            state_key: "prod/automata_web.tfstate"
+            role_arn_var: "AUTOMATA_AWS_PROD_ROLE_ARN"
+            state_bucket_var: "AUTOMATA_AWS_PROD_STATE_BUCKET"
+            lock_table_var: "AUTOMATA_AWS_PROD_WEB_LOCK_TABLE"
+    defaults:
+      run:
+        working-directory: web/terraform/envs/${{ matrix.env.name }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+          cache: "npm"
+          cache-dependency-path: web/package-lock.json
+
+      - name: Install dependencies
+        working-directory: web
+        run: npm ci
+
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ vars[matrix.env.role_arn_var] }}
+          aws-region: ${{ matrix.env.aws_region }}
+
+      - name: Set up Terraform
+        uses: hashicorp/setup-terraform@v3
+        with:
+          terraform_version: "1.10.3"
+
+      - name: Write backend config
+        run: |
+          cat > backend.hcl <<EOF
+          bucket         = "${{ vars[matrix.env.state_bucket_var] }}"
+          key            = "${{ matrix.env.state_key }}"
+          region         = "${{ matrix.env.backend_region }}"
+          dynamodb_table = "${{ vars[matrix.env.lock_table_var] }}"
+          EOF
+
+      - name: Terraform init
+        run: terraform init -input=false -backend-config=backend.hcl
+
+      - name: Terraform format check
+        working-directory: web/terraform
+        run: terraform fmt -check -recursive
+
+      - name: Terraform validate
+        run: terraform validate
+
+      - name: Ensure lock files unchanged
+        run: git diff --exit-code -- ../../
+
+      - name: Terraform plan
+        run: terraform plan -no-color | tee plan.txt
+
+      - name: Capture plan output
+        if: github.event_name == 'pull_request'
+        id: capture_plan
+        run: |
+          filtered=$(grep -v "Refreshing state" plan.txt)
+          if echo "$filtered" | grep -q "No changes. Your infrastructure matches the configuration"; then
+            echo "plan_output=No changes. Your infrastructure matches the configuration." >> "$GITHUB_OUTPUT"
+          else
+            echo "plan_output<<EOF" >> "$GITHUB_OUTPUT"
+            echo "$filtered" >> "$GITHUB_OUTPUT"
+            echo "EOF" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Post PR comment with Terraform plan
+        if: github.event_name == 'pull_request'
+        uses: marocchino/sticky-pull-request-comment@v2
+        with:
+          header: terraform-plan-${{ matrix.env.name }}-frontend
+          message: |
+            **Environment:** `${{ matrix.env.name }}`
+
+            ```diff
+            ${{ steps.capture_plan.outputs.plan_output }}
+            ```
+
+  apply-dev:
+    name: Apply (dev)
+    needs: plan
+    if: github.event_name == 'pull_request' || (github.event_name == 'push' && github.ref == 'refs/heads/main')
+    runs-on: ubuntu-latest
+    environment:
+      name: dev
+    defaults:
+      run:
+        working-directory: web/terraform/envs/dev
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+          cache: "npm"
+          cache-dependency-path: web/package-lock.json
+
+      - name: Install dependencies
+        working-directory: web
+        run: npm ci
+
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ vars.AUTOMATA_AWS_DEV_ROLE_ARN }}
+          aws-region: us-east-1
+
+      - name: Set up Terraform
+        uses: hashicorp/setup-terraform@v3
+        with:
+          terraform_version: "1.10.3"
+
+      - name: Write backend config
+        run: |
+          cat > backend.hcl <<EOF
+          bucket         = "${{ vars.AUTOMATA_AWS_DEV_STATE_BUCKET }}"
+          key            = "dev/automata_web.tfstate"
+          region         = "eu-west-2"
+          dynamodb_table = "${{ vars.AUTOMATA_AWS_DEV_WEB_LOCK_TABLE }}"
+          EOF
+
+      - name: Terraform init
+        run: terraform init -input=false -backend-config=backend.hcl
+
+      - name: Terraform apply
+        run: terraform apply -auto-approve
+
+  apply-prod:
+    name: Apply (prod)
+    needs: plan
+    if: github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    environment:
+      name: prod
+    defaults:
+      run:
+        working-directory: web/terraform/envs/prod
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+          cache: "npm"
+          cache-dependency-path: web/package-lock.json
+
+      - name: Install dependencies
+        working-directory: web
+        run: npm ci
+
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ vars.AUTOMATA_AWS_PROD_ROLE_ARN }}
+          aws-region: us-east-1
+
+      - name: Set up Terraform
+        uses: hashicorp/setup-terraform@v3
+        with:
+          terraform_version: "1.10.3"
+
+      - name: Write backend config
+        run: |
+          cat > backend.hcl <<EOF
+          bucket         = "${{ vars.AUTOMATA_AWS_PROD_STATE_BUCKET }}"
+          key            = "prod/automata_web.tfstate"
+          region         = "eu-west-2"
+          dynamodb_table = "${{ vars.AUTOMATA_AWS_PROD_WEB_LOCK_TABLE }}"
+          EOF
+
+      - name: Terraform init
+        run: terraform init -input=false -backend-config=backend.hcl
+
+      - name: Terraform apply
+        run: terraform apply -auto-approve

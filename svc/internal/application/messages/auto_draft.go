@@ -7,6 +7,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/Kapital-B/automata/svc/internal/application/jobkit"
 	"github.com/Kapital-B/automata/svc/internal/application/ports/driven"
 	"github.com/google/uuid"
 )
@@ -31,6 +32,12 @@ type AutoDraftResult struct {
 	JobRunID        uuid.UUID
 	ActionItemsSeen int
 	DraftsGenerated int
+}
+
+type AutoDraftChunkResult struct {
+	ActionItemsSeen int
+	DraftsGenerated int
+	Done            bool
 }
 
 type autoDraftPayload struct {
@@ -120,6 +127,67 @@ func (s *AutoDraftService) GenerateForAccount(ctx context.Context, userID, accou
 	meta := fmt.Sprintf(`{"total_action_items":%d,"processed_action_items":%d,"reply_candidates":%d,"drafts_generated":%d,"action_items_seen":%d,"only_unseen":%t}`, len(items), len(items), replyCandidates, len(drafts), len(seenIDs), onlyUnseen)
 	_ = s.JobRuns.UpdateJobRunStatus(ctx, runID, "success", timePtrAutoDraft(time.Now().UTC()), nil, meta)
 	return &AutoDraftResult{JobRunID: runID, ActionItemsSeen: len(seenIDs), DraftsGenerated: len(drafts)}, nil
+}
+
+func (s *AutoDraftService) GenerateChunk(ctx context.Context, run driven.RunContext) (*AutoDraftChunkResult, error) {
+	if s == nil || s.Messages == nil || s.Summaries == nil || s.LLM == nil {
+		return nil, fmt.Errorf("auto-draft service not configured")
+	}
+	if run.AccountID == nil || *run.AccountID == uuid.Nil {
+		return nil, fmt.Errorf("account_id is required")
+	}
+	if run.Payload.MessageID == nil || *run.Payload.MessageID == uuid.Nil {
+		return nil, fmt.Errorf("message_id is required")
+	}
+	onlyUnseen := !run.Payload.Force
+	items, err := s.Summaries.ListActionItemsForAutoDraft(ctx, run.UserID, *run.AccountID, onlyUnseen, 100)
+	if err != nil {
+		return nil, err
+	}
+	now := time.Now().UTC()
+	seenIDs := make([]uuid.UUID, 0, len(items))
+	drafts := make([]driven.DraftSuggestionRow, 0, len(items))
+	for _, item := range items {
+		if item.MessageID != *run.Payload.MessageID {
+			continue
+		}
+		seenIDs = append(seenIDs, item.ID)
+		if !run.Payload.Force && !actionItemNeedsReply(item.Text) {
+			continue
+		}
+		msg, err := s.Messages.GetMessage(ctx, run.UserID, item.MessageID)
+		if err != nil || msg == nil {
+			continue
+		}
+		draft, err := s.generateDraft(ctx, item, *msg)
+		if err != nil {
+			continue
+		}
+		drafts = append(drafts, driven.DraftSuggestionRow{
+			ID:           jobkit.DeterministicID(run.RunID, "draft_suggest", item.ID.String(), item.MessageID.String()),
+			UserID:       run.UserID,
+			AccountID:    *run.AccountID,
+			MessageID:    item.MessageID,
+			ActionItemID: item.ID,
+			RunID:        run.RunID,
+			Subject:      draft.Subject,
+			Body:         draft.Body,
+			Model:        s.ModelLabel,
+			CreatedAt:    now,
+			UpdatedAt:    &now,
+		})
+	}
+	if err := s.Summaries.MarkActionItemsAutoDraftSeen(ctx, run.UserID, seenIDs, now); err != nil {
+		return nil, err
+	}
+	if err := s.Summaries.InsertDraftSuggestions(ctx, drafts); err != nil {
+		return nil, err
+	}
+	return &AutoDraftChunkResult{
+		ActionItemsSeen: len(seenIDs),
+		DraftsGenerated: len(drafts),
+		Done:            true,
+	}, nil
 }
 
 func (s *AutoDraftService) generateDraft(ctx context.Context, item driven.ActionItemRow, msg driven.MessageRow) (*autoDraftPayload, error) {

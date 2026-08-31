@@ -6,8 +6,8 @@ import (
 	"testing"
 	"time"
 
-	domainacc "github.com/Kapital-B/automata/svc/internal/domain/accounts"
 	"github.com/Kapital-B/automata/svc/internal/application/ports/driven"
+	domainacc "github.com/Kapital-B/automata/svc/internal/domain/accounts"
 	"github.com/google/uuid"
 	_ "modernc.org/sqlite"
 )

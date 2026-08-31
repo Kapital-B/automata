@@ -21,15 +21,15 @@ var (
 )
 
 type Service struct {
-	Users       driven.UserRepository
-	Projects    driven.ProjectRepository
-	Facts       driven.FactRepository
-	Decisions   driven.DecisionRepository
-	Issues      driven.IssueRepository
-	Timeline    driven.TimelineRepository
-	JobRuns     driven.JobRunRepository
-	LLM         driven.LLMClient
-	Attention   AttentionProjects
+	Users     driven.UserRepository
+	Projects  driven.ProjectRepository
+	Facts     driven.FactRepository
+	Decisions driven.DecisionRepository
+	Issues    driven.IssueRepository
+	Timeline  driven.TimelineRepository
+	JobRuns   driven.JobRunRepository
+	LLM       driven.LLMClient
+	Attention AttentionProjects
 }
 
 // AttentionProjects reports home-org projects that currently need operator input.

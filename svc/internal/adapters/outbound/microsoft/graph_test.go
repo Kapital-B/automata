@@ -10,7 +10,7 @@ import (
 	"testing"
 )
 
-func TestListInboxDeltaPaginatesAndReturnsDeltaLink(t *testing.T) {
+func TestListInboxDeltaReturnsSinglePageCursor(t *testing.T) {
 	var baseURL string
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
@@ -41,13 +41,16 @@ func TestListInboxDeltaPaginatesAndReturnsDeltaLink(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if res.DeltaLink != "delta-final" {
-		t.Fatalf("expected final delta link, got %q", res.DeltaLink)
+	if res.NextLink != baseURL+"/v1.0/delta-page-2" {
+		t.Fatalf("expected next link, got %q", res.NextLink)
 	}
-	if len(res.Messages) != 2 {
-		t.Fatalf("expected two messages, got %d", len(res.Messages))
+	if res.DeltaLink != "" {
+		t.Fatalf("expected final delta link to be deferred, got %q", res.DeltaLink)
 	}
-	if res.Messages[0].ID != "m1" || res.Messages[1].ID != "m2" {
+	if len(res.Messages) != 1 {
+		t.Fatalf("expected one page of messages, got %d", len(res.Messages))
+	}
+	if res.Messages[0].ID != "m1" {
 		t.Fatalf("unexpected message ids: %#v", res.Messages)
 	}
 }

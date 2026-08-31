@@ -12,13 +12,13 @@ import (
 	"testing"
 	"time"
 
+	"github.com/Kapital-B/automata/svc/internal/adapters/outbound/microsoft"
+	"github.com/Kapital-B/automata/svc/internal/adapters/outbound/persistence/sqlite"
+	"github.com/Kapital-B/automata/svc/internal/adapters/outbound/security"
 	appaccounts "github.com/Kapital-B/automata/svc/internal/application/accounts"
 	"github.com/Kapital-B/automata/svc/internal/application/auth"
 	appmessages "github.com/Kapital-B/automata/svc/internal/application/messages"
 	"github.com/Kapital-B/automata/svc/internal/application/ports/driven"
-	"github.com/Kapital-B/automata/svc/internal/adapters/outbound/microsoft"
-	"github.com/Kapital-B/automata/svc/internal/adapters/outbound/persistence/sqlite"
-	"github.com/Kapital-B/automata/svc/internal/adapters/outbound/security"
 	domainacc "github.com/Kapital-B/automata/svc/internal/domain/accounts"
 	"github.com/google/uuid"
 	_ "modernc.org/sqlite"
@@ -84,11 +84,11 @@ func newCategorizeTestServer(t *testing.T) (*httptest.Server, *sqlite.Repository
 		t.Fatal(err)
 	}
 	h := &Handlers{
-		Log: slog.New(slog.NewTextHandler(io.Discard, nil)),
+		Log:        slog.New(slog.NewTextHandler(io.Discard, nil)),
 		AccountSvc: accountSvc, SyncSvc: syncSvc, CategorizeSvc: categorizeSvc, AuthSvc: authSvc,
 		Accounts: repo, Messages: repo, JobRuns: repo, OAuthStates: repo, Users: repo,
 		Dashboard: "http://localhost:5173", SuccessPath: "/ok", ErrorPath: "/err",
-		JWTSecret: jwtSecret, JWTTTL: time.Hour, DefaultUserID: devUser,
+		JWTSecret: jwtSecret, JWTTTL: time.Hour, DefaultUserID: devUser, JobsInline: true,
 	}
 	srv := httptest.NewServer(h.Routes())
 	t.Cleanup(srv.Close)

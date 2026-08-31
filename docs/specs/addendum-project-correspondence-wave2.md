@@ -62,7 +62,7 @@ svc/internal/
     projectai/
 ```
 
-HTTP handlers remain thin. Jobs use existing Asynq / `job_runs` patterns. New `job_type` values: `interpret_project`, `reconcile_project`, `project_ai` (names may be shortened but must be CHECK-migrated like prior jobs).
+HTTP handlers remain thin. On the hosted/Floci path, `interpret_project` and `reconcile_project` use the bounded DynamoDB job registry in [aws-deployment.md §4.4](aws-deployment.md#44-job-contract-keys-and-registry); `project_ai` remains synchronous request/response audit through `JobExecutionPort`. Asynq/relational `job_runs` applies only to the legacy local implementation.
 
 ---
 
@@ -101,7 +101,7 @@ SQLite-first (Postgres-compatible types). UTC ISO-8601 text. UUIDs as text.
 | `created_by_user_id` | UUID nullable | Profile who confirmed/created. |
 | `created_at` | timestamptz | |
 
-Partial unique index: at most one `status = active` per `fact_id`.
+Logical invariant: at most one `status = active` per `fact_id`. SQLite/Postgres may use a partial unique index; hosted DSQL uses generated `active_fact_id = CASE WHEN status = 'active' THEN fact_id END` plus a UNIQUE constraint, as defined in [addendum-aurora-dsql.md](addendum-aurora-dsql.md).
 
 ### 4.3 `fact_evidence`
 
@@ -146,7 +146,7 @@ Same shape as `fact_evidence` (message XOR manual, CASCADE link only).
 | `organisation_id` | UUID FK | |
 | `project_id` | UUID FK | |
 | `account_id` | UUID nullable | Set when mail-bound; null for manual-only runs. |
-| `run_id` | UUID nullable | `job_runs.id`. |
+| `run_id` | UUID nullable | Job provenance id; no DSQL FK because hosted run state is in DynamoDB. |
 | `status` | text | CHECK `pending\|accepted\|dismissed\|expired`. |
 | `payload_json` | text | Candidate fact/decision proposals (schema §9). |
 | `confidence` | real nullable | |
@@ -303,9 +303,9 @@ Citations reference `fact_version_id`, `decision_id`, `issue_id`, `message_id`, 
 | `reconcile_project` | After interpret success; or API | Must not destroy evidence on failure |
 | `project_ai` | Ask API async mode (optional) | Persist answer artifact if useful for debug |
 
-Failures must not roll back correspondence. Retry via existing Asynq behaviour.
+Failures must not roll back correspondence. Retry only through the fenced/idempotent policy registered for the job type in the AWS deployment plan.
 
-Extend `job_runs` CHECK constraints when adding types (same migration pattern as `assign_projects` / `resolve_contacts`).
+Register payload schema, chunk boundary, cursor, and retry/effect policy when adding a type. Do not extend a hosted relational `job_runs` CHECK; DynamoDB is the hosted run store.
 
 ---
 

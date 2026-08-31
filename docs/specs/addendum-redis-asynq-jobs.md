@@ -1,11 +1,13 @@
 # Addendum: Redis, Asynq, and the job runner
 
-**Status:** Draft (implementation guidance)  
+**Status:** Legacy implementation record — superseded for AWS and the Floci parity path  
 **Parent document:** [Technical specification (initial.md)](initial.md)  
 **Companion PRD:** [docs/prds/initial.md](../prds/initial.md)  
 **Last updated:** 2026-04-25
 
-This addendum details how to run **asynchronous background jobs** (sync, categorization, summarization, forward rules, draft suggestion, and future pipeline steps) using **Redis** and **[Asynq](https://github.com/hibiken/asynq)** in the **`svc/`** Go backend. It aligns with the **hexagonal layout**, **`job_runs`** contract, **HTTP APIs** for runs, **scheduler** expectations, and **logging / tracing** rules in [initial.md](initial.md). It does **not** change product intent; the PRD remains authoritative for product behavior.
+This addendum records the existing **Redis + [Asynq](https://github.com/hibiken/asynq)** implementation in the **`svc/`** Go backend. It remains useful while removing the current adapter, but it is **not the target design** for AWS or normal local development. [AWS deployment §4](aws-deployment.md#4-job-rearchitecture-heimdall-dynamodb-loop) supersedes its dispatch, lifecycle persistence, retry, concurrency, chaining, scheduler, and local-run instructions with DynamoDB Streams + Lambda + Floci. The canonical public status vocabulary remains `pending|running|success|failed|cancelled`.
+
+Do not extend this design with new queues or Redis locks. New job types must be registered with bounded chunk/cursor/effect semantics in the AWS deployment plan.
 
 ---
 
@@ -187,7 +189,7 @@ Follow [§8](initial.md#8-security): no raw email bodies in logs; prefer interna
 
 ## 9. Scheduler integration
 
-Nightly pipeline per [§7](initial.md#7-scheduler-and-job-runner): **`sync` → `categorize` → `summarize` → `forward_rules`** (when enabled), **per `account_id`**.
+The legacy adapter implemented **`sync` → `categorize` → `summarize` → `forward_rules`** per account. The target canonical chain adds `resolve_contacts` and `assign_projects` as defined in [aws-deployment.md §4.4.2](aws-deployment.md#442-job-type-registry-and-chunk-boundary); do not use this section to define new hosted chains.
 
 **Enqueue strategy:**
 

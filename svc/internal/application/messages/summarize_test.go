@@ -118,7 +118,7 @@ func TestSummarizeMarksExcludedBySettingsAsSeenWithoutLLM(t *testing.T) {
 	}
 	calls := 0
 	svc := &SummarizeService{
-		Messages: repo,
+		Messages:  repo,
 		Summaries: repo,
 		LLM: &fakeLLM{
 			responses: []string{`{"general_summary":"should not run","action_items":[],"fyi":[]}`},

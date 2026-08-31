@@ -176,7 +176,7 @@ export function useAssistantHomeData(accountFilter: AccountFilter) {
     const summary = summaryQuery.data ?? null;
     const actionItems = summary?.action_items ?? [];
     const fyi = summary?.fyi ?? [];
-    const runs = runsQuery.data;
+    const runs = runsQuery.data?.runs;
     const failedRuns = (runs ?? []).filter((r) => r.status === "failed");
     const latestRun = (runs ?? [])[0];
     const unassignedCount =

@@ -13,12 +13,12 @@ import (
 	"testing"
 	"time"
 
-	appaccounts "github.com/Kapital-B/automata/svc/internal/application/accounts"
-	appmessages "github.com/Kapital-B/automata/svc/internal/application/messages"
-	"github.com/Kapital-B/automata/svc/internal/application/auth"
 	"github.com/Kapital-B/automata/svc/internal/adapters/outbound/microsoft"
 	"github.com/Kapital-B/automata/svc/internal/adapters/outbound/persistence/sqlite"
 	"github.com/Kapital-B/automata/svc/internal/adapters/outbound/security"
+	appaccounts "github.com/Kapital-B/automata/svc/internal/application/accounts"
+	"github.com/Kapital-B/automata/svc/internal/application/auth"
+	appmessages "github.com/Kapital-B/automata/svc/internal/application/messages"
 	"github.com/google/uuid"
 	_ "modernc.org/sqlite"
 )
@@ -122,7 +122,7 @@ func TestOAuthStartConnectAndCallbackCreatesAccount(t *testing.T) {
 	jwtSecret := []byte("abcdefghijklmnopqrstuvwxyz123456")
 	authSvc := auth.NewService(repo, repo, repo, nil, nil, jwtSecret, time.Hour, 30*24*time.Hour)
 	h := &Handlers{
-		Log: slog.New(slog.NewTextHandler(io.Discard, nil)),
+		Log:        slog.New(slog.NewTextHandler(io.Discard, nil)),
 		AccountSvc: accountSvc, SyncSvc: syncSvc, AuthSvc: authSvc,
 		Accounts: repo, Messages: repo, JobRuns: repo, OAuthStates: repo, Users: repo,
 		Dashboard: "http://dashboard.test", SuccessPath: "/connected", ErrorPath: "/error",
@@ -228,7 +228,7 @@ func TestOAuthCallbackInvalidStateRedirectsError(t *testing.T) {
 	jwtSecret := []byte("abcdefghijklmnopqrstuvwxyz123456")
 	authSvc := auth.NewService(repo, repo, repo, nil, nil, jwtSecret, time.Hour, 30*24*time.Hour)
 	h := &Handlers{
-		Log: slog.New(slog.NewTextHandler(io.Discard, nil)),
+		Log:        slog.New(slog.NewTextHandler(io.Discard, nil)),
 		AccountSvc: accountSvc, SyncSvc: syncSvc, AuthSvc: authSvc,
 		Accounts: repo, Messages: repo, JobRuns: repo, OAuthStates: repo, Users: repo,
 		Dashboard: "http://dashboard.test", SuccessPath: "/ok", ErrorPath: "/err",

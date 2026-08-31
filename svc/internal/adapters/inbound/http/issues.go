@@ -108,8 +108,8 @@ func (h *Handlers) createProjectIssue(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	var body struct {
-		Title               string `json:"title"`
-		CurrentPositionNote string `json:"current_position_note"`
+		Title               string  `json:"title"`
+		CurrentPositionNote string  `json:"current_position_note"`
 		AssigneeUserID      *string `json:"assignee_user_id"`
 		AssigneeContactID   *string `json:"assignee_contact_id"`
 		ItemRefs            []struct {
@@ -398,12 +398,12 @@ func issueJSON(v appissues.IssueView, withItems bool) map[string]any {
 		items := make([]map[string]any, 0, len(v.Items))
 		for _, t := range v.Items {
 			row := map[string]any{
-				"id":         t.Item.ID.String(),
-				"issue_id":   t.Item.IssueID.String(),
-				"source":     t.Source,
-				"title":      t.Title,
-				"snippet":    t.BodySnippet,
-				"added_at":   t.Item.AddedAt.UTC().Format(time.RFC3339Nano),
+				"id":       t.Item.ID.String(),
+				"issue_id": t.Item.IssueID.String(),
+				"source":   t.Source,
+				"title":    t.Title,
+				"snippet":  t.BodySnippet,
+				"added_at": t.Item.AddedAt.UTC().Format(time.RFC3339Nano),
 			}
 			if t.OccurredAt != nil {
 				row["occurred_at"] = t.OccurredAt.UTC().Format(time.RFC3339Nano)

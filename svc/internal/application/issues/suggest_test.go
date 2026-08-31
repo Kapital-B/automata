@@ -55,13 +55,13 @@ func TestSuggestReturnsProposalWithoutCreating(t *testing.T) {
 	}
 
 	payload, _ := json.Marshal(map[string]any{
-		"schema_version":   1,
-		"project_id":       projectID.String(),
-		"issue_title":      "Pump P-03",
-		"message_ids":      []string{msgID.String()},
-		"manual_item_ids":  []string{manual.ID.String()},
-		"confidence":       0.91,
-		"reason":           "both mention P-03",
+		"schema_version":  1,
+		"project_id":      projectID.String(),
+		"issue_title":     "Pump P-03",
+		"message_ids":     []string{msgID.String()},
+		"manual_item_ids": []string{manual.ID.String()},
+		"confidence":      0.91,
+		"reason":          "both mention P-03",
 	})
 	llm := &fakeLLM{content: string(payload)}
 	issueSvc.LLM = llm

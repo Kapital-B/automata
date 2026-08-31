@@ -7,10 +7,14 @@ React + Vite + TypeScript UI for the Automata mail assistant. It talks to the Go
 ```bash
 cd web
 npm install
-cp .env.example .env   # optional; defaults to http://localhost:8080
+cp .env.example .env   # optional
 ```
 
-- **`VITE_API_BASE_URL`** — Base URL of the API (no trailing slash). Example: `http://localhost:8080`.
+- **`VITE_API_BASE_URL`** — Base URL of the API (no trailing slash).
+
+**Floci local (primary path):** start the backend with `./scripts/local_up` + `./scripts/local_deploy` from the repo root, then set `VITE_API_BASE_URL` to the printed `api_gateway_url` (Floci API Gateway), not bare `http://localhost:8080`. See [svc/README.md](../svc/README.md#local-development-aws-parity-via-floci--target-path) and [docs/specs/aws-deployment.md](../docs/specs/aws-deployment.md).
+
+**Debug shortcut only:** `JOBS_INLINE=true go run ./cmd/server` still works for one-off local debugging, but the default path is API Gateway + Lambda + DynamoDB Streams on Floci.
 
 ## Run locally
 

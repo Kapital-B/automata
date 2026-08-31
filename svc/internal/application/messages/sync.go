@@ -41,8 +41,151 @@ type SyncOptions struct {
 	Trigger string
 }
 
+type SyncChunkResult struct {
+	MessagesUpserted int
+	Fetched          int
+	DeltaReused      bool
+	DeltaResetReason string
+	NextCursor       *driven.JobCursor
+	Done             bool
+}
+
 func (s *SyncService) SyncInbox(ctx context.Context, userID uuid.UUID, accountID uuid.UUID) (*SyncResult, error) {
 	return s.SyncInboxWithOptions(ctx, userID, accountID, SyncOptions{})
+}
+
+func (s *SyncService) SyncChunk(ctx context.Context, run driven.RunContext) (*SyncChunkResult, error) {
+	if s == nil || s.Accounts == nil || s.Messages == nil || s.OAuth == nil || s.Graph == nil || s.Vault == nil {
+		return nil, fmt.Errorf("sync service not configured")
+	}
+	if run.AccountID == nil || *run.AccountID == uuid.Nil {
+		return nil, fmt.Errorf("account_id is required")
+	}
+	accountID := *run.AccountID
+	row, cipher, err := s.Accounts.GetAccount(ctx, run.UserID, accountID)
+	if err != nil {
+		return nil, err
+	}
+	if row == nil {
+		return nil, fmt.Errorf("account not found")
+	}
+	if len(cipher) == 0 {
+		return nil, fmt.Errorf("no tokens for account")
+	}
+	raw, err := s.Vault.Decrypt(cipher)
+	if err != nil {
+		return nil, err
+	}
+	kind, refresh, err := appaccounts.DecodeRefreshPayload(raw)
+	if err != nil {
+		return nil, err
+	}
+	tok, err := s.OAuth.RefreshAccessToken(ctx, kind, refresh)
+	if err != nil {
+		return nil, fmt.Errorf("refresh token: %w", err)
+	}
+	newRefresh := refresh
+	if tok.RefreshToken != "" {
+		newRefresh = tok.RefreshToken
+	}
+	payload, err := appaccounts.EncodeRefreshPayloadForStorage(kind, newRefresh)
+	if err != nil {
+		return nil, err
+	}
+	newCipher, err := s.Vault.Encrypt(payload)
+	if err != nil {
+		return nil, err
+	}
+	if err := s.Accounts.UpdateAccountTokens(ctx, run.UserID, accountID, newCipher, row.PrimaryEmail, row.GraphTenantID, row.MsalHomeAccountID, "connected", nil); err != nil {
+		return nil, err
+	}
+
+	cursor := ""
+	deltaUsed := false
+	if run.Cursor != nil && strings.TrimSpace(run.Cursor.Value) != "" {
+		cursor = strings.TrimSpace(run.Cursor.Value)
+		deltaUsed = true
+	} else {
+		prevDeltaLink, err := s.Accounts.GetSyncDeltaLink(ctx, run.UserID, accountID)
+		if err != nil {
+			return nil, err
+		}
+		cursor = strings.TrimSpace(strOrEmpty(prevDeltaLink))
+		deltaUsed = cursor != ""
+	}
+	deltaResetReason := ""
+	deltaRes, err := s.Graph.ListInboxDelta(ctx, tok.AccessToken, cursor, 100)
+	if err != nil && deltaUsed && isInvalidDeltaError(err) {
+		deltaResetReason = "invalid_delta_link"
+		deltaRes, err = s.Graph.ListInboxDelta(ctx, tok.AccessToken, "", 100)
+		deltaUsed = false
+	}
+	if err != nil {
+		return nil, err
+	}
+	list := deltaRes.Messages
+	n := 0
+	for _, gm := range list {
+		rt, err := parseGraphTime(gm.ReceivedDateTime)
+		if err != nil {
+			rt = time.Now().UTC()
+		}
+		body := gm.BodyPreview
+		var bodyFetched *time.Time
+		if gm.BodyContent != "" {
+			body = normalizeBody(gm.BodyContent, gm.BodyContentType)
+			t := time.Now().UTC()
+			bodyFetched = &t
+		} else if gm.BodyPreview != "" {
+			body = gm.BodyPreview
+		}
+		fromObj := map[string]string{"name": gm.FromName, "address": gm.FromAddress}
+		fromJSON, _ := json.Marshal(fromObj)
+		toJSON, _ := json.Marshal(graphRecipientsJSON(gm.ToRecipients))
+		ccJSON, _ := json.Marshal(graphRecipientsJSON(gm.CcRecipients))
+		conv := gm.ConversationID
+		etag := gm.ChangeKey
+		m := driven.MessageRow{
+			ID:                uuid.New(),
+			AccountID:         accountID,
+			ProviderMessageID: gm.ID,
+			ConversationID:    nullIfEmpty(conv),
+			ReceivedAt:        rt,
+			Subject:           gm.Subject,
+			FromJSON:          string(fromJSON),
+			ToJSON:            string(toJSON),
+			CcJSON:            string(ccJSON),
+			BodyText:          nullIfEmpty(body),
+			BodyFetchedAt:     bodyFetched,
+			HasAttachments:    gm.HasAttachments,
+			RawEtag:           nullIfEmpty(etag),
+			CreatedAt:         time.Now().UTC(),
+			UpdatedAt:         time.Now().UTC(),
+		}
+		if err := s.Messages.UpsertMessage(ctx, m); err != nil {
+			return nil, err
+		}
+		n++
+	}
+
+	out := &SyncChunkResult{
+		MessagesUpserted: n,
+		Fetched:          len(list),
+		DeltaReused:      deltaUsed,
+		DeltaResetReason: deltaResetReason,
+	}
+	if strings.TrimSpace(deltaRes.NextLink) != "" {
+		out.NextCursor = &driven.JobCursor{Kind: "graph_next_link", Value: strings.TrimSpace(deltaRes.NextLink)}
+		return out, nil
+	}
+	if strings.TrimSpace(deltaRes.DeltaLink) == "" {
+		return nil, fmt.Errorf("graph delta response missing cursor")
+	}
+	if err := s.Accounts.UpsertSyncState(ctx, run.UserID, accountID, &deltaRes.DeltaLink, time.Now().UTC()); err != nil {
+		return nil, err
+	}
+	out.Done = true
+	return out, nil
 }
 
 func (s *SyncService) SyncInboxWithOptions(ctx context.Context, userID uuid.UUID, accountID uuid.UUID, opts SyncOptions) (*SyncResult, error) {

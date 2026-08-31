@@ -171,6 +171,18 @@ type SummarySnapshotRow struct {
 	CreatedAt      time.Time
 }
 
+type SummaryJobChunkRow struct {
+	ID          uuid.UUID
+	RunID       uuid.UUID
+	AccountID   uuid.UUID
+	ChunkIndex  int
+	Phase       string
+	MessageIDs  []uuid.UUID
+	PayloadJSON string
+	CreatedAt   time.Time
+	UpdatedAt   time.Time
+}
+
 type ActionItemRow struct {
 	ID              uuid.UUID
 	UserID          uuid.UUID
@@ -832,6 +844,8 @@ type SummaryRepository interface {
 	UpsertSummarySettings(ctx context.Context, row SummarySettingsRow) error
 	InsertSummarySnapshot(ctx context.Context, row SummarySnapshotRow) error
 	ListSummarySnapshots(ctx context.Context, userID uuid.UUID, accountID *uuid.UUID, limit int) ([]SummarySnapshotRow, error)
+	UpsertSummaryJobChunk(ctx context.Context, row SummaryJobChunkRow) error
+	ListSummaryJobChunks(ctx context.Context, runID uuid.UUID) ([]SummaryJobChunkRow, error)
 	InsertActionItems(ctx context.Context, rows []ActionItemRow) error
 	ListOpenActionItems(ctx context.Context, userID uuid.UUID, accountID *uuid.UUID) ([]ActionItemRow, error)
 	MarkActionItemDone(ctx context.Context, userID uuid.UUID, itemID uuid.UUID, at time.Time) error

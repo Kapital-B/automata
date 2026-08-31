@@ -320,7 +320,7 @@ func (g *GraphClient) ListInboxMessages(ctx context.Context, accessToken string,
 	return out, nil
 }
 
-// ListInboxDelta lists mailbox changes via Graph delta query and returns a new delta link.
+// ListInboxDelta lists exactly one Graph delta page and returns either a next link or a final delta link.
 func (g *GraphClient) ListInboxDelta(ctx context.Context, accessToken string, deltaLink string, pageSize int) (*driven.GraphDeltaResult, error) {
 	if pageSize <= 0 {
 		pageSize = 50
@@ -337,31 +337,25 @@ func (g *GraphClient) ListInboxDelta(ctx context.Context, accessToken string, de
 		u.RawQuery = q.Encode()
 		nextURL = u.String()
 	}
-	out := make([]driven.GraphMessage, 0, pageSize)
-	finalDelta := ""
-	for nextURL != "" {
-		var res deltaMessagesResponse
-		if err := g.getJSONMail(ctx, accessToken, nextURL, &res); err != nil {
-			return nil, err
-		}
-		for _, m := range res.Value {
-			// Graph delta may include tombstones; skip rows without id.
-			if strings.TrimSpace(m.ID) == "" {
-				continue
-			}
-			out = append(out, mapGraphMessage(m))
-		}
-		if strings.TrimSpace(res.DeltaLink) != "" {
-			finalDelta = strings.TrimSpace(res.DeltaLink)
-		}
-		nextURL = strings.TrimSpace(res.NextLink)
+	var res deltaMessagesResponse
+	if err := g.getJSONMail(ctx, accessToken, nextURL, &res); err != nil {
+		return nil, err
 	}
-	if finalDelta == "" {
-		return nil, fmt.Errorf("graph delta response missing delta link")
+	out := make([]driven.GraphMessage, 0, len(res.Value))
+	for _, m := range res.Value {
+		// Graph delta may include tombstones; skip rows without id.
+		if strings.TrimSpace(m.ID) == "" {
+			continue
+		}
+		out = append(out, mapGraphMessage(m))
+	}
+	if strings.TrimSpace(res.NextLink) == "" && strings.TrimSpace(res.DeltaLink) == "" {
+		return nil, fmt.Errorf("graph delta response missing cursor")
 	}
 	return &driven.GraphDeltaResult{
 		Messages:  out,
-		DeltaLink: finalDelta,
+		NextLink:  strings.TrimSpace(res.NextLink),
+		DeltaLink: strings.TrimSpace(res.DeltaLink),
 	}, nil
 }
 

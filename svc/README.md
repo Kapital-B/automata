@@ -2,15 +2,93 @@
 
 HTTP service per [docs/specs/initial.md](../docs/specs/initial.md): **app auth** (email/password, Microsoft, Google), **mailbox** connect (Microsoft Graph), SQLite storage, JWT API access.
 
+Hosting and the background-job redesign are specified in [docs/specs/aws-deployment.md](../docs/specs/aws-deployment.md).
+
 ## Requirements
 
 - Go **1.22+**
-- Redis **7+** (used by Asynq for background jobs)
-- Microsoft Entra app: **mail** redirect `MS_REDIRECT_URI` (e.g. `http://localhost:8080/api/accounts/callback`) with delegated `Mail.Read`, `Mail.Send`, `User.Read`, `offline_access`.
-- Same app (or another) **sign-in**: add redirect `MS_AUTH_REDIRECT_URI` (default `http://localhost:8080/api/auth/microsoft/callback`) with delegated `openid`, `offline_access`, `email`, `profile` (v2 endpoint).
+- Docker / Docker Compose v2 (for the Floci local path; see below)
+- Terraform **1.10.x** (Floci deploy)
+- Microsoft Entra app: **mail** redirect `MS_REDIRECT_URI` (for Floci, `http://localhost:4566/restapis/<api-id>/local/_user_request_/api/accounts/callback`; for direct debug, `http://localhost:8080/api/accounts/callback`) with delegated `Mail.Read`, `Mail.Send`, `User.Read`, `offline_access`.
+- Same app (or another) **sign-in**: add redirect `MS_AUTH_REDIRECT_URI` (for Floci, `http://localhost:4566/restapis/<api-id>/local/_user_request_/api/auth/microsoft/callback`; for direct debug, `http://localhost:8080/api/auth/microsoft/callback`) with delegated `openid`, `offline_access`, `email`, `profile` (v2 endpoint).
 - **Google** (optional): OAuth Web client with redirect `GOOGLE_REDIRECT_URI` (default `APP_PUBLIC_URL/api/auth/google/callback`).
 
-## Run
+---
+
+## Local development (AWS parity via Floci) — target path
+
+Once [aws-deployment.md](../docs/specs/aws-deployment.md) Phases 1–4 land, day-to-day local runs use the **same Lambda / DynamoDB Streams / EventBridge shape as AWS**:
+
+| Piece | Local |
+| ----- | ----- |
+| AWS APIs | [Floci](https://floci.io/) on `http://localhost:4566` (credentials `test` / `test`) |
+| Product DB | Postgres in Compose (stand-in for Aurora DSQL) |
+| Jobs | DynamoDB + Streams on Floci → worker Lambda |
+| Scheduler | EventBridge on Floci → scheduler Lambda |
+| HTTP | API Gateway on Floci → API Lambda |
+
+Redis / Asynq are **not** part of this path.
+
+### Prerequisites
+
+- Docker Compose v2
+- Go, Terraform 1.10.x
+- Node 20+ (for `web/`)
+
+### First-time setup
+
+```bash
+# from repo root
+./scripts/local_configure
+# edit svc/local.env — MS_*, ENCRYPTION_KEY, JWT_SECRET, and redirect URIs after first deploy
+```
+
+### Start emulators
+
+```bash
+./scripts/local_up
+# Floci:   http://localhost:4566
+# Postgres: localhost:5432  user/db/password automata
+```
+
+### Deploy API + jobs stack into Floci
+
+```bash
+./scripts/local_deploy
+# prints api_gateway_url and invokes the migrate Lambda
+```
+
+`local_deploy` auto-detects `amd64` vs `arm64` from `uname -m`; override with `LAMBDA_ARCH`.
+Re-run it after Lambda or Terraform changes.
+
+### Logs
+
+```bash
+./scripts/local_logs
+# stream worker and scheduler logs appear on the Floci container
+```
+
+### Web UI
+
+```bash
+cd web
+# set VITE_API_BASE_URL to api_gateway_url from local_deploy
+npm ci && npm run dev
+```
+
+**Debug shortcut only (not the default):** `JOBS_INLINE=true go run ./cmd/server` skips Floci and runs the job inline in the HTTP process.
+
+The parity path uses four separate `provided.al2023` bootstrap archives:
+- `cmd/api` for API Gateway REST proxy
+- `cmd/scheduler` for EventBridge ticks
+- `cmd/worker` for DynamoDB Streams
+- `cmd/migrate` for explicit migration invokes
+
+---
+
+## Transitional path (Redis / Asynq)
+
+Redis / Asynq are still in-tree for older flows and tests, but they are no longer the primary local path:
 
 ```bash
 cd svc
@@ -24,10 +102,10 @@ go run ./cmd/server
 go run ./cmd/worker
 ```
 
-For local Redis:
+If you still need the old Redis queue locally, start Redis separately (for example `docker run --rm -p 6379:6379 redis:7-alpine`):
 
 ```bash
-docker compose up -d redis
+docker run --rm -p 6379:6379 redis:7-alpine
 ```
 
 - **Health:** `GET http://localhost:8080/api/health`
@@ -36,17 +114,17 @@ docker compose up -d redis
 - Microsoft redirects to `GET /api/accounts/callback?code=...&state=...`, then **302** to `{DASHBOARD_BASE_URL}{OAUTH_SUCCESS_PATH}?account_id=...`
 - **Sync inbox:** `POST /api/accounts/{id}/sync` returns quickly with `job_run_id` and queues work
 - **Categorize inbox:** `POST /api/accounts/{id}/categorize` (requires `LLM_BASE_URL` + `LLM_MODEL`) returns quickly with `job_run_id` and queues work
-- **Track progress:** `GET /api/runs` / `GET /api/runs/{id}`; progress counters are written in `meta_json` while jobs run
+- **Track progress:** `GET /api/runs` / `GET /api/runs/{id}`; Floci/AWS use DynamoDB-backed runs with `X-Next-Cursor`, nullable `started_at` / `finished_at`, and `POST /api/runs/{id}/cancel`
 - **List messages:** `GET /api/messages?account_id={uuid}`
 - **List categories:** `GET /api/categories`
 
-## Async run flow
+## Async run flow (transitional)
 
-`cmd/server` enqueues sync/categorize tasks to Redis via Asynq and creates a `job_runs` row in `pending` status.
+`cmd/server` can still enqueue sync/categorize tasks to Redis via Asynq when `JOBS_INLINE=false` and Redis is configured.
 
-`cmd/worker` consumes tasks, updates `job_runs` through `running` to `success` or `failed`, and writes incremental progress (for example `processed_messages` / `total_messages`) into `meta_json`.
+In the primary Floci/AWS flow, API requests enqueue into DynamoDB, the stream worker Lambda advances each job, and the scheduler Lambda handles due schedules / lease recovery.
 
-UI and API consumers should treat `job_runs` as the durable source of truth for run state.
+UI and API consumers should treat the runs API as the durable source of truth for run state. On Floci/AWS the backing store is the DynamoDB jobs table ([aws-deployment.md](../docs/specs/aws-deployment.md)).
 
 ## Auth
 

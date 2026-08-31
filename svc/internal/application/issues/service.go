@@ -52,13 +52,13 @@ type IssueView struct {
 }
 
 type TrailItem struct {
-	Item         driven.IssueItemRow
-	Source       string // mail | manual
-	Title        string
-	OccurredAt   *time.Time
-	AccountID    *uuid.UUID
-	Channel      string
-	BodySnippet  string
+	Item        driven.IssueItemRow
+	Source      string // mail | manual
+	Title       string
+	OccurredAt  *time.Time
+	AccountID   *uuid.UUID
+	Channel     string
+	BodySnippet string
 }
 
 type CreateInput struct {
@@ -79,10 +79,10 @@ type UpdateInput struct {
 	CurrentPositionNote *string
 	Status              *string
 	// ClearAssignee clears both assignee fields when true.
-	ClearAssignee       bool
-	AssigneeUserID      *uuid.UUID
-	AssigneeContactID   *uuid.UUID
-	SetAssignee         bool // true when client sent assignee fields
+	ClearAssignee     bool
+	AssigneeUserID    *uuid.UUID
+	AssigneeContactID *uuid.UUID
+	SetAssignee       bool // true when client sent assignee fields
 }
 
 func (s *Service) List(ctx context.Context, userID, projectID uuid.UUID) ([]IssueView, error) {
@@ -190,7 +190,7 @@ func (s *Service) Create(ctx context.Context, userID, projectID uuid.UUID, in Cr
 	row := driven.IssueRow{
 		ID: uuid.New(), OrganisationID: orgID, ProjectID: projectID,
 		Title: title, CurrentPositionNote: strings.TrimSpace(in.CurrentPositionNote),
-		Status: string(domainissues.StatusOpen),
+		Status:         string(domainissues.StatusOpen),
 		AssigneeUserID: assigneeUser, AssigneeContactID: assigneeContact,
 		CreatedAt: now, UpdatedAt: now,
 	}

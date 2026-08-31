@@ -10,6 +10,7 @@ import (
 	"time"
 	"unicode"
 
+	"github.com/Kapital-B/automata/svc/internal/application/jobkit"
 	"github.com/Kapital-B/automata/svc/internal/application/ports/driven"
 	"github.com/Kapital-B/automata/svc/internal/domain/contacts"
 	domainprojects "github.com/Kapital-B/automata/svc/internal/domain/projects"
@@ -521,6 +522,13 @@ type AssignService struct {
 	JobRuns     driven.JobRunRepository
 }
 
+type AssignChunkResult struct {
+	MessagesProcessed int
+	MessagesAssigned  int
+	NextCursor        *driven.JobCursor
+	Done              bool
+}
+
 func (s *AssignService) AssignAfterSync(ctx context.Context, userID, accountID uuid.UUID) error {
 	orgID, err := s.Users.GetHomeOrganisationID(ctx, userID)
 	if err != nil {
@@ -557,6 +565,56 @@ func (s *AssignService) AssignAfterSync(ctx context.Context, userID, accountID u
 		_ = s.JobRuns.UpdateJobRunStatus(ctx, *runID, "success", &finished, nil, string(meta))
 	}
 	return nil
+}
+
+func (s *AssignService) AssignAccountChunk(ctx context.Context, run driven.RunContext) (*AssignChunkResult, error) {
+	if s == nil || s.Users == nil || s.Projects == nil || s.Assignments == nil || s.Contacts == nil || s.Messages == nil {
+		return nil, fmt.Errorf("assign service not configured")
+	}
+	if run.AccountID == nil || *run.AccountID == uuid.Nil {
+		return nil, fmt.Errorf("account_id is required")
+	}
+	orgID, err := s.Users.GetHomeOrganisationID(ctx, run.UserID)
+	if err != nil {
+		return nil, err
+	}
+	projects, err := s.Projects.ListProjects(ctx, orgID, driven.ProjectListFilter{Limit: 500})
+	if err != nil {
+		return nil, err
+	}
+	offset := jobkit.DecodeOffsetCursor(run.Cursor)
+	msgs, err := s.Messages.ListMessages(ctx, run.UserID, driven.MessageListFilter{
+		AccountID: run.AccountID,
+		Limit:     26,
+		Offset:    offset,
+	})
+	if err != nil {
+		return nil, err
+	}
+	done := len(msgs) <= 25
+	if len(msgs) > 25 {
+		msgs = msgs[:25]
+	}
+	now := time.Now().UTC()
+	assigned := 0
+	for _, msg := range msgs {
+		ok, err := s.tryAssignOne(ctx, orgID, run.UserID, *run.AccountID, msg, projects, &run.RunID, now)
+		if err != nil {
+			return nil, err
+		}
+		if ok {
+			assigned++
+		}
+	}
+	out := &AssignChunkResult{
+		MessagesProcessed: len(msgs),
+		MessagesAssigned:  assigned,
+		Done:              done,
+	}
+	if !done {
+		out.NextCursor = jobkit.EncodeOffsetCursor(offset + len(msgs))
+	}
+	return out, nil
 }
 
 func (s *AssignService) tryAssignOne(ctx context.Context, orgID, userID, accountID uuid.UUID, msg driven.MessageRow, projects []driven.ProjectRow, runID *uuid.UUID, now time.Time) (bool, error) {

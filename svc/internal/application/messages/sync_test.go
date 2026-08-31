@@ -9,9 +9,9 @@ import (
 	"testing"
 	"time"
 
+	"github.com/Kapital-B/automata/svc/internal/adapters/outbound/persistence/sqlite"
 	appaccounts "github.com/Kapital-B/automata/svc/internal/application/accounts"
 	"github.com/Kapital-B/automata/svc/internal/application/ports/driven"
-	"github.com/Kapital-B/automata/svc/internal/adapters/outbound/persistence/sqlite"
 	domainacc "github.com/Kapital-B/automata/svc/internal/domain/accounts"
 	"github.com/google/uuid"
 	_ "modernc.org/sqlite"
@@ -31,14 +31,14 @@ func (f *fakeSyncOAuth) RefreshAccessToken(ctx context.Context, kind domainacc.M
 
 type passthroughVault struct{}
 
-func (v *passthroughVault) Encrypt(plaintext []byte) ([]byte, error) { return plaintext, nil }
+func (v *passthroughVault) Encrypt(plaintext []byte) ([]byte, error)  { return plaintext, nil }
 func (v *passthroughVault) Decrypt(ciphertext []byte) ([]byte, error) { return ciphertext, nil }
 
 type fakeDeltaGraph struct {
-	calls      []string
-	results    []*driven.GraphDeltaResult
-	errByCall  map[int]error
-	resultIdx  int
+	calls     []string
+	results   []*driven.GraphDeltaResult
+	errByCall map[int]error
+	resultIdx int
 }
 
 func (f *fakeDeltaGraph) GetMe(ctx context.Context, accessToken string) (*driven.GraphProfile, error) {

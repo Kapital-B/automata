@@ -8,9 +8,9 @@ import (
 	"testing"
 	"time"
 
+	"github.com/Kapital-B/automata/svc/internal/adapters/outbound/persistence/sqlite"
 	appaccounts "github.com/Kapital-B/automata/svc/internal/application/accounts"
 	"github.com/Kapital-B/automata/svc/internal/application/ports/driven"
-	"github.com/Kapital-B/automata/svc/internal/adapters/outbound/persistence/sqlite"
 	domainacc "github.com/Kapital-B/automata/svc/internal/domain/accounts"
 	"github.com/google/uuid"
 	_ "modernc.org/sqlite"

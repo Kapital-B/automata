@@ -1,0 +1,28 @@
+lambda_architecture = "amd64"
+app_public_url      = "http://localhost:4566"
+dashboard_base_url  = "http://localhost:5173"
+
+ms_client_id         = "REPLACE_ME"
+ms_client_secret     = "REPLACE_ME"
+ms_redirect_uri      = "http://localhost:4566/restapis/replace-after-deploy/local/_user_request_/api/accounts/callback"
+ms_auth_redirect_uri = "http://localhost:4566/restapis/replace-after-deploy/local/_user_request_/api/auth/microsoft/callback"
+
+google_client_id     = ""
+google_client_secret = ""
+google_redirect_uri  = "http://localhost:4566/restapis/replace-after-deploy/local/_user_request_/api/auth/google/callback"
+
+slack_mode          = "fake"
+slack_client_id     = ""
+slack_client_secret = ""
+slack_redirect_uri  = "http://localhost:4566/restapis/replace-after-deploy/local/_user_request_/api/connectors/callback"
+
+encryption_key       = "12345678901234567890123456789012"
+jwt_secret           = "abcdefghijklmnopqrstuvwxyz123456"
+auth_default_user_id = "a0000001-0000-4000-8000-000000000001"
+
+bedrock_model_id          = "eu.amazon.nova-2-lite-v1:0"
+bedrock_runtime_endpoint  = "http://floci:4566"
+job_cursor_secret         = "abcdefghijklmnopqrstuvwxyz123456"
+job_terminal_retention_days = 30
+job_lease_seconds           = 960
+job_pending_wake_after_seconds = 120

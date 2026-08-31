@@ -43,7 +43,7 @@ adapters/outbound/
   whatsapp/       # optional / bridge
 ```
 
-Jobs: extend `job_runs` CHECK with connector sync types (e.g. `sync_slack`, `sync_teams`, `sync_whatsapp`, `ingest_transcript`, `ingest_doc_revision`) via the existing table-rebuild migration pattern.
+Jobs: `sync_slack` is registered in [aws-deployment.md §4.4](aws-deployment.md#44-job-contract-keys-and-registry). `sync_teams`, `sync_whatsapp`, `ingest_transcript`, and `ingest_doc_revision` are reserved names only; before implementation, add a bounded unit/cursor/effect policy to that registry. Do not extend a hosted relational `job_runs` CHECK.
 
 Home-org listing remains default for Path A. Path B authorization: **project membership** (not “any profile in org”) for project-scoped reads/writes. Spec APIs must check `GetProjectMember` for the caller on project routes once a project has members beyond the creator (creator bootstrapped as owner/member in Wave 1).
 
@@ -68,7 +68,7 @@ Home-org listing remains default for Path A. Path B authorization: **project mem
 | `accepted_at` | timestamptz nullable | |
 | `created_at` / `updated_at` | timestamptz | |
 
-Unique: `(project_id, email)` where status = pending (partial).
+Logical unique: one pending invite per `(project_id, lower(email))`. SQLite/Postgres may use a partial index; hosted DSQL uses a generated nullable key such as `pending_email = CASE WHEN status = 'pending' THEN lower(email) END` and `UNIQUE(project_id, pending_email)`.
 
 ### 3.2 `contact_profile_links`
 
@@ -221,9 +221,9 @@ Ask / attention / facts APIs unchanged.
 
 | `job_type` | Trigger | Notes |
 | ---------- | ------- | ----- |
-| `sync_teams` / `sync_slack` / … | API / schedule | Cursor in `meta_json` |
-| `ingest_transcript` | API | Optional LLM cleanup; still evidence-first |
-| `ingest_doc_revision` | API / webhook | |
+| `sync_teams` / `sync_slack` / … | API / schedule | Durable DynamoDB cursor; one provider page per invocation |
+| `ingest_transcript` | API | Reserved until a bounded chunk/effect policy is specified; evidence-first |
+| `ingest_doc_revision` | API / webhook | Reserved until a bounded chunk/effect policy is specified |
 
 Failures must not delete prior correspondence. Partial sync resumes via cursor.
 

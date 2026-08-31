@@ -11,13 +11,13 @@ import (
 	"testing"
 	"time"
 
-	appaccounts "github.com/Kapital-B/automata/svc/internal/application/accounts"
-	appmessages "github.com/Kapital-B/automata/svc/internal/application/messages"
-	"github.com/Kapital-B/automata/svc/internal/application/auth"
-	"github.com/Kapital-B/automata/svc/internal/application/ports/driven"
 	"github.com/Kapital-B/automata/svc/internal/adapters/outbound/microsoft"
 	"github.com/Kapital-B/automata/svc/internal/adapters/outbound/persistence/sqlite"
 	"github.com/Kapital-B/automata/svc/internal/adapters/outbound/security"
+	appaccounts "github.com/Kapital-B/automata/svc/internal/application/accounts"
+	"github.com/Kapital-B/automata/svc/internal/application/auth"
+	appmessages "github.com/Kapital-B/automata/svc/internal/application/messages"
+	"github.com/Kapital-B/automata/svc/internal/application/ports/driven"
 	domainacc "github.com/Kapital-B/automata/svc/internal/domain/accounts"
 	"github.com/google/uuid"
 	_ "modernc.org/sqlite"
@@ -50,7 +50,7 @@ func newRunsTestServer(t *testing.T) (*httptest.Server, *sqlite.Repository, uuid
 	devUser := uuid.MustParse("a0000001-0000-4000-8000-000000000001")
 	authSvc := auth.NewService(repo, repo, repo, nil, nil, jwtSecret, time.Hour, 30*24*time.Hour)
 	h := &Handlers{
-		Log: slog.New(slog.NewTextHandler(io.Discard, nil)),
+		Log:        slog.New(slog.NewTextHandler(io.Discard, nil)),
 		AccountSvc: accountSvc, SyncSvc: syncSvc, AuthSvc: authSvc,
 		Accounts: repo, Messages: repo, JobRuns: repo, OAuthStates: repo, Users: repo,
 		Dashboard: "http://localhost:5173", SuccessPath: "/ok", ErrorPath: "/err",

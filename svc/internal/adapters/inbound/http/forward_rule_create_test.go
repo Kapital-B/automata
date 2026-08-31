@@ -11,9 +11,9 @@ import (
 	"testing"
 	"time"
 
+	"github.com/Kapital-B/automata/svc/internal/adapters/outbound/persistence/sqlite"
 	"github.com/Kapital-B/automata/svc/internal/application/ports/driven"
 	domainacc "github.com/Kapital-B/automata/svc/internal/domain/accounts"
-	"github.com/Kapital-B/automata/svc/internal/adapters/outbound/persistence/sqlite"
 	"github.com/google/uuid"
 )
 
@@ -40,10 +40,10 @@ func TestCreateForwardRuleDefaultsDisabled(t *testing.T) {
 
 	jwtSecret := []byte("abcdefghijklmnopqrstuvwxyz123456")
 	h := &Handlers{
-		Log:        slog.New(slog.NewTextHandler(io.Discard, nil)),
-		Accounts:   repo,
-		Forwards:   repo,
-		JWTSecret:  jwtSecret,
+		Log:           slog.New(slog.NewTextHandler(io.Discard, nil)),
+		Accounts:      repo,
+		Forwards:      repo,
+		JWTSecret:     jwtSecret,
 		DefaultUserID: devUser,
 	}
 	srv := httptest.NewServer(h.Routes())

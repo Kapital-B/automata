@@ -56,8 +56,8 @@ export type JobRun = {
   status: "pending" | "running" | "success" | "failed" | "cancelled";
   time_window_start?: string;
   time_window_end?: string;
-  started_at: string;
-  finished_at?: string;
+  started_at: string | null;
+  finished_at: string | null;
   error_message?: string;
   meta_json: Record<string, unknown>;
 };
@@ -66,7 +66,13 @@ export type ListRunsFilter = {
   accountId?: string;
   jobType?: string;
   limit?: number;
+  cursor?: string;
   offset?: number;
+};
+
+export type ListRunsResponse = {
+  runs: JobRun[];
+  nextCursor?: string;
 };
 
 export type CategoryDefinition = {
@@ -224,6 +230,48 @@ export async function apiRequest<T>(path: string, init?: RequestInit): Promise<T
     await parseApiError(response);
   }
 
+  return response.json() as Promise<T>;
+}
+
+async function apiRequestWithResponse<T>(
+  path: string,
+  init?: RequestInit,
+): Promise<{ data: T; response: Response }> {
+  const response = await fetch(`${API_BASE_URL}${path}`, {
+    ...init,
+    headers: {
+      "Content-Type": "application/json",
+      ...init?.headers,
+    },
+  });
+
+  if (!response.ok) {
+    await parseApiError(response);
+  }
+
+  return {
+    data: (await response.json()) as T,
+    response,
+  };
+}
+
+function readNextCursor(response: Response) {
+  const value = response.headers.get("X-Next-Cursor") ?? response.headers.get("Next-Cursor");
+  if (!value) {
+    return undefined;
+  }
+  const trimmed = value.trim();
+  return trimmed ? trimmed : undefined;
+}
+
+async function parseOptionalJson<T>(response: Response): Promise<T | undefined> {
+  if (response.status === 204 || response.headers.get("Content-Length") === "0") {
+    return undefined;
+  }
+  const contentType = response.headers.get("Content-Type") ?? "";
+  if (!contentType.includes("application/json")) {
+    return undefined;
+  }
   return response.json() as Promise<T>;
 }
 
@@ -1265,7 +1313,13 @@ export async function createConnectorBinding(
   });
 }
 
-export async function listRuns(accessToken: string, filter: ListRunsFilter = {}) {
+export async function listRuns(
+  accessToken: string,
+  filter: ListRunsFilter = {},
+): Promise<ListRunsResponse> {
+  if (typeof filter.offset === "number" && filter.offset > 0) {
+    throw new Error("offset pagination not supported; use cursor");
+  }
   const params = new URLSearchParams();
   if (filter.accountId) {
     params.set("account_id", filter.accountId);
@@ -1276,19 +1330,40 @@ export async function listRuns(accessToken: string, filter: ListRunsFilter = {})
   if (typeof filter.limit === "number") {
     params.set("limit", String(filter.limit));
   }
+  if (filter.cursor) {
+    params.set("cursor", filter.cursor);
+  }
   if (typeof filter.offset === "number") {
     params.set("offset", String(filter.offset));
   }
   const suffix = params.size > 0 ? `?${params.toString()}` : "";
-  return apiRequest<JobRun[]>(`/api/runs${suffix}`, {
+  const { data, response } = await apiRequestWithResponse<JobRun[]>(`/api/runs${suffix}`, {
     headers: toAuthHeader(accessToken),
   });
+  return {
+    runs: data,
+    nextCursor: readNextCursor(response),
+  };
 }
 
 export async function getRun(accessToken: string, id: string) {
   return apiRequest<JobRun>(`/api/runs/${id}`, {
     headers: toAuthHeader(accessToken),
   });
+}
+
+export async function cancelRun(accessToken: string, id: string): Promise<JobRun | undefined> {
+  const response = await fetch(`${API_BASE_URL}/api/runs/${id}/cancel`, {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+      ...toAuthHeader(accessToken),
+    },
+  });
+  if (!response.ok) {
+    await parseApiError(response);
+  }
+  return parseOptionalJson<JobRun>(response);
 }
 
 export async function listCategories(accessToken: string) {

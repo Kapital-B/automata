@@ -8,6 +8,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/Kapital-B/automata/svc/internal/application/jobkit"
 	"github.com/Kapital-B/automata/svc/internal/application/ports/driven"
 	"github.com/google/uuid"
 )
@@ -27,6 +28,13 @@ type CategorizeOptions struct {
 	Recategorize bool
 	RunID        *uuid.UUID
 	Trigger      string
+}
+
+type CategorizeChunkResult struct {
+	MessagesCategorized int
+	MessagesScanned     int
+	NextCursor          *driven.JobCursor
+	Done                bool
 }
 
 type categorizePayload struct {
@@ -275,6 +283,85 @@ func fallbackCategorySlug(categories []driven.CategoryDefinitionRow) string {
 		return strings.Compare(a.Slug, b.Slug)
 	})
 	return sorted[0].Slug
+}
+
+func (s *CategorizeService) CategorizeChunk(ctx context.Context, run driven.RunContext) (*CategorizeChunkResult, error) {
+	if s == nil || s.Messages == nil || s.LLM == nil {
+		return nil, fmt.Errorf("categorize service not configured")
+	}
+	if run.AccountID == nil || *run.AccountID == uuid.Nil {
+		return nil, fmt.Errorf("account_id is required")
+	}
+	offset := jobkit.DecodeOffsetCursor(run.Cursor)
+	rows, err := s.Messages.ListMessages(ctx, run.UserID, driven.MessageListFilter{
+		AccountID: run.AccountID,
+		Limit:     26,
+		Offset:    offset,
+	})
+	if err != nil {
+		return nil, err
+	}
+	done := len(rows) <= 25
+	if len(rows) > 25 {
+		rows = rows[:25]
+	}
+	categories, err := s.Messages.ListCategoryDefinitions(ctx, run.UserID)
+	if err != nil {
+		return nil, err
+	}
+	if len(categories) == 0 {
+		return nil, fmt.Errorf("no categories defined for user")
+	}
+	count := 0
+	for _, m := range rows {
+		if !run.Payload.Recategorize && m.CategorySlug != nil && strings.TrimSpace(*m.CategorySlug) != "" {
+			continue
+		}
+		p, err := s.classifyMessage(ctx, m, categories)
+		if err != nil {
+			return nil, err
+		}
+		if p.CategorySlug == "" || !hasCategorySlug(categories, p.CategorySlug) {
+			p.CategorySlug = fallbackCategorySlug(categories)
+		}
+		def, err := s.Messages.GetCategoryDefinitionBySlug(ctx, run.UserID, p.CategorySlug)
+		if err != nil {
+			return nil, err
+		}
+		if def == nil {
+			def, err = s.Messages.GetCategoryDefinitionBySlug(ctx, run.UserID, fallbackCategorySlug(categories))
+			if err != nil || def == nil {
+				if err == nil {
+					err = fmt.Errorf("missing category definition for %q", p.CategorySlug)
+				}
+				return nil, err
+			}
+		}
+		now := time.Now().UTC()
+		if err := s.Messages.UpsertMessageCategory(ctx, driven.MessageCategoryRow{
+			ID:         jobkit.DeterministicID(run.RunID, "categorize", m.ID.String()),
+			MessageID:  m.ID,
+			AccountID:  *run.AccountID,
+			CategoryID: def.ID,
+			Source:     "llm",
+			Confidence: p.Confidence,
+			RunID:      run.RunID,
+			CreatedAt:  now,
+			UpdatedAt:  now,
+		}); err != nil {
+			return nil, err
+		}
+		count++
+	}
+	out := &CategorizeChunkResult{
+		MessagesCategorized: count,
+		MessagesScanned:     len(rows),
+		Done:                done,
+	}
+	if !done {
+		out.NextCursor = jobkit.EncodeOffsetCursor(offset + len(rows))
+	}
+	return out, nil
 }
 
 func timePtr(t time.Time) *time.Time {

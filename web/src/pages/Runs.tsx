@@ -1,13 +1,15 @@
 import { PageHeader } from "@/components/PageHeader";
 import { AccountBadge } from "@/components/AccountBadge";
-import { listRuns } from "@/lib/auth";
+import { Button } from "@/components/ui/button";
+import { cancelRun, listRuns, type JobRun } from "@/lib/auth";
 import { relativeTime } from "@/lib/accounts";
-import { CheckCircle2, XCircle, Clock, Ban } from "lucide-react";
+import { CheckCircle2, XCircle, Clock, Ban, Loader2 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import type { AccountFilter } from "@/components/AppShell";
 import { useAuth } from "@/components/auth/AuthProvider";
 import { useAccountsData } from "@/hooks/useAccountsData";
-import { useQuery } from "@tanstack/react-query";
+import { toast } from "@/hooks/use-toast";
+import { useInfiniteQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 
 interface Props {
   accountFilter: AccountFilter;
@@ -24,22 +26,47 @@ const statusIcon = {
 export default function RunsPage({ accountFilter }: Props) {
   const { accessToken } = useAuth();
   const { accounts } = useAccountsData();
-  const runsQuery = useQuery({
+  const queryClient = useQueryClient();
+  const runsQuery = useInfiniteQuery({
     queryKey: ["runs", accessToken, accountFilter],
-    queryFn: () =>
+    queryFn: ({ pageParam }) =>
       listRuns(accessToken!, {
         accountId: accountFilter === "all" ? undefined : accountFilter,
+        cursor: pageParam,
+        limit: 50,
       }),
+    initialPageParam: undefined as string | undefined,
     enabled: Boolean(accessToken),
+    getNextPageParam: (lastPage) => lastPage.nextCursor ?? undefined,
     refetchInterval: (query) => {
-      const rows = (query.state.data ?? []) as Array<{ status?: string }>;
+      const rows =
+        (query.state.data?.pages ?? []).flatMap((page) => page.runs) as Array<{ status?: string }>;
       return rows.some((r) => r.status === "pending" || r.status === "running") ? 2000 : false;
     },
   });
+  const cancelMutation = useMutation({
+    mutationFn: async (runID: string) => {
+      if (!accessToken) throw new Error("Not authenticated");
+      await cancelRun(accessToken, runID);
+    },
+    onSuccess: async () => {
+      toast({ title: "Cancel requested" });
+      await queryClient.invalidateQueries({ queryKey: ["runs"] });
+    },
+    onError: (error) => {
+      toast({
+        title: "Could not cancel run",
+        description: error instanceof Error ? error.message : "Unknown error",
+        variant: "destructive",
+      });
+    },
+  });
   const visible =
-    runsQuery.data?.filter(
-      (r) => accountFilter === "all" || r.account_id === accountFilter || !r.account_id,
-    ) ?? [];
+    runsQuery.data?.pages
+      .flatMap((page) => page.runs)
+      .filter(
+        (r) => accountFilter === "all" || r.account_id === accountFilter || !r.account_id,
+      ) ?? [];
 
   const getAccount = (accountID?: string) => accounts.find((account) => account.id === accountID);
 
@@ -99,20 +126,69 @@ export default function RunsPage({ accountFilter }: Props) {
                   </span>
                 </td>
                 <td className="px-4 py-3 text-xs text-muted-foreground">
-                  {relativeTime(r.started_at)}
+                  {r.started_at ? relativeTime(r.started_at) : "—"}
                 </td>
                 <td className="px-4 py-3">
-                  <span className="font-mono text-[11px] text-muted-foreground">
-                    {renderRunResult(r.meta_json)}
-                  </span>
+                  <div className="flex flex-col items-start gap-2">
+                    <span className="font-mono text-[11px] text-muted-foreground">
+                      {renderRunResult(r.meta_json)}
+                    </span>
+                    {isActiveRun(r) ? (
+                      <Button
+                        size="sm"
+                        variant="outline"
+                        className="h-8"
+                        disabled={cancelMutation.isPending && cancelMutation.variables === r.id}
+                        onClick={() => cancelMutation.mutate(r.id)}
+                      >
+                        {cancelMutation.isPending && cancelMutation.variables === r.id ? (
+                          <>
+                            <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                            Cancelling…
+                          </>
+                        ) : (
+                          "Cancel"
+                        )}
+                      </Button>
+                    ) : null}
+                  </div>
                 </td>
               </tr>
             ))}
           </tbody>
         </table>
+        {visible.length > 0 &&
+        (runsQuery.hasNextPage || runsQuery.isFetchingNextPage || runsQuery.isFetchNextPageError) ? (
+          <div className="border-t border-border/70 px-4 py-3">
+            <Button
+              size="sm"
+              variant="outline"
+              disabled={!runsQuery.hasNextPage || runsQuery.isFetchingNextPage}
+              onClick={() => void runsQuery.fetchNextPage()}
+            >
+              {runsQuery.isFetchingNextPage ? (
+                <>
+                  <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                  Loading…
+                </>
+              ) : (
+                "Load more"
+              )}
+            </Button>
+            {runsQuery.isFetchNextPageError ? (
+              <p className="mt-2 text-xs text-destructive">
+                Could not load more runs: {runsQuery.error instanceof Error ? runsQuery.error.message : "unknown error"}
+              </p>
+            ) : null}
+          </div>
+        ) : null}
       </div>
     </div>
   );
+}
+
+function isActiveRun(run: JobRun) {
+  return run.status === "pending" || run.status === "running";
 }
 
 function renderRunResult(meta: Record<string, unknown>) {

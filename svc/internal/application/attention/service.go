@@ -35,13 +35,13 @@ type Item struct {
 }
 
 type Counts struct {
-	Total                int `json:"total"`
-	IssueAssignee        int `json:"issue_assignee"`
-	MemberRole           int `json:"member_role"`
-	ProvisionalFact      int `json:"provisional_fact"`
-	ProvisionalDecision  int `json:"provisional_decision"`
-	OpenContradiction    int `json:"open_contradiction"`
-	MailActionItem       int `json:"mail_action_item"`
+	Total               int `json:"total"`
+	IssueAssignee       int `json:"issue_assignee"`
+	MemberRole          int `json:"member_role"`
+	ProvisionalFact     int `json:"provisional_fact"`
+	ProvisionalDecision int `json:"provisional_decision"`
+	OpenContradiction   int `json:"open_contradiction"`
+	MailActionItem      int `json:"mail_action_item"`
 }
 
 type Result struct {
@@ -204,7 +204,7 @@ func (s *Service) forProject(ctx context.Context, userID, orgID uuid.UUID, p dri
 			}
 			out.Items = append(out.Items, Item{
 				ID: "fact-version:" + v.ID.String(), WhyMe: WhyProvisionalFact,
-				Title: "Confirm fact: " + f.Label,
+				Title:     "Confirm fact: " + f.Label,
 				ProjectID: p.ID.String(), ProjectName: p.Name, RefType: "fact_version", RefID: v.ID.String(),
 			})
 		}

@@ -226,7 +226,7 @@ Assignment unit for mail with a non-empty `conversation_id`.
 | `confidence` | real nullable | |
 | `reason` | text | Shown in UI. |
 | `source` | text | `user` \| `rule` \| `llm`. |
-| `run_id` | UUID FK `job_runs` nullable | |
+| `run_id` | UUID nullable | Job provenance id; no DSQL FK on the hosted path because run state is in DynamoDB. |
 | `assigned_by_user_id` | UUID FK `users` nullable | |
 | `created_at` / `updated_at` | timestamptz | |
 
@@ -246,7 +246,7 @@ Per-message override of the thread assignment.
 | `confidence` | real nullable | |
 | `reason` | text | |
 | `source` | text | `user` \| `rule` \| `llm`. |
-| `run_id` | UUID FK nullable | |
+| `run_id` | UUID nullable | Job provenance id; no hosted DSQL FK to DynamoDB run state. |
 | `assigned_by_user_id` | UUID FK nullable | |
 | `created_at` / `updated_at` | timestamptz | |
 
@@ -313,14 +313,14 @@ On message delete: delete these rows (`ON DELETE CASCADE` from `messages` / `man
 
 **Check:** exactly one source. **Unique** per source id. Default: one primary issue per item; Wave 1 API rejects a second issue for the same item.
 
-### 4.17 `job_runs.job_type`
+### 4.17 Job registry types
 
-Extend the CHECK (or equivalent) to include:
+The legacy SQLite CHECK includes:
 
 - `resolve_contacts`
 - `assign_projects`
 
-Existing types unchanged.
+On AWS/Floci these names belong in the typed registry in [aws-deployment.md §4.4](aws-deployment.md#44-job-contract-keys-and-registry), with bounded chunks and durable cursors; there is no hosted relational `job_runs` CHECK.
 
 ---
 
@@ -500,7 +500,7 @@ After `sync` succeeds for an account, enqueue (or inline for tests):
 1. `resolve_contacts`
 2. `assign_projects`
 
-Same `run_id` chain or child runs with `account_id` set. Failures must not roll back stored messages (PRD: evidence survives AI/job failure). Retry via existing Asynq/`job_runs` behaviour.
+Use child run IDs in one deterministic chain with `account_id` set. Failures must not roll back stored messages (PRD: evidence survives AI/job failure). Hosted retries use DynamoDB revision/attempt fencing and each registered step’s idempotency policy, not Asynq.
 
 Do not mix two `account_id`s in one LLM call if 1d suggestions are added.
 

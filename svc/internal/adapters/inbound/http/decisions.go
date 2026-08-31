@@ -56,13 +56,13 @@ func (h *Handlers) createProjectDecision(w http.ResponseWriter, r *http.Request)
 		return
 	}
 	var body struct {
-		Statement           string `json:"statement"`
-		Confirm             bool   `json:"confirm"`
-		IssueID             *string `json:"issue_id"`
-		AssigneeUserID      *string `json:"assignee_user_id"`
-		AssigneeContactID   *string `json:"assignee_contact_id"`
+		Statement            string  `json:"statement"`
+		Confirm              bool    `json:"confirm"`
+		IssueID              *string `json:"issue_id"`
+		AssigneeUserID       *string `json:"assignee_user_id"`
+		AssigneeContactID    *string `json:"assignee_contact_id"`
 		SupersedesDecisionID *string `json:"supersedes_decision_id"`
-		Evidence            []struct {
+		Evidence             []struct {
 			MessageID    *string `json:"message_id"`
 			ManualItemID *string `json:"manual_item_id"`
 		} `json:"evidence"`

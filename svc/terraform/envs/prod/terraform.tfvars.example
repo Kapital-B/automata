@@ -1,0 +1,11 @@
+go_arch             = "amd64"
+lambda_architecture = "x86_64"
+
+# Public client IDs only. Secrets (encryption key, JWT, OAuth client secrets)
+# are created by Terraform as empty Secrets Manager entries and must be
+# populated manually after apply — see terraform output secret_names.
+ms_client_id     = "REPLACE_ME"
+google_client_id = ""
+
+slack_mode      = "oauth"
+slack_client_id = ""

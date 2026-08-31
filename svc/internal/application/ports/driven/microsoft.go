@@ -52,6 +52,7 @@ type GraphRecipient struct {
 
 type GraphDeltaResult struct {
 	Messages  []GraphMessage
+	NextLink  string
 	DeltaLink string
 }
 

@@ -1,0 +1,4 @@
+bucket         = "REPLACE_ME_AUTOMATA_DEV_STATE_BUCKET"
+key            = "dev/automata_web.tfstate"
+region         = "eu-west-2"
+dynamodb_table = "REPLACE_ME_AUTOMATA_WEB_DEV_LOCK_TABLE"

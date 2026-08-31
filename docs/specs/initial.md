@@ -2,7 +2,7 @@
 
 **Status:** Draft  
 **Companion PRD:** [docs/prds/initial.md](../prds/initial.md)  
-**Related addenda:** [Redis, Asynq, and the job runner](addendum-redis-asynq-jobs.md) · [Project correspondence Wave 1](addendum-project-correspondence-wave1.md)  
+**Related addenda:** [AWS deployment (Heimdall pattern)](aws-deployment.md) · [Aurora DSQL](addendum-aurora-dsql.md) · [Redis/Asynq legacy implementation](addendum-redis-asynq-jobs.md) · [Project correspondence Wave 1](addendum-project-correspondence-wave1.md)  
 **Last updated:** 2026-04-25 (monorepo `svc/`/`web/`, Go backend, Phase 1 API-only)
 
 This document specifies architecture, data model, integrations, APIs, and operational behavior. The **PRD** remains the source of product intent; this document is the source of **implementation invariants** (especially **multi-account provenance**).
@@ -57,7 +57,7 @@ The repository root has **two top-level directories**:
 Every persistent record that represents **user data**, **derived intelligence**, or **side effects** **must** include:
 
 - **`account_id`**: UUID (or stable surrogate) referencing `accounts.id`, **except** entities that are explicitly global (see below).
-- Where the row is **produced by automation**, **`run_id`** (nullable FK to `job_runs`) **should** be set so operators can trace “which execution wrote this.”
+- Where the row is **produced by automation**, **`run_id`** should be set so operators can trace “which execution wrote this.” It may be an FK to local relational `job_runs`; on AWS/Floci it is a UUID provenance value without an FK because run state is in DynamoDB.
 
 **Global entities** (no `account_id`): user-level settings, global category **definitions** (the vocabulary), and **forward_allowlist** entries if shared across accounts (optional; see [§4](#4-data-model)). **Every** message, category **assignment**, summary, draft, forward audit, and provider token **must** be account-scoped.
 
@@ -126,7 +126,7 @@ The same **Microsoft Graph** APIs apply to **work or school** mailboxes (Entra I
   - **`https://login.microsoftonline.com/consumers`** — **personal** Microsoft account only;
   - **`https://login.microsoftonline.com/common`** — user may pick work or personal; use only if the product exposes a single “any Microsoft” button and the app registration supports both.
 
-**`POST /api/accounts` body** (see [§6](#6-http-api-fastapi)) must include `ms_account_kind` with values **`work`** (use `organizations` authority) or **`personal`** (use `consumers` authority). Persist `ms_account_kind` on `accounts` (see [§4.2](#42-accounts)) for UI and support. **Graph** resource and `me` are unchanged; tokens for both paths access mail via the same API surface.
+**`POST /api/accounts` body** (see [§6](#6-http-api-go-service-in-svc)) must include `ms_account_kind` with values **`work`** (use `organizations` authority) or **`personal`** (use `consumers` authority). Persist `ms_account_kind` on `accounts` (see [§4.2](#42-accounts)) for UI and support. **Graph** resource and `me` are unchanged; tokens for both paths access mail via the same API surface.
 
 - **Scopes (initial):** identical for work and personal:
   - `https://graph.microsoft.com/Mail.Read`
@@ -231,21 +231,23 @@ Global vocabulary: `id`, `slug` (e.g. `important`, `spam`, `finance`, `other`), 
 | `category_id` | UUID FK | |
 | `source`      | enum | `llm` \| `rule` \| `user` |
 | `confidence`  | float nullable | |
-| `run_id`      | UUID FK nullable | |
+| `run_id`      | UUID provenance nullable | No hosted FK to DynamoDB run state |
 
 **Invariant:** `message_categories.account_id` = `messages.account_id` for the same `message_id` (enforce in app or trigger).
 
 ### 4.7 `job_runs`
 
+This table is the logical/public run contract and the legacy SQLite representation. On AWS and the Floci parity path, [aws-deployment.md §4](aws-deployment.md#4-job-rearchitecture-heimdall-dynamodb-loop) maps it to DynamoDB with the same public status/timestamp vocabulary. All `run_id` FKs in this document become UUID provenance columns without hosted relational FKs.
+
 | Column         | Type | Notes |
 | -------------- | ---- | ----- |
 | `id`           | UUID PK | |
 | `account_id`   | UUID FK nullable | null = “all accounts” job only if defined; prefer **per-account** runs for traceability |
-| `job_type`     | enum | `sync` \| `summarize` \| `categorize` \| `forward_rules` \| `draft_suggest` |
+| `job_type`     | enum | `sync` \| `sync_slack` \| `categorize` \| `summarize` \| `draft_suggest` \| `forward_rules` \| `resolve_contacts` \| `assign_projects` \| `interpret_project` \| `reconcile_project` \| `project_ai`; AWS registry is authoritative |
 | `trigger`      | enum | `schedule` \| `api` |
 | `status`       | enum | `pending` \| `running` \| `success` \| `failed` \| `cancelled` |
 | `time_window_start` / `end` | timestamptz nullable | for summarize |
-| `started_at` / `finished_at` | timestamptz | |
+| `started_at` / `finished_at` | timestamptz nullable | Pending runs have no `started_at`; non-terminal runs have no `finished_at` |
 | `error_message` | text nullable | |
 | `meta_json`   | jsonb | model name, request counts, etc. |
 
@@ -255,7 +257,7 @@ Global vocabulary: `id`, `slug` (e.g. `important`, `spam`, `finance`, `other`), 
 | ------------- | ---- | ----- |
 | `id`          | UUID PK | |
 | `account_id`  | UUID FK | |
-| `run_id`      | UUID FK | |
+| `run_id`      | UUID provenance | No hosted FK to DynamoDB run state |
 | `generated_at`| timestamptz | |
 | `window_start` / `window_end` | timestamptz | |
 | `payload_json`| jsonb | **Structured** summary (action items, FYI, per-message refs) |
@@ -269,7 +271,7 @@ Global vocabulary: `id`, `slug` (e.g. `important`, `spam`, `finance`, `other`), 
 | ------------ | ---- | ----- |
 | `id`         | UUID PK | |
 | `account_id` | UUID FK | |
-| `run_id`     | UUID FK | |
+| `run_id`     | UUID provenance | No hosted FK to DynamoDB run state |
 | `step`       | text | e.g. `categorize_batch_3` |
 | `input_hash` | text | optional dedupe |
 | `output_json`| jsonb | parsed JSON; **no secrets** |
@@ -302,12 +304,12 @@ Global vocabulary: `id`, `slug` (e.g. `important`, `spam`, `finance`, `other`), 
 | `account_id`  | UUID FK | |
 | `message_id`  | UUID FK | |
 | `rule_id`     | UUID FK | |
-| `status`      | enum | `sent` \| `failed` \| `skipped_not_allowed` |
+| `status`      | enum | `sent` \| `rejected` \| `unknown` \| `failed` \| `skipped_not_allowed` |
 | `detail`      | text nullable | error or skip reason |
-| `run_id`      | UUID FK | |
+| `run_id`      | UUID provenance | No hosted FK to DynamoDB run state |
 | `created_at`  | timestamptz | |
 
-**Idempotency:** unique `(message_id, rule_id)` or store last result only—product choice; avoid double-send.
+**Idempotency:** unique `(message_id, rule_id)` and upsert the latest durable outcome. AWS forwarding uses the at-most-once effect ledger in [aws-deployment.md §4.4.3](aws-deployment.md#443-irreversible-effects): `unknown` means delivery may have happened and must not be retried automatically; audit repair never calls Graph.
 
 ### 4.13 `drafts` (in-app)
 
@@ -316,11 +318,13 @@ Global vocabulary: `id`, `slug` (e.g. `important`, `spam`, `finance`, `other`), 
 | `id`          | UUID PK | |
 | `account_id`  | UUID FK | **Provenance** |
 | `message_id`  | UUID FK | target thread |
-| `run_id`      | UUID FK nullable | |
+| `run_id`      | UUID provenance nullable | No hosted FK to DynamoDB run state |
 | `body_text`   | text | |
 | `status`      | enum | `suggested` \| `edited` \| `discarded` |
 | `context_json` | jsonb nullable | **Future:** per-account context bundle; **never** mix two accounts in one object |
 | `created_at` / `updated_at` | timestamptz | |
+
+**Automation idempotency:** generated drafts use unique `(run_id, message_id)` so replaying one `draft_suggest` invocation upserts rather than creates a duplicate.
 
 ### 4.14 `send_attempts`
 
@@ -455,8 +459,8 @@ The **`svc/`** process exposes the routes below (for example via **chi**, **Echo
 
 ## 7. Scheduler and job runner
 
-- **In-process** scheduling in Go (for example `robfig/cron` or a simple **goroutine + ticker** for v1), **or** a **separate worker binary** under `svc/cmd/worker` with **Redis** / queue if isolation is required. For **Redis + [Asynq](https://github.com/hibiken/asynq)** (queues, concurrency, observability, real-time push pattern), see the **[addendum: Redis, Asynq, and the job runner](addendum-redis-asynq-jobs.md)**. Minimum behavior:
-  - **Nightly (per account):** `sync` → `categorize` (if separate) → `summarize` → `forward_rules` (if enabled).
+- **Legacy local implementation:** in-process scheduling or `cmd/worker` with Redis/Asynq is documented in the [Redis/Asynq addendum](addendum-redis-asynq-jobs.md). **Target AWS/Floci implementation:** EventBridge scheduler + fenced DynamoDB Streams continuation loop in [aws-deployment.md §4](aws-deployment.md#4-job-rearchitecture-heimdall-dynamodb-loop). Minimum product behavior in either adapter:
+  - **Default nightly chain (per account):** `sync` → `resolve_contacts` → `categorize` → `assign_projects` → `summarize` → `forward_rules` (skip disabled steps; custom schedule chains must use registered types).
   - **Concurrency:** at most one **sync** per `account_id` at a time; **LLM** calls batched with concurrency limits to avoid OOM on LM Studio host.
 - **On-demand** endpoints enqueue the same `job_type` with `trigger=api`.
 
@@ -609,7 +613,7 @@ Phases are **sequential**: each phase produces something **shippable** and **tes
 
 ### 12.5 Phase 5 — Forward rules + allowlist
 
-**Delivers:** `forward_allowlist`, per-account `forward_rules` (conditions initially simple: `category_slug` or keyword; LLM `forward_hints` optional). **Enforce** allowlist on create and on execution. `forward_audit` for every attempt. **Graph** `POST /me/sendMail` (or forward) to deliver rule-based forwards only to allowlisted addresses.
+**Delivers:** `forward_allowlist`, per-account `forward_rules` (conditions initially simple: `category_slug` or keyword; LLM `forward_hints` optional). **Enforce** allowlist on create and on execution. One idempotent `forward_audit` per `(message_id, rule_id)`, including `unknown` for ambiguous provider outcomes. **Graph** `POST /me/sendMail` (or forward) delivers rule-based forwards only to allowlisted addresses; `unknown` is reconciled manually, never auto-retried.
 
 **Exit criteria:** Rule fires once per idempotency design; no send to a non-allowlisted address; audit row exists.
 
@@ -661,7 +665,7 @@ flowchart TB
 ## 13. Future extensions (non-blocking)
 
 - **Per-account** LLM and prompt profile in `accounts.llm_config_json`.
-- **Observability:** OpenTelemetry traces with `account_id` on spans (low cardinality). When using the **Asynq** job runner, apply the same tracing and structured-log fields for **`run_id`** and **`job_type`** as described in **[addendum: Redis, Asynq, and the job runner](addendum-redis-asynq-jobs.md#8-logging-and-tracing)**.
+- **Observability:** OpenTelemetry traces with `account_id` on spans (low cardinality). All job adapters include structured **`run_id`**, **`attempt_id`**, **`account_id`**, and **`job_type`** fields; hosted alarm/log requirements are in [aws-deployment.md §6.8](aws-deployment.md#68-backup-retention-and-observability).
 - Generic **IMAP** / other providers as further connectors (lower priority unless required).
 
 ### 13.1 Planned phase: Google Workspace (work mail)

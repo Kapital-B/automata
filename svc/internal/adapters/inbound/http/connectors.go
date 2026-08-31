@@ -181,7 +181,7 @@ func (h *Handlers) createConnectorBinding(w http.ResponseWriter, r *http.Request
 }
 
 func (h *Handlers) syncConnector(w http.ResponseWriter, r *http.Request) {
-	if h.ConnectorSvc == nil || h.JobRuns == nil {
+	if h.ConnectorSvc == nil {
 		writeJSON(w, http.StatusServiceUnavailable, map[string]string{"error": "connector sync not configured"})
 		return
 	}
@@ -191,7 +191,7 @@ func (h *Handlers) syncConnector(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	userID := userIDOrEmpty(r)
-	if h.JobQueue == nil {
+	if h.JobsInline {
 		result, err := h.ConnectorSvc.Sync(r.Context(), userID, connectorAccountID)
 		if err != nil {
 			if errors.Is(err, appconnectors.ErrNotFound) {
@@ -221,6 +221,27 @@ func (h *Handlers) syncConnector(w http.ResponseWriter, r *http.Request) {
 	}
 	if !found {
 		writeJSON(w, http.StatusNotFound, map[string]string{"error": "not found"})
+		return
+	}
+	if h.JobEnqueuer != nil {
+		job, err := h.JobEnqueuer.Enqueue(r.Context(), driven.CreateJobInput{
+			JobType:     "sync_slack",
+			UserID:      userID,
+			TriggerKind: driven.JobTriggerAPI,
+			Payload: driven.JobPayload{
+				ConnectorAccountID: &connectorAccountID,
+			},
+			Now: time.Now().UTC(),
+		})
+		if err != nil {
+			writeJSON(w, http.StatusBadRequest, map[string]string{"error": err.Error()})
+			return
+		}
+		writeAcceptedJob(w, job.ID)
+		return
+	}
+	if h.JobQueue == nil || h.JobRuns == nil {
+		writeJSON(w, http.StatusServiceUnavailable, map[string]string{"error": "connector sync not configured"})
 		return
 	}
 	runID := uuid.New()

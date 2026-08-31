@@ -8,12 +8,12 @@ import (
 	"testing"
 	"time"
 
-	appaccounts "github.com/Kapital-B/automata/svc/internal/application/accounts"
-	appmessages "github.com/Kapital-B/automata/svc/internal/application/messages"
-	"github.com/Kapital-B/automata/svc/internal/application/auth"
 	"github.com/Kapital-B/automata/svc/internal/adapters/outbound/microsoft"
 	"github.com/Kapital-B/automata/svc/internal/adapters/outbound/persistence/sqlite"
 	"github.com/Kapital-B/automata/svc/internal/adapters/outbound/security"
+	appaccounts "github.com/Kapital-B/automata/svc/internal/application/accounts"
+	"github.com/Kapital-B/automata/svc/internal/application/auth"
+	appmessages "github.com/Kapital-B/automata/svc/internal/application/messages"
 	"github.com/google/uuid"
 	_ "modernc.org/sqlite"
 )

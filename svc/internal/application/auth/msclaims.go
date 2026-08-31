@@ -17,11 +17,11 @@ func parseMSAccessTokenClaims(jwt string) (oid, email string, err error) {
 		return "", "", err
 	}
 	var c struct {
-		OID                  string `json:"oid"`
-		Sub                  string `json:"sub"`
-		Email                string `json:"email"`
-		PreferredUsername    string `json:"preferred_username"`
-		UPN                  string `json:"upn"`
+		OID               string `json:"oid"`
+		Sub               string `json:"sub"`
+		Email             string `json:"email"`
+		PreferredUsername string `json:"preferred_username"`
+		UPN               string `json:"upn"`
 	}
 	if err := json.Unmarshal(raw, &c); err != nil {
 		return "", "", err

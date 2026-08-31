@@ -15,7 +15,7 @@ import (
 )
 
 var (
-	ErrNotFound            = errors.New("not found")
+	ErrNotFound          = errors.New("not found")
 	ErrInvalidSubjectKey = errors.New("invalid subject_key")
 	ErrInvalidStatus     = errors.New("invalid status")
 	ErrInvalidEvidence   = errors.New("invalid evidence ref")

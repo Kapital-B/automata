@@ -20,6 +20,10 @@ type OpenAIClient struct {
 }
 
 func (c *OpenAIClient) ChatCompletion(ctx context.Context, messages []driven.LLMMessage) (*driven.LLMResponse, error) {
+	return c.ChatCompletionWithOptions(ctx, messages, driven.LLMRequestOptions{})
+}
+
+func (c *OpenAIClient) ChatCompletionWithOptions(ctx context.Context, messages []driven.LLMMessage, opts driven.LLMRequestOptions) (*driven.LLMResponse, error) {
 	if c == nil || c.BaseURL == "" || c.Model == "" {
 		return nil, fmt.Errorf("llm not configured")
 	}
@@ -28,11 +32,19 @@ func (c *OpenAIClient) ChatCompletion(ctx context.Context, messages []driven.LLM
 		Content string `json:"content"`
 	}
 	type reqBody struct {
-		Model       string   `json:"model"`
-		Temperature float64  `json:"temperature"`
-		Messages    []reqMsg `json:"messages"`
+		Model           string   `json:"model"`
+		Temperature     float64  `json:"temperature"`
+		MaxTokens       int      `json:"max_tokens,omitempty"`
+		ReasoningEffort string   `json:"reasoning_effort,omitempty"`
+		Messages        []reqMsg `json:"messages"`
 	}
 	payload := reqBody{Model: c.Model, Temperature: 0, Messages: make([]reqMsg, 0, len(messages))}
+	if opts.MaxOutputTokens > 0 {
+		payload.MaxTokens = opts.MaxOutputTokens
+	}
+	if strings.TrimSpace(opts.ReasoningHint) != "" {
+		payload.ReasoningEffort = strings.TrimSpace(opts.ReasoningHint)
+	}
 	for _, m := range messages {
 		payload.Messages = append(payload.Messages, reqMsg{Role: m.Role, Content: m.Content})
 	}
