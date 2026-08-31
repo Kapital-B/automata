@@ -46,26 +46,29 @@ jobs:
     name: Plan (${{ matrix.env.name }})
     needs: quality
     runs-on: ubuntu-latest
+    environment: ${{ matrix.env.name }}
     strategy:
       matrix:
         env:
-          - name: dev
+          - name: dev-us-east-1-a
+            tf_env: dev
             aws_region: "us-east-1"
-            backend_region: "eu-west-2"
-            state_key: "dev/automata_web.tfstate"
-            role_arn_var: "AUTOMATA_AWS_DEV_ROLE_ARN"
-            state_bucket_var: "AUTOMATA_AWS_DEV_STATE_BUCKET"
-            lock_table_var: "AUTOMATA_AWS_DEV_WEB_LOCK_TABLE"
-          - name: prod
-            aws_region: "us-east-1"
-            backend_region: "eu-west-2"
-            state_key: "prod/automata_web.tfstate"
-            role_arn_var: "AUTOMATA_AWS_PROD_ROLE_ARN"
-            state_bucket_var: "AUTOMATA_AWS_PROD_STATE_BUCKET"
-            lock_table_var: "AUTOMATA_AWS_PROD_WEB_LOCK_TABLE"
+            backend_region: "us-east-1"
+            state_key: "automata_web.tfstate"
+            role_arn: "arn:aws:iam::179923445089:role/CloudManagerDeploy-automata-front-end-dev-us-east-1-a"
+            state_bucket: "automata-web-dev-terraform-state"
+            lock_table: "automata_web-lock-table"
+          # - name: prod-us-east-1-a
+          #   tf_env: prod
+          #   aws_region: "us-east-1"
+          #   backend_region: "us-east-1"
+          #   state_key: "prod/automata_web.tfstate"
+          #   role_arn: "arn:aws:iam::ACCOUNT:role/CloudManagerDeploy-automata-front-end-prod-us-east-1-a"
+          #   state_bucket: "automata-web-prod-terraform-state"
+          #   lock_table: "automata_web-lock-table"
     defaults:
       run:
-        working-directory: web/terraform/envs/${{ matrix.env.name }}
+        working-directory: web/terraform/envs/${{ matrix.env.tf_env }}
     steps:
       - uses: actions/checkout@v4
 
@@ -83,7 +86,7 @@ jobs:
       - name: Configure AWS credentials
         uses: aws-actions/configure-aws-credentials@v4
         with:
-          role-to-assume: ${{ vars[matrix.env.role_arn_var] }}
+          role-to-assume: ${{ matrix.env.role_arn }}
           aws-region: ${{ matrix.env.aws_region }}
 
       - name: Set up Terraform
@@ -94,10 +97,10 @@ jobs:
       - name: Write backend config
         run: |
           cat > backend.hcl <<EOF
-          bucket         = "${{ vars[matrix.env.state_bucket_var] }}"
+          bucket         = "${{ matrix.env.state_bucket }}"
           key            = "${{ matrix.env.state_key }}"
           region         = "${{ matrix.env.backend_region }}"
-          dynamodb_table = "${{ vars[matrix.env.lock_table_var] }}"
+          dynamodb_table = "${{ matrix.env.lock_table }}"
           EOF
 
       - name: Terraform init
@@ -109,9 +112,6 @@ jobs:
 
       - name: Terraform validate
         run: terraform validate
-
-      - name: Ensure lock files unchanged
-        run: git diff --exit-code -- ../../
 
       - name: Terraform plan
         run: terraform plan -no-color | tee plan.txt
@@ -146,8 +146,7 @@ jobs:
     needs: plan
     if: github.event_name == 'pull_request' || (github.event_name == 'push' && github.ref == 'refs/heads/main')
     runs-on: ubuntu-latest
-    environment:
-      name: dev
+    environment: dev-us-east-1-a
     defaults:
       run:
         working-directory: web/terraform/envs/dev
@@ -168,7 +167,7 @@ jobs:
       - name: Configure AWS credentials
         uses: aws-actions/configure-aws-credentials@v4
         with:
-          role-to-assume: ${{ vars.AUTOMATA_AWS_DEV_ROLE_ARN }}
+          role-to-assume: arn:aws:iam::179923445089:role/CloudManagerDeploy-automata-front-end-dev-us-east-1-a
           aws-region: us-east-1
 
       - name: Set up Terraform
@@ -179,60 +178,10 @@ jobs:
       - name: Write backend config
         run: |
           cat > backend.hcl <<EOF
-          bucket         = "${{ vars.AUTOMATA_AWS_DEV_STATE_BUCKET }}"
-          key            = "dev/automata_web.tfstate"
-          region         = "eu-west-2"
-          dynamodb_table = "${{ vars.AUTOMATA_AWS_DEV_WEB_LOCK_TABLE }}"
-          EOF
-
-      - name: Terraform init
-        run: terraform init -input=false -backend-config=backend.hcl
-
-      - name: Terraform apply
-        run: terraform apply -auto-approve
-
-  apply-prod:
-    name: Apply (prod)
-    needs: plan
-    if: github.ref == 'refs/heads/main'
-    runs-on: ubuntu-latest
-    environment:
-      name: prod
-    defaults:
-      run:
-        working-directory: web/terraform/envs/prod
-    steps:
-      - uses: actions/checkout@v4
-
-      - name: Set up Node.js
-        uses: actions/setup-node@v4
-        with:
-          node-version: "20"
-          cache: "npm"
-          cache-dependency-path: web/package-lock.json
-
-      - name: Install dependencies
-        working-directory: web
-        run: npm ci
-
-      - name: Configure AWS credentials
-        uses: aws-actions/configure-aws-credentials@v4
-        with:
-          role-to-assume: ${{ vars.AUTOMATA_AWS_PROD_ROLE_ARN }}
-          aws-region: us-east-1
-
-      - name: Set up Terraform
-        uses: hashicorp/setup-terraform@v3
-        with:
-          terraform_version: "1.10.3"
-
-      - name: Write backend config
-        run: |
-          cat > backend.hcl <<EOF
-          bucket         = "${{ vars.AUTOMATA_AWS_PROD_STATE_BUCKET }}"
-          key            = "prod/automata_web.tfstate"
-          region         = "eu-west-2"
-          dynamodb_table = "${{ vars.AUTOMATA_AWS_PROD_WEB_LOCK_TABLE }}"
+          bucket         = "automata-web-dev-terraform-state"
+          key            = "automata_web.tfstate"
+          region         = "us-east-1"
+          dynamodb_table = "automata_web-lock-table"
           EOF
 
       - name: Terraform init

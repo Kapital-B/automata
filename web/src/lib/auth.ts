@@ -1336,7 +1336,8 @@ export async function listRuns(
   if (typeof filter.offset === "number") {
     params.set("offset", String(filter.offset));
   }
-  const suffix = params.size > 0 ? `?${params.toString()}` : "";
+  const query = params.toString();
+  const suffix = query ? `?${query}` : "";
   const { data, response } = await apiRequestWithResponse<JobRun[]>(`/api/runs${suffix}`, {
     headers: toAuthHeader(accessToken),
   });
@@ -1495,7 +1496,8 @@ export async function listMessages(accessToken: string, filter: ListMessagesFilt
   if (typeof filter.offset === "number") {
     params.set("offset", String(filter.offset));
   }
-  const suffix = params.size > 0 ? `?${params.toString()}` : "";
+  const query = params.toString();
+  const suffix = query ? `?${query}` : "";
   return apiRequest<MessageItem[]>(`/api/messages${suffix}`, {
     headers: toAuthHeader(accessToken),
   });

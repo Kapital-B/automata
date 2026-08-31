@@ -61,8 +61,8 @@ variable "auth_default_user_id" {
 }
 
 locals {
-  environment          = "prod"
-  aws_region           = "eu-west-2"
+  environment = "prod"
+  aws_region  = "eu-west-2"
   # API zone lives in this account; SPA apex zone lives in the frontend account.
   hosted_zone_name     = "api.automata.kapital-b.com"
   api_domain_name      = "api.automata.kapital-b.com"

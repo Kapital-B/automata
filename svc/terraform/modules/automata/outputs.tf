@@ -55,10 +55,10 @@ output "hosted_zone_name" {
 output "secret_names" {
   description = "Secrets Manager secret names created for hosted envs. Populate values manually after apply."
   value = local.enable_hosted ? {
-    encryption_key      = aws_secretsmanager_secret.encryption_key[0].name
-    jwt_secret          = aws_secretsmanager_secret.jwt_secret[0].name
-    job_cursor_secret   = aws_secretsmanager_secret.job_cursor_secret[0].name
-    ms_client_secret    = aws_secretsmanager_secret.ms_client_secret[0].name
+    encryption_key       = aws_secretsmanager_secret.encryption_key[0].name
+    jwt_secret           = aws_secretsmanager_secret.jwt_secret[0].name
+    job_cursor_secret    = aws_secretsmanager_secret.job_cursor_secret[0].name
+    ms_client_secret     = aws_secretsmanager_secret.ms_client_secret[0].name
     google_client_secret = aws_secretsmanager_secret.google_client_secret[0].name
     slack_client_secret  = aws_secretsmanager_secret.slack_client_secret[0].name
   } : {}

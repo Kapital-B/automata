@@ -1,0 +1,11 @@
+go_arch             = "amd64"
+lambda_architecture = "x86_64"
+
+# Public client IDs only. CI writes these from GitHub Environment variables:
+#   MS_CLIENT_ID (required), GOOGLE_CLIENT_ID, SLACK_CLIENT_ID, SLACK_MODE
+# Secrets Manager secret *values* are populated manually after apply.
+ms_client_id     = "REPLACE_ME"
+google_client_id = ""
+
+slack_mode      = "oauth"
+slack_client_id = ""

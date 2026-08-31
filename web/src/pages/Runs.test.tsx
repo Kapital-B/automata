@@ -113,7 +113,7 @@ describe("RunsPage", () => {
     renderPage();
 
     expect(await screen.findByRole("heading", { name: "Job runs" })).toBeInTheDocument();
-    expect(screen.getByText("1/2 processed")).toBeInTheDocument();
+    expect(await screen.findByText("1/2 processed")).toBeInTheDocument();
     expect(screen.getByText("4 drafts generated · 7 seen")).toBeInTheDocument();
     expect(screen.getByText("—")).toBeInTheDocument();
 

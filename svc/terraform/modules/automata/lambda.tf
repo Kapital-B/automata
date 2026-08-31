@@ -245,8 +245,8 @@ resource "null_resource" "build_bootstraps" {
     interpreter = ["bash", "-c"]
     command     = <<-EOT
       set -euo pipefail
-      ROOT="${path.module}/../../../"
-      OUT="${path.module}/.dist"
+      ROOT="${abspath("${path.module}/../../..")}"
+      OUT="${abspath(path.module)}/.dist"
       GOARCH="${local.lambda_go_arch}"
       rm -rf "$OUT"
       mkdir -p "$OUT/api" "$OUT/scheduler" "$OUT/worker" "$OUT/migrate"

@@ -66,19 +66,19 @@ locals {
   ]) : []
 
   hosted_secret_env = local.enable_hosted ? {
-    ENCRYPTION_KEY_SECRET_ID    = aws_secretsmanager_secret.encryption_key[0].name
-    JWT_SECRET_SECRET_ID        = aws_secretsmanager_secret.jwt_secret[0].name
-    JOB_CURSOR_SECRET_SECRET_ID = aws_secretsmanager_secret.job_cursor_secret[0].name
-    MS_CLIENT_SECRET_SECRET_ID  = aws_secretsmanager_secret.ms_client_secret[0].name
+    ENCRYPTION_KEY_SECRET_ID       = aws_secretsmanager_secret.encryption_key[0].name
+    JWT_SECRET_SECRET_ID           = aws_secretsmanager_secret.jwt_secret[0].name
+    JOB_CURSOR_SECRET_SECRET_ID    = aws_secretsmanager_secret.job_cursor_secret[0].name
+    MS_CLIENT_SECRET_SECRET_ID     = aws_secretsmanager_secret.ms_client_secret[0].name
     GOOGLE_CLIENT_SECRET_SECRET_ID = aws_secretsmanager_secret.google_client_secret[0].name
     SLACK_CLIENT_SECRET_SECRET_ID  = aws_secretsmanager_secret.slack_client_secret[0].name
   } : {}
 
   local_secret_env = local.enable_hosted ? {} : {
-    ENCRYPTION_KEY      = var.encryption_key
-    JWT_SECRET          = var.jwt_secret
-    JOB_CURSOR_SECRET   = var.job_cursor_secret
-    MS_CLIENT_SECRET    = var.ms_client_secret
+    ENCRYPTION_KEY       = var.encryption_key
+    JWT_SECRET           = var.jwt_secret
+    JOB_CURSOR_SECRET    = var.job_cursor_secret
+    MS_CLIENT_SECRET     = var.ms_client_secret
     GOOGLE_CLIENT_SECRET = var.google_client_secret
     SLACK_CLIENT_SECRET  = var.slack_client_secret
   }

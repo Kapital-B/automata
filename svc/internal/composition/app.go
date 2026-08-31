@@ -40,7 +40,6 @@ import (
 	awsconfig "github.com/aws/aws-sdk-go-v2/config"
 	"github.com/aws/aws-sdk-go-v2/service/dynamodb"
 	"github.com/go-chi/chi/v5"
-	"github.com/go-chi/cors"
 	"github.com/google/uuid"
 )
 
@@ -537,28 +536,12 @@ func (r *Runtime) buildServices(ctx context.Context) error {
 		JWTTTL:               r.Config.JWTTTL,
 		DefaultUserID:        r.Config.DefaultUserID,
 		JobQueue:             r.QueueClient,
+		CORSOrigins:          r.Config.CORSOrigins,
 	}
 	r.Handlers = h
 	router := h.Routes()
 	if chiRouter, ok := router.(*chi.Mux); ok {
 		r.ChiRouter = chiRouter
-		if len(r.Config.CORSOrigins) > 0 {
-			chiRouter.Use(cors.New(cors.Options{
-				AllowedOrigins:   r.Config.CORSOrigins,
-				AllowedMethods:   []string{"GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"},
-				AllowedHeaders:   []string{"Accept", "Content-Type", "X-Request-ID", "Authorization"},
-				ExposedHeaders:   []string{"X-Next-Cursor"},
-				AllowCredentials: false,
-			}).Handler)
-		}
-	} else if len(r.Config.CORSOrigins) > 0 {
-		router = cors.New(cors.Options{
-			AllowedOrigins:   r.Config.CORSOrigins,
-			AllowedMethods:   []string{"GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"},
-			AllowedHeaders:   []string{"Accept", "Content-Type", "X-Request-ID", "Authorization"},
-			ExposedHeaders:   []string{"X-Next-Cursor"},
-			AllowCredentials: false,
-		}).Handler(router)
 	}
 	r.Router = router
 	return nil

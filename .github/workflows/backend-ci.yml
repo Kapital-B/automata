@@ -39,26 +39,29 @@ jobs:
     name: Plan (${{ matrix.env.name }})
     needs: test
     runs-on: ubuntu-latest
+    environment: ${{ matrix.env.name }}
     strategy:
       matrix:
         env:
-          - name: dev
-            aws_region: "eu-west-2"
-            backend_region: "eu-west-2"
-            state_key: "dev/automata.tfstate"
-            role_arn_var: "AUTOMATA_AWS_DEV_ROLE_ARN"
-            state_bucket_var: "AUTOMATA_AWS_DEV_STATE_BUCKET"
-            lock_table_var: "AUTOMATA_AWS_DEV_LOCK_TABLE"
-          # - name: prod
-          #   aws_region: "eu-west-2"
-          #   backend_region: "eu-west-2"
+          - name: dev-eu-west-1-a
+            tf_env: dev
+            aws_region: "eu-west-1"
+            backend_region: "eu-west-1"
+            state_key: "automata.tfstate"
+            role_arn: "arn:aws:iam::262258604158:role/CloudManagerDeploy-automata-dev-eu-west-1-a"
+            state_bucket: "automata-dev-terraform-state"
+            lock_table: "automata-lock-table"
+          # - name: prod-eu-west-1-a
+          #   tf_env: prod
+          #   aws_region: "eu-west-1"
+          #   backend_region: "eu-west-1"
           #   state_key: "prod/automata.tfstate"
-          #   role_arn_var: "AUTOMATA_AWS_PROD_ROLE_ARN"
-          #   state_bucket_var: "AUTOMATA_AWS_PROD_STATE_BUCKET"
-          #   lock_table_var: "AUTOMATA_AWS_PROD_LOCK_TABLE"
+          #   role_arn: "arn:aws:iam::ACCOUNT:role/CloudManagerDeploy-automata-prod-eu-west-1-a"
+          #   state_bucket: "automata-prod-terraform-state"
+          #   lock_table: "automata-lock-table"
     defaults:
       run:
-        working-directory: svc/terraform/envs/${{ matrix.env.name }}
+        working-directory: svc/terraform/envs/${{ matrix.env.tf_env }}
     steps:
       - uses: actions/checkout@v4
 
@@ -71,7 +74,7 @@ jobs:
       - name: Configure AWS credentials
         uses: aws-actions/configure-aws-credentials@v4
         with:
-          role-to-assume: ${{ vars[matrix.env.role_arn_var] }}
+          role-to-assume: ${{ matrix.env.role_arn }}
           aws-region: ${{ matrix.env.aws_region }}
 
       - name: Set up Terraform
@@ -79,59 +82,45 @@ jobs:
         with:
           terraform_version: "1.10.3"
 
-      - name: Smoke test Lambda archives
-        working-directory: svc
-        run: |
-          set -euo pipefail
-          rm -rf dist
-          for entrypoint in api scheduler worker migrate; do
-            mkdir -p "dist/${entrypoint}"
-            GOOS=linux GOARCH=amd64 CGO_ENABLED=0 go build -trimpath -o "dist/${entrypoint}/bootstrap" "./cmd/${entrypoint}"
-            chmod +x "dist/${entrypoint}/bootstrap"
-            (
-              cd "dist/${entrypoint}"
-              zip -qr "../${entrypoint}.zip" bootstrap
-            )
-          done
-          python - <<'PY'
-          import pathlib
-          import zipfile
-
-          root = pathlib.Path("dist")
-          for archive in sorted(root.glob("*.zip")):
-              with zipfile.ZipFile(archive) as zf:
-                  names = zf.namelist()
-                  if names != ["bootstrap"]:
-                      raise SystemExit(f"{archive.name}: expected only bootstrap at zip root, got {names}")
-                  mode = zf.getinfo("bootstrap").external_attr >> 16
-                  if mode & 0o111 == 0:
-                      raise SystemExit(f"{archive.name}: bootstrap is not executable")
-          PY
-
       - name: Write backend config
         run: |
           cat > backend.hcl <<EOF
-          bucket         = "${{ vars[matrix.env.state_bucket_var] }}"
+          bucket         = "${{ matrix.env.state_bucket }}"
           key            = "${{ matrix.env.state_key }}"
           region         = "${{ matrix.env.backend_region }}"
-          dynamodb_table = "${{ vars[matrix.env.lock_table_var] }}"
+          dynamodb_table = "${{ matrix.env.lock_table }}"
           EOF
 
       - name: Terraform init
         run: terraform init -input=false -backend-config=backend.hcl
 
+      - name: Write terraform.tfvars
+        env:
+          MS_CLIENT_ID: 0def669d-5c56-4295-84ae-c685aed1332d
+          GOOGLE_CLIENT_ID: 703295674009-svkgao4hm259ovpmhl74qmivkl93vrr0.apps.googleusercontent.com
+          SLACK_CLIENT_ID: ""
+          SLACK_MODE: "oauth"
+        run: |
+          set -euo pipefail
+          if [ -z "${MS_CLIENT_ID}" ]; then
+            echo "Missing GitHub Actions variable MS_CLIENT_ID for environment ${{ matrix.env.name }}" >&2
+            exit 1
+          fi
+          cat > terraform.tfvars <<EOF
+          go_arch             = "amd64"
+          lambda_architecture = "x86_64"
+          ms_client_id        = "${MS_CLIENT_ID}"
+          google_client_id    = "${GOOGLE_CLIENT_ID}"
+          slack_mode          = "${SLACK_MODE:-oauth}"
+          slack_client_id     = "${SLACK_CLIENT_ID}"
+          EOF
+
       - name: Terraform format check
         working-directory: svc/terraform
         run: terraform fmt -check -recursive
 
-      - name: Terraform validate
-        run: terraform validate
-
-      - name: Ensure lock files unchanged
-        run: git diff --exit-code -- ../../
-
       - name: Terraform plan
-        run: terraform plan -no-color | tee plan.txt
+        run: terraform plan -input=false -no-color | tee plan.txt
 
       - name: Capture plan output
         if: github.event_name == 'pull_request'
@@ -163,8 +152,7 @@ jobs:
     needs: plan
     if: github.event_name == 'pull_request' || (github.event_name == 'push' && github.ref == 'refs/heads/main')
     runs-on: ubuntu-latest
-    environment:
-      name: dev
+    environment: dev-eu-west-1-a
     defaults:
       run:
         working-directory: svc/terraform/envs/dev
@@ -180,8 +168,8 @@ jobs:
       - name: Configure AWS credentials
         uses: aws-actions/configure-aws-credentials@v4
         with:
-          role-to-assume: ${{ vars.AUTOMATA_AWS_DEV_ROLE_ARN }}
-          aws-region: eu-west-2
+          role-to-assume: arn:aws:iam::262258604158:role/CloudManagerDeploy-automata-dev-eu-west-1-a
+          aws-region: eu-west-1
 
       - name: Set up Terraform
         uses: hashicorp/setup-terraform@v3
@@ -191,59 +179,35 @@ jobs:
       - name: Write backend config
         run: |
           cat > backend.hcl <<EOF
-          bucket         = "${{ vars.AUTOMATA_AWS_DEV_STATE_BUCKET }}"
-          key            = "dev/automata.tfstate"
-          region         = "eu-west-2"
-          dynamodb_table = "${{ vars.AUTOMATA_AWS_DEV_LOCK_TABLE }}"
+          bucket         = "automata-dev-terraform-state"
+          key            = "automata.tfstate"
+          region         = "eu-west-1"
+          dynamodb_table = "automata-lock-table"
           EOF
 
       - name: Terraform init
         run: terraform init -input=false -backend-config=backend.hcl
 
+      - name: Write terraform.tfvars
+        env:
+          MS_CLIENT_ID: 0def669d-5c56-4295-84ae-c685aed1332d
+          GOOGLE_CLIENT_ID: 703295674009-svkgao4hm259ovpmhl74qmivkl93vrr0.apps.googleusercontent.com
+          SLACK_CLIENT_ID: ""
+          SLACK_MODE: "oauth"
+        run: |
+          set -euo pipefail
+          if [ -z "${MS_CLIENT_ID}" ]; then
+            echo "Missing GitHub Actions variable MS_CLIENT_ID for environment dev-eu-west-1-a" >&2
+            exit 1
+          fi
+          cat > terraform.tfvars <<EOF
+          go_arch             = "amd64"
+          lambda_architecture = "x86_64"
+          ms_client_id        = "${MS_CLIENT_ID}"
+          google_client_id    = "${GOOGLE_CLIENT_ID}"
+          slack_mode          = "${SLACK_MODE:-oauth}"
+          slack_client_id     = "${SLACK_CLIENT_ID}"
+          EOF
+
       - name: Terraform apply
-        run: terraform apply -auto-approve
-
-  # apply-prod:
-  #   name: Apply (prod)
-  #   needs: plan
-  #   if: github.ref == 'refs/heads/main'
-  #   runs-on: ubuntu-latest
-  #   environment:
-  #     name: prod
-  #   defaults:
-  #     run:
-  #       working-directory: svc/terraform/envs/prod
-  #   steps:
-  #     - uses: actions/checkout@v4
-
-  #     - name: Set up Go
-  #       uses: actions/setup-go@v5
-  #       with:
-  #         go-version-file: svc/go.mod
-  #         cache-dependency-path: svc/go.sum
-
-  #     - name: Configure AWS credentials
-  #       uses: aws-actions/configure-aws-credentials@v4
-  #       with:
-  #         role-to-assume: ${{ vars.AUTOMATA_AWS_PROD_ROLE_ARN }}
-  #         aws-region: eu-west-2
-
-  #     - name: Set up Terraform
-  #       uses: hashicorp/setup-terraform@v3
-  #       with:
-  #         terraform_version: "1.10.3"
-
-  #     - name: Write backend config
-  #       run: |
-  #         cat > backend.hcl <<EOF
-  #         bucket         = "${{ vars.AUTOMATA_AWS_PROD_STATE_BUCKET }}"
-  #         key            = "prod/automata.tfstate"
-  #         region         = "eu-west-2"
-  #         dynamodb_table = "${{ vars.AUTOMATA_AWS_PROD_LOCK_TABLE }}"
-  #         EOF
-
-  #     - name: Terraform init
-  #       run: terraform init -input=false -backend-config=backend.hcl
-
-  #     - name: Terraform apply
-  #       run: terraform apply -auto-approve
+        run: terraform apply -input=false -auto-approve

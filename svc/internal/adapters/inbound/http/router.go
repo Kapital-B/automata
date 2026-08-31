@@ -31,6 +31,7 @@ import (
 	appreconcile "github.com/Kapital-B/automata/svc/internal/application/reconcile"
 	domainacc "github.com/Kapital-B/automata/svc/internal/domain/accounts"
 	"github.com/go-chi/chi/v5"
+	"github.com/go-chi/cors"
 	"github.com/google/uuid"
 )
 
@@ -82,10 +83,22 @@ type Handlers struct {
 	JWTTTL               time.Duration
 	DefaultUserID        uuid.UUID // dev fallback when no Bearer token
 	JobQueue             *asynqadapter.QueueClient
+	CORSOrigins          []string
 }
 
 func (h *Handlers) Routes() http.Handler {
 	r := chi.NewRouter()
+	// CORS must be registered before routes; chi ignores Use() after route registration.
+	if len(h.CORSOrigins) > 0 {
+		r.Use(cors.New(cors.Options{
+			AllowedOrigins:   h.CORSOrigins,
+			AllowedMethods:   []string{"GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"},
+			AllowedHeaders:   []string{"Accept", "Content-Type", "X-Request-ID", "Authorization"},
+			ExposedHeaders:   []string{"X-Next-Cursor"},
+			AllowCredentials: false,
+			MaxAge:           300,
+		}).Handler)
+	}
 	r.Use(requestIDMiddleware)
 	if h.Log != nil {
 		r.Use(requestLogMiddleware(h.Log))

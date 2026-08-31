@@ -27,8 +27,8 @@ variable "cloudfront_price_class" {
 }
 
 locals {
-  environment      = "dev"
-  aws_region       = "us-east-1"
+  environment = "dev"
+  aws_region  = "us-east-1"
   # SPA apex zone is created in this account; API zone is owned by the backend account.
   hosted_zone_name = "automata-dev.kapital-b.com"
   site_domain_name = "automata-dev.kapital-b.com"

@@ -58,12 +58,12 @@ locals {
       JOB_LEASE_SECONDS              = tostring(var.job_lease_seconds)
       JOB_PENDING_WAKE_AFTER_SECONDS = tostring(var.job_pending_wake_after_seconds)
       # AWS_REGION is reserved by Lambda and injected automatically; do not set it.
-      AWS_ENDPOINT                   = var.aws_endpoint
-      BEDROCK_MODEL_ID               = var.bedrock_model_id
-      BEDROCK_RUNTIME_ENDPOINT       = var.bedrock_runtime_endpoint
-      DSQL_CLUSTER_ENDPOINT          = local.dsql_endpoint
-      DSQL_REGION                    = local.enable_hosted ? var.aws_region : ""
-      DSQL_DATABASE_ROLE             = local.enable_hosted ? var.dsql_runtime_role : ""
+      AWS_ENDPOINT             = var.aws_endpoint
+      BEDROCK_MODEL_ID         = var.bedrock_model_id
+      BEDROCK_RUNTIME_ENDPOINT = var.bedrock_runtime_endpoint
+      DSQL_CLUSTER_ENDPOINT    = local.dsql_endpoint
+      DSQL_REGION              = local.enable_hosted ? var.aws_region : ""
+      DSQL_DATABASE_ROLE       = local.enable_hosted ? var.dsql_runtime_role : ""
     },
     local.local_secret_env,
     local.hosted_secret_env,
