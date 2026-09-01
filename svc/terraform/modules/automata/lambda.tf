@@ -80,26 +80,23 @@ resource "aws_iam_role_policy" "api" {
           ]
         }
       ],
-      local.enable_hosted ? [
-        {
-          Effect   = "Allow"
-          Action   = ["dsql:DbConnect"]
-          Resource = [aws_dsql_cluster.hosted[0].arn]
-        },
-        {
-          Effect = "Allow"
-          Action = ["bedrock:InvokeModel"]
-          Resource = [
-            "arn:${data.aws_partition.current.partition}:bedrock:${var.aws_region}::foundation-model/${local.foundation_model_id}",
-            "arn:${data.aws_partition.current.partition}:bedrock:${var.aws_region}:${data.aws_caller_identity.current.account_id}:inference-profile/${var.bedrock_model_id}"
-          ]
-        },
-        {
-          Effect   = "Allow"
-          Action   = ["secretsmanager:GetSecretValue"]
-          Resource = local.hosted_secret_arns
-        }
-      ] : []
+      local.enable_hosted ? concat(
+        [
+          {
+            Effect   = "Allow"
+            Action   = ["dsql:DbConnect"]
+            Resource = [aws_dsql_cluster.hosted[0].arn]
+          },
+        ],
+        local.bedrock_invoke_statements,
+        [
+          {
+            Effect   = "Allow"
+            Action   = ["secretsmanager:GetSecretValue"]
+            Resource = local.hosted_secret_arns
+          },
+        ]
+      ) : []
     )
   })
 }
@@ -185,26 +182,23 @@ resource "aws_iam_role_policy" "worker" {
           ]
         }
       ],
-      local.enable_hosted ? [
-        {
-          Effect   = "Allow"
-          Action   = ["dsql:DbConnect"]
-          Resource = [aws_dsql_cluster.hosted[0].arn]
-        },
-        {
-          Effect = "Allow"
-          Action = ["bedrock:InvokeModel"]
-          Resource = [
-            "arn:${data.aws_partition.current.partition}:bedrock:${var.aws_region}::foundation-model/${local.foundation_model_id}",
-            "arn:${data.aws_partition.current.partition}:bedrock:${var.aws_region}:${data.aws_caller_identity.current.account_id}:inference-profile/${var.bedrock_model_id}"
-          ]
-        },
-        {
-          Effect   = "Allow"
-          Action   = ["secretsmanager:GetSecretValue"]
-          Resource = local.hosted_secret_arns
-        }
-      ] : []
+      local.enable_hosted ? concat(
+        [
+          {
+            Effect   = "Allow"
+            Action   = ["dsql:DbConnect"]
+            Resource = [aws_dsql_cluster.hosted[0].arn]
+          },
+        ],
+        local.bedrock_invoke_statements,
+        [
+          {
+            Effect   = "Allow"
+            Action   = ["secretsmanager:GetSecretValue"]
+            Resource = local.hosted_secret_arns
+          },
+        ]
+      ) : []
     )
   })
 }
@@ -227,19 +221,19 @@ resource "aws_iam_role_policy" "migrate" {
 
 resource "null_resource" "build_bootstraps" {
   triggers = {
-    api_main       = filesha256("${path.module}/../../../cmd/api/main.go")
-    scheduler_main = filesha256("${path.module}/../../../cmd/scheduler/main.go")
-    worker_main    = filesha256("${path.module}/../../../cmd/worker/main.go")
+    api_main        = filesha256("${path.module}/../../../cmd/api/main.go")
+    scheduler_main  = filesha256("${path.module}/../../../cmd/scheduler/main.go")
+    worker_main     = filesha256("${path.module}/../../../cmd/worker/main.go")
     migrate_main    = filesha256("${path.module}/../../../cmd/migrate/main.go")
     migrate_pkg     = filesha256("${path.module}/../../../internal/adapters/outbound/persistence/migrate/migrate.go")
     migrate_runtime = filesha256("${path.module}/../../../internal/adapters/outbound/persistence/migrate/dsql_runtime.go")
     migrate_common  = filesha256("${path.module}/../../../internal/adapters/outbound/persistence/migrate/common/001_baseline.sql")
-    composition    = filesha256("${path.module}/../../../internal/composition/app.go")
-    factory        = filesha256("${path.module}/../../../internal/adapters/outbound/persistence/factory/factory.go")
-    factory_dsql   = filesha256("${path.module}/../../../internal/adapters/outbound/persistence/factory/dsql.go")
-    go_mod         = filesha256("${path.module}/../../../go.mod")
-    go_sum         = filesha256("${path.module}/../../../go.sum")
-    arch           = local.lambda_go_arch
+    composition     = filesha256("${path.module}/../../../internal/composition/app.go")
+    factory         = filesha256("${path.module}/../../../internal/adapters/outbound/persistence/factory/factory.go")
+    factory_dsql    = filesha256("${path.module}/../../../internal/adapters/outbound/persistence/factory/dsql.go")
+    go_mod          = filesha256("${path.module}/../../../go.mod")
+    go_sum          = filesha256("${path.module}/../../../go.sum")
+    arch            = local.lambda_go_arch
   }
 
   provisioner "local-exec" {
@@ -388,7 +382,10 @@ resource "aws_lambda_invocation" "run_migrations" {
 
   depends_on = [
     aws_lambda_function.migrate,
-    aws_cloudwatch_log_group.migrate
+    aws_cloudwatch_log_group.migrate,
+    aws_iam_role_policy.api,
+    aws_iam_role_policy.scheduler,
+    aws_iam_role_policy.worker,
   ]
 }
 

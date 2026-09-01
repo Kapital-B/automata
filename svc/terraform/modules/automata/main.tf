@@ -35,6 +35,47 @@ locals {
     var.bedrock_model_id
   )
 
+  # Geographic inference profiles (eu.*/us.*) route to foundation models in peer
+  # regions. IAM must allow those destination FM ARNs or Converse fails with 403
+  # when Bedrock picks a non-local region (e.g. eu-north-1 from eu-west-1).
+  bedrock_inference_profile_arn = "arn:${data.aws_partition.current.partition}:bedrock:${var.aws_region}:${data.aws_caller_identity.current.account_id}:inference-profile/${var.bedrock_model_id}"
+  bedrock_foundation_model_regions = (
+    startswith(var.bedrock_model_id, "eu.") ? [
+      "eu-central-1",
+      "eu-north-1",
+      "eu-south-1",
+      "eu-south-2",
+      "eu-west-1",
+      "eu-west-3",
+    ] :
+    startswith(var.bedrock_model_id, "us.") ? [
+      "us-east-1",
+      "us-east-2",
+      "us-west-2",
+    ] :
+    [var.aws_region]
+  )
+  bedrock_invoke_statements = [
+    {
+      Effect   = "Allow"
+      Action   = ["bedrock:InvokeModel", "bedrock:InvokeModelWithResponseStream"]
+      Resource = [local.bedrock_inference_profile_arn]
+    },
+    {
+      Effect = "Allow"
+      Action = ["bedrock:InvokeModel", "bedrock:InvokeModelWithResponseStream"]
+      Resource = [
+        for region in local.bedrock_foundation_model_regions :
+        "arn:${data.aws_partition.current.partition}:bedrock:${region}::foundation-model/${local.foundation_model_id}"
+      ]
+      Condition = {
+        StringEquals = {
+          "bedrock:InferenceProfileArn" = local.bedrock_inference_profile_arn
+        }
+      }
+    },
+  ]
+
   lambda_env = merge(
     {
       APP_PUBLIC_URL                 = local.effective_app_public_url
@@ -71,9 +112,9 @@ locals {
   )
 
   migrate_lambda_env = merge(local.lambda_env, {
-    DATABASE_URL                 = local.enable_hosted ? local.migrate_database_url : local.effective_database_url
-    DSQL_DATABASE_ROLE           = local.enable_hosted ? var.dsql_admin_role : ""
-    DSQL_RUNTIME_DATABASE_ROLE   = local.enable_hosted ? var.dsql_runtime_role : ""
-    DSQL_RUNTIME_IAM_ROLE_ARNS   = local.enable_hosted ? join(",", [aws_iam_role.api.arn, aws_iam_role.scheduler.arn, aws_iam_role.worker.arn]) : ""
+    DATABASE_URL               = local.enable_hosted ? local.migrate_database_url : local.effective_database_url
+    DSQL_DATABASE_ROLE         = local.enable_hosted ? var.dsql_admin_role : ""
+    DSQL_RUNTIME_DATABASE_ROLE = local.enable_hosted ? var.dsql_runtime_role : ""
+    DSQL_RUNTIME_IAM_ROLE_ARNS = local.enable_hosted ? join(",", [aws_iam_role.api.arn, aws_iam_role.scheduler.arn, aws_iam_role.worker.arn]) : ""
   })
 }

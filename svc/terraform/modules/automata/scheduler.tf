@@ -9,6 +9,9 @@ resource "aws_cloudwatch_event_target" "scheduler" {
   rule      = aws_cloudwatch_event_rule.scheduler.name
   target_id = "automata-scheduler"
   arn       = aws_lambda_function.scheduler.arn
+
+  # Avoid EventBridge ticks against a scheduler that started before DSQL IAM grants.
+  depends_on = [aws_lambda_invocation.run_migrations]
 }
 
 resource "aws_lambda_permission" "scheduler" {

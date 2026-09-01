@@ -17,8 +17,7 @@ import (
 )
 
 var (
-	workerOnce    sync.Once
-	workerInitErr error
+	workerMu      sync.Mutex
 	workerRuntime *composition.Runtime
 )
 
@@ -27,24 +26,8 @@ func main() {
 }
 
 func handle(ctx context.Context, event events.DynamoDBEvent) (events.DynamoDBEventResponse, error) {
-	workerOnce.Do(func() {
-		log := slog.New(slog.NewJSONHandler(os.Stdout, &slog.HandlerOptions{Level: slog.LevelInfo}))
-		cfg, err := configuration.Load()
-		if err != nil {
-			log.Error("worker init failed", "err", err)
-			workerInitErr = err
-			return
-		}
-		workerRuntime, err = composition.Build(ctx, log, cfg, composition.Options{
-			EnableJobStore: true,
-			LeaseOwner:     "worker",
-		})
-		if err != nil {
-			log.Error("worker init failed", "err", err)
-			workerInitErr = err
-		}
-	})
-	if workerInitErr != nil {
+	rt, err := ensureWorker(ctx)
+	if err != nil {
 		return events.DynamoDBEventResponse{}, errors.New("worker unavailable")
 	}
 	resp := events.DynamoDBEventResponse{
@@ -62,13 +45,38 @@ func handle(ctx context.Context, event events.DynamoDBEvent) (events.DynamoDBEve
 		if err != nil {
 			continue
 		}
-		if err := workerRuntime.Execution.HandleStreamRecord(ctx, id, time.Now().UTC()); err != nil && !errors.Is(err, driven.ErrJobConflict) {
+		if err := rt.Execution.HandleStreamRecord(ctx, id, time.Now().UTC()); err != nil && !errors.Is(err, driven.ErrJobConflict) {
 			resp.BatchItemFailures = append(resp.BatchItemFailures, events.DynamoDBBatchItemFailure{
 				ItemIdentifier: record.Change.SequenceNumber,
 			})
 		}
 	}
 	return resp, nil
+}
+
+func ensureWorker(ctx context.Context) (*composition.Runtime, error) {
+	workerMu.Lock()
+	defer workerMu.Unlock()
+	if workerRuntime != nil {
+		return workerRuntime, nil
+	}
+
+	log := slog.New(slog.NewJSONHandler(os.Stdout, &slog.HandlerOptions{Level: slog.LevelInfo}))
+	cfg, err := configuration.Load()
+	if err != nil {
+		log.Error("worker init failed", "err", err)
+		return nil, err
+	}
+	rt, err := composition.Build(ctx, log, cfg, composition.Options{
+		EnableJobStore: true,
+		LeaseOwner:     "worker",
+	})
+	if err != nil {
+		log.Error("worker init failed", "err", err)
+		return nil, err
+	}
+	workerRuntime = rt
+	return workerRuntime, nil
 }
 
 func shouldHandleRecord(record events.DynamoDBEventRecord) bool {

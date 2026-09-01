@@ -15,8 +15,7 @@ import (
 )
 
 var (
-	schedulerOnce    sync.Once
-	schedulerInitErr error
+	schedulerMu      sync.Mutex
 	schedulerRuntime *composition.Runtime
 )
 
@@ -25,28 +24,39 @@ func main() {
 }
 
 func handle(ctx context.Context, _ events.CloudWatchEvent) error {
-	schedulerOnce.Do(func() {
-		log := slog.New(slog.NewJSONHandler(os.Stdout, &slog.HandlerOptions{Level: slog.LevelInfo}))
-		cfg, err := configuration.Load()
-		if err != nil {
-			log.Error("scheduler init failed", "err", err)
-			schedulerInitErr = err
-			return
-		}
-		schedulerRuntime, err = composition.Build(ctx, log, cfg, composition.Options{
-			EnableJobStore: true,
-			LeaseOwner:     "scheduler",
-		})
-		if err != nil {
-			log.Error("scheduler init failed", "err", err)
-			schedulerInitErr = err
-		}
-	})
-	if schedulerInitErr != nil {
+	rt, err := ensureScheduler(ctx)
+	if err != nil {
 		return errors.New("scheduler unavailable")
 	}
-	if schedulerRuntime == nil || schedulerRuntime.Scheduler == nil {
+	if rt.Scheduler == nil {
 		return nil
 	}
-	return schedulerRuntime.Scheduler.Tick(ctx, time.Now().UTC())
+	return rt.Scheduler.Tick(ctx, time.Now().UTC())
+}
+
+// ensureScheduler initializes once on success. Failures are not sticky so the next
+// invoke retries — important when migrate IAM grants land after a warm start.
+func ensureScheduler(ctx context.Context) (*composition.Runtime, error) {
+	schedulerMu.Lock()
+	defer schedulerMu.Unlock()
+	if schedulerRuntime != nil {
+		return schedulerRuntime, nil
+	}
+
+	log := slog.New(slog.NewJSONHandler(os.Stdout, &slog.HandlerOptions{Level: slog.LevelInfo}))
+	cfg, err := configuration.Load()
+	if err != nil {
+		log.Error("scheduler init failed", "err", err)
+		return nil, err
+	}
+	rt, err := composition.Build(ctx, log, cfg, composition.Options{
+		EnableJobStore: true,
+		LeaseOwner:     "scheduler",
+	})
+	if err != nil {
+		log.Error("scheduler init failed", "err", err)
+		return nil, err
+	}
+	schedulerRuntime = rt
+	return schedulerRuntime, nil
 }

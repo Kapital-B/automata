@@ -15,9 +15,8 @@ import (
 )
 
 var (
-	apiOnce    sync.Once
+	apiMu      sync.Mutex
 	apiAdapter *chiadapter.ChiLambda
-	apiInitErr error
 	apiLog     *slog.Logger
 )
 
@@ -26,31 +25,10 @@ func main() {
 }
 
 func handle(ctx context.Context, req events.APIGatewayProxyRequest) (events.APIGatewayProxyResponse, error) {
-	apiOnce.Do(func() {
-		apiLog = slog.New(slog.NewJSONHandler(os.Stdout, &slog.HandlerOptions{Level: slog.LevelInfo}))
-		cfg, err := configuration.Load()
-		if err != nil {
-			apiLog.Error("api init failed", "err", err)
-			apiInitErr = err
-			return
-		}
-		runtime, err := composition.Build(ctx, apiLog, cfg, composition.Options{
-			EnableJobStore: true,
-			LeaseOwner:     "api",
-		})
-		if err != nil {
-			apiLog.Error("api init failed", "err", err)
-			apiInitErr = err
-			return
-		}
-		apiAdapter = chiadapter.New(runtime.ChiRouter)
-	})
-	if apiInitErr != nil {
-		// Init errors previously returned without CORS headers, so browsers reported a
-		// CORS failure and hid the 500 body. Echo allowlisted Origin so the client can
-		// surface {"error":"service unavailable"} (and check CloudWatch for the real err).
+	adapter, err := ensureAPI(ctx)
+	if err != nil {
 		if apiLog != nil {
-			apiLog.Error("api unavailable", "method", req.HTTPMethod, "path", req.Path, "err", apiInitErr)
+			apiLog.Error("api unavailable", "method", req.HTTPMethod, "path", req.Path, "err", err)
 		}
 		headers := map[string]string{"Content-Type": "application/json"}
 		applyCORSHeaders(headers, req)
@@ -63,7 +41,34 @@ func handle(ctx context.Context, req events.APIGatewayProxyRequest) (events.APIG
 			Body:       `{"error":"service unavailable"}`,
 		}, nil
 	}
-	return apiAdapter.ProxyWithContext(ctx, req)
+	return adapter.ProxyWithContext(ctx, req)
+}
+
+// ensureAPI initializes once on success. Failures are not sticky so the next
+// invoke retries — important when migrate IAM grants land after a warm start.
+func ensureAPI(ctx context.Context) (*chiadapter.ChiLambda, error) {
+	apiMu.Lock()
+	defer apiMu.Unlock()
+	if apiAdapter != nil {
+		return apiAdapter, nil
+	}
+
+	apiLog = slog.New(slog.NewJSONHandler(os.Stdout, &slog.HandlerOptions{Level: slog.LevelInfo}))
+	cfg, err := configuration.Load()
+	if err != nil {
+		apiLog.Error("api init failed", "err", err)
+		return nil, err
+	}
+	runtime, err := composition.Build(ctx, apiLog, cfg, composition.Options{
+		EnableJobStore: true,
+		LeaseOwner:     "api",
+	})
+	if err != nil {
+		apiLog.Error("api init failed", "err", err)
+		return nil, err
+	}
+	apiAdapter = chiadapter.New(runtime.ChiRouter)
+	return apiAdapter, nil
 }
 
 func applyCORSHeaders(headers map[string]string, req events.APIGatewayProxyRequest) {
