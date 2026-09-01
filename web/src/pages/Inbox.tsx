@@ -11,6 +11,7 @@ import {
   listCategories,
   listDraftSuggestions,
   listMessages,
+  getMessage,
   listProjects,
   syncAccount,
   type MessageItem,
@@ -169,6 +170,11 @@ export default function InboxPage({ accountFilter }: Props) {
       }),
     enabled: Boolean(accessToken),
   });
+  const selectedMessageQuery = useQuery({
+    queryKey: ["message", accessToken, selectedId],
+    queryFn: () => getMessage(accessToken!, selectedId),
+    enabled: Boolean(accessToken && selectedId),
+  });
   const projectsQuery = useQuery({
     queryKey: ["projects", accessToken, "inbox-filter"],
     queryFn: () => listProjects(accessToken!),
@@ -315,11 +321,12 @@ export default function InboxPage({ accountFilter }: Props) {
   }, [deepLinkedMessageID, filtered, selectedId]);
 
   const selected = filtered.find((m) => m.id === selectedId) ?? filtered[0];
+  const selectedBody = selectedMessageQuery.data?.body_text;
   const selAccount = selected ? accounts.find((a) => a.id === selected.account_id) : undefined;
   const selectedFromLines = selected ? senderLines(selected.from_json) : null;
 
   useEffect(() => {
-    if (!accessToken || !selected?.body_text || !looksLikeTextConvertedHtml(selected.body_text)) {
+    if (!accessToken || !selectedBody || !looksLikeTextConvertedHtml(selectedBody)) {
       return;
     }
     if (htmlRefreshAttempts.has(selected.id)) {
@@ -329,7 +336,10 @@ export default function InboxPage({ accountFilter }: Props) {
     setHtmlRefreshAttempts((prev) => new Set(prev).add(selected.id));
     setRefreshingHtmlMessageIds((prev) => new Set(prev).add(selected.id));
     void syncAccount(accessToken, selected.account_id)
-      .then(() => queryClient.invalidateQueries({ queryKey: ["messages"] }))
+      .then(() => {
+        void queryClient.invalidateQueries({ queryKey: ["messages"] });
+        void queryClient.invalidateQueries({ queryKey: ["message", accessToken, selected.id] });
+      })
       .catch((err) => {
         toast({
           title: "Could not refresh HTML email",
@@ -344,7 +354,7 @@ export default function InboxPage({ accountFilter }: Props) {
           return next;
         });
       });
-  }, [accessToken, htmlRefreshAttempts, queryClient, selected]);
+  }, [accessToken, htmlRefreshAttempts, queryClient, selected, selectedBody]);
 
   const isRefreshingSelectedHtml = selected ? refreshingHtmlMessageIds.has(selected.id) : false;
   const draftByMessageKey = useMemo(() => {
@@ -621,7 +631,14 @@ export default function InboxPage({ accountFilter }: Props) {
                 Refreshing the HTML version of this email...
               </div>
             )}
-            <EmailBody body={selected.body_text ?? ""} />
+            {selectedMessageQuery.isLoading ? (
+              <div className="flex items-center gap-2 px-6 py-5 text-sm text-muted-foreground">
+                <Loader2 className="h-4 w-4 animate-spin" />
+                Loading message...
+              </div>
+            ) : (
+              <EmailBody body={selectedBody ?? ""} />
+            )}
           </article>
         )}
       </div>

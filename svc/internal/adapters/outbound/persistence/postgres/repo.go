@@ -638,7 +638,13 @@ func (r *Repository) ListMessages(ctx context.Context, userID uuid.UUID, filter 
 	var b strings.Builder
 	b.WriteString(`
 		SELECT m.id, m.account_id, m.provider_message_id, m.conversation_id, m.received_at, m.subject, m.from_json,
-			m.to_json, m.cc_json, m.to_cc_preview, m.body_text, m.body_fetched_at, m.has_attachments, m.raw_etag,
+			m.to_json, m.cc_json, m.to_cc_preview, `)
+	if filter.OmitBody {
+		b.WriteString(`NULL AS body_text`)
+	} else {
+		b.WriteString(`m.body_text`)
+	}
+	b.WriteString(`, m.body_fetched_at, m.has_attachments, m.raw_etag,
 			cd.slug, mc.confidence, m.created_at, m.updated_at, m.summary_seen_at, m.forward_seen_at
 		FROM messages m
 		INNER JOIN accounts a ON a.id = m.account_id AND a.user_id = ?

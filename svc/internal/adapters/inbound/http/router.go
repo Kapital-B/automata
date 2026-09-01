@@ -498,6 +498,7 @@ func (h *Handlers) listMessages(w http.ResponseWriter, r *http.Request) {
 		}
 		filter.Offset = n
 	}
+	filter.OmitBody = true
 	uid := userIDOrEmpty(r)
 	rows, err := h.Messages.ListMessages(r.Context(), uid, filter)
 	if err != nil {
@@ -513,7 +514,6 @@ func (h *Handlers) listMessages(w http.ResponseWriter, r *http.Request) {
 		ReceivedAt         string          `json:"received_at"`
 		HasAttachments     bool            `json:"has_attachments"`
 		FromJSON           json.RawMessage `json:"from_json"`
-		BodyText           *string         `json:"body_text,omitempty"`
 		Preview            string          `json:"preview"`
 		CategorySlug       *string         `json:"category_slug,omitempty"`
 		CategoryConfidence *float64        `json:"category_confidence,omitempty"`
@@ -534,7 +534,6 @@ func (h *Handlers) listMessages(w http.ResponseWriter, r *http.Request) {
 			ReceivedAt:         m.ReceivedAt.UTC().Format(time.RFC3339Nano),
 			HasAttachments:     m.HasAttachments,
 			FromJSON:           json.RawMessage(m.FromJSON),
-			BodyText:           m.BodyText,
 			Preview:            preview,
 			CategorySlug:       m.CategorySlug,
 			CategoryConfidence: m.CategoryConfidence,

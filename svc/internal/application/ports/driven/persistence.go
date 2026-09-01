@@ -124,8 +124,9 @@ type MessageListFilter struct {
 	Since             *time.Time
 	OnlySummaryUnseen bool
 	OnlyForwardUnseen bool
-	Limit             int
-	Offset            int
+	OmitBody            bool
+	Limit               int
+	Offset              int
 }
 
 // JobRunRow is the persisted job run shape for API responses and auditing.
