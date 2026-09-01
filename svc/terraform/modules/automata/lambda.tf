@@ -87,15 +87,13 @@ resource "aws_iam_role_policy" "api" {
             Action   = ["dsql:DbConnect"]
             Resource = [aws_dsql_cluster.hosted[0].arn]
           },
-        ],
-        local.bedrock_invoke_statements,
-        [
           {
             Effect   = "Allow"
             Action   = ["secretsmanager:GetSecretValue"]
             Resource = local.hosted_secret_arns
           },
-        ]
+        ],
+        local.bedrock_invoke_statements,
       ) : []
     )
   })
@@ -189,15 +187,13 @@ resource "aws_iam_role_policy" "worker" {
             Action   = ["dsql:DbConnect"]
             Resource = [aws_dsql_cluster.hosted[0].arn]
           },
-        ],
-        local.bedrock_invoke_statements,
-        [
           {
             Effect   = "Allow"
             Action   = ["secretsmanager:GetSecretValue"]
             Resource = local.hosted_secret_arns
           },
-        ]
+        ],
+        local.bedrock_invoke_statements,
       ) : []
     )
   })

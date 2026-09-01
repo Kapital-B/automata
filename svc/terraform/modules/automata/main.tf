@@ -57,22 +57,15 @@ locals {
   )
   bedrock_invoke_statements = [
     {
-      Effect   = "Allow"
-      Action   = ["bedrock:InvokeModel", "bedrock:InvokeModelWithResponseStream"]
-      Resource = [local.bedrock_inference_profile_arn]
-    },
-    {
       Effect = "Allow"
       Action = ["bedrock:InvokeModel", "bedrock:InvokeModelWithResponseStream"]
-      Resource = [
-        for region in local.bedrock_foundation_model_regions :
-        "arn:${data.aws_partition.current.partition}:bedrock:${region}::foundation-model/${local.foundation_model_id}"
-      ]
-      Condition = {
-        StringEquals = {
-          "bedrock:InferenceProfileArn" = local.bedrock_inference_profile_arn
-        }
-      }
+      Resource = concat(
+        [local.bedrock_inference_profile_arn],
+        [
+          for region in local.bedrock_foundation_model_regions :
+          "arn:${data.aws_partition.current.partition}:bedrock:${region}::foundation-model/${local.foundation_model_id}"
+        ]
+      )
     },
   ]
 
