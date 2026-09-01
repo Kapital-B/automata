@@ -215,8 +215,8 @@ resource "aws_iam_role_policy" "migrate" {
   })
 }
 
-resource "null_resource" "build_bootstraps" {
-  triggers = {
+locals {
+  bootstrap_fingerprint = sha256(jsonencode({
     api_main        = filesha256("${path.module}/../../../cmd/api/main.go")
     scheduler_main  = filesha256("${path.module}/../../../cmd/scheduler/main.go")
     worker_main     = filesha256("${path.module}/../../../cmd/worker/main.go")
@@ -227,58 +227,46 @@ resource "null_resource" "build_bootstraps" {
     composition     = filesha256("${path.module}/../../../internal/composition/app.go")
     factory         = filesha256("${path.module}/../../../internal/adapters/outbound/persistence/factory/factory.go")
     factory_dsql    = filesha256("${path.module}/../../../internal/adapters/outbound/persistence/factory/dsql.go")
+    execution       = filesha256("${path.module}/../../../internal/application/jobs/execution.go")
+    scheduler_svc   = filesha256("${path.module}/../../../internal/application/jobs/scheduler.go")
+    dynamodb_store  = filesha256("${path.module}/../../../internal/adapters/outbound/dynamodbjobs/store.go")
     go_mod          = filesha256("${path.module}/../../../go.mod")
     go_sum          = filesha256("${path.module}/../../../go.sum")
     arch            = local.lambda_go_arch
-  }
+  }))
+}
 
-  provisioner "local-exec" {
-    interpreter = ["bash", "-c"]
-    command     = <<-EOT
-      set -euo pipefail
-      ROOT="${abspath("${path.module}/../../..")}"
-      OUT="${abspath(path.module)}/.dist"
-      GOARCH="${local.lambda_go_arch}"
-      rm -rf "$OUT"
-      mkdir -p "$OUT/api" "$OUT/scheduler" "$OUT/worker" "$OUT/migrate"
-      docker run --rm -v "$ROOT:/workspace" -w /workspace golang:1.24 bash -c '
-        set -euo pipefail
-        export CGO_ENABLED=0 GOOS=linux GOARCH='"$GOARCH"'
-        go build -trimpath -o /workspace/terraform/modules/automata/.dist/api/bootstrap ./cmd/api
-        go build -trimpath -o /workspace/terraform/modules/automata/.dist/scheduler/bootstrap ./cmd/scheduler
-        go build -trimpath -o /workspace/terraform/modules/automata/.dist/worker/bootstrap ./cmd/worker
-        go build -trimpath -o /workspace/terraform/modules/automata/.dist/migrate/bootstrap ./cmd/migrate
-      '
-    EOT
+# Build during plan/refresh so archive_file source dirs exist on clean checkouts.
+data "external" "build_bootstraps" {
+  program = ["bash", "${path.module}/build_bootstraps.sh"]
+  query = {
+    arch        = local.lambda_go_arch
+    fingerprint = local.bootstrap_fingerprint
   }
 }
 
 data "archive_file" "api" {
   type        = "zip"
-  source_dir  = "${path.module}/.dist/api"
+  source_dir  = "${path.module}/.dist/${data.external.build_bootstraps.result.api}"
   output_path = "${path.module}/api-bootstrap.zip"
-  depends_on  = [null_resource.build_bootstraps]
 }
 
 data "archive_file" "scheduler" {
   type        = "zip"
-  source_dir  = "${path.module}/.dist/scheduler"
+  source_dir  = "${path.module}/.dist/${data.external.build_bootstraps.result.scheduler}"
   output_path = "${path.module}/scheduler-bootstrap.zip"
-  depends_on  = [null_resource.build_bootstraps]
 }
 
 data "archive_file" "worker" {
   type        = "zip"
-  source_dir  = "${path.module}/.dist/worker"
+  source_dir  = "${path.module}/.dist/${data.external.build_bootstraps.result.worker}"
   output_path = "${path.module}/worker-bootstrap.zip"
-  depends_on  = [null_resource.build_bootstraps]
 }
 
 data "archive_file" "migrate" {
   type        = "zip"
-  source_dir  = "${path.module}/.dist/migrate"
+  source_dir  = "${path.module}/.dist/${data.external.build_bootstraps.result.migrate}"
   output_path = "${path.module}/migrate-bootstrap.zip"
-  depends_on  = [null_resource.build_bootstraps]
 }
 
 resource "aws_lambda_function" "api" {
