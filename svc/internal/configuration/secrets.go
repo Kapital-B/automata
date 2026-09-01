@@ -2,8 +2,11 @@ package configuration
 
 import (
 	"context"
+	"errors"
 	"fmt"
+	"log/slog"
 	"os"
+	"strings"
 	"sync"
 	"time"
 
@@ -11,12 +14,15 @@ import (
 	awsconfig "github.com/aws/aws-sdk-go-v2/config"
 	"github.com/aws/aws-sdk-go-v2/credentials"
 	"github.com/aws/aws-sdk-go-v2/service/secretsmanager"
+	smtypes "github.com/aws/aws-sdk-go-v2/service/secretsmanager/types"
 )
 
 var (
 	secretsMu     sync.Mutex
 	secretsCache  = map[string]string{}
 	secretsClient *secretsmanager.Client
+
+	errEmptySecretString = errors.New("empty secret string")
 )
 
 // resolveSecret returns the plain env value when set; otherwise loads from
@@ -30,6 +36,41 @@ func resolveSecret(plainEnv, secretIDEnv string) (string, error) {
 		return "", nil
 	}
 	return getSecretValue(secretID)
+}
+
+// resolveOptionalSecret is like resolveSecret, but treats an empty Secrets Manager
+// container (no AWSCURRENT value yet) as "" so optional providers can soft-disable.
+func resolveOptionalSecret(plainEnv, secretIDEnv string) (string, error) {
+	if v := os.Getenv(plainEnv); v != "" {
+		return v, nil
+	}
+	secretID := os.Getenv(secretIDEnv)
+	if secretID == "" {
+		return "", nil
+	}
+	value, err := getSecretValue(secretID)
+	if err == nil {
+		return value, nil
+	}
+	if isUnpopulatedSecret(err) {
+		slog.Warn("optional secret not populated; continuing without it",
+			"env", plainEnv,
+			"secret_id", secretID,
+			"err", err,
+		)
+		return "", nil
+	}
+	return "", err
+}
+
+func isUnpopulatedSecret(err error) bool {
+	var notFound *smtypes.ResourceNotFoundException
+	if errors.As(err, &notFound) {
+		return true
+	}
+	return errors.Is(err, errEmptySecretString) ||
+		strings.Contains(err.Error(), "has no SecretString") ||
+		strings.Contains(err.Error(), "AWSCURRENT")
 }
 
 func getSecretValue(secretID string) (string, error) {
@@ -51,7 +92,7 @@ func getSecretValue(secretID string) (string, error) {
 		return "", fmt.Errorf("secretsmanager GetSecretValue %q: %w", secretID, err)
 	}
 	if out.SecretString == nil || *out.SecretString == "" {
-		return "", fmt.Errorf("secretsmanager secret %q has no SecretString; populate it manually after terraform apply", secretID)
+		return "", fmt.Errorf("secretsmanager secret %q has no SecretString; populate it manually after terraform apply: %w", secretID, errEmptySecretString)
 	}
 	secretsCache[secretID] = *out.SecretString
 	return *out.SecretString, nil

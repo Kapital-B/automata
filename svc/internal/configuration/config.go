@@ -2,6 +2,7 @@ package configuration
 
 import (
 	"fmt"
+	"log/slog"
 	"os"
 	"strings"
 	"time"
@@ -217,11 +218,11 @@ func Load() (Config, error) {
 	if err != nil {
 		return Config{}, fmt.Errorf("MS_CLIENT_SECRET: %w", err)
 	}
-	googleClientSecret, err := resolveSecret("GOOGLE_CLIENT_SECRET", "GOOGLE_CLIENT_SECRET_SECRET_ID")
+	googleClientSecret, err := resolveOptionalSecret("GOOGLE_CLIENT_SECRET", "GOOGLE_CLIENT_SECRET_SECRET_ID")
 	if err != nil {
 		return Config{}, fmt.Errorf("GOOGLE_CLIENT_SECRET: %w", err)
 	}
-	slackClientSecret, err := resolveSecret("SLACK_CLIENT_SECRET", "SLACK_CLIENT_SECRET_SECRET_ID")
+	slackClientSecret, err := resolveOptionalSecret("SLACK_CLIENT_SECRET", "SLACK_CLIENT_SECRET_SECRET_ID")
 	if err != nil {
 		return Config{}, fmt.Errorf("SLACK_CLIENT_SECRET: %w", err)
 	}
@@ -283,11 +284,15 @@ func Load() (Config, error) {
 		return Config{}, fmt.Errorf("MS_CLIENT_ID, MS_CLIENT_SECRET, and MS_REDIRECT_URI are required for mail connect")
 	}
 	if cfg.GoogleClientID != "" && (cfg.GoogleClientSecret == "" || cfg.GoogleRedirectURI == "") {
-		return Config{}, fmt.Errorf("GOOGLE_CLIENT_ID set: also require GOOGLE_CLIENT_SECRET and GOOGLE_REDIRECT_URI")
+		slog.Warn("GOOGLE_CLIENT_ID set without secret/redirect; disabling Google auth")
+		cfg.GoogleClientID = ""
+		cfg.GoogleClientSecret = ""
 	}
 	if cfg.SlackClientID != "" && !strings.EqualFold(cfg.SlackMode, "fake") &&
 		(cfg.SlackClientSecret == "" || cfg.SlackRedirectURI == "") {
-		return Config{}, fmt.Errorf("SLACK_CLIENT_ID set: also require SLACK_CLIENT_SECRET and SLACK_REDIRECT_URI")
+		slog.Warn("SLACK_CLIENT_ID set without secret/redirect; disabling Slack OAuth")
+		cfg.SlackClientID = ""
+		cfg.SlackClientSecret = ""
 	}
 	if cfg.LLMBaseURL != "" && cfg.LLMModel == "" {
 		return Config{}, fmt.Errorf("LLM_BASE_URL set: also require LLM_MODEL")
