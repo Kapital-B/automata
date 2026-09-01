@@ -42,6 +42,7 @@ var defaultCategories = []struct {
 type Repository struct {
 	db            *sql.DB
 	OAuthStateTTL time.Duration
+	txIsolation   sql.IsolationLevel
 }
 
 type rowScanner interface {
@@ -49,10 +50,19 @@ type rowScanner interface {
 }
 
 func NewRepository(db *sql.DB, oauthStateTTL time.Duration) *Repository {
+	return NewRepositoryWithIsolation(db, oauthStateTTL, sql.LevelSerializable)
+}
+
+// NewRepositoryWithIsolation configures transaction isolation.
+// Aurora DSQL rejects SERIALIZABLE and runs at Repeatable Read only.
+func NewRepositoryWithIsolation(db *sql.DB, oauthStateTTL time.Duration, isolation sql.IsolationLevel) *Repository {
 	if oauthStateTTL <= 0 {
 		oauthStateTTL = defaultOAuthStateTTL
 	}
-	return &Repository{db: db, OAuthStateTTL: oauthStateTTL}
+	if isolation == sql.LevelDefault {
+		isolation = sql.LevelSerializable
+	}
+	return &Repository{db: db, OAuthStateTTL: oauthStateTTL, txIsolation: isolation}
 }
 
 func (r *Repository) execContext(ctx context.Context, query string, args ...any) (sql.Result, error) {
@@ -81,7 +91,7 @@ func txQueryRowContext(ctx context.Context, tx *sql.Tx, query string, args ...an
 
 func (r *Repository) withTx(ctx context.Context, fn func(*sql.Tx) error) error {
 	_, err := withSerializableRetry(ctx, func(ctx context.Context) (struct{}, error) {
-		tx, err := r.db.BeginTx(ctx, &sql.TxOptions{Isolation: sql.LevelSerializable})
+		tx, err := r.beginTx(ctx)
 		if err != nil {
 			return struct{}{}, err
 		}
@@ -95,6 +105,10 @@ func (r *Repository) withTx(ctx context.Context, fn func(*sql.Tx) error) error {
 		return struct{}{}, nil
 	})
 	return err
+}
+
+func (r *Repository) beginTx(ctx context.Context) (*sql.Tx, error) {
+	return r.db.BeginTx(ctx, &sql.TxOptions{Isolation: r.txIsolation})
 }
 
 func withSerializableRetry[T any](ctx context.Context, fn func(context.Context) (T, error)) (T, error) {
@@ -1788,7 +1802,7 @@ func (r *Repository) CreateUser(ctx context.Context, id uuid.UUID, email string,
 
 func (r *Repository) CreateUserWithHomeOrg(ctx context.Context, id uuid.UUID, email string, passwordHash *string, now time.Time, identityProvider, identitySubject, identityEmail string) (uuid.UUID, error) {
 	return withSerializableRetry(ctx, func(ctx context.Context) (uuid.UUID, error) {
-		tx, err := r.db.BeginTx(ctx, &sql.TxOptions{Isolation: sql.LevelSerializable})
+		tx, err := r.beginTx(ctx)
 		if err != nil {
 			return uuid.Nil, err
 		}

@@ -16,3 +16,7 @@ override.tf.json
 *_override.tf.json
 .terraformrc
 terraform.rc
+
+# Lambda bootstrap build artifacts (rebuilt by terraform local-exec)
+svc/terraform/modules/automata/.dist/
+svc/terraform/modules/automata/*-bootstrap.zip

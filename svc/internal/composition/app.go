@@ -212,8 +212,11 @@ func openRepository(ctx context.Context, cfg configuration.Config, autoMigrate b
 	switch engine {
 	case factory.EngineSQLite:
 		return db, sqliterepo.NewRepository(db, cfg.OAuthStateTTL), nil
-	case factory.EnginePostgres, factory.EngineDSQL:
+	case factory.EnginePostgres:
 		return db, pgrepo.NewRepository(db, cfg.OAuthStateTTL), nil
+	case factory.EngineDSQL:
+		// DSQL fixes isolation at Repeatable Read; SERIALIZABLE is rejected (SQLSTATE 0A000).
+		return db, pgrepo.NewRepositoryWithIsolation(db, cfg.OAuthStateTTL, sql.LevelRepeatableRead), nil
 	default:
 		_ = db.Close()
 		return nil, nil, fmt.Errorf("unsupported database engine %q", engine)
