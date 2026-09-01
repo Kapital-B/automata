@@ -1296,7 +1296,17 @@ func effectSK(key string) string { return "EFFECT#" + key }
 
 func formatTime(t time.Time) string { return t.UTC().Format(sortTimeLayout) }
 
-func parseTime(raw string) (time.Time, error) { return time.Parse(sortTimeLayout, raw) }
+// parseTime accepts fixed 9-digit sort keys and variable-precision RFC3339
+// timestamps (e.g. Python %f microsecond writes from ops scripts).
+func parseTime(raw string) (time.Time, error) {
+	if t, err := time.Parse(time.RFC3339Nano, raw); err == nil {
+		return t, nil
+	}
+	if t, err := time.Parse(time.RFC3339, raw); err == nil {
+		return t, nil
+	}
+	return time.Parse(sortTimeLayout, raw)
+}
 
 func parseTimePtr(raw *string) (*time.Time, error) {
 	if raw == nil || *raw == "" {
