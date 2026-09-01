@@ -33,6 +33,14 @@ locals {
   hosted_zone_name = "automata-dev.kapital-b.com"
   site_domain_name = "automata-dev.kapital-b.com"
   api_base_url     = "https://api.automata-dev.kapital-b.com"
+  # From: terraform -chdir=svc/terraform/envs/dev output -json hosted_zone_name_servers
+  # Must be published here (not only on kapital-b.com) because api.* is under this apex.
+  api_zone_name_servers = [
+    "ns-122.awsdns-15.com.",
+    "ns-960.awsdns-56.net.",
+    "ns-1044.awsdns-02.org.",
+    "ns-1571.awsdns-04.co.uk.",
+  ]
 }
 
 provider "aws" {
@@ -47,6 +55,7 @@ module "automata_web" {
   hosted_zone_name       = local.hosted_zone_name
   site_domain_name       = local.site_domain_name
   api_base_url           = local.api_base_url
+  api_zone_name_servers  = local.api_zone_name_servers
   cloudfront_price_class = var.cloudfront_price_class
 }
 

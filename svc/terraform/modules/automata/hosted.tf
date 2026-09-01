@@ -94,7 +94,9 @@ resource "aws_route53_record" "api_alias" {
   alias {
     name                   = aws_api_gateway_domain_name.api[0].regional_domain_name
     zone_id                = aws_api_gateway_domain_name.api[0].regional_zone_id
-    evaluate_target_health = true
+    # false: true can omit answers when API Gateway reports unhealthy, which
+    # looks like "CORS"/unreachable and never invokes Lambda.
+    evaluate_target_health = false
   }
 }
 

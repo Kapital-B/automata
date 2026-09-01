@@ -24,6 +24,12 @@ variable "api_base_url" {
   type        = string
 }
 
+variable "api_zone_name_servers" {
+  description = "NS records for api.<spa-apex> hosted in the backend account. Required because api.* is a child of the SPA apex zone."
+  type        = list(string)
+  default     = []
+}
+
 variable "cloudfront_price_class" {
   description = "CloudFront price class."
   type        = string

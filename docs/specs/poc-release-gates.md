@@ -20,9 +20,11 @@ This checklist is the release gate for the AWS-hosted Automata POC across Floci 
 
 - Apply `svc/terraform/envs/dev` in the backend account (API region).
 - Apply `web/terraform/envs/dev` in the frontend account (`us-east-1`).
-- From the **root** account zone `kapital-b.com`, NS-delegate **both**:
+- From the **root** account zone `kapital-b.com`, NS-delegate:
   - `automata-dev` → `terraform output hosted_zone_name_servers` from **web** (SPA apex)
-  - `api.automata-dev` → `terraform output hosted_zone_name_servers` from **svc** (API)
+- From the **SPA apex zone** in the frontend account (`automata-dev.kapital-b.com`), NS-delegate:
+  - `api` → `terraform output hosted_zone_name_servers` from **svc** (API)
+  - Do **not** rely only on an `api.automata-dev` NS cut on `kapital-b.com`: `api.*` is hierarchically under the SPA apex, so resolvers that follow that apex often NXDOMAIN the API host and never hit API Gateway/Lambda (browser shows a CORS-looking failure with empty Lambda logs).
 - Validate the API custom domain:
   - `api.automata-dev.kapital-b.com`
   - ACM certificate issued in the API region
@@ -67,7 +69,8 @@ This checklist is the release gate for the AWS-hosted Automata POC across Floci 
 - Repeat the hosted checks in `svc/terraform/envs/prod` and `web/terraform/envs/prod`.
 - From `kapital-b.com`, NS-delegate:
   - `automata` → web `hosted_zone_name_servers`
-  - `api.automata` → svc `hosted_zone_name_servers`
+- From the SPA apex zone (`automata.kapital-b.com`), NS-delegate:
+  - `api` → svc `hosted_zone_name_servers`
 - Confirm `api.automata.kapital-b.com` and `automata.kapital-b.com` behave identically to `dev`.
 - Promote only after `dev` E2E coverage, DSQL/IAM checks, and Bedrock checks are all green.
 

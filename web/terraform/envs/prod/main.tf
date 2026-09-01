@@ -28,6 +28,8 @@ locals {
   hosted_zone_name = "automata.kapital-b.com"
   site_domain_name = "automata.kapital-b.com"
   api_base_url     = "https://api.automata.kapital-b.com"
+  # From: terraform -chdir=svc/terraform/envs/prod output -json hosted_zone_name_servers
+  api_zone_name_servers = []
 }
 
 provider "aws" {
@@ -42,6 +44,7 @@ module "automata_web" {
   hosted_zone_name       = local.hosted_zone_name
   site_domain_name       = local.site_domain_name
   api_base_url           = local.api_base_url
+  api_zone_name_servers  = local.api_zone_name_servers
   cloudfront_price_class = var.cloudfront_price_class
 }
 
