@@ -145,6 +145,7 @@ func Build(ctx context.Context, log *slog.Logger, cfg configuration.Config, opts
 			LeaseOwner:  leaseOwner,
 			LeaseFor:    cfg.JobLeaseDuration,
 			TerminalTTL: cfg.JobTerminalRetention,
+			Log:         log,
 		}
 	}
 
@@ -490,6 +491,7 @@ func (r *Runtime) buildServices(ctx context.Context) error {
 		OAuthStateTTL:     r.Config.OAuthStateTTL,
 		PendingWakeAfter:  r.Config.JobPendingWakeAfter,
 		ScheduleBatchSize: appjobs.DefaultSchedulerBatchLimit,
+		Log:               r.Log,
 	}
 
 	h := &httphandler.Handlers{

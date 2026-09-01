@@ -2,7 +2,9 @@ package jobs
 
 import (
 	"context"
+	"errors"
 	"fmt"
+	"log/slog"
 	"strings"
 	"time"
 
@@ -38,6 +40,14 @@ type SchedulerService struct {
 	OAuthStateTTL     time.Duration
 	PendingWakeAfter  time.Duration
 	ScheduleBatchSize int
+	Log               *slog.Logger
+}
+
+func (s *SchedulerService) log() *slog.Logger {
+	if s != nil && s.Log != nil {
+		return s.Log
+	}
+	return slog.Default()
 }
 
 func (s *SchedulerService) Tick(ctx context.Context, now time.Time) error {
@@ -45,19 +55,30 @@ func (s *SchedulerService) Tick(ctx context.Context, now time.Time) error {
 		return nil
 	}
 	now = now.UTC()
+	start := time.Now().UTC()
+	s.log().Info("scheduler tick begin", "now", now)
 	if err := s.deleteExpiredOAuthStates(ctx, now); err != nil {
+		s.log().Error("scheduler oauth cleanup failed", "err", err)
 		return err
 	}
 	if err := s.enqueueDueSchedules(ctx, now); err != nil {
+		s.log().Error("scheduler enqueue due failed", "err", err)
 		return err
 	}
 	if err := s.rewakePending(ctx, now); err != nil {
+		s.log().Error("scheduler rewake pending failed", "err", err)
 		return err
 	}
 	if err := s.recoverExpiredLeases(ctx, now); err != nil {
+		s.log().Error("scheduler lease recovery failed", "err", err)
 		return err
 	}
-	return s.reconcileEffects(ctx, now)
+	if err := s.reconcileEffects(ctx, now); err != nil {
+		s.log().Error("scheduler effect reconcile failed", "err", err)
+		return err
+	}
+	s.log().Info("scheduler tick end", "duration_ms", time.Since(start).Milliseconds())
+	return nil
 }
 
 func (s *SchedulerService) deleteExpiredOAuthStates(ctx context.Context, now time.Time) error {
@@ -73,18 +94,22 @@ func (s *SchedulerService) deleteExpiredOAuthStates(ctx context.Context, now tim
 
 func (s *SchedulerService) enqueueDueSchedules(ctx context.Context, now time.Time) error {
 	if s.Schedules == nil || s.Accounts == nil || s.Store == nil {
+		s.log().Info("scheduler enqueue skipped", "reason", "schedules/accounts/store not configured")
 		return nil
 	}
 	due, err := s.Schedules.ListDueSchedules(ctx, now, s.batchLimit())
 	if err != nil {
 		return err
 	}
+	s.log().Info("scheduler due schedules", "count", len(due))
 	enq := s.Enqueuer
 	if enq == nil {
 		enq = &Enqueuer{Store: s.Store, Registry: s.Registry}
 	}
+	enqueued, skippedLock, skippedEmpty := 0, 0, 0
 	for _, chain := range due {
 		if len(chain.Jobs) == 0 || chain.IntervalMinutes <= 0 || !chain.Enabled {
+			skippedEmpty++
 			continue
 		}
 		accountIDs, err := s.targetAccounts(ctx, chain)
@@ -94,14 +119,41 @@ func (s *SchedulerService) enqueueDueSchedules(ctx context.Context, now time.Tim
 		scheduledFor := chain.NextRunAt.UTC()
 		for _, accountID := range accountIDs {
 			if _, err := enq.EnqueueChain(ctx, chain.UserID, &accountID, driven.JobTriggerSchedule, chain.Jobs, driven.JobPayload{}, &chain.ID, &scheduledFor); err != nil {
+				if errors.Is(err, driven.ErrJobLockHeld) {
+					// Another active/pending job owns the mailbox lock — skip this
+					// account and keep ticking so pending rewake/lease recovery run.
+					skippedLock++
+					s.log().Info("scheduler enqueue skipped lock held",
+						"schedule_id", chain.ID,
+						"account_id", accountID,
+						"user_id", chain.UserID,
+						"jobs", chain.Jobs,
+					)
+					continue
+				}
 				return err
 			}
+			enqueued++
+			s.log().Info("scheduler enqueued chain",
+				"schedule_id", chain.ID,
+				"account_id", accountID,
+				"user_id", chain.UserID,
+				"jobs", chain.Jobs,
+				"scheduled_for", scheduledFor,
+			)
 		}
 		nextRunAt := scheduledFor.Add(time.Duration(chain.IntervalMinutes) * time.Minute)
 		if err := s.markScheduleExecuted(ctx, chain.ID, scheduledFor, now, nextRunAt); err != nil {
 			return err
 		}
+		s.log().Info("scheduler marked executed", "schedule_id", chain.ID, "next_run_at", nextRunAt)
 	}
+	s.log().Info("scheduler enqueue summary",
+		"due", len(due),
+		"enqueued", enqueued,
+		"skipped_lock", skippedLock,
+		"skipped_empty", skippedEmpty,
+	)
 	return nil
 }
 
@@ -113,10 +165,20 @@ func (s *SchedulerService) rewakePending(ctx context.Context, now time.Time) err
 	if err != nil {
 		return err
 	}
+	rewoke, conflicts := 0, 0
 	for _, job := range stale {
-		if _, err := s.Store.ReWakePending(ctx, job.ID, job.Revision, now); err != nil && err != driven.ErrJobConflict {
+		if _, err := s.Store.ReWakePending(ctx, job.ID, job.Revision, now); err != nil {
+			if err == driven.ErrJobConflict {
+				conflicts++
+				continue
+			}
 			return err
 		}
+		rewoke++
+		s.log().Info("scheduler rewoke pending", "job_id", job.ID, "job_type", job.JobType, "revision", job.Revision)
+	}
+	if len(stale) > 0 {
+		s.log().Info("scheduler rewake summary", "stale", len(stale), "rewoke", rewoke, "conflicts", conflicts)
 	}
 	return nil
 }
@@ -129,13 +191,24 @@ func (s *SchedulerService) recoverExpiredLeases(ctx context.Context, now time.Ti
 	if err != nil {
 		return err
 	}
+	recovered, conflicts, skipped := 0, 0, 0
 	for _, job := range stale {
 		if job.AttemptID == nil {
+			skipped++
 			continue
 		}
-		if _, err := s.Store.RecoverExpiredLease(ctx, job.ID, job.Revision, *job.AttemptID, now); err != nil && err != driven.ErrJobConflict {
+		if _, err := s.Store.RecoverExpiredLease(ctx, job.ID, job.Revision, *job.AttemptID, now); err != nil {
+			if err == driven.ErrJobConflict {
+				conflicts++
+				continue
+			}
 			return err
 		}
+		recovered++
+		s.log().Info("scheduler recovered lease", "job_id", job.ID, "job_type", job.JobType, "attempt_id", *job.AttemptID)
+	}
+	if len(stale) > 0 {
+		s.log().Info("scheduler lease recovery summary", "expired", len(stale), "recovered", recovered, "conflicts", conflicts, "skipped", skipped)
 	}
 	return nil
 }
@@ -153,6 +226,10 @@ func (s *SchedulerService) reconcileEffects(ctx context.Context, now time.Time) 
 		if err != nil {
 			return err
 		}
+		if len(effects) == 0 {
+			continue
+		}
+		s.log().Info("scheduler reconcile effects", "state", state, "count", len(effects))
 		for _, effect := range effects {
 			switch effect.State {
 			case driven.EffectSucceededPendingAudit:

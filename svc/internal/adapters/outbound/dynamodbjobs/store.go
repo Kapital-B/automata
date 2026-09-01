@@ -646,7 +646,10 @@ func (s *Store) completeWithNext(ctx context.Context, current, done *jobItem, ne
 			Put: &types.Put{
 				TableName:           &s.tableName,
 				Item:                doneAV,
-				ConditionExpression: strPtr("entity_type = :entity AND status = :status AND revision = :revision AND attempt_id = :attempt"),
+				ConditionExpression: strPtr("entity_type = :entity AND #status = :status AND revision = :revision AND attempt_id = :attempt"),
+				ExpressionAttributeNames: map[string]string{
+					"#status": "status",
+				},
 				ExpressionAttributeValues: map[string]types.AttributeValue{
 					":entity":   &types.AttributeValueMemberS{Value: "job"},
 					":status":   &types.AttributeValueMemberS{Value: driven.JobStatusRunning},
@@ -744,7 +747,7 @@ func (s *Store) putJobWithLock(ctx context.Context, current, next *jobItem, expe
 		lockCondition += " AND owner_attempt_id = :lock_attempt"
 		values[":lock_attempt"] = &types.AttributeValueMemberS{Value: expectedAttempt.String()}
 	}
-	jobCondition, jobValues := s.jobCondition(current, expectedAttempt != nil)
+	jobCondition, jobNames, jobValues := s.jobCondition(current, expectedAttempt != nil)
 	for k, v := range jobValues {
 		values[k] = v
 	}
@@ -755,6 +758,7 @@ func (s *Store) putJobWithLock(ctx context.Context, current, next *jobItem, expe
 					TableName:                 &s.tableName,
 					Item:                      jobAV,
 					ConditionExpression:       &jobCondition,
+					ExpressionAttributeNames:  jobNames,
 					ExpressionAttributeValues: jobValues,
 				},
 			},
@@ -783,7 +787,7 @@ func (s *Store) replaceJobAndDeleteLock(ctx context.Context, current, next *jobI
 	if err != nil {
 		return nil, err
 	}
-	jobCondition, jobValues := s.jobCondition(current, expectedAttempt != nil)
+	jobCondition, jobNames, jobValues := s.jobCondition(current, expectedAttempt != nil)
 	lockCondition := "entity_type = :lock_entity AND owner_job_id = :job AND revision = :lock_revision"
 	lockValues := map[string]types.AttributeValue{
 		":lock_entity":   &types.AttributeValueMemberS{Value: "lock"},
@@ -801,6 +805,7 @@ func (s *Store) replaceJobAndDeleteLock(ctx context.Context, current, next *jobI
 					TableName:                 &s.tableName,
 					Item:                      jobAV,
 					ConditionExpression:       &jobCondition,
+					ExpressionAttributeNames:  jobNames,
 					ExpressionAttributeValues: jobValues,
 				},
 			},
@@ -825,11 +830,12 @@ func (s *Store) replaceJob(ctx context.Context, current, next *jobItem, requireA
 	if err != nil {
 		return nil, err
 	}
-	condition, values := s.jobCondition(current, requireAttempt)
+	condition, names, values := s.jobCondition(current, requireAttempt)
 	_, err = s.client.PutItem(ctx, &dynamodb.PutItemInput{
 		TableName:                 &s.tableName,
 		Item:                      item,
 		ConditionExpression:       &condition,
+		ExpressionAttributeNames:  names,
 		ExpressionAttributeValues: values,
 	})
 	if err != nil {
@@ -838,8 +844,10 @@ func (s *Store) replaceJob(ctx context.Context, current, next *jobItem, requireA
 	return next.record()
 }
 
-func (s *Store) jobCondition(current *jobItem, requireAttempt bool) (string, map[string]types.AttributeValue) {
-	condition := "entity_type = :entity AND status = :status AND revision = :revision"
+func (s *Store) jobCondition(current *jobItem, requireAttempt bool) (string, map[string]string, map[string]types.AttributeValue) {
+	// "status" is a DynamoDB reserved keyword and must be aliased.
+	condition := "entity_type = :entity AND #status = :status AND revision = :revision"
+	names := map[string]string{"#status": "status"}
 	values := map[string]types.AttributeValue{
 		":entity":   &types.AttributeValueMemberS{Value: "job"},
 		":status":   &types.AttributeValueMemberS{Value: current.Status},
@@ -849,7 +857,7 @@ func (s *Store) jobCondition(current *jobItem, requireAttempt bool) (string, map
 		condition += " AND attempt_id = :attempt"
 		values[":attempt"] = &types.AttributeValueMemberS{Value: *current.AttemptID}
 	}
-	return condition, values
+	return condition, names, values
 }
 
 func (s *Store) mustRunningAttempt(ctx context.Context, jobID uuid.UUID, expectedRevision int64, attemptID uuid.UUID) (*jobItem, error) {

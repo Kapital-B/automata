@@ -67,6 +67,7 @@ func ensureAPI(ctx context.Context) (*chiadapter.ChiLambda, error) {
 		apiLog.Error("api init failed", "err", err)
 		return nil, err
 	}
+	apiLog.Info("api init ok", "jobs_table", cfg.JobsTableName, "database_engine", cfg.DatabaseEngine)
 	apiAdapter = chiadapter.New(runtime.ChiRouter)
 	return apiAdapter, nil
 }

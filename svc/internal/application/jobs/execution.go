@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"log/slog"
 	"time"
 
 	"github.com/Kapital-B/automata/svc/internal/application/ports/driven"
@@ -25,6 +26,14 @@ type ExecutionService struct {
 	LeaseOwner  string
 	LeaseFor    time.Duration
 	TerminalTTL time.Duration
+	Log         *slog.Logger
+}
+
+func (s *ExecutionService) log() *slog.Logger {
+	if s != nil && s.Log != nil {
+		return s.Log
+	}
+	return slog.Default()
 }
 
 func (s *ExecutionService) leaseDuration() time.Duration {
@@ -48,26 +57,36 @@ func (s *ExecutionService) HandleStreamRecord(ctx context.Context, jobID uuid.UU
 	job, err := s.Store.GetByID(ctx, jobID)
 	if err != nil {
 		if errors.Is(err, driven.ErrJobNotFound) {
+			s.log().Info("execution skip missing job", "job_id", jobID)
 			return nil
 		}
 		return err
 	}
 	switch job.Status {
 	case driven.JobStatusSuccess, driven.JobStatusFailed, driven.JobStatusCancelled:
+		s.log().Info("execution skip terminal job", "job_id", jobID, "job_type", job.JobType, "status", job.Status)
 		return nil
 	case driven.JobStatusPending:
 		owner := s.LeaseOwner
 		if owner == "" {
 			owner = "worker"
 		}
+		s.log().Info("execution kick pending", "job_id", jobID, "job_type", job.JobType, "revision", job.Revision, "owner", owner)
 		_, err := s.Store.KickPending(ctx, job.ID, job.Revision, owner, now.Add(s.leaseDuration()), now)
 		if errors.Is(err, driven.ErrJobConflict) {
+			s.log().Info("execution kick conflict", "job_id", jobID, "job_type", job.JobType)
 			return nil
 		}
-		return err
+		if err != nil {
+			return err
+		}
+		s.log().Info("execution kicked to running", "job_id", jobID, "job_type", job.JobType)
+		return nil
 	case driven.JobStatusRunning:
+		s.log().Info("execution run chunk", "job_id", jobID, "job_type", job.JobType, "revision", job.Revision, "processed", job.Progress.Processed, "failed", job.Progress.Failed)
 		err := s.runChunk(ctx, job, now)
 		if errors.Is(err, driven.ErrJobConflict) {
+			s.log().Info("execution chunk conflict", "job_id", jobID, "job_type", job.JobType)
 			return nil
 		}
 		return err
@@ -82,11 +101,13 @@ func (s *ExecutionService) runChunk(ctx context.Context, job *driven.JobRecord, 
 	}
 	attemptID := *job.AttemptID
 	if job.CancelRequestedAt != nil {
+		s.log().Info("execution cancel running", "job_id", job.ID, "job_type", job.JobType)
 		_, err := s.Store.CancelRunning(ctx, job.ID, job.Revision, attemptID, now, s.terminalTTL())
 		return err
 	}
 	exec, ok := s.Executors[job.JobType]
 	if !ok {
+		s.log().Error("execution unregistered job type", "job_id", job.ID, "job_type", job.JobType)
 		_, err := s.Store.FailJob(ctx, job.ID, job.Revision, attemptID, "unregistered job type: "+job.JobType, now, s.terminalTTL())
 		return err
 	}
@@ -122,6 +143,7 @@ func (s *ExecutionService) runChunk(ctx context.Context, job *driven.JobRecord, 
 			if msg == "" {
 				msg = err.Error()
 			}
+			s.log().Warn("execution defer retry", "job_id", job.ID, "job_type", job.JobType, "retry_at", retryAt, "err", msg)
 			_, derr := s.Store.DeferRetry(ctx, current.ID, current.Revision, attemptID, retryAt, msg, now)
 			return derr
 		}
@@ -129,10 +151,12 @@ func (s *ExecutionService) runChunk(ctx context.Context, job *driven.JobRecord, 
 		if msg == "" {
 			msg = err.Error()
 		}
+		s.log().Error("execution fail job", "job_id", job.ID, "job_type", job.JobType, "err", msg)
 		_, ferr := s.Store.FailJob(ctx, current.ID, current.Revision, attemptID, msg, now, s.terminalTTL())
 		return ferr
 	}
 	if current.CancelRequestedAt != nil {
+		s.log().Info("execution cancel after chunk", "job_id", job.ID, "job_type", job.JobType)
 		_, err := s.Store.CancelRunning(ctx, current.ID, current.Revision, attemptID, now, s.terminalTTL())
 		return err
 	}
@@ -148,6 +172,7 @@ func (s *ExecutionService) runChunk(ctx context.Context, job *driven.JobRecord, 
 		}
 	}
 	if !result.Done {
+		s.log().Info("execution advance", "job_id", job.ID, "job_type", job.JobType, "processed", progress.Processed, "failed", progress.Failed)
 		_, err := s.Store.AdvanceRunning(ctx, current.ID, current.Revision, attemptID, result.NextCursor, progress, now.Add(s.leaseDuration()), now)
 		return err
 	}
@@ -172,6 +197,7 @@ func (s *ExecutionService) runChunk(ctx context.Context, job *driven.JobRecord, 
 			Now:            now,
 		}
 	}
+	s.log().Info("execution complete step", "job_id", job.ID, "job_type", job.JobType, "processed", progress.Processed, "failed", progress.Failed, "has_next", next != nil)
 	_, err = s.Store.CompleteStep(ctx, current.ID, current.Revision, attemptID, progress, next, now, s.terminalTTL())
 	return err
 }

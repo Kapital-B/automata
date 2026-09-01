@@ -17,6 +17,7 @@ import (
 var (
 	schedulerMu      sync.Mutex
 	schedulerRuntime *composition.Runtime
+	schedulerLog     *slog.Logger
 )
 
 func main() {
@@ -24,14 +25,24 @@ func main() {
 }
 
 func handle(ctx context.Context, _ events.CloudWatchEvent) error {
+	log := schedulerLogger()
+	start := time.Now().UTC()
 	rt, err := ensureScheduler(ctx)
 	if err != nil {
+		log.Error("scheduler unavailable", "err", err)
 		return errors.New("scheduler unavailable")
 	}
 	if rt.Scheduler == nil {
+		log.Info("scheduler tick skipped", "reason", "scheduler not configured")
 		return nil
 	}
-	return rt.Scheduler.Tick(ctx, time.Now().UTC())
+	log.Info("scheduler tick start")
+	if err := rt.Scheduler.Tick(ctx, time.Now().UTC()); err != nil {
+		log.Error("scheduler tick failed", "err", err, "duration_ms", time.Since(start).Milliseconds())
+		return err
+	}
+	log.Info("scheduler tick ok", "duration_ms", time.Since(start).Milliseconds())
+	return nil
 }
 
 // ensureScheduler initializes once on success. Failures are not sticky so the next
@@ -43,7 +54,7 @@ func ensureScheduler(ctx context.Context) (*composition.Runtime, error) {
 		return schedulerRuntime, nil
 	}
 
-	log := slog.New(slog.NewJSONHandler(os.Stdout, &slog.HandlerOptions{Level: slog.LevelInfo}))
+	log := schedulerLogger()
 	cfg, err := configuration.Load()
 	if err != nil {
 		log.Error("scheduler init failed", "err", err)
@@ -57,6 +68,14 @@ func ensureScheduler(ctx context.Context) (*composition.Runtime, error) {
 		log.Error("scheduler init failed", "err", err)
 		return nil, err
 	}
+	log.Info("scheduler init ok", "jobs_table", cfg.JobsTableName, "database_engine", cfg.DatabaseEngine)
 	schedulerRuntime = rt
 	return schedulerRuntime, nil
+}
+
+func schedulerLogger() *slog.Logger {
+	if schedulerLog == nil {
+		schedulerLog = slog.New(slog.NewJSONHandler(os.Stdout, &slog.HandlerOptions{Level: slog.LevelInfo}))
+	}
+	return schedulerLog
 }
