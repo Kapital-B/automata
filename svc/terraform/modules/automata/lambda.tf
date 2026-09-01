@@ -230,9 +230,10 @@ resource "null_resource" "build_bootstraps" {
     api_main       = filesha256("${path.module}/../../../cmd/api/main.go")
     scheduler_main = filesha256("${path.module}/../../../cmd/scheduler/main.go")
     worker_main    = filesha256("${path.module}/../../../cmd/worker/main.go")
-    migrate_main   = filesha256("${path.module}/../../../cmd/migrate/main.go")
-    migrate_pkg    = filesha256("${path.module}/../../../internal/adapters/outbound/persistence/migrate/migrate.go")
-    migrate_common = filesha256("${path.module}/../../../internal/adapters/outbound/persistence/migrate/common/001_baseline.sql")
+    migrate_main    = filesha256("${path.module}/../../../cmd/migrate/main.go")
+    migrate_pkg     = filesha256("${path.module}/../../../internal/adapters/outbound/persistence/migrate/migrate.go")
+    migrate_runtime = filesha256("${path.module}/../../../internal/adapters/outbound/persistence/migrate/dsql_runtime.go")
+    migrate_common  = filesha256("${path.module}/../../../internal/adapters/outbound/persistence/migrate/common/001_baseline.sql")
     composition    = filesha256("${path.module}/../../../internal/composition/app.go")
     factory        = filesha256("${path.module}/../../../internal/adapters/outbound/persistence/factory/factory.go")
     factory_dsql   = filesha256("${path.module}/../../../internal/adapters/outbound/persistence/factory/dsql.go")
@@ -373,6 +374,7 @@ resource "aws_lambda_invocation" "run_migrations" {
       for filename in sort(fileset("${path.module}/../../../internal/adapters/outbound/persistence/migrate", "**/*.sql")) :
       filesha256("${path.module}/../../../internal/adapters/outbound/persistence/migrate/${filename}")
     ]))
+    runtime_iam_arns = lookup(local.migrate_lambda_env, "DSQL_RUNTIME_IAM_ROLE_ARNS", "")
   })
 
   triggers = {
@@ -381,6 +383,7 @@ resource "aws_lambda_invocation" "run_migrations" {
       for filename in sort(fileset("${path.module}/../../../internal/adapters/outbound/persistence/migrate", "**/*.sql")) :
       filesha256("${path.module}/../../../internal/adapters/outbound/persistence/migrate/${filename}")
     ]))
+    runtime_iam_arns = lookup(local.migrate_lambda_env, "DSQL_RUNTIME_IAM_ROLE_ARNS", "")
   }
 
   depends_on = [

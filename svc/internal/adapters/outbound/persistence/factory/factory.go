@@ -60,7 +60,10 @@ func Open(ctx context.Context, cfg Config) (*sql.DB, error) {
 		if err != nil {
 			return nil, err
 		}
-		dsn = tokenized
+		dsn, err = withDSQLSearchPath(tokenized)
+		if err != nil {
+			return nil, err
+		}
 		// Tokens expire after ~15m; recycle connections before that.
 		if cfg.ConnMaxLifetime <= 0 || cfg.ConnMaxLifetime >= dsqlTokenLifetime {
 			cfg.ConnMaxLifetime = 10 * time.Minute

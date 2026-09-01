@@ -70,6 +70,11 @@ func Apply(ctx context.Context, db *sql.DB, engine factory.Engine) error {
 		slog.InfoContext(ctx, "migrate: recorded", "path", m.Path)
 	}
 	slog.InfoContext(ctx, "migrate: complete", "applied", applied, "skipped", skipped)
+	if engine == factory.EngineDSQL {
+		if err := ensureDSQLRuntimeAccess(ctx, db); err != nil {
+			return err
+		}
+	}
 	return nil
 }
 

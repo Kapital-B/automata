@@ -64,13 +64,16 @@ locals {
       DSQL_CLUSTER_ENDPOINT    = local.dsql_endpoint
       DSQL_REGION              = local.enable_hosted ? var.aws_region : ""
       DSQL_DATABASE_ROLE       = local.enable_hosted ? var.dsql_runtime_role : ""
+      DSQL_SCHEMA              = local.enable_hosted ? var.dsql_schema : ""
     },
     local.local_secret_env,
     local.hosted_secret_env,
   )
 
   migrate_lambda_env = merge(local.lambda_env, {
-    DATABASE_URL       = local.enable_hosted ? local.migrate_database_url : local.effective_database_url
-    DSQL_DATABASE_ROLE = local.enable_hosted ? var.dsql_admin_role : ""
+    DATABASE_URL                 = local.enable_hosted ? local.migrate_database_url : local.effective_database_url
+    DSQL_DATABASE_ROLE           = local.enable_hosted ? var.dsql_admin_role : ""
+    DSQL_RUNTIME_DATABASE_ROLE   = local.enable_hosted ? var.dsql_runtime_role : ""
+    DSQL_RUNTIME_IAM_ROLE_ARNS   = local.enable_hosted ? join(",", [aws_iam_role.api.arn, aws_iam_role.scheduler.arn, aws_iam_role.worker.arn]) : ""
   })
 }

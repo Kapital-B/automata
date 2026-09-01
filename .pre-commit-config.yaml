@@ -1,0 +1,9 @@
+repos:
+  - repo: local
+    hooks:
+      - id: terraform-fmt
+        name: terraform fmt -check -recursive
+        entry: bash -c 'terraform fmt -check -recursive svc/terraform web/terraform'
+        language: system
+        pass_filenames: false
+        files: \.tf$

@@ -235,6 +235,12 @@ variable "dsql_runtime_role" {
   default     = "automata_runtime"
 }
 
+variable "dsql_schema" {
+  description = "Hosted application schema. DSQL rejects grants on public, so runtime tables live here."
+  type        = string
+  default     = "automata"
+}
+
 variable "dsql_admin_role" {
   description = "Hosted administrative DSQL database role name."
   type        = string

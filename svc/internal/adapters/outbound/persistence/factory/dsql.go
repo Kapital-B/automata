@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"net/url"
 	"os"
+	"regexp"
 	"strings"
 	"time"
 
@@ -14,6 +15,8 @@ import (
 
 // dsqlTokenLifetime is the default IAM auth token lifetime used by the AWS SDK.
 const dsqlTokenLifetime = 15 * time.Minute
+
+var dsqlIdentRE = regexp.MustCompile(`^[a-zA-Z_][a-zA-Z0-9_]*$`)
 
 // withDSQLAuthToken injects a fresh Aurora DSQL IAM auth token as the password.
 // Without this, pgx sends an empty/missing password and DSQL returns
@@ -65,6 +68,26 @@ func withDSQLAuthToken(ctx context.Context, databaseURL string) (string, error) 
 	if q.Get("sslmode") == "" {
 		q.Set("sslmode", "require")
 	}
+	u.RawQuery = q.Encode()
+	return u.String(), nil
+}
+
+// withDSQLSearchPath sets search_path on every new connection via startup params.
+// Custom roles cannot GRANT USAGE on public; app tables live in DSQL_SCHEMA.
+func withDSQLSearchPath(databaseURL string) (string, error) {
+	schema := strings.TrimSpace(os.Getenv("DSQL_SCHEMA"))
+	if schema == "" {
+		schema = "automata"
+	}
+	if !dsqlIdentRE.MatchString(schema) {
+		return "", fmt.Errorf("invalid DSQL_SCHEMA %q", schema)
+	}
+	u, err := url.Parse(databaseURL)
+	if err != nil {
+		return "", fmt.Errorf("parse database url: %w", err)
+	}
+	q := u.Query()
+	q.Set("search_path", schema+",public")
 	u.RawQuery = q.Encode()
 	return u.String(), nil
 }
