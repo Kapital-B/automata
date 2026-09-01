@@ -738,19 +738,16 @@ func (s *Store) putJobWithLock(ctx context.Context, current, next *jobItem, expe
 		return nil, err
 	}
 	lockCondition := "entity_type = :lock_entity AND owner_job_id = :job AND revision = :lock_revision"
-	values := map[string]types.AttributeValue{
+	lockValues := map[string]types.AttributeValue{
 		":lock_entity":   &types.AttributeValueMemberS{Value: "lock"},
 		":job":           &types.AttributeValueMemberS{Value: current.JobID},
 		":lock_revision": &types.AttributeValueMemberN{Value: fmt.Sprintf("%d", lock.Revision)},
 	}
 	if expectedAttempt != nil {
 		lockCondition += " AND owner_attempt_id = :lock_attempt"
-		values[":lock_attempt"] = &types.AttributeValueMemberS{Value: expectedAttempt.String()}
+		lockValues[":lock_attempt"] = &types.AttributeValueMemberS{Value: expectedAttempt.String()}
 	}
 	jobCondition, jobNames, jobValues := s.jobCondition(current, expectedAttempt != nil)
-	for k, v := range jobValues {
-		values[k] = v
-	}
 	_, err = s.client.TransactWriteItems(ctx, &dynamodb.TransactWriteItemsInput{
 		TransactItems: []types.TransactWriteItem{
 			{
@@ -767,7 +764,7 @@ func (s *Store) putJobWithLock(ctx context.Context, current, next *jobItem, expe
 					TableName:                 &s.tableName,
 					Item:                      lockAV,
 					ConditionExpression:       &lockCondition,
-					ExpressionAttributeValues: values,
+					ExpressionAttributeValues: lockValues,
 				},
 			},
 		},
