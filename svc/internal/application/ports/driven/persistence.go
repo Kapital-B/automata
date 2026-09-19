@@ -124,9 +124,9 @@ type MessageListFilter struct {
 	Since             *time.Time
 	OnlySummaryUnseen bool
 	OnlyForwardUnseen bool
-	OmitBody            bool
-	Limit               int
-	Offset              int
+	OmitBody          bool
+	Limit             int
+	Offset            int
 }
 
 // JobRunRow is the persisted job run shape for API responses and auditing.
@@ -520,6 +520,10 @@ type EffectiveAssignment struct {
 }
 
 // UnassignedItem is a mail or manual row for the Unassigned queue.
+//
+// Mail rows are thread units: one row per conversation, represented by its most
+// recent queued message. A message carrying its own assignment override is its
+// own decision and stays a separate row.
 type UnassignedItem struct {
 	Kind           string // message | manual
 	MessageID      *uuid.UUID
@@ -535,6 +539,8 @@ type UnassignedItem struct {
 	Reason         string
 	ProjectID      *uuid.UUID
 	Source         string
+	Confidence     *float64 // scorer confidence; nil when never scored
+	ThreadCount    int      // queued messages this row stands for; always >= 1
 }
 
 // UnassignedListFilter narrows the unassigned queue.
@@ -815,9 +821,14 @@ type TimelineRepository interface {
 // AssignmentRepository persists thread/message project assignments.
 type AssignmentRepository interface {
 	UpsertThreadAssignment(ctx context.Context, row AssignmentRow) error
+	// UpsertThreadAssignments writes many thread assignments, chunking so a
+	// single transaction stays well inside the DSQL 3,000 mutated-row cap.
+	UpsertThreadAssignments(ctx context.Context, rows []AssignmentRow) error
 	GetThreadAssignment(ctx context.Context, accountID uuid.UUID, conversationID string) (*AssignmentRow, error)
 	DeleteThreadAssignment(ctx context.Context, accountID uuid.UUID, conversationID string) error
 	UpsertMessageOverride(ctx context.Context, row AssignmentRow) error
+	// UpsertMessageOverrides writes many per-message overrides, chunked as above.
+	UpsertMessageOverrides(ctx context.Context, rows []AssignmentRow) error
 	GetMessageOverride(ctx context.Context, messageID uuid.UUID) (*AssignmentRow, error)
 	DeleteMessageOverride(ctx context.Context, messageID uuid.UUID) error
 	EffectiveAssignment(ctx context.Context, userID, messageID uuid.UUID) (*EffectiveAssignment, error)

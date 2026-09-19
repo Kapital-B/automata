@@ -293,13 +293,21 @@ func (h *Handlers) listUnassigned(w http.ResponseWriter, r *http.Request) {
 	}
 	out := make([]map[string]any, 0, len(items))
 	for _, it := range items {
+		threadCount := it.ThreadCount
+		if threadCount < 1 {
+			threadCount = 1
+		}
 		row := map[string]any{
-			"kind":        it.Kind,
-			"subject":     it.Subject,
-			"status":      it.Status,
-			"reason":      it.Reason,
-			"source":      it.Source,
-			"occurred_at": it.OccurredAt.UTC().Format(time.RFC3339Nano),
+			"kind":         it.Kind,
+			"subject":      it.Subject,
+			"status":       it.Status,
+			"reason":       it.Reason,
+			"source":       it.Source,
+			"occurred_at":  it.OccurredAt.UTC().Format(time.RFC3339Nano),
+			"thread_count": threadCount,
+		}
+		if it.Confidence != nil {
+			row["confidence"] = *it.Confidence
 		}
 		if it.Kind == "manual" {
 			if it.ManualItemID != nil {
@@ -706,4 +714,88 @@ func manualItemJSON(m driven.ManualItemRow) map[string]any {
 		out["assignment_source"] = *m.AssignmentSource
 	}
 	return out
+}
+
+// assignProjectsBatch assigns or clears many triage items in one request.
+//
+// Items are reported individually: a single bad item returns its own error code
+// alongside the successes rather than failing the whole request.
+func (h *Handlers) assignProjectsBatch(w http.ResponseWriter, r *http.Request) {
+	uid, ok := UserIDFromContext(r.Context())
+	if !ok {
+		writeJSON(w, http.StatusUnauthorized, map[string]string{"error": "unauthorized"})
+		return
+	}
+	if h.ProjectSvc == nil {
+		writeJSON(w, http.StatusServiceUnavailable, map[string]string{"error": "projects not configured"})
+		return
+	}
+	var body struct {
+		Items []struct {
+			Kind      string  `json:"kind"`
+			ID        string  `json:"id"`
+			ProjectID *string `json:"project_id"`
+			Scope     string  `json:"scope"`
+		} `json:"items"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid json"})
+		return
+	}
+	if len(body.Items) > appprojects.MaxBatchAssignItems {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "too_many_items"})
+		return
+	}
+
+	items := make([]appprojects.BatchAssignItem, 0, len(body.Items))
+	for _, in := range body.Items {
+		id, err := uuid.Parse(strings.TrimSpace(in.ID))
+		if err != nil {
+			writeJSON(w, http.StatusBadRequest, map[string]string{"error": "bad id"})
+			return
+		}
+		item := appprojects.BatchAssignItem{
+			Kind:  strings.TrimSpace(in.Kind),
+			ID:    id,
+			Scope: domainprojects.AssignScope(strings.TrimSpace(in.Scope)),
+		}
+		if in.ProjectID != nil && strings.TrimSpace(*in.ProjectID) != "" {
+			pid, err := uuid.Parse(strings.TrimSpace(*in.ProjectID))
+			if err != nil {
+				writeJSON(w, http.StatusBadRequest, map[string]string{"error": "bad project_id"})
+				return
+			}
+			item.ProjectID = &pid
+		}
+		items = append(items, item)
+	}
+
+	results, err := h.ProjectSvc.AssignBatch(r.Context(), uid, items)
+	if err != nil {
+		if errors.Is(err, appprojects.ErrTooManyItems) {
+			writeJSON(w, http.StatusBadRequest, map[string]string{"error": "too_many_items"})
+			return
+		}
+		h.Log.Error("assign batch", "err", err)
+		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "internal"})
+		return
+	}
+
+	assigned, failed := 0, 0
+	out := make([]map[string]any, 0, len(results))
+	for _, res := range results {
+		row := map[string]any{"id": res.ID.String(), "ok": res.OK}
+		if res.OK {
+			assigned++
+		} else {
+			failed++
+			row["error"] = res.Error
+		}
+		out = append(out, row)
+	}
+	writeJSON(w, http.StatusOK, map[string]any{
+		"results":  out,
+		"assigned": assigned,
+		"failed":   failed,
+	})
 }
