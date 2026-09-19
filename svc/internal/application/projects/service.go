@@ -513,6 +513,9 @@ func (s *Service) GetTimeline(ctx context.Context, userID, projectID uuid.UUID, 
 }
 
 // AssignService auto-assigns projects after sync.
+//
+// LLM is optional. With it nil the service runs the deterministic tiers only,
+// which is the behaviour when no model is configured.
 type AssignService struct {
 	Users       driven.UserRepository
 	Projects    driven.ProjectRepository
@@ -520,6 +523,7 @@ type AssignService struct {
 	Contacts    driven.ContactRepository
 	Messages    driven.MessageRepository
 	JobRuns     driven.JobRunRepository
+	LLM         driven.LLMClient
 }
 
 type AssignChunkResult struct {
@@ -527,6 +531,46 @@ type AssignChunkResult struct {
 	MessagesAssigned  int
 	NextCursor        *driven.JobCursor
 	Done              bool
+	Tally             assignTally
+}
+
+// assignTally breaks a run down by outcome so a run that scored nothing is
+// distinguishable from a run that failed.
+type assignTally struct {
+	CommittedRule   int
+	ProvisionalRule int
+	ProvisionalLLM  int
+	Unscored        int
+	Errors          int
+}
+
+func (t *assignTally) record(o assignOutcome) {
+	switch o {
+	case outcomeCommittedRule:
+		t.CommittedRule++
+	case outcomeProvisionalRule:
+		t.ProvisionalRule++
+	case outcomeProvisionalLLM:
+		t.ProvisionalLLM++
+	default:
+		t.Unscored++
+	}
+}
+
+func (t assignTally) assigned() int {
+	return t.CommittedRule + t.ProvisionalRule + t.ProvisionalLLM
+}
+
+func (t assignTally) meta(considered int) map[string]any {
+	return map[string]any{
+		"messages_considered": considered,
+		"assigned":            t.assigned(),
+		"committed_rule":      t.CommittedRule,
+		"provisional_rule":    t.ProvisionalRule,
+		"provisional_llm":     t.ProvisionalLLM,
+		"unscored":            t.Unscored,
+		"errors":              t.Errors,
+	}
 }
 
 func (s *AssignService) AssignAfterSync(ctx context.Context, userID, accountID uuid.UUID) error {
@@ -549,22 +593,52 @@ func (s *AssignService) AssignAfterSync(ctx context.Context, userID, accountID u
 		runID = &id
 		_ = s.JobRuns.InsertJobRun(ctx, id, accountID, "assign_projects", "api", "running", now, time.Time{}, nil, `{}`)
 	}
-	assigned := 0
+	sig := s.buildSignals(ctx, orgID, userID, accountID)
+	tally := assignTally{}
+	var firstErr error
+	var unscored []driven.MessageRow
 	for _, msg := range msgs {
-		ok, err := s.tryAssignOne(ctx, orgID, userID, accountID, msg, projects, runID, now)
+		outcome, err := s.tryAssignOne(ctx, orgID, userID, accountID, msg, projects, sig, runID, now)
 		if err != nil {
+			// Keep going so one bad message does not strand the rest, but record
+			// the failure: reporting success on a failed pass is what made a
+			// broken assignment run indistinguishable from "nothing matched".
+			tally.Errors++
+			if firstErr == nil {
+				firstErr = err
+			}
 			continue
 		}
-		if ok {
-			assigned++
+		tally.record(outcome)
+		if outcome == outcomeUnscored {
+			unscored = append(unscored, msg)
 		}
 	}
-	if s.JobRuns != nil && runID != nil {
-		meta, _ := json.Marshal(map[string]any{"messages_considered": len(msgs), "assigned": assigned})
-		finished := time.Now().UTC()
-		_ = s.JobRuns.UpdateJobRunStatus(ctx, *runID, "success", &finished, nil, string(meta))
+	// The model only sees what deterministic rules could not place.
+	if n, err := s.scoreWithLLM(ctx, orgID, accountID, unscored, projects, runID, now); err != nil {
+		tally.Errors++
+		if firstErr == nil {
+			firstErr = err
+		}
+		tally.ProvisionalLLM += n
+		tally.Unscored -= n
+	} else {
+		tally.ProvisionalLLM += n
+		tally.Unscored -= n
 	}
-	return nil
+	if s.JobRuns != nil && runID != nil {
+		meta, _ := json.Marshal(tally.meta(len(msgs)))
+		finished := time.Now().UTC()
+		status := "success"
+		var errMsg *string
+		if tally.Errors > 0 {
+			status = "failed"
+			m := fmt.Sprintf("%d of %d messages failed to assign: %v", tally.Errors, len(msgs), firstErr)
+			errMsg = &m
+		}
+		_ = s.JobRuns.UpdateJobRunStatus(ctx, *runID, status, &finished, errMsg, string(meta))
+	}
+	return firstErr
 }
 
 func (s *AssignService) AssignAccountChunk(ctx context.Context, run driven.RunContext) (*AssignChunkResult, error) {
@@ -582,12 +656,12 @@ func (s *AssignService) AssignAccountChunk(ctx context.Context, run driven.RunCo
 	if err != nil {
 		return nil, err
 	}
-	offset := jobkit.DecodeOffsetCursor(run.Cursor)
-	msgs, err := s.Messages.ListMessages(ctx, run.UserID, driven.MessageListFilter{
-		AccountID: run.AccountID,
-		Limit:     26,
-		Offset:    offset,
-	})
+	filter := driven.MessageListFilter{AccountID: run.AccountID, Limit: 26}
+	if at, id, ok := jobkit.DecodeKeysetCursor(run.Cursor); ok {
+		filter.BeforeReceivedAt = &at
+		filter.BeforeID = &id
+	}
+	msgs, err := s.Messages.ListMessages(ctx, run.UserID, filter)
 	if err != nil {
 		return nil, err
 	}
@@ -596,33 +670,59 @@ func (s *AssignService) AssignAccountChunk(ctx context.Context, run driven.RunCo
 		msgs = msgs[:25]
 	}
 	now := time.Now().UTC()
-	assigned := 0
+	sig := s.buildSignals(ctx, orgID, run.UserID, *run.AccountID)
+	tally := assignTally{}
+	var unscored []driven.MessageRow
 	for _, msg := range msgs {
-		ok, err := s.tryAssignOne(ctx, orgID, run.UserID, *run.AccountID, msg, projects, &run.RunID, now)
+		outcome, err := s.tryAssignOne(ctx, orgID, run.UserID, *run.AccountID, msg, projects, sig, &run.RunID, now)
 		if err != nil {
 			return nil, err
 		}
-		if ok {
-			assigned++
+		tally.record(outcome)
+		if outcome == outcomeUnscored {
+			unscored = append(unscored, msg)
 		}
 	}
+	n, err := s.scoreWithLLM(ctx, orgID, *run.AccountID, unscored, projects, &run.RunID, now)
+	if err != nil {
+		return nil, err
+	}
+	tally.ProvisionalLLM += n
+	tally.Unscored -= n
 	out := &AssignChunkResult{
 		MessagesProcessed: len(msgs),
-		MessagesAssigned:  assigned,
+		MessagesAssigned:  tally.assigned(),
 		Done:              done,
+		Tally:             tally,
 	}
-	if !done {
-		out.NextCursor = jobkit.EncodeOffsetCursor(offset + len(msgs))
+	if !done && len(msgs) > 0 {
+		last := msgs[len(msgs)-1]
+		out.NextCursor = jobkit.EncodeKeysetCursor(last.ReceivedAt, last.ID)
 	}
 	return out, nil
 }
 
-func (s *AssignService) tryAssignOne(ctx context.Context, orgID, userID, accountID uuid.UUID, msg driven.MessageRow, projects []driven.ProjectRow, runID *uuid.UUID, now time.Time) (bool, error) {
-	// 1. Sibling committed project
+// assignOutcome records what the scorer decided, for run metadata.
+type assignOutcome int
+
+const (
+	outcomeUnscored assignOutcome = iota
+	outcomeCommittedRule
+	outcomeProvisionalRule
+	outcomeProvisionalLLM
+)
+
+// tryAssignOne resolves one message against the project set.
+//
+// Order follows Wave 1 §9: a committed sibling in the same thread wins, then a
+// single project code token commits, then the ranked scorer supplies a
+// provisional suggestion. Only a code token may commit without the operator.
+func (s *AssignService) tryAssignOne(ctx context.Context, orgID, userID, accountID uuid.UUID, msg driven.MessageRow, projects []driven.ProjectRow, sig *signals, runID *uuid.UUID, now time.Time) (assignOutcome, error) {
+	// 1. Sibling committed project.
 	if msg.ConversationID != nil && strings.TrimSpace(*msg.ConversationID) != "" {
 		sib, err := s.Assignments.FindCommittedSiblingProject(ctx, userID, accountID, *msg.ConversationID, msg.ID)
 		if err != nil {
-			return false, err
+			return outcomeUnscored, err
 		}
 		if sib != nil {
 			row := driven.AssignmentRow{
@@ -632,83 +732,88 @@ func (s *AssignService) tryAssignOne(ctx context.Context, orgID, userID, account
 				Source: string(domainprojects.SourceRule), RunID: runID, CreatedAt: now, UpdatedAt: now,
 			}
 			if err := s.Assignments.UpsertThreadAssignment(ctx, row); err != nil {
-				return false, err
+				return outcomeUnscored, err
 			}
 			_ = s.upsertParticipants(ctx, orgID, *sib, msg)
-			return true, nil
+			return outcomeCommittedRule, nil
 		}
 	}
 
-	body := ""
-	if msg.BodyText != nil {
-		body = *msg.BodyText
-	}
-	haystack := msg.Subject + "\n" + body
-
-	// 2. Exact one project code token
-	codeHits := matchProjectCodes(haystack, projects)
-	if len(codeHits) == 1 {
-		p := codeHits[0]
-		if msg.ConversationID == nil || strings.TrimSpace(*msg.ConversationID) == "" {
-			mid := msg.ID
-			row := driven.AssignmentRow{
-				OrganisationID: orgID, AccountID: accountID, MessageID: &mid, ProjectID: &p.ID,
-				Status: string(domainprojects.StatusCommitted), Reason: "code:" + p.Code,
-				Source: string(domainprojects.SourceRule), RunID: runID, CreatedAt: now, UpdatedAt: now,
-			}
-			if err := s.Assignments.UpsertMessageOverride(ctx, row); err != nil {
-				return false, err
-			}
-		} else {
-			row := driven.AssignmentRow{
-				ID: uuid.New(), OrganisationID: orgID, AccountID: accountID,
-				ConversationID: *msg.ConversationID, ProjectID: &p.ID,
-				Status: string(domainprojects.StatusCommitted), Reason: "code:" + p.Code,
-				Source: string(domainprojects.SourceRule), RunID: runID, CreatedAt: now, UpdatedAt: now,
-			}
-			if err := s.Assignments.UpsertThreadAssignment(ctx, row); err != nil {
-				return false, err
-			}
+	// 2. Exactly one project code token commits (Wave 1 §7: confidence >= 0.9
+	//    AND a code match).
+	if p, ok := codeTokenHit(msg, projects); ok {
+		if err := s.writeAssignment(ctx, orgID, accountID, msg, p.ID,
+			domainprojects.StatusCommitted, "code:"+p.Code, domainprojects.SourceRule,
+			ptrFloat64(confidenceCodeToken), runID, now); err != nil {
+			return outcomeUnscored, err
 		}
 		_ = s.upsertParticipants(ctx, orgID, p.ID, msg)
-		return true, nil
-	}
-	if len(codeHits) > 1 {
-		return false, nil
+		return outcomeCommittedRule, nil
 	}
 
-	// 3. Exactly one name/keyword match (prefer subject)
-	nameHits := matchProjectNamesKeywords(msg.Subject, projects)
-	if len(nameHits) == 0 {
-		nameHits = matchProjectNamesKeywords(haystack, projects)
+	// 3. Ranked candidates. Ambiguity yields the top suggestion rather than
+	//    silence; the operator rejects it in one click if it is wrong.
+	var contactIDs []uuid.UUID
+	if s.Contacts != nil && sig != nil && len(sig.contactProjects) > 0 {
+		contactIDs, _ = s.Contacts.ListContactIDsForMessage(ctx, orgID, msg.ID)
 	}
-	if len(nameHits) == 1 {
-		p := nameHits[0]
-		reason := "name_or_keyword:" + p.Code
-		if msg.ConversationID == nil || strings.TrimSpace(*msg.ConversationID) == "" {
-			mid := msg.ID
-			row := driven.AssignmentRow{
-				OrganisationID: orgID, AccountID: accountID, MessageID: &mid, ProjectID: &p.ID,
-				Status: string(domainprojects.StatusProvisional), Reason: reason,
-				Source: string(domainprojects.SourceRule), RunID: runID, CreatedAt: now, UpdatedAt: now,
-			}
-			if err := s.Assignments.UpsertMessageOverride(ctx, row); err != nil {
-				return false, err
-			}
-		} else {
-			row := driven.AssignmentRow{
-				ID: uuid.New(), OrganisationID: orgID, AccountID: accountID,
-				ConversationID: *msg.ConversationID, ProjectID: &p.ID,
-				Status: string(domainprojects.StatusProvisional), Reason: reason,
-				Source: string(domainprojects.SourceRule), RunID: runID, CreatedAt: now, UpdatedAt: now,
-			}
-			if err := s.Assignments.UpsertThreadAssignment(ctx, row); err != nil {
-				return false, err
+	candidates := scoreMessage(msg, projects, sig, contactIDs)
+	if len(candidates) > 0 {
+		top := candidates[0]
+		conf := top.Confidence
+		if err := s.writeAssignment(ctx, orgID, accountID, msg, top.Project.ID,
+			domainprojects.StatusProvisional, top.Reason, domainprojects.SourceRule,
+			&conf, runID, now); err != nil {
+			return outcomeUnscored, err
+		}
+		return outcomeProvisionalRule, nil
+	}
+	return outcomeUnscored, nil
+}
+
+// writeAssignment upserts at thread scope when the message has a conversation,
+// and as a per-message override otherwise (Wave 1 §7).
+func (s *AssignService) writeAssignment(ctx context.Context, orgID, accountID uuid.UUID, msg driven.MessageRow, projectID uuid.UUID, status domainprojects.AssignmentStatus, reason string, source domainprojects.AssignmentSource, confidence *float64, runID *uuid.UUID, now time.Time) error {
+	pid := projectID
+	if msg.ConversationID == nil || strings.TrimSpace(*msg.ConversationID) == "" {
+		mid := msg.ID
+		return s.Assignments.UpsertMessageOverride(ctx, driven.AssignmentRow{
+			OrganisationID: orgID, AccountID: accountID, MessageID: &mid, ProjectID: &pid,
+			Status: string(status), Confidence: confidence, Reason: reason,
+			Source: string(source), RunID: runID, CreatedAt: now, UpdatedAt: now,
+		})
+	}
+	return s.Assignments.UpsertThreadAssignment(ctx, driven.AssignmentRow{
+		ID: uuid.New(), OrganisationID: orgID, AccountID: accountID,
+		ConversationID: *msg.ConversationID, ProjectID: &pid,
+		Status: string(status), Confidence: confidence, Reason: reason,
+		Source: string(source), RunID: runID, CreatedAt: now, UpdatedAt: now,
+	})
+}
+
+func ptrFloat64(v float64) *float64 { return &v }
+
+// buildSignals loads the per-run evidence the scorer reuses across messages.
+// Best effort: scoring degrades to codes and keywords if these fail.
+func (s *AssignService) buildSignals(ctx context.Context, orgID, userID, accountID uuid.UUID) *signals {
+	sig := newSignals()
+	if s.Assignments != nil {
+		rows, err := s.Assignments.ListCommittedAssignmentSignals(ctx, userID, accountID, 500)
+		if err == nil {
+			for _, row := range rows {
+				sig.addAssignmentSignal(row)
 			}
 		}
-		return true, nil
 	}
-	return false, nil
+	if s.Projects != nil {
+		rows, err := s.Projects.ListProjectParticipants(ctx, orgID)
+		if err == nil {
+			for _, row := range rows {
+				sig.addParticipant(row)
+			}
+		}
+	}
+	return sig
 }
 
 func (s *AssignService) upsertParticipants(ctx context.Context, orgID, projectID uuid.UUID, msg driven.MessageRow) error {

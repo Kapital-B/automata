@@ -2,6 +2,7 @@ package sqlite_test
 
 import (
 	"context"
+	"strings"
 	"testing"
 	"time"
 
@@ -232,16 +233,28 @@ func TestAutoAssignSiblingCodeNameAmbiguous(t *testing.T) {
 		t.Fatalf("name assign: %+v", effName)
 	}
 
-	// Ambiguous codes → leave unassigned
+	// Ambiguous codes must never commit. Since the triage-efficiency addendum
+	// (§9.1) they no longer go silent either: the operator gets the top ranked
+	// candidate as a provisional suggestion they can reject in one click.
 	m5 := insertMsg(t, repo, accountID, "DC01 and OT02", "amb", "both")
-	_ = p2 // silence
-	before, _ := svc.EffectiveAssignment(ctx, userID, m5)
+	_ = p2
 	if err := assign.AssignAfterSync(ctx, userID, accountID); err != nil {
 		t.Fatal(err)
 	}
 	after, _ := svc.EffectiveAssignment(ctx, userID, m5)
-	if after.ProjectID != nil {
-		t.Fatalf("ambiguous should stay unassigned: before=%+v after=%+v", before, after)
+	if after.Status == "committed" {
+		t.Fatalf("ambiguous codes must never auto-commit: %+v", after)
+	}
+	if after.ProjectID == nil || after.Status != "provisional" {
+		t.Fatalf("ambiguous should be suggested provisionally: %+v", after)
+	}
+	// DC01 wins on corroborating evidence (every prior committed message from
+	// this sender domain went to DC01), not on alphabetical order.
+	if *after.ProjectID != p.ID {
+		t.Fatalf("expected corroborated project %s, got %s (reason=%q)", p.ID, *after.ProjectID, after.Reason)
+	}
+	if !strings.Contains(after.Reason, "sender_domain") {
+		t.Fatalf("expected sender-domain corroboration in reason, got %q", after.Reason)
 	}
 }
 

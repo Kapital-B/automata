@@ -127,6 +127,11 @@ type MessageListFilter struct {
 	OmitBody          bool
 	Limit             int
 	Offset            int
+	// BeforeReceivedAt/BeforeID page a received_at DESC, id DESC scan from a
+	// stable position. Prefer these over Offset for jobs, whose result set
+	// mutates between chunks.
+	BeforeReceivedAt *time.Time
+	BeforeID         *uuid.UUID
 }
 
 // JobRunRow is the persisted job run shape for API responses and auditing.
@@ -469,6 +474,19 @@ type ProjectMemberRow struct {
 	UpdatedAt         time.Time
 }
 
+// ProjectParticipantRow links a contact to a project they correspond on.
+type ProjectParticipantRow struct {
+	ProjectID uuid.UUID
+	ContactID uuid.UUID
+}
+
+// AssignmentSignalRow is one historical committed assignment, used to learn
+// which senders correspond about which project.
+type AssignmentSignalRow struct {
+	ProjectID uuid.UUID
+	FromJSON  string
+}
+
 // ProjectListFilter narrows project listing.
 type ProjectListFilter struct {
 	IncludeArchived bool
@@ -486,6 +504,9 @@ type ProjectRepository interface {
 	GetProjectMember(ctx context.Context, projectID, userID uuid.UUID) (*ProjectMemberRow, error)
 	UpdateProjectMember(ctx context.Context, member ProjectMemberRow) error
 	UpsertProjectParticipant(ctx context.Context, projectID, contactID uuid.UUID, firstSeenAt time.Time) error
+	// ListProjectParticipants returns every (project, contact) pair in the org.
+	// Used to score assignment candidates by participant overlap.
+	ListProjectParticipants(ctx context.Context, organisationID uuid.UUID) ([]ProjectParticipantRow, error)
 	CountProjectMembers(ctx context.Context, projectID uuid.UUID) (int, error)
 }
 
@@ -837,6 +858,9 @@ type AssignmentRepository interface {
 	// ListMessagesNeedingAssign returns recent messages on an account with no effective project.
 	ListMessagesNeedingAssign(ctx context.Context, userID, accountID uuid.UUID, limit int) ([]MessageRow, error)
 	FindCommittedSiblingProject(ctx context.Context, userID, accountID uuid.UUID, conversationID string, excludeMessageID uuid.UUID) (*uuid.UUID, error)
+	// ListCommittedAssignmentSignals returns recent committed mail assignments
+	// with the sender payload, so the scorer can learn sender/domain affinity.
+	ListCommittedAssignmentSignals(ctx context.Context, userID, accountID uuid.UUID, limit int) ([]AssignmentSignalRow, error)
 }
 
 // JobRunRepository records sync runs (Phase 1: synchronous insert).

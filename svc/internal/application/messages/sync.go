@@ -29,6 +29,10 @@ type SyncService struct {
 	Assign interface {
 		AssignAfterSync(ctx context.Context, userID, accountID uuid.UUID) error
 	}
+	// AssignEnqueuer, when set, takes assignment off the sync request path:
+	// scoring a mailbox is real work and sync latency should not include it.
+	// Falls back to the inline Assign hook when nil.
+	AssignEnqueuer driven.JobEnqueuer
 }
 
 type SyncResult struct {
@@ -333,9 +337,7 @@ func (s *SyncService) SyncInboxWithOptions(ctx context.Context, userID uuid.UUID
 		// Idempotent backfill so People is populated for mail synced before contacts existed.
 		_ = s.Resolve.BackfillAccount(ctx, userID, accountID)
 	}
-	if s.Assign != nil {
-		_ = s.Assign.AssignAfterSync(ctx, userID, accountID)
-	}
+	s.scheduleAssignment(ctx, userID, accountID)
 	if err := s.Accounts.UpsertSyncState(ctx, userID, accountID, &deltaRes.DeltaLink, time.Now().UTC()); err != nil {
 		return nil, err
 	}
@@ -466,4 +468,31 @@ func jsonEscape(s string) string {
 
 func timePtrSync(t time.Time) *time.Time {
 	return &t
+}
+
+// scheduleAssignment hands project assignment to the job queue when one is
+// configured, and otherwise runs it inline.
+//
+// Assignment scores every unassigned message on the account, which is too much
+// work to sit inside a sync response. assign_projects is already a registered
+// streamed job with its own chunking and retry policy.
+func (s *SyncService) scheduleAssignment(ctx context.Context, userID, accountID uuid.UUID) {
+	if s.AssignEnqueuer != nil {
+		acc := accountID
+		_, err := s.AssignEnqueuer.Enqueue(ctx, driven.CreateJobInput{
+			JobType:     "assign_projects",
+			UserID:      userID,
+			AccountID:   &acc,
+			TriggerKind: driven.JobTriggerAPI,
+			Now:         time.Now().UTC(),
+		})
+		if err == nil {
+			return
+		}
+		// Fall through to the inline path so a queue outage does not silently
+		// stop correspondence being filed.
+	}
+	if s.Assign != nil {
+		_ = s.Assign.AssignAfterSync(ctx, userID, accountID)
+	}
 }

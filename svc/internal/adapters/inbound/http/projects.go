@@ -8,6 +8,7 @@ import (
 	"strings"
 	"time"
 
+	appjobs "github.com/Kapital-B/automata/svc/internal/application/jobs"
 	"github.com/Kapital-B/automata/svc/internal/application/ports/driven"
 	appprojects "github.com/Kapital-B/automata/svc/internal/application/projects"
 	domainprojects "github.com/Kapital-B/automata/svc/internal/domain/projects"
@@ -798,4 +799,77 @@ func (h *Handlers) assignProjectsBatch(w http.ResponseWriter, r *http.Request) {
 		"assigned": assigned,
 		"failed":   failed,
 	})
+}
+
+// rescanUnassigned re-runs project assignment over an account.
+//
+// Without this the only way to re-score correspondence is to sync mail again,
+// so editing a project's codes or keywords has no visible effect and a failing
+// assignment pass has nowhere to surface.
+func (h *Handlers) rescanUnassigned(w http.ResponseWriter, r *http.Request) {
+	uid, ok := UserIDFromContext(r.Context())
+	if !ok {
+		writeJSON(w, http.StatusUnauthorized, map[string]string{"error": "unauthorized"})
+		return
+	}
+	if h.JobEnqueuer == nil {
+		writeJSON(w, http.StatusServiceUnavailable, map[string]string{"error": "assignment not configured"})
+		return
+	}
+	var body struct {
+		AccountID *string `json:"account_id"`
+	}
+	if r.Body != nil {
+		_ = json.NewDecoder(r.Body).Decode(&body)
+	}
+
+	accountIDs := make([]uuid.UUID, 0, 1)
+	if body.AccountID != nil && strings.TrimSpace(*body.AccountID) != "" {
+		id, err := uuid.Parse(strings.TrimSpace(*body.AccountID))
+		if err != nil {
+			writeJSON(w, http.StatusBadRequest, map[string]string{"error": "bad account_id"})
+			return
+		}
+		authorized, err := h.authorizeAccount(r.Context(), uid, id)
+		if err != nil {
+			h.Log.Error("authorize rescan account", "err", err)
+			writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "internal"})
+			return
+		}
+		if !authorized {
+			writeJSON(w, http.StatusNotFound, map[string]string{"error": "not found"})
+			return
+		}
+		accountIDs = append(accountIDs, id)
+	} else {
+		if h.Accounts == nil {
+			writeJSON(w, http.StatusServiceUnavailable, map[string]string{"error": "accounts not configured"})
+			return
+		}
+		rows, err := h.Accounts.ListAccounts(r.Context(), uid)
+		if err != nil {
+			h.Log.Error("list accounts for rescan", "err", err)
+			writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "internal"})
+			return
+		}
+		for _, row := range rows {
+			accountIDs = append(accountIDs, row.ID)
+		}
+	}
+	if len(accountIDs) == 0 {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "no accounts to rescan"})
+		return
+	}
+
+	runIDs := make([]string, 0, len(accountIDs))
+	for _, accountID := range accountIDs {
+		job, err := h.enqueueAccountJob(r.Context(), uid, accountID, appjobs.TypeAssignProjects, driven.JobPayload{})
+		if err != nil {
+			h.Log.Error("enqueue assign_projects", "err", err)
+			writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "internal"})
+			return
+		}
+		runIDs = append(runIDs, job.ID.String())
+	}
+	writeJSON(w, http.StatusAccepted, map[string]any{"run_ids": runIDs})
 }
