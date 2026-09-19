@@ -409,7 +409,13 @@ func (r *Repository) ListMessages(ctx context.Context, userID uuid.UUID, filter 
 		)`)
 		args = append(args, filter.ProjectID.String(), filter.ProjectID.String())
 	}
-	b.WriteString(` ORDER BY m.received_at DESC LIMIT ? OFFSET ?`)
+	if filter.BeforeReceivedAt != nil && filter.BeforeID != nil {
+		// SQLite has no row-value comparison, so expand the keyset predicate.
+		b.WriteString(` AND (m.received_at < ? OR (m.received_at = ? AND m.id < ?))`)
+		ts := formatRFC3339(filter.BeforeReceivedAt.UTC())
+		args = append(args, ts, ts, filter.BeforeID.String())
+	}
+	b.WriteString(` ORDER BY m.received_at DESC, m.id DESC LIMIT ? OFFSET ?`)
 	args = append(args, limit, offset)
 	rows, err := r.db.QueryContext(ctx, b.String(), args...)
 	if err != nil {

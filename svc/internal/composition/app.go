@@ -400,6 +400,11 @@ func (r *Runtime) buildServices(ctx context.Context) error {
 		Resolve:  resolveSvc,
 		Assign:   assignSvc,
 	}
+	// Guarded: assigning a nil *Enqueuer into the interface field would make it
+	// non-nil and disable the inline fallback.
+	if r.Enqueuer != nil {
+		syncSvc.AssignEnqueuer = r.Enqueuer
+	}
 
 	var categorizeSvc *appmessages.CategorizeService
 	var summarizeSvc *appmessages.SummarizeService
@@ -414,6 +419,8 @@ func (r *Runtime) buildServices(ctx context.Context) error {
 		issueSvc.LLM = llmClient
 		interpretSvc.LLM = llmClient
 		projectAISvc.LLM = llmClient
+		// Triage scoring falls back to deterministic tiers when this is nil.
+		assignSvc.LLM = llmClient
 		categorizeSvc = &appmessages.CategorizeService{
 			Messages: repo,
 			LLM:      llmClient,

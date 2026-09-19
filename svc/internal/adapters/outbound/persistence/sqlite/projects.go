@@ -873,3 +873,72 @@ func buildAssignmentRow(idStr, orgStr, accStr, conv string, messageID *uuid.UUID
 	}
 	return row, nil
 }
+
+func (r *Repository) ListProjectParticipants(ctx context.Context, organisationID uuid.UUID) ([]driven.ProjectParticipantRow, error) {
+	rows, err := r.db.QueryContext(ctx, `
+		SELECT pp.project_id, pp.contact_id
+		FROM project_participants pp
+		INNER JOIN projects p ON p.id = pp.project_id
+		WHERE p.organisation_id = ? AND p.archived_at IS NULL
+	`, organisationID.String())
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	out := make([]driven.ProjectParticipantRow, 0)
+	for rows.Next() {
+		var projectStr, contactStr string
+		if err := rows.Scan(&projectStr, &contactStr); err != nil {
+			return nil, err
+		}
+		projectID, err := uuid.Parse(projectStr)
+		if err != nil {
+			return nil, err
+		}
+		contactID, err := uuid.Parse(contactStr)
+		if err != nil {
+			return nil, err
+		}
+		out = append(out, driven.ProjectParticipantRow{ProjectID: projectID, ContactID: contactID})
+	}
+	return out, rows.Err()
+}
+
+func (r *Repository) ListCommittedAssignmentSignals(ctx context.Context, userID, accountID uuid.UUID, limit int) ([]driven.AssignmentSignalRow, error) {
+	if limit <= 0 {
+		limit = 500
+	}
+	rows, err := r.db.QueryContext(ctx, `
+		SELECT COALESCE(o.project_id, t.project_id) AS project_id, m.from_json
+		FROM messages m
+		INNER JOIN accounts a ON a.id = m.account_id AND a.user_id = ?
+		LEFT JOIN message_assignment_overrides o ON o.message_id = m.id
+		LEFT JOIN thread_assignments t
+			ON t.account_id = m.account_id
+			AND t.conversation_id = m.conversation_id
+			AND m.conversation_id IS NOT NULL
+			AND m.conversation_id <> ''
+		WHERE m.account_id = ?
+		  AND CASE WHEN o.message_id IS NOT NULL THEN o.status ELSE t.status END = 'committed'
+		  AND COALESCE(o.project_id, t.project_id) IS NOT NULL
+		ORDER BY m.received_at DESC
+		LIMIT ?
+	`, userID.String(), accountID.String(), limit)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	out := make([]driven.AssignmentSignalRow, 0)
+	for rows.Next() {
+		var projectStr, fromJSON string
+		if err := rows.Scan(&projectStr, &fromJSON); err != nil {
+			return nil, err
+		}
+		projectID, err := uuid.Parse(projectStr)
+		if err != nil {
+			return nil, err
+		}
+		out = append(out, driven.AssignmentSignalRow{ProjectID: projectID, FromJSON: fromJSON})
+	}
+	return out, rows.Err()
+}
