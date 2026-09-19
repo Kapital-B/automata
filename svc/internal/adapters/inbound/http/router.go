@@ -159,6 +159,7 @@ func (h *Handlers) Routes() http.Handler {
 	r.Delete("/api/issues/{id}/items/{itemID}", h.removeIssueItem)
 	r.Get("/api/unassigned/summary", h.unassignedSummary)
 	r.Get("/api/unassigned", h.listUnassigned)
+	r.Post("/api/project-assignments/batch", h.assignProjectsBatch)
 	r.Post("/api/messages/{id}/project-assignment", h.assignMessageProject)
 	r.Delete("/api/messages/{id}/project-assignment/override", h.clearMessageOverride)
 	r.Post("/api/manual-items", h.createManualItem)

@@ -720,8 +720,12 @@ func scanMemberRow(s rowScanner) (*driven.ProjectMemberRow, error) {
 	}, nil
 }
 
-func (r *Repository) UpsertThreadAssignment(ctx context.Context, row driven.AssignmentRow) error {
-	_, err := r.execContext(ctx, `
+// assignmentUpsertChunk bounds how many assignment rows go into one
+// transaction. DSQL aborts a transaction that mutates more than 3,000 rows
+// (cascades included), so batch writes commit in chunks well under that.
+const assignmentUpsertChunk = 100
+
+const upsertThreadAssignmentSQL = `
 		INSERT INTO thread_assignments (
 			id, organisation_id, account_id, conversation_id, project_id, status, confidence, reason, source,
 			run_id, assigned_by_user_id, created_at, updated_at
@@ -734,9 +738,46 @@ func (r *Repository) UpsertThreadAssignment(ctx context.Context, row driven.Assi
 			source = excluded.source,
 			run_id = excluded.run_id,
 			assigned_by_user_id = excluded.assigned_by_user_id,
-			updated_at = excluded.updated_at
-	`, row.ID.String(), row.OrganisationID.String(), row.AccountID.String(), row.ConversationID, nullUUID(row.ProjectID), row.Status, nullFloat(row.Confidence), row.Reason, row.Source, nullUUID(row.RunID), nullUUID(row.AssignedByUserID), row.CreatedAt.UTC(), row.UpdatedAt.UTC())
+			updated_at = excluded.updated_at`
+
+func threadAssignmentArgs(row driven.AssignmentRow) []any {
+	return []any{row.ID.String(), row.OrganisationID.String(), row.AccountID.String(), row.ConversationID,
+		nullUUID(row.ProjectID), row.Status, nullFloat(row.Confidence), row.Reason, row.Source,
+		nullUUID(row.RunID), nullUUID(row.AssignedByUserID), row.CreatedAt.UTC(), row.UpdatedAt.UTC()}
+}
+
+func (r *Repository) UpsertThreadAssignment(ctx context.Context, row driven.AssignmentRow) error {
+	_, err := r.execContext(ctx, upsertThreadAssignmentSQL, threadAssignmentArgs(row)...)
 	return err
+}
+
+func (r *Repository) UpsertThreadAssignments(ctx context.Context, rows []driven.AssignmentRow) error {
+	return chunkedTx(ctx, r, rows, func(ctx context.Context, tx *sql.Tx, row driven.AssignmentRow) error {
+		_, err := txExecContext(ctx, tx, upsertThreadAssignmentSQL, threadAssignmentArgs(row)...)
+		return err
+	})
+}
+
+// chunkedTx applies fn to every row, committing one transaction per chunk.
+func chunkedTx(ctx context.Context, r *Repository, rows []driven.AssignmentRow, fn func(context.Context, *sql.Tx, driven.AssignmentRow) error) error {
+	for start := 0; start < len(rows); start += assignmentUpsertChunk {
+		end := start + assignmentUpsertChunk
+		if end > len(rows) {
+			end = len(rows)
+		}
+		chunk := rows[start:end]
+		if err := r.withTx(ctx, func(tx *sql.Tx) error {
+			for _, row := range chunk {
+				if err := fn(ctx, tx, row); err != nil {
+					return err
+				}
+			}
+			return nil
+		}); err != nil {
+			return err
+		}
+	}
+	return nil
 }
 
 func (r *Repository) GetThreadAssignment(ctx context.Context, accountID uuid.UUID, conversationID string) (*driven.AssignmentRow, error) {
@@ -757,11 +798,7 @@ func (r *Repository) DeleteThreadAssignment(ctx context.Context, accountID uuid.
 	return err
 }
 
-func (r *Repository) UpsertMessageOverride(ctx context.Context, row driven.AssignmentRow) error {
-	if row.MessageID == nil {
-		return fmt.Errorf("message override requires message_id")
-	}
-	_, err := r.execContext(ctx, `
+const upsertMessageOverrideSQL = `
 		INSERT INTO message_assignment_overrides (
 			message_id, organisation_id, account_id, project_id, status, confidence, reason, source,
 			run_id, assigned_by_user_id, created_at, updated_at
@@ -774,9 +811,32 @@ func (r *Repository) UpsertMessageOverride(ctx context.Context, row driven.Assig
 			source = excluded.source,
 			run_id = excluded.run_id,
 			assigned_by_user_id = excluded.assigned_by_user_id,
-			updated_at = excluded.updated_at
-	`, row.MessageID.String(), row.OrganisationID.String(), row.AccountID.String(), nullUUID(row.ProjectID), row.Status, nullFloat(row.Confidence), row.Reason, row.Source, nullUUID(row.RunID), nullUUID(row.AssignedByUserID), row.CreatedAt.UTC(), row.UpdatedAt.UTC())
+			updated_at = excluded.updated_at`
+
+func messageOverrideArgs(row driven.AssignmentRow) []any {
+	return []any{row.MessageID.String(), row.OrganisationID.String(), row.AccountID.String(),
+		nullUUID(row.ProjectID), row.Status, nullFloat(row.Confidence), row.Reason, row.Source,
+		nullUUID(row.RunID), nullUUID(row.AssignedByUserID), row.CreatedAt.UTC(), row.UpdatedAt.UTC()}
+}
+
+func (r *Repository) UpsertMessageOverride(ctx context.Context, row driven.AssignmentRow) error {
+	if row.MessageID == nil {
+		return fmt.Errorf("message override requires message_id")
+	}
+	_, err := r.execContext(ctx, upsertMessageOverrideSQL, messageOverrideArgs(row)...)
 	return err
+}
+
+func (r *Repository) UpsertMessageOverrides(ctx context.Context, rows []driven.AssignmentRow) error {
+	for _, row := range rows {
+		if row.MessageID == nil {
+			return fmt.Errorf("message override requires message_id")
+		}
+	}
+	return chunkedTx(ctx, r, rows, func(ctx context.Context, tx *sql.Tx, row driven.AssignmentRow) error {
+		_, err := txExecContext(ctx, tx, upsertMessageOverrideSQL, messageOverrideArgs(row)...)
+		return err
+	})
 }
 
 func (r *Repository) GetMessageOverride(ctx context.Context, messageID uuid.UUID) (*driven.AssignmentRow, error) {
@@ -850,6 +910,84 @@ func msgEffectiveNil(msg *driven.MessageRow, err error) (*driven.EffectiveAssign
 	return nil, nil
 }
 
+// unassignedEffCTE resolves the Wave 1 §7 effective assignment for every mail
+// message on the caller's accounts in one pass: an override row wins outright
+// (including when it clears the project), otherwise the thread row applies.
+//
+// This must stay a single statement. Resolving assignments per message turns the
+// triage queue into thousands of round-trips, and on DSQL each one is a
+// distributed hop.
+const unassignedEffCTE = `
+	WITH eff AS (
+		SELECT
+			m.id AS message_id,
+			m.account_id,
+			a.label AS account_label,
+			m.subject,
+			m.from_json,
+			m.conversation_id,
+			m.received_at,
+			CASE WHEN o.message_id IS NOT NULL THEN o.project_id ELSE t.project_id END AS project_id,
+			CASE WHEN o.message_id IS NOT NULL THEN o.status     ELSE t.status     END AS raw_status,
+			CASE WHEN o.message_id IS NOT NULL THEN o.reason     ELSE t.reason     END AS reason,
+			CASE WHEN o.message_id IS NOT NULL THEN o.source     ELSE t.source     END AS source,
+			CASE WHEN o.message_id IS NOT NULL THEN o.confidence ELSE t.confidence END AS confidence,
+			CASE
+				WHEN o.message_id IS NOT NULL THEN NULL
+				WHEN m.conversation_id IS NULL OR m.conversation_id = '' THEN NULL
+				ELSE m.conversation_id
+			END AS thread_key
+		FROM messages m
+		INNER JOIN accounts a ON a.id = m.account_id AND a.user_id = ?
+		LEFT JOIN message_assignment_overrides o ON o.message_id = m.id
+		LEFT JOIN thread_assignments t
+			ON t.account_id = m.account_id
+			AND t.conversation_id = m.conversation_id
+			AND m.conversation_id IS NOT NULL
+			AND m.conversation_id <> ''
+	),
+	queued AS (
+		SELECT
+			message_id, account_id, account_label, subject, from_json, conversation_id,
+			received_at, project_id,
+			COALESCE(reason, '') AS reason,
+			COALESCE(source, '') AS source,
+			confidence,
+			CASE WHEN project_id IS NULL THEN 'unassigned' ELSE raw_status END AS status,
+			COALESCE(thread_key, message_id::text) AS group_key
+		FROM eff
+		WHERE project_id IS NULL OR raw_status = 'provisional'
+	),
+	grouped AS (
+		SELECT
+			queued.*,
+			ROW_NUMBER() OVER (PARTITION BY group_key ORDER BY received_at DESC, message_id DESC) AS rn,
+			COUNT(*) OVER (PARTITION BY group_key) AS thread_count
+		FROM queued
+	),
+	manual AS (
+		SELECT
+			mi.id AS manual_item_id,
+			mi.title,
+			mi.channel,
+			mi.occurred_at,
+			mi.project_id,
+			CASE WHEN mi.project_id IS NULL THEN 'unassigned' ELSE mi.assignment_status END AS status,
+			COALESCE(mi.assignment_reason, '') AS reason,
+			COALESCE(mi.assignment_source, '') AS source
+		FROM manual_items mi
+		WHERE mi.organisation_id = ?
+		  AND (mi.project_id IS NULL OR mi.assignment_status = 'provisional')
+	)`
+
+func normalizeUnassignedStatus(status string) string {
+	s := strings.TrimSpace(strings.ToLower(status))
+	if s == "" {
+		return "all"
+	}
+	return s
+}
+
 func (r *Repository) ListUnassigned(ctx context.Context, userID uuid.UUID, filter driven.UnassignedListFilter) ([]driven.UnassignedItem, error) {
 	limit := filter.Limit
 	if limit <= 0 {
@@ -859,137 +997,177 @@ func (r *Repository) ListUnassigned(ctx context.Context, userID uuid.UUID, filte
 	if offset < 0 {
 		offset = 0
 	}
-	status := strings.TrimSpace(strings.ToLower(filter.Status))
-	if status == "" {
-		status = "all"
+	status := normalizeUnassignedStatus(filter.Status)
+
+	orgID, err := r.GetHomeOrganisationID(ctx, userID)
+	if err != nil {
+		return nil, err
 	}
-	out := make([]driven.UnassignedItem, 0)
-	rows, err := r.queryContext(ctx, `
-		SELECT m.id, m.account_id, a.label, m.subject, m.from_json, m.conversation_id, m.received_at
-		FROM messages m
-		INNER JOIN accounts a ON a.id = m.account_id AND a.user_id = ?
-		ORDER BY m.received_at DESC
-		LIMIT ?
-	`, userID.String(), defaultTimelineCandidateLimit)
+
+	args := []any{userID.String(), orgID.String()}
+	mailWhere := "rn = 1"
+	manualWhere := "1 = 1"
+	if status != "all" {
+		mailWhere += " AND status = ?"
+		manualWhere += " AND status = ?"
+	}
+
+	q := unassignedEffCTE + `
+	SELECT 'message' AS kind, message_id::text AS id, account_id::text AS account_id,
+		account_label, subject, from_json, '' AS channel, conversation_id,
+		received_at AS occurred_at, project_id::text AS project_id, status, reason, source,
+		confidence, thread_count
+	FROM grouped
+	WHERE ` + mailWhere + `
+	UNION ALL
+	SELECT 'manual', manual_item_id::text, NULL::text, '', title, '', channel, NULL::text,
+		occurred_at, project_id::text, status, reason, source,
+		NULL::double precision, 1::bigint
+	FROM manual
+	WHERE ` + manualWhere + `
+	ORDER BY occurred_at DESC
+	LIMIT ? OFFSET ?`
+
+	if status != "all" {
+		args = append(args, status, status)
+	}
+	args = append(args, limit, offset)
+
+	rows, err := r.queryContext(ctx, q, args...)
 	if err != nil {
 		return nil, err
 	}
 	defer rows.Close()
+	return scanUnassignedRows(rows)
+}
+
+func scanUnassignedRows(rows *sql.Rows) ([]driven.UnassignedItem, error) {
+	out := make([]driven.UnassignedItem, 0)
 	for rows.Next() {
-		var idStr, accountStr, label, subject, fromJSON string
-		var conversation sql.NullString
-		var receivedAt time.Time
-		if err := rows.Scan(&idStr, &accountStr, &label, &subject, &fromJSON, &conversation, &receivedAt); err != nil {
+		var kind, idStr, accountLabel, subject, fromJSON, channel, status, reason, source string
+		var accountID, conversationID, projectID sql.NullString
+		var confidence sql.NullFloat64
+		var threadCount int64
+		var occurredAt time.Time
+		if err := rows.Scan(&kind, &idStr, &accountID, &accountLabel, &subject, &fromJSON,
+			&channel, &conversationID, &occurredAt, &projectID, &status, &reason, &source,
+			&confidence, &threadCount); err != nil {
 			return nil, err
 		}
-		id, _ := uuid.Parse(idStr)
-		accountID, _ := uuid.Parse(accountStr)
-		eff, err := r.EffectiveAssignment(ctx, userID, id)
-		if err != nil || eff == nil {
-			continue
+		id, err := uuid.Parse(idStr)
+		if err != nil {
+			return nil, err
 		}
-		itemStatus := "unassigned"
-		if eff.ProjectID != nil && eff.Status == "provisional" {
-			itemStatus = "provisional"
-		} else if eff.ProjectID != nil && eff.Status == "committed" {
-			continue
+		if threadCount < 1 {
+			threadCount = 1
 		}
-		if status == "unassigned" && itemStatus != "unassigned" {
-			continue
+		item := driven.UnassignedItem{
+			Kind:        kind,
+			Subject:     subject,
+			Channel:     channel,
+			OccurredAt:  occurredAt.UTC(),
+			Status:      status,
+			Reason:      reason,
+			Source:      source,
+			ThreadCount: int(threadCount),
 		}
-		if status == "provisional" && itemStatus != "provisional" {
-			continue
-		}
-		msgID, accID := id, accountID
-		out = append(out, driven.UnassignedItem{
-			Kind: "message", MessageID: &msgID, AccountID: &accID, AccountLabel: label,
-			Subject: subject, FromJSON: fromJSON, ConversationID: nullStringPtr(conversation),
-			OccurredAt: receivedAt.UTC(), Status: itemStatus, Reason: eff.Reason, ProjectID: eff.ProjectID, Source: eff.Source,
-		})
-	}
-	if err := rows.Err(); err != nil {
-		return nil, err
-	}
-	orgID, err := r.GetHomeOrganisationID(ctx, userID)
-	if err == nil {
-		manuals, err := r.ListUnassignedManualItems(ctx, orgID, 500)
-		if err == nil {
-			for _, m := range manuals {
-				itemStatus := "unassigned"
-				if m.AssignmentStatus == "provisional" && m.ProjectID != nil {
-					itemStatus = "provisional"
-				} else if m.AssignmentStatus == "committed" && m.ProjectID != nil {
-					continue
+		if kind == "manual" {
+			mid := id
+			item.ManualItemID = &mid
+		} else {
+			mid := id
+			item.MessageID = &mid
+			item.AccountLabel = accountLabel
+			item.FromJSON = fromJSON
+			item.ConversationID = nullStringPtr(conversationID)
+			if accountID.Valid {
+				acc, err := uuid.Parse(accountID.String)
+				if err != nil {
+					return nil, err
 				}
-				if status == "unassigned" && itemStatus != "unassigned" {
-					continue
-				}
-				if status == "provisional" && itemStatus != "provisional" {
-					continue
-				}
-				mid := m.ID
-				reason := ""
-				if m.AssignmentReason != nil {
-					reason = *m.AssignmentReason
-				}
-				source := ""
-				if m.AssignmentSource != nil {
-					source = *m.AssignmentSource
-				}
-				out = append(out, driven.UnassignedItem{
-					Kind: "manual", ManualItemID: &mid, Subject: m.Title, Channel: m.Channel, OccurredAt: m.OccurredAt,
-					Status: itemStatus, Reason: reason, ProjectID: m.ProjectID, Source: source,
-				})
+				item.AccountID = &acc
 			}
 		}
+		if projectID.Valid {
+			pid, err := uuid.Parse(projectID.String)
+			if err != nil {
+				return nil, err
+			}
+			item.ProjectID = &pid
+		}
+		if confidence.Valid {
+			c := confidence.Float64
+			item.Confidence = &c
+		}
+		out = append(out, item)
 	}
-	sort.Slice(out, func(i, j int) bool { return out[i].OccurredAt.After(out[j].OccurredAt) })
-	if offset >= len(out) {
-		return []driven.UnassignedItem{}, nil
-	}
-	end := offset + limit
-	if end > len(out) {
-		end = len(out)
-	}
-	return out[offset:end], nil
+	return out, rows.Err()
 }
 
 func (r *Repository) CountUnassignedSummary(ctx context.Context, userID uuid.UUID) (driven.UnassignedSummary, error) {
-	items, err := r.ListUnassigned(ctx, userID, driven.UnassignedListFilter{Status: "all", Limit: 2000})
-	if err != nil {
-		return driven.UnassignedSummary{}, err
-	}
 	var sum driven.UnassignedSummary
-	for _, it := range items {
-		if it.Status == "provisional" {
-			sum.Provisional++
+	orgID, err := r.GetHomeOrganisationID(ctx, userID)
+	if err != nil {
+		return sum, err
+	}
+	q := unassignedEffCTE + `
+	SELECT status, COUNT(*) FROM (
+		SELECT status FROM grouped WHERE rn = 1
+		UNION ALL
+		SELECT status FROM manual
+	) counted
+	GROUP BY status`
+	rows, err := r.queryContext(ctx, q, userID.String(), orgID.String())
+	if err != nil {
+		return sum, err
+	}
+	defer rows.Close()
+	for rows.Next() {
+		var status string
+		var n int
+		if err := rows.Scan(&status, &n); err != nil {
+			return driven.UnassignedSummary{}, err
+		}
+		if status == "provisional" {
+			sum.Provisional += n
 		} else {
-			sum.Unassigned++
+			sum.Unassigned += n
 		}
 	}
-	return sum, nil
+	return sum, rows.Err()
 }
 
+// ListMessagesNeedingAssign returns messages on the account with no override row
+// and no thread row, i.e. Wave 1 §9's "effective assignment is Unassigned".
 func (r *Repository) ListMessagesNeedingAssign(ctx context.Context, userID, accountID uuid.UUID, limit int) ([]driven.MessageRow, error) {
 	if limit <= 0 {
 		limit = 500
 	}
-	msgs, err := r.ListMessages(ctx, userID, driven.MessageListFilter{AccountID: &accountID, Limit: limit})
+	rows, err := r.queryContext(ctx, `
+		SELECT m.id, m.account_id, m.provider_message_id, m.conversation_id, m.received_at, m.subject, m.from_json,
+			m.to_json, m.cc_json, m.to_cc_preview, m.body_text, m.body_fetched_at, m.has_attachments, m.raw_etag,
+			cd.slug, mc.confidence, m.created_at, m.updated_at, m.summary_seen_at, m.forward_seen_at
+		FROM messages m
+		INNER JOIN accounts a ON a.id = m.account_id AND a.user_id = ?
+		LEFT JOIN message_categories mc ON mc.message_id = m.id AND mc.source = 'llm'
+		LEFT JOIN category_definitions cd ON cd.id = mc.category_id
+		LEFT JOIN message_assignment_overrides o ON o.message_id = m.id
+		LEFT JOIN thread_assignments t
+			ON t.account_id = m.account_id
+			AND t.conversation_id = m.conversation_id
+			AND m.conversation_id IS NOT NULL
+			AND m.conversation_id <> ''
+		WHERE m.account_id = ?
+		  AND o.message_id IS NULL
+		  AND t.id IS NULL
+		ORDER BY m.received_at DESC
+		LIMIT ?
+	`, userID.String(), accountID.String(), limit)
 	if err != nil {
 		return nil, err
 	}
-	out := make([]driven.MessageRow, 0)
-	for _, m := range msgs {
-		eff, err := r.EffectiveAssignment(ctx, userID, m.ID)
-		if err != nil || eff == nil {
-			continue
-		}
-		if eff.ProjectID != nil || eff.Scope != "none" {
-			continue
-		}
-		out = append(out, m)
-	}
-	return out, nil
+	defer rows.Close()
+	return scanMessageRows(rows)
 }
 
 func (r *Repository) FindCommittedSiblingProject(ctx context.Context, userID, accountID uuid.UUID, conversationID string, excludeMessageID uuid.UUID) (*uuid.UUID, error) {

@@ -302,6 +302,7 @@ func ensureUserCategoryIndexes(tx *sql.Tx) error {
 	statements := []string{
 		`CREATE INDEX IF NOT EXISTS idx_category_definitions_user ON category_definitions(user_id)`,
 		`CREATE INDEX IF NOT EXISTS idx_category_definitions_user_sort ON category_definitions(user_id, sort_order, slug)`,
+		`CREATE INDEX IF NOT EXISTS idx_messages_account_received ON messages(account_id, received_at DESC)`,
 		`CREATE INDEX IF NOT EXISTS idx_message_categories_account ON message_categories(account_id)`,
 		`CREATE INDEX IF NOT EXISTS idx_message_categories_message ON message_categories(message_id)`,
 		`CREATE INDEX IF NOT EXISTS idx_message_categories_category ON message_categories(category_id)`,
@@ -569,6 +570,7 @@ func migrateProjectsAssignments(db *sql.DB) error {
 			UNIQUE (account_id, conversation_id)
 		)`,
 		`CREATE INDEX IF NOT EXISTS idx_thread_assignments_org ON thread_assignments(organisation_id)`,
+		`CREATE INDEX IF NOT EXISTS idx_thread_assignments_account_conv ON thread_assignments(account_id, conversation_id)`,
 		`CREATE TABLE IF NOT EXISTS message_assignment_overrides (
 			message_id TEXT PRIMARY KEY NOT NULL REFERENCES messages(id) ON DELETE CASCADE,
 			organisation_id TEXT NOT NULL REFERENCES organisations(id) ON DELETE CASCADE,

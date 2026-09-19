@@ -3,6 +3,7 @@ package persistencetest
 import (
 	"context"
 	"database/sql"
+	"fmt"
 	"strings"
 	"testing"
 	"time"
@@ -34,6 +35,9 @@ type Repository interface {
 type Handle struct {
 	DB   *sql.DB
 	Repo Repository
+	// Counter is optional. When set, the suite asserts that hot read paths stay
+	// set-based; when nil those assertions are skipped.
+	Counter *QueryCounter
 }
 
 type Factory func(t *testing.T) Handle
@@ -295,6 +299,364 @@ func Run(t *testing.T, factory Factory) {
 			t.Fatal("expected stale schedule CAS failure")
 		}
 	})
+
+	t.Run("triage_effective_assignment_parity", func(t *testing.T) {
+		h := factory(t)
+		ctx := context.Background()
+		now := time.Now().UTC()
+		userID, orgID, accountID := seedUserAccount(t, h.Repo, uuid.New(), now)
+		projectID := createProject(t, h.Repo, orgID, userID, "DC01", "Riverside")
+
+		// Every permutation of override / thread assignment that Wave 1 §7 defines.
+		cases := []struct {
+			name         string
+			conversation string
+			thread       *string // thread project, "" means row with NULL project
+			override     *string // override project, "" means row with NULL project
+			wantQueued   bool
+			wantStatus   string
+			threadStatus string
+			ovrStatus    string
+		}{
+			{name: "bare", conversation: "c-bare", wantQueued: true, wantStatus: "unassigned"},
+			{name: "no_conversation", conversation: "", wantQueued: true, wantStatus: "unassigned"},
+			{name: "thread_committed", conversation: "c-tc", thread: ptrStr(projectID.String()), threadStatus: "committed", wantQueued: false},
+			{name: "thread_provisional", conversation: "c-tp", thread: ptrStr(projectID.String()), threadStatus: "provisional", wantQueued: true, wantStatus: "provisional"},
+			{name: "override_committed", conversation: "c-oc", override: ptrStr(projectID.String()), ovrStatus: "committed", wantQueued: false},
+			{name: "override_provisional", conversation: "c-op", override: ptrStr(projectID.String()), ovrStatus: "provisional", wantQueued: true, wantStatus: "provisional"},
+			// An override that clears the project wins over an assigned thread.
+			{name: "override_null_over_committed_thread", conversation: "c-onc", thread: ptrStr(projectID.String()), threadStatus: "committed", override: ptrStr(""), ovrStatus: "committed", wantQueued: true, wantStatus: "unassigned"},
+		}
+
+		ids := make(map[string]uuid.UUID, len(cases))
+		for i, tc := range cases {
+			msgID := insertMsg(t, h.Repo, accountID, tc.name, tc.conversation, "body", now.Add(-time.Duration(i)*time.Minute))
+			ids[tc.name] = msgID
+			if tc.thread != nil {
+				row := driven.AssignmentRow{
+					ID: uuid.New(), OrganisationID: orgID, AccountID: accountID,
+					ConversationID: tc.conversation, Status: tc.threadStatus,
+					Reason: "seed", Source: string(domainprojects.SourceRule), CreatedAt: now, UpdatedAt: now,
+				}
+				if *tc.thread != "" {
+					pid := uuid.MustParse(*tc.thread)
+					row.ProjectID = &pid
+				}
+				if err := h.Repo.UpsertThreadAssignment(ctx, row); err != nil {
+					t.Fatal(err)
+				}
+			}
+			if tc.override != nil {
+				mid := msgID
+				row := driven.AssignmentRow{
+					OrganisationID: orgID, AccountID: accountID, MessageID: &mid,
+					Status: tc.ovrStatus, Reason: "seed", Source: string(domainprojects.SourceUser),
+					CreatedAt: now, UpdatedAt: now,
+				}
+				if *tc.override != "" {
+					pid := uuid.MustParse(*tc.override)
+					row.ProjectID = &pid
+				}
+				if err := h.Repo.UpsertMessageOverride(ctx, row); err != nil {
+					t.Fatal(err)
+				}
+			}
+		}
+
+		items, err := h.Repo.ListUnassigned(ctx, userID, driven.UnassignedListFilter{Status: "all", Limit: 100})
+		if err != nil {
+			t.Fatal(err)
+		}
+		queued := map[uuid.UUID]driven.UnassignedItem{}
+		for _, it := range items {
+			if it.MessageID != nil {
+				queued[*it.MessageID] = it
+			}
+		}
+
+		for _, tc := range cases {
+			msgID := ids[tc.name]
+			got, inQueue := queued[msgID]
+			if inQueue != tc.wantQueued {
+				t.Errorf("%s: queued = %v, want %v", tc.name, inQueue, tc.wantQueued)
+				continue
+			}
+			if !tc.wantQueued {
+				continue
+			}
+			if got.Status != tc.wantStatus {
+				t.Errorf("%s: status = %q, want %q", tc.name, got.Status, tc.wantStatus)
+			}
+			// The list query and the single-message resolver must agree.
+			eff, err := h.Repo.EffectiveAssignment(ctx, userID, msgID)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if !samePtrUUID(eff.ProjectID, got.ProjectID) {
+				t.Errorf("%s: list project=%v, EffectiveAssignment project=%v", tc.name, got.ProjectID, eff.ProjectID)
+			}
+		}
+	})
+
+	t.Run("triage_thread_dedupe", func(t *testing.T) {
+		h := factory(t)
+		ctx := context.Background()
+		now := time.Now().UTC()
+		userID, _, accountID := seedUserAccount(t, h.Repo, uuid.New(), now)
+
+		// One conversation with four messages collapses to a single decision.
+		for i := 0; i < 4; i++ {
+			insertMsg(t, h.Repo, accountID, "thread msg", "conv-1", "body", now.Add(-time.Duration(i)*time.Minute))
+		}
+		// Messages with no conversation are each their own decision.
+		insertMsg(t, h.Repo, accountID, "loose a", "", "body", now.Add(-10*time.Minute))
+		insertMsg(t, h.Repo, accountID, "loose b", "", "body", now.Add(-11*time.Minute))
+
+		items, err := h.Repo.ListUnassigned(ctx, userID, driven.UnassignedListFilter{Status: "all", Limit: 100})
+		if err != nil {
+			t.Fatal(err)
+		}
+		if len(items) != 3 {
+			t.Fatalf("want 3 queue rows (1 thread + 2 loose), got %d", len(items))
+		}
+		var threadRow *driven.UnassignedItem
+		for i := range items {
+			if items[i].ConversationID != nil && *items[i].ConversationID == "conv-1" {
+				threadRow = &items[i]
+			}
+		}
+		if threadRow == nil {
+			t.Fatal("thread row missing")
+		}
+		if threadRow.ThreadCount != 4 {
+			t.Errorf("thread_count = %d, want 4", threadRow.ThreadCount)
+		}
+		for _, it := range items {
+			if it.ConversationID == nil || *it.ConversationID == "" {
+				if it.ThreadCount != 1 {
+					t.Errorf("loose message thread_count = %d, want 1", it.ThreadCount)
+				}
+			}
+		}
+
+		// Counts are over decisions, so the badge matches the queue length.
+		sum, err := h.Repo.CountUnassignedSummary(ctx, userID)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if sum.Unassigned+sum.Provisional != len(items) {
+			t.Errorf("summary total = %d, queue length = %d", sum.Unassigned+sum.Provisional, len(items))
+		}
+	})
+
+	t.Run("triage_overridden_message_is_its_own_row", func(t *testing.T) {
+		h := factory(t)
+		ctx := context.Background()
+		now := time.Now().UTC()
+		userID, orgID, accountID := seedUserAccount(t, h.Repo, uuid.New(), now)
+		projectID := createProject(t, h.Repo, orgID, userID, "DC02", "Hollow")
+
+		a := insertMsg(t, h.Repo, accountID, "m a", "conv-x", "body", now)
+		insertMsg(t, h.Repo, accountID, "m b", "conv-x", "body", now.Add(-time.Minute))
+
+		// Thread is provisional, but one message is individually cleared.
+		if err := h.Repo.UpsertThreadAssignment(ctx, driven.AssignmentRow{
+			ID: uuid.New(), OrganisationID: orgID, AccountID: accountID, ConversationID: "conv-x",
+			ProjectID: &projectID, Status: "provisional", Reason: "seed",
+			Source: string(domainprojects.SourceRule), CreatedAt: now, UpdatedAt: now,
+		}); err != nil {
+			t.Fatal(err)
+		}
+		mid := a
+		if err := h.Repo.UpsertMessageOverride(ctx, driven.AssignmentRow{
+			OrganisationID: orgID, AccountID: accountID, MessageID: &mid,
+			Status: "committed", Reason: "seed", Source: string(domainprojects.SourceUser),
+			CreatedAt: now, UpdatedAt: now,
+		}); err != nil {
+			t.Fatal(err)
+		}
+
+		items, err := h.Repo.ListUnassigned(ctx, userID, driven.UnassignedListFilter{Status: "all", Limit: 100})
+		if err != nil {
+			t.Fatal(err)
+		}
+		if len(items) != 2 {
+			t.Fatalf("want 2 rows (cleared message + rest of thread), got %d", len(items))
+		}
+		for _, it := range items {
+			if it.MessageID != nil && *it.MessageID == a {
+				if it.Status != "unassigned" || it.ProjectID != nil {
+					t.Errorf("overridden message: status=%q project=%v, want unassigned/nil", it.Status, it.ProjectID)
+				}
+				if it.ThreadCount != 1 {
+					t.Errorf("overridden message thread_count = %d, want 1", it.ThreadCount)
+				}
+			}
+		}
+	})
+
+	t.Run("triage_status_filter_and_pagination", func(t *testing.T) {
+		h := factory(t)
+		ctx := context.Background()
+		now := time.Now().UTC()
+		userID, orgID, accountID := seedUserAccount(t, h.Repo, uuid.New(), now)
+		projectID := createProject(t, h.Repo, orgID, userID, "DC03", "Quarry")
+
+		// 5 provisional threads and 5 unassigned threads, interleaved in time.
+		for i := 0; i < 5; i++ {
+			conv := fmt.Sprintf("prov-%d", i)
+			insertMsg(t, h.Repo, accountID, conv, conv, "body", now.Add(-time.Duration(i*2)*time.Minute))
+			if err := h.Repo.UpsertThreadAssignment(ctx, driven.AssignmentRow{
+				ID: uuid.New(), OrganisationID: orgID, AccountID: accountID, ConversationID: conv,
+				ProjectID: &projectID, Status: "provisional", Reason: "seed",
+				Source: string(domainprojects.SourceRule), CreatedAt: now, UpdatedAt: now,
+			}); err != nil {
+				t.Fatal(err)
+			}
+			plain := fmt.Sprintf("plain-%d", i)
+			insertMsg(t, h.Repo, accountID, plain, plain, "body", now.Add(-time.Duration(i*2+1)*time.Minute))
+		}
+
+		all, err := h.Repo.ListUnassigned(ctx, userID, driven.UnassignedListFilter{Status: "all", Limit: 100})
+		if err != nil {
+			t.Fatal(err)
+		}
+		if len(all) != 10 {
+			t.Fatalf("want 10 rows, got %d", len(all))
+		}
+		prov, err := h.Repo.ListUnassigned(ctx, userID, driven.UnassignedListFilter{Status: "provisional", Limit: 100})
+		if err != nil {
+			t.Fatal(err)
+		}
+		if len(prov) != 5 {
+			t.Fatalf("want 5 provisional rows, got %d", len(prov))
+		}
+		for _, it := range prov {
+			if it.Status != "provisional" {
+				t.Fatalf("status filter leaked %q", it.Status)
+			}
+		}
+
+		// Pagination must be a window over the filtered set, not over raw candidates.
+		page1, err := h.Repo.ListUnassigned(ctx, userID, driven.UnassignedListFilter{Status: "all", Limit: 4, Offset: 0})
+		if err != nil {
+			t.Fatal(err)
+		}
+		page2, err := h.Repo.ListUnassigned(ctx, userID, driven.UnassignedListFilter{Status: "all", Limit: 4, Offset: 4})
+		if err != nil {
+			t.Fatal(err)
+		}
+		page3, err := h.Repo.ListUnassigned(ctx, userID, driven.UnassignedListFilter{Status: "all", Limit: 4, Offset: 8})
+		if err != nil {
+			t.Fatal(err)
+		}
+		if len(page1) != 4 || len(page2) != 4 || len(page3) != 2 {
+			t.Fatalf("page sizes = %d/%d/%d, want 4/4/2", len(page1), len(page2), len(page3))
+		}
+		seen := map[uuid.UUID]bool{}
+		for _, pg := range [][]driven.UnassignedItem{page1, page2, page3} {
+			for _, it := range pg {
+				if it.MessageID == nil {
+					continue
+				}
+				if seen[*it.MessageID] {
+					t.Fatalf("message %s returned on more than one page", it.MessageID)
+				}
+				seen[*it.MessageID] = true
+			}
+		}
+		if len(seen) != 10 {
+			t.Fatalf("paged through %d distinct rows, want 10", len(seen))
+		}
+
+		sum, err := h.Repo.CountUnassignedSummary(ctx, userID)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if sum.Provisional != 5 || sum.Unassigned != 5 {
+			t.Fatalf("summary = %+v, want 5 provisional / 5 unassigned", sum)
+		}
+	})
+
+	t.Run("triage_read_path_is_set_based", func(t *testing.T) {
+		h := factory(t)
+		if h.Counter == nil {
+			t.Skip("handle has no query counter")
+		}
+		ctx := context.Background()
+		now := time.Now().UTC()
+		userID, _, accountID := seedUserAccount(t, h.Repo, uuid.New(), now)
+		for i := 0; i < 60; i++ {
+			insertMsg(t, h.Repo, accountID, "subject", fmt.Sprintf("conv-%d", i), "body", now.Add(-time.Duration(i)*time.Minute))
+		}
+
+		// Both calls resolve the home org first, then run one statement. The
+		// pre-rewrite implementation issued two to three per candidate message.
+		h.Counter.Reset()
+		if _, err := h.Repo.ListUnassigned(ctx, userID, driven.UnassignedListFilter{Status: "all", Limit: 50}); err != nil {
+			t.Fatal(err)
+		}
+		if n := h.Counter.Count(); n > 3 {
+			t.Errorf("ListUnassigned issued %d statements over 60 messages, want <= 3", n)
+		}
+
+		h.Counter.Reset()
+		if _, err := h.Repo.CountUnassignedSummary(ctx, userID); err != nil {
+			t.Fatal(err)
+		}
+		if n := h.Counter.Count(); n > 3 {
+			t.Errorf("CountUnassignedSummary issued %d statements over 60 messages, want <= 3", n)
+		}
+
+		h.Counter.Reset()
+		if _, err := h.Repo.ListMessagesNeedingAssign(ctx, userID, accountID, 500); err != nil {
+			t.Fatal(err)
+		}
+		if n := h.Counter.Count(); n > 3 {
+			t.Errorf("ListMessagesNeedingAssign issued %d statements over 60 messages, want <= 3", n)
+		}
+	})
+
+	t.Run("triage_messages_needing_assign_excludes_assigned", func(t *testing.T) {
+		h := factory(t)
+		ctx := context.Background()
+		now := time.Now().UTC()
+		userID, orgID, accountID := seedUserAccount(t, h.Repo, uuid.New(), now)
+		projectID := createProject(t, h.Repo, orgID, userID, "DC04", "Bridge")
+
+		free := insertMsg(t, h.Repo, accountID, "free", "conv-free", "body", now)
+		threaded := insertMsg(t, h.Repo, accountID, "threaded", "conv-assigned", "body", now.Add(-time.Minute))
+		overridden := insertMsg(t, h.Repo, accountID, "overridden", "conv-ovr", "body", now.Add(-2*time.Minute))
+
+		if err := h.Repo.UpsertThreadAssignment(ctx, driven.AssignmentRow{
+			ID: uuid.New(), OrganisationID: orgID, AccountID: accountID, ConversationID: "conv-assigned",
+			ProjectID: &projectID, Status: "committed", Reason: "seed",
+			Source: string(domainprojects.SourceRule), CreatedAt: now, UpdatedAt: now,
+		}); err != nil {
+			t.Fatal(err)
+		}
+		mid := overridden
+		if err := h.Repo.UpsertMessageOverride(ctx, driven.AssignmentRow{
+			OrganisationID: orgID, AccountID: accountID, MessageID: &mid,
+			Status: "committed", Reason: "seed", Source: string(domainprojects.SourceUser),
+			CreatedAt: now, UpdatedAt: now,
+		}); err != nil {
+			t.Fatal(err)
+		}
+
+		msgs, err := h.Repo.ListMessagesNeedingAssign(ctx, userID, accountID, 500)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if len(msgs) != 1 || msgs[0].ID != free {
+			got := make([]string, 0, len(msgs))
+			for _, m := range msgs {
+				got = append(got, m.Subject)
+			}
+			t.Fatalf("want only the unassigned message, got %v", got)
+		}
+		_ = threaded
+	})
 }
 
 func seedUserAccount(t *testing.T, repo Repository, userID uuid.UUID, now time.Time) (uuid.UUID, uuid.UUID, uuid.UUID) {
@@ -335,15 +697,50 @@ func ensureLegacyJobRunIfPresent(t *testing.T, db *sql.DB, runID, accountID uuid
 	if db == nil {
 		return
 	}
-	_, err := db.Exec(`
-		INSERT INTO job_runs (id, account_id, job_type, trigger_kind, status, started_at, finished_at, error_message, meta_json)
-		VALUES (?, ?, 'summarize', 'api', 'success', ?, ?, NULL, '{}')
-	`, runID.String(), accountID.String(), now.Format(time.RFC3339Nano), now.Format(time.RFC3339Nano))
-	if err == nil {
-		return
+	// This helper writes straight to the handle rather than through the repository,
+	// so it does not get the repository's placeholder rewriting. SQLite wants `?`
+	// and Postgres wants `$n`; try both before treating an error as real.
+	stmts := []string{
+		`INSERT INTO job_runs (id, account_id, job_type, trigger_kind, status, started_at, finished_at, error_message, meta_json)
+		 VALUES (?, ?, 'summarize', 'api', 'success', ?, ?, NULL, '{}')`,
+		`INSERT INTO job_runs (id, account_id, job_type, trigger_kind, status, started_at, finished_at, error_message, meta_json)
+		 VALUES ($1, $2, 'summarize', 'api', 'success', $3, $4, NULL, '{}')`,
 	}
-	if strings.Contains(strings.ToLower(err.Error()), "no such table") || strings.Contains(strings.ToLower(err.Error()), "does not exist") {
-		return
+	ts := now.Format(time.RFC3339Nano)
+	var lastErr error
+	for _, q := range stmts {
+		_, err := db.Exec(q, runID.String(), accountID.String(), ts, ts)
+		if err == nil {
+			return
+		}
+		lastErr = err
+		msg := strings.ToLower(err.Error())
+		if strings.Contains(msg, "no such table") || strings.Contains(msg, "does not exist") {
+			return
+		}
 	}
-	t.Fatal(err)
+	t.Fatal(lastErr)
+}
+
+func ptrStr(v string) *string { return &v }
+
+func samePtrUUID(a, b *uuid.UUID) bool {
+	if a == nil || b == nil {
+		return a == nil && b == nil
+	}
+	return *a == *b
+}
+
+func createProject(t *testing.T, repo Repository, orgID, userID uuid.UUID, code, name string) uuid.UUID {
+	t.Helper()
+	id := uuid.New()
+	now := time.Now().UTC()
+	if err := repo.CreateProject(context.Background(), driven.ProjectRow{
+		ID: id, OrganisationID: orgID, Name: name, Code: code, CreatedAt: now, UpdatedAt: now,
+	}, driven.ProjectMemberRow{
+		ID: uuid.New(), ProjectID: id, UserID: userID, Role: "owner", CreatedAt: now, UpdatedAt: now,
+	}); err != nil {
+		t.Fatal(err)
+	}
+	return id
 }
