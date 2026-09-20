@@ -49,7 +49,33 @@ Sources: [SQL compatibility](https://docs.aws.amazon.com/aurora-dsql/latest/user
 
 Cascading FK actions **count toward the 3,000-row limit**.
 
-### 3.2 No partial indexes
+### 3.2 Index key restrictions
+
+**No sort order on index keys.** DSQL's `CREATE INDEX` grammar has no `ASC`/`DESC`:
+
+```
+CREATE [ UNIQUE ] INDEX ASYNC [ [ IF NOT EXISTS ] name ] ON table_name
+    ( { column_name | ( expression ) } [ NULLS { FIRST | LAST } ] [, ...] )
+    [ INCLUDE ( column_name [, ...] ) ] [ NULLS [ NOT ] DISTINCT ] [ WHERE predicate ]
+```
+
+`CREATE INDEX ASYNC … ON messages(account_id, received_at DESC)` is accepted by
+vanilla Postgres and rejected by DSQL with `SQLSTATE 0A000`, *specifying sort
+order not supported for index keys*. This reached dev once (PR #9); an
+ascending index still serves `ORDER BY … DESC`, so the fix is simply to drop
+the keyword in the `dsql/` migration while the `postgres/` one may keep it.
+
+`TestDSQLIndexesHaveNoSortOrder` in the migrate package lints the `dsql/*.sql`
+set for this, along with the mandatory `ASYNC` keyword, because CI has no DSQL
+cluster to catch it.
+
+**Note (unverified):** current AWS documentation lists `WHERE predicate` as
+supported syntax, which would make the partial-index workarounds below
+unnecessary. That contradicts §3.2 as originally written and has not been
+retested on a live cluster — treat the workarounds as still authoritative until
+someone confirms.
+
+### 3.3 Partial index workarounds
 
 `CREATE INDEX` has **no `WHERE` clause**. Affected Automata indexes:
 
@@ -60,13 +86,13 @@ Cascading FK actions **count toward the 3,000-row limit**.
 | `UNIQUE (message_id) WHERE message_id IS NOT NULL` on `issue_items` | Unique on `message_id` (multiple NULLs OK). |
 | `idx_messages_account_summary_unseen … WHERE summary_seen_at IS NULL` | Full index `(account_id, summary_seen_at)` or `(account_id)` and filter in SQL. |
 
-### 3.3 Optimistic concurrency (no `SKIP LOCKED`)
+### 3.4 Optimistic concurrency (no `SKIP LOCKED`)
 
 `SELECT FOR UPDATE` does **not** block; conflicts abort at commit with **SQLSTATE 40001**. Retry product updates that hit `40001`.
 
 **Jobs are not claimed in DSQL.** Lease, status, and cursor live on the DynamoDB job item (Heimdall stream loop in [aws-deployment.md §4](aws-deployment.md#4-job-rearchitecture-heimdall-dynamodb-loop)). Do **not** build a `SKIP LOCKED` / `UPDATE job_runs … pending` queue in DSQL.
 
-### 3.4 Other gaps (non-blocking)
+### 3.5 Other gaps (non-blocking)
 
 - **No extensions** (no `pgcrypto`, `pg_trgm`). AES-GCM stays in Go (`security.NewAESGCMVault`). Contact search stays `ILIKE`; one organisation is small.
 - **No PL/pgSQL / triggers.** All logic already in application services.
