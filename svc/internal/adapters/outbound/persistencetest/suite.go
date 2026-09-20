@@ -660,6 +660,7 @@ func Run(t *testing.T, factory Factory) {
 
 	runHomeOverviewTimestampTests(t, factory)
 	runActivityFeedTests(t, factory)
+	runAttentionTests(t, factory)
 
 	t.Run("timeline_hydration_is_batched_and_correct", func(t *testing.T) {
 		h := factory(t)
@@ -1305,6 +1306,126 @@ func runActivityFeedTests(t *testing.T, factory Factory) {
 		}
 		if n := h.Counter.Count(); n != 1 {
 			t.Errorf("ListOverviewProjects issued %d statements, want 1", n)
+		}
+	})
+}
+
+// runAttentionTests covers the set-based rewrite of /api/attention.
+func runAttentionTests(t *testing.T, factory Factory) {
+	t.Helper()
+
+	t.Run("attention_is_set_based_and_membership_scoped", func(t *testing.T) {
+		h := factory(t)
+		ctx := context.Background()
+		now := time.Now().UTC()
+		userID, orgID, _ := seedUserAccount(t, h.Repo, uuid.New(), now)
+
+		// A project the caller belongs to, with one of each pending kind.
+		mine := createProject(t, h.Repo, orgID, userID, "DC30", "Mine")
+		assigned := userID
+		if err := h.Repo.CreateIssue(ctx, driven.IssueRow{
+			ID: uuid.New(), OrganisationID: orgID, ProjectID: mine, Title: "Assigned to me",
+			Status: "open", AssigneeUserID: &assigned, CreatedAt: now, UpdatedAt: now,
+		}); err != nil {
+			t.Fatal(err)
+		}
+		if err := h.Repo.CreateIssue(ctx, driven.IssueRow{
+			ID: uuid.New(), OrganisationID: orgID, ProjectID: mine, Title: "Awaiting input",
+			Status: "awaiting_input", CreatedAt: now, UpdatedAt: now,
+		}); err != nil {
+			t.Fatal(err)
+		}
+		if err := h.Repo.CreateIssue(ctx, driven.IssueRow{
+			ID: uuid.New(), OrganisationID: orgID, ProjectID: mine, Title: "Already resolved",
+			Status: "resolved", CreatedAt: now, UpdatedAt: now,
+		}); err != nil {
+			t.Fatal(err)
+		}
+		if err := h.Repo.CreateContradiction(ctx, driven.ContradictionRow{
+			ID: uuid.New(), OrganisationID: orgID, ProjectID: mine, Status: "open",
+			Summary: "conflict", CreatedAt: now, UpdatedAt: now,
+		}); err != nil {
+			t.Fatal(err)
+		}
+		if err := h.Repo.CreateDecision(ctx, driven.DecisionRow{
+			ID: uuid.New(), OrganisationID: orgID, ProjectID: mine, Statement: "Maybe",
+			Status: "proposed", Source: "llm", CreatedAt: now, UpdatedAt: now,
+		}); err != nil {
+			t.Fatal(err)
+		}
+		factID := uuid.New()
+		if err := h.Repo.CreateFact(ctx, driven.FactRow{
+			ID: factID, OrganisationID: orgID, ProjectID: mine,
+			SubjectKey: "duty", Label: "Duty", CreatedAt: now, UpdatedAt: now,
+		}); err != nil {
+			t.Fatal(err)
+		}
+		if err := h.Repo.CreateFactVersion(ctx, driven.FactVersionRow{
+			ID: uuid.New(), FactID: factID, Status: "proposed", ValueJSON: "{}",
+			ValueText: "90 kW", Source: "llm", CreatedAt: now,
+		}); err != nil {
+			t.Fatal(err)
+		}
+
+		// A project in the same org the caller is not a member of.
+		stranger := uuid.New()
+		if _, err := h.Repo.CreateUserWithHomeOrg(ctx, stranger, "s-"+stranger.String()+"@ex.com", nil, now,
+			"password", stranger.String(), "s-"+stranger.String()+"@ex.com"); err != nil {
+			t.Fatal(err)
+		}
+		theirs := uuid.New()
+		if err := h.Repo.CreateProject(ctx, driven.ProjectRow{
+			ID: theirs, OrganisationID: orgID, Name: "Theirs", Code: "DC31", CreatedAt: now, UpdatedAt: now,
+		}, driven.ProjectMemberRow{
+			ID: uuid.New(), ProjectID: theirs, UserID: stranger, Role: "owner", CreatedAt: now, UpdatedAt: now,
+		}); err != nil {
+			t.Fatal(err)
+		}
+		if err := h.Repo.CreateContradiction(ctx, driven.ContradictionRow{
+			ID: uuid.New(), OrganisationID: orgID, ProjectID: theirs, Status: "open",
+			Summary: "invisible", CreatedAt: now, UpdatedAt: now,
+		}); err != nil {
+			t.Fatal(err)
+		}
+
+		if h.Counter != nil {
+			h.Counter.Reset()
+		}
+		rows, err := h.Repo.ListAttention(ctx, userID, orgID)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if h.Counter != nil {
+			if n := h.Counter.Count(); n != 1 {
+				t.Errorf("ListAttention issued %d statements, want 1", n)
+			}
+		}
+
+		byKind := map[string]int{}
+		for _, row := range rows {
+			byKind[row.Kind]++
+			if row.ProjectID != mine {
+				t.Errorf("attention leaked a non-member project: %s", row.ProjectName)
+			}
+			if row.OccurredAt.IsZero() {
+				t.Errorf("row %s has no timestamp, so it cannot be ordered by recency", row.Kind)
+			}
+		}
+		for kind, want := range map[string]int{
+			"issue_assignee":       1,
+			"member_role":          1,
+			"provisional_fact":     1,
+			"provisional_decision": 1,
+			"open_contradiction":   1,
+		} {
+			if byKind[kind] != want {
+				t.Errorf("%s = %d, want %d (all kinds: %v)", kind, byKind[kind], want, byKind)
+			}
+		}
+		// A resolved issue is not pending, and an issue assigned to the caller
+		// must not also appear under member_role.
+		if len(rows) != 5 {
+			t.Errorf("attention rows = %d, want 5: %v", len(rows), byKind)
 		}
 	})
 }

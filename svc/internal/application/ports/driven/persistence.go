@@ -474,6 +474,18 @@ type ProjectMemberRow struct {
 	UpdatedAt         time.Time
 }
 
+// AttentionRow is one thing awaiting the caller, resolved in a single query
+// across the projects they are a member of.
+type AttentionRow struct {
+	Kind        string // issue_assignee | member_role | provisional_fact | provisional_decision | open_contradiction
+	Title       string // raw label/statement/summary; the service formats it
+	ProjectID   uuid.UUID
+	ProjectName string
+	RefType     string
+	RefID       uuid.UUID
+	OccurredAt  time.Time
+}
+
 // ActivityItem is one change to what a project knows, for the Home feed.
 type ActivityItem struct {
 	Kind        string // see the kind table in addendum-home-overview.md §6.3
@@ -546,6 +558,9 @@ type ProjectRepository interface {
 	// ListProjectParticipants returns every (project, contact) pair in the org.
 	// Used to score assignment candidates by participant overlap.
 	ListProjectParticipants(ctx context.Context, organisationID uuid.UUID) ([]ProjectParticipantRow, error)
+	// ListAttention returns everything awaiting the caller across the projects
+	// they are a member of, in one query.
+	ListAttention(ctx context.Context, userID, organisationID uuid.UUID) ([]AttentionRow, error)
 	// ListActivity returns recent changes across the projects the caller is a
 	// member of, newest first.
 	ListActivity(ctx context.Context, userID, organisationID uuid.UUID, filter ActivityFilter) ([]ActivityItem, error)
