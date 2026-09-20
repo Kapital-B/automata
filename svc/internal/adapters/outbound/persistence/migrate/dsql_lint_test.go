@@ -22,15 +22,17 @@ var (
 	sortOrderRE   = regexp.MustCompile(`(?i)(,|\(|\s)\s*[\w".]+\s+(ASC|DESC)\s*(,|\))`)
 )
 
-func dsqlStatements(t *testing.T) map[string][]string {
+// dsqlStatements returns the DSQL migration set as the migrator itself
+// classifies it, so the lints assert on what will actually be executed.
+func dsqlStatements(t *testing.T) map[string][]classifiedStatement {
 	t.Helper()
 	migrations, err := List(factory.EngineDSQL)
 	if err != nil {
 		t.Fatal(err)
 	}
-	out := map[string][]string{}
+	out := map[string][]classifiedStatement{}
 	for _, m := range migrations {
-		out[m.Path] = splitStatements(m.SQL)
+		out[m.Path] = classifyStatements(m.SQL)
 	}
 	if len(out) == 0 {
 		t.Fatal("no DSQL migrations listed")
@@ -57,8 +59,8 @@ func stripSQLComments(stmt string) string {
 // Postgres accepts DESC on index keys; DSQL has no ASC/DESC in its grammar.
 func TestDSQLIndexesHaveNoSortOrder(t *testing.T) {
 	for path, statements := range dsqlStatements(t) {
-		for _, raw := range statements {
-			stmt := stripSQLComments(raw)
+		for _, cs := range statements {
+			stmt := stripSQLComments(cs.SQL)
 			if !createIndexRE.MatchString(stmt) {
 				continue
 			}
@@ -78,8 +80,8 @@ func TestDSQLIndexesHaveNoSortOrder(t *testing.T) {
 // creation is always asynchronous and the ASYNC keyword is mandatory.
 func TestDSQLIndexesAreAsync(t *testing.T) {
 	for path, statements := range dsqlStatements(t) {
-		for _, raw := range statements {
-			stmt := stripSQLComments(raw)
+		for _, cs := range statements {
+			stmt := stripSQLComments(cs.SQL)
 			if !createIndexRE.MatchString(stmt) {
 				continue
 			}
@@ -130,4 +132,75 @@ func indexKeyList(stmt string) string {
 		}
 	}
 	return ""
+}
+
+// TestDSQLAsyncIndexesAreClassifiedAsync is the guard for the second failure
+// that reached dev.
+//
+// CREATE INDEX ASYNC returns a job id, so the migrator must send it down the
+// query path. Classification keys off the start of the statement, and a
+// migration opening with a `--` comment header used to fall through to the
+// generic exec path, which DSQL rejects with "multiple ddl statements not
+// supported in a transaction". Documenting a migration must not change how it
+// is executed.
+//
+// This asserts on classifyStatements, which is what applyStatements iterates.
+func TestDSQLAsyncIndexesAreClassifiedAsync(t *testing.T) {
+	for path, statements := range dsqlStatements(t) {
+		for _, cs := range statements {
+			if !createIndexRE.MatchString(stripSQLComments(cs.SQL)) {
+				continue
+			}
+			if !cs.AsyncIndex {
+				t.Errorf("%s: index statement not classified async; it would be exec'd instead of queried\n  %s",
+					path, strings.Join(strings.Fields(cs.SQL), " "))
+			}
+		}
+	}
+}
+
+// TestClassifyStatementsIgnoresCommentHeaders pins the classification itself
+// against the exact shape that broke: a documented migration.
+func TestClassifyStatementsIgnoresCommentHeaders(t *testing.T) {
+	got := classifyStatements(`
+-- Some explanation of why this index exists.
+-- Spanning several lines.
+CREATE INDEX ASYNC IF NOT EXISTS idx_a ON t(a);
+CREATE INDEX ASYNC IF NOT EXISTS idx_b ON t(b);
+-- a trailing note with no statement
+`)
+	if len(got) != 2 {
+		t.Fatalf("classified %d statements, want 2 (comment-only chunks dropped)", len(got))
+	}
+	for _, cs := range got {
+		if !cs.AsyncIndex {
+			t.Errorf("statement not classified async: %q", cs.SQL)
+		}
+		if strings.HasPrefix(cs.SQL, "--") {
+			t.Errorf("comment header leaked into the executed SQL: %q", cs.SQL)
+		}
+	}
+}
+
+func TestStatementBodyStripsLeadingComments(t *testing.T) {
+	cases := []struct {
+		name string
+		in   string
+		want string
+	}{
+		{"plain", "CREATE INDEX ASYNC x ON t(a)", "CREATE INDEX ASYNC x ON t(a)"},
+		{"comment header", "-- why\n-- more\nCREATE INDEX ASYNC x ON t(a)", "CREATE INDEX ASYNC x ON t(a)"},
+		{"blank lines", "\n\n  \nCREATE INDEX ASYNC x ON t(a)", "CREATE INDEX ASYNC x ON t(a)"},
+		{"comment only", "-- just a note\n", ""},
+		{"empty", "", ""},
+		// A trailing comment belongs to the statement and must survive.
+		{"trailing comment kept", "-- lead\nCREATE INDEX ASYNC x ON t(a) -- tail", "CREATE INDEX ASYNC x ON t(a) -- tail"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := statementBody(tc.in); got != tc.want {
+				t.Errorf("statementBody(%q) = %q, want %q", tc.in, got, tc.want)
+			}
+		})
+	}
 }

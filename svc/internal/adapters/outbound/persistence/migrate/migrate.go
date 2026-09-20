@@ -139,7 +139,7 @@ func applyStatements(ctx context.Context, db *sql.DB, engine factory.Engine, m M
 	// Submit all CREATE INDEX ASYNC jobs first so DSQL can build them concurrently,
 	// then wait. Waiting after each submit serialized ~68 index builds and blew the
 	// 900s Lambda timeout.
-	stmts := splitStatements(m.SQL)
+	stmts := classifyStatements(m.SQL)
 	slog.InfoContext(ctx, "migrate: statements", "path", m.Path, "count", len(stmts))
 
 	type indexJob struct {
@@ -149,8 +149,9 @@ func applyStatements(ctx context.Context, db *sql.DB, engine factory.Engine, m M
 	var indexJobs []indexJob
 	submitted, existed, other := 0, 0, 0
 
-	for i, stmt := range stmts {
-		if strings.HasPrefix(strings.ToUpper(stmt), "CREATE INDEX ASYNC") {
+	for i, cs := range stmts {
+		stmt := cs.SQL
+		if cs.AsyncIndex {
 			if engine != factory.EngineDSQL {
 				return fmt.Errorf("async index found in non-DSQL migration")
 			}
@@ -195,6 +196,54 @@ func applyStatements(ctx context.Context, db *sql.DB, engine factory.Engine, m M
 			"path", m.Path, "index", job.Name, "job_id", job.ID, "step", i+1, "of", len(indexJobs))
 	}
 	return nil
+}
+
+// classifiedStatement is one executable statement plus how it must be run.
+type classifiedStatement struct {
+	SQL string
+	// AsyncIndex marks CREATE INDEX ASYNC, which returns a job id and so must
+	// be sent down the query path rather than exec'd.
+	AsyncIndex bool
+}
+
+// classifyStatements splits a migration and decides how each statement runs.
+//
+// Classification keys off the statement body rather than the raw chunk: a
+// documented migration opens with `--` lines, and matching on those used to
+// route an async index into the generic exec path, which DSQL rejects with
+// "multiple ddl statements not supported in a transaction". Whether a
+// migration carries a comment header must not change how it executes.
+//
+// Comment-only chunks are dropped rather than executed.
+func classifyStatements(sqlText string) []classifiedStatement {
+	raw := splitStatements(sqlText)
+	out := make([]classifiedStatement, 0, len(raw))
+	for _, chunk := range raw {
+		body := statementBody(chunk)
+		if body == "" {
+			continue
+		}
+		out = append(out, classifiedStatement{
+			SQL:        body,
+			AsyncIndex: strings.HasPrefix(strings.ToUpper(body), "CREATE INDEX ASYNC"),
+		})
+	}
+	return out
+}
+
+// statementBody strips leading blank lines and `--` line comments so a
+// statement is recognised by what it does rather than by whether it carries a
+// comment header. Returns "" for a chunk that is only comments.
+func statementBody(stmt string) string {
+	lines := strings.Split(stmt, "\n")
+	for i, line := range lines {
+		trimmed := strings.TrimSpace(line)
+		if trimmed == "" || strings.HasPrefix(trimmed, "--") {
+			continue
+		}
+		return strings.TrimSpace(strings.Join(lines[i:], "\n"))
+	}
+	return ""
 }
 
 func asyncIndexName(stmt string) string {
