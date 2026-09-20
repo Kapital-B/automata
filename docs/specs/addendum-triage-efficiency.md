@@ -689,7 +689,39 @@ output, so documenting a migration can no longer change how it runs.
 pins the behaviour directly. Both verified to fail against the pre-fix
 classification.
 
-### 18.3 Still unverified
+### 18.3 Root cause: an apostrophe in a comment
+
+The third deploy failed again, differently:
+
+```
+dsql/003_triage_indexes.sql: ERROR: cannot insert multiple commands into a
+prepared statement (SQLSTATE 42601)
+```
+
+This is the actual cause of all three failures. `splitStatements` tracked
+string literals but not comments, so the apostrophe in `DSQL's` — inside a
+`--` comment I had written to explain §18.1 — opened a string literal that
+never closed. Every following `;` was treated as literal text, and the file
+collapsed into a **single** statement containing both `CREATE INDEX` commands.
+
+That single chunk explains the earlier errors too: as one statement it carried
+two DDL commands ("multiple ddl statements not supported in a transaction"),
+and once classification routed it to the query path it became two commands in
+one prepared statement.
+
+`splitStatements` now understands `--` line comments, `/* */` block comments,
+and double-quoted identifiers, alongside the string-literal handling it already
+had. `TestSplitStatementsApostropheInComment` reproduces the exact failing
+input, and `TestSplitStatementsCommentHandling` covers the surrounding cases —
+semicolons and apostrophes inside comments and strings, escaped quotes, and a
+`--` marker inside a string literal that must *not* start a comment.
+
+**The lesson worth keeping:** no migration in the repo had ever contained an
+apostrophe in a comment, so the splitter's blind spot was invisible until a
+documented migration was added. §18.1 and §18.2 were both real defects and
+both needed fixing, but neither was the reason the deploy failed.
+
+### 18.4 Still unverified
 
 | Construct | Status |
 | --------- | ------ |
