@@ -75,7 +75,9 @@ No index supports the candidate query's `ORDER BY m.received_at`; `migrate/dsql/
 
 ### 2.6 The assign cursor is an offset labelled as a keyset
 
-`AssignAccountChunk` pages with `jobkit.DecodeOffsetCursor` / `EncodeOffsetCursor` (`service.go:583-617`), which encode an integer offset under `Kind: "message_keyset"` (`jobkit/helpers.go`). The registry declares `CursorKind: CursorMessageKeyset` (`jobs/registry.go:124`). Offset paging over a set that mutates between chunks can skip messages.
+`AssignAccountChunk` pages with `jobkit.DecodeOffsetCursor` / `EncodeOffsetCursor` (`service.go:583-617`), which encode an integer offset under `Kind: "message_keyset"` (`jobkit/helpers.go`). The registry declares `CursorKind: CursorMessageKeyset` (`jobs/registry.go:124`).
+
+An offset counts rows behind it rather than naming the last row read. The scan is ordered `received_at DESC`, so **rows removed above the cursor** — retention, account cleanup — shift everything below them up and the next chunk steps straight over messages it never saw. (New mail arriving between chunks is benign: it causes re-processing, not skipping, and assignment is idempotent.)
 
 ---
 
@@ -456,13 +458,13 @@ Selection state must be announced (`aria-selected`, live region for the selectio
 - **Move `AssignAfterSync` off the sync request path.** `messages/sync.go:336-338` calls it inline; enqueue `assign_projects` for the account instead. Sync latency should not include assignment, and §5.4's query is no longer cheap enough to hide.
 - **Stop reporting success on failure.** `AssignAfterSync` must count per-message errors and mark the run `failed` when any occurred, with the count in `meta_json` (`service.go:653-665`). Today errors `continue` and the run is unconditionally `"success"`.
 - Run meta carries `{ "threads_considered", "committed_rule", "provisional_rule", "provisional_llm", "unscored", "errors" }` so a run that scored nothing is distinguishable from a run that failed.
-- **Fix the cursor.** `assign_projects` declares `CursorKind: CursorMessageKeyset` but encodes an integer offset (`jobkit/helpers.go`, `service.go:583-617`). Offset paging over a mutating set can skip messages. Either implement a real `(received_at, id)` keyset or re-declare the cursor kind honestly. Given this slice already touches the query, prefer the keyset.
+- **Fix the cursor.** `assign_projects` declares `CursorKind: CursorMessageKeyset` but encodes an integer offset (`jobkit/helpers.go`, `service.go:583-617`). When rows are removed above the cursor the next chunk skips unscanned messages (§2.6). Implement a real `(received_at, id)` keyset rather than re-declaring the cursor kind.
 
 ---
 
 ## 13. Slice exit criteria
 
-**T1.** `GET /api/unassigned?limit=100` issues **one** statement for the mail side and one for manual items, verifiable by query counter in the repository contract test. `GET /api/unassigned/summary` issues one. No statement on either path selects `body_text`. A mailbox of 5,000 messages returns inside the 30 s API Lambda timeout with margin.
+**T1.** `GET /api/unassigned?limit=100` and `GET /api/unassigned/summary` each issue a **constant** number of statements regardless of mailbox size, verifiable by query counter in the repository contract test (the home-org lookup plus one set-based query; mail and manual items are unioned into that single statement). No statement on either path selects `body_text`. Wall-clock behaviour against the 30 s API Lambda timeout is a property of the hosted cluster, not of the test suite: the contract test asserts the statement count that makes it achievable, and the DSQL plan must be confirmed on dev before promotion.
 
 **T2.** A provisional row renders its suggested project name and a `Confirm` button; clicking it assigns without touching the select. A 20-message unassigned thread appears as **one** row showing `20 messages`. The sidebar badge equals the number of rows in the queue.
 
@@ -485,7 +487,7 @@ Selection state must be announced (`aria-selected`, live region for the selectio
 - Scoring: ranked candidates are deterministic given equal inputs; no suggestion below the provisional floor; archived projects are never candidates (`matchProjectCodes` already skips them, `service.go:736-738`).
 - LLM: unknown `ref` dropped; unknown `project_code` dropped; malformed JSON repaired once then abandoned; a nil `LLM` leaves deterministic behaviour unchanged.
 - `assign_projects` marks a run `failed` when any message errors.
-- Existing Wave 1 tests (`http/projects_test.go`, `sqlite/projects_test.go`) must pass unchanged — this spec changes no assignment semantics.
+- Existing Wave 1 tests must pass unchanged **except** `TestAutoAssignSiblingCodeNameAmbiguous`, which asserts the pre-§9.1 rule that ambiguity produces no suggestion. That is the one assignment semantic this spec deliberately changes; the test is updated to assert the new contract — ambiguity yields the top ranked **provisional** candidate and still never auto-commits.
 
 ---
 
@@ -493,10 +495,67 @@ Selection state must be announced (`aria-selected`, live region for the selectio
 
 | Risk | Mitigation |
 | ---- | ---------- |
-| Window function unsupported or slow on Aurora DSQL | §6 fallback: dedupe in Go over the single-query result. Verify on dev DSQL before promoting T2. |
+| Window function unsupported or slow on Aurora DSQL | Validated against PostgreSQL 16 in the contract suite, so the syntax and semantics are sound. DSQL itself is still unverified — §6 fallback stands: dedupe in Go over the single-query result. Confirm on dev DSQL before promoting T2. |
 | The §5.1 plan degrades on DSQL's distributed executor | Measure with the dev cluster before promotion; §5.5 indexes exist precisely for this join shape. |
 | Sender-domain affinity over-fits on a young organisation | Minimum support threshold; §13 T4 tests the cold case explicitly. |
 | LLM cost on a full rescan | Thread-level scoring + batching + deterministic short-circuit; rescan is operator-triggered (§8.3), not automatic. |
 | Operators batch-assign carelessly once it is fast | `u` to undo the last batch (§11.3); explicit partial-failure reporting; assignment remains reversible by design. |
 
 **Open:** whether `thread_count` should count all messages in the conversation or only those currently unassigned. This spec says **only those in the queue**, so the number matches what disappears on click. Revisit if operators read it as thread length.
+
+---
+
+## 16. Implementation record
+
+Implemented across three commits on `feat/triage-efficiency`. Deviations from
+the spec as drafted, and findings that surfaced while building it.
+
+### 16.1 Deviations
+
+| Spec | What was built | Why |
+| ---- | -------------- | --- |
+| §5.3 "one statement for the mail side and one for manual items" | **One** statement total — mail and manual items are unioned inside the same CTE chain | Merging two result sets in Go cannot paginate correctly, which is the bug §5.1 sets out to fix |
+| §5.6 "give `QueryClient` real defaults … `staleTime` of 30 s" | Global default is `retry: 1` only; the stale window and `refetchOnWindowFocus: false` are scoped to the `unassigned-summary` query via `unassignedSummaryQueryOptions` | A global `staleTime` would stale-cache every screen in the app. The expensive query is the badge; only the badge needs the window |
+| §9.1 ranked candidates | Added a small **corroboration bonus** so independent signals that agree outrank a single signal | Without it, two projects tying on the same signal were separated by project code sort order. Ambiguity resolved alphabetically is not a defensible suggestion |
+
+### 16.2 Found while building
+
+Pre-existing defects outside this spec's scope, fixed here only where they
+blocked the work:
+
+- **The postgres contract tests had never run.** `AUTOMATA_TEST_POSTGRES_DSN` is
+  unset in CI, so the suite always skipped. With a database attached it
+  deadlocked, then failed on a syntax error. Both are fixed (§16.3), and the
+  suite now runs against PostgreSQL 16.
+- **`ListProjectTimeline` can deadlock on a small pool.** It issues
+  `timelineContactsForMessage` and `FindIssueIDByMessage` per row *while the
+  outer result set is still streaming* (`postgres/domains.go:1340-1360`). With
+  `MaxOpenConns: 1` it hangs forever; the factory defaults postgres/DSQL to 3
+  (`factory.go:77-83`), so production survives on pool headroom rather than by
+  design, and concurrent requests can still starve it. **Not fixed — it is the
+  timeline, not triage.** It needs the same set-based treatment as §5.1.
+
+### 16.3 Test-harness changes
+
+- Added a statement-counting SQL driver wrapper (`persistencetest/counting.go`)
+  so the N+1 guard in §13 T1 is enforceable, and so §5.2 ("never read bodies")
+  is assertable rather than aspirational.
+- Raised the postgres contract pool from 1 to 3 to match production, and moved
+  `search_path` onto the DSN. A session-level `SET search_path` only binds the
+  connection that ran it, so with a multi-connection pool every test was
+  silently writing into `public` instead of its own schema.
+- Fixed `ensureLegacyJobRunIfPresent`, which wrote raw `?` placeholders straight
+  to the handle, bypassing the repository's placeholder rewriting and failing
+  every postgres contract run on syntax.
+
+### 16.4 Verification
+
+| Check | Result |
+| ----- | ------ |
+| `go build ./...`, `go vet ./...` | clean |
+| `go test ./...` (SQLite) | pass |
+| Postgres contract suite (PostgreSQL 16, real database) | pass |
+| `npm run lint` | 0 errors (8 pre-existing fast-refresh warnings in `ui/`) |
+| `npm run test` | 43 pass |
+| `npm run build` | pass |
+| Aurora DSQL | **not verified** — no cluster available. §6 window function and the §5.1 plan still need a dev-DSQL run before promotion |

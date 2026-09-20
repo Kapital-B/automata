@@ -23,6 +23,7 @@ import { mergeNeedsMeRows } from "@/lib/needsMe";
 import { toast } from "@/hooks/use-toast";
 import { useAssistantHomeData } from "@/hooks/useAssistantHomeData";
 import { useState } from "react";
+import { unassignedSummaryQueryOptions } from "@/lib/triage";
 
 type Props = {
   accountFilter: AccountFilter;
@@ -63,6 +64,7 @@ export default function AssistantHomePage({ accountFilter }: Props) {
     queryKey: ["unassigned-summary", accessToken],
     queryFn: () => getUnassignedSummary(accessToken!),
     enabled: Boolean(accessToken),
+    ...unassignedSummaryQueryOptions,
   });
   const healthQuery = useQuery({
     queryKey: ["api-health"],

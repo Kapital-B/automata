@@ -2,6 +2,7 @@ package projects
 
 import (
 	"context"
+	"errors"
 	"strings"
 	"testing"
 	"time"
@@ -250,3 +251,41 @@ func TestScoreWithLLMMessageWithoutConversationWritesOverride(t *testing.T) {
 }
 
 func nowUTC() time.Time { return time.Now().UTC() }
+
+func TestScoreWithLLMAbandonsAfterOneFailedRepair(t *testing.T) {
+	dc01 := proj("DC01", "Cooling")
+	rec := &recordingAssignments{}
+	// Both the original response and the repair are unusable.
+	llm := &fakeLLM{responses: []string{"still not json", "also not json"}}
+	svc := &AssignService{Assignments: rec, LLM: llm}
+
+	msgs := []driven.MessageRow{llmTestMessage("subject", "conv-1")}
+	n, err := svc.scoreWithLLM(context.Background(), uuid.New(), uuid.New(), msgs, []driven.ProjectRow{dc01}, nil, nowUTC())
+	if err == nil {
+		t.Fatal("expected an error once the repair also fails")
+	}
+	if n != 0 {
+		t.Errorf("assigned = %d, want 0", n)
+	}
+	if llm.calls != 2 {
+		t.Errorf("llm calls = %d, want 2 (one attempt, one repair, then give up)", llm.calls)
+	}
+	if len(rec.threads) != 0 || len(rec.overrides) != 0 {
+		t.Error("nothing should be written when the response cannot be parsed")
+	}
+}
+
+func TestScoreWithLLMPropagatesTransportError(t *testing.T) {
+	dc01 := proj("DC01", "Cooling")
+	rec := &recordingAssignments{}
+	llm := &fakeLLM{err: errors.New("upstream unavailable")}
+	svc := &AssignService{Assignments: rec, LLM: llm}
+
+	msgs := []driven.MessageRow{llmTestMessage("subject", "conv-1")}
+	if _, err := svc.scoreWithLLM(context.Background(), uuid.New(), uuid.New(), msgs, []driven.ProjectRow{dc01}, nil, nowUTC()); err == nil {
+		t.Fatal("expected the transport error to surface")
+	}
+	if len(rec.threads) != 0 {
+		t.Error("a failed call must not write suggestions")
+	}
+}

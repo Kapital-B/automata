@@ -15,6 +15,7 @@ import {
   listRuns,
 } from "@/lib/auth";
 import type { UiAccount } from "@/lib/accounts";
+import { unassignedSummaryQueryOptions } from "@/lib/triage";
 
 export type AssistantSuggestion = {
   id: string;
@@ -170,6 +171,7 @@ export function useAssistantHomeData(accountFilter: AccountFilter) {
     queryKey: ["unassigned-summary", accessToken],
     queryFn: () => getUnassignedSummary(accessToken!),
     enabled: Boolean(accessToken),
+    ...unassignedSummaryQueryOptions,
   });
 
   const state = useMemo<AssistantHomeState>(() => {
