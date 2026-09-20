@@ -26,6 +26,8 @@ type Repository interface {
 	driven.ManualItemRepository
 	driven.IssueRepository
 	driven.FactRepository
+	driven.DecisionRepository
+	driven.ContradictionRepository
 	driven.TimelineRepository
 	driven.AssignmentRepository
 	driven.SummaryRepository
@@ -657,6 +659,7 @@ func Run(t *testing.T, factory Factory) {
 	})
 
 	runHomeOverviewTimestampTests(t, factory)
+	runActivityFeedTests(t, factory)
 
 	t.Run("timeline_hydration_is_batched_and_correct", func(t *testing.T) {
 		h := factory(t)
@@ -1028,6 +1031,280 @@ func runHomeOverviewTimestampTests(t *testing.T, factory Factory) {
 		}
 		if !after.UpdatedAt.After(*after.ResolvedAt) {
 			t.Error("updated_at should have moved past resolved_at, which is why updated_at cannot date the resolution")
+		}
+	})
+}
+
+// runActivityFeedTests covers the cross-project Home feed.
+func runActivityFeedTests(t *testing.T, factory Factory) {
+	t.Helper()
+
+	t.Run("activity_shows_each_change_and_scopes_by_membership", func(t *testing.T) {
+		h := factory(t)
+		ctx := context.Background()
+		now := time.Now().UTC()
+		userID, orgID, accountID := seedUserAccount(t, h.Repo, uuid.New(), now)
+		mine := createProject(t, h.Repo, orgID, userID, "DC20", "Mine")
+
+		// A project in the same org that the caller is NOT a member of.
+		stranger := uuid.New()
+		if _, err := h.Repo.CreateUserWithHomeOrg(ctx, stranger, "stranger-"+stranger.String()+"@ex.com", nil, now,
+			"password", stranger.String(), "stranger-"+stranger.String()+"@ex.com"); err != nil {
+			t.Fatal(err)
+		}
+		theirs := uuid.New()
+		if err := h.Repo.CreateProject(ctx, driven.ProjectRow{
+			ID: theirs, OrganisationID: orgID, Name: "Theirs", Code: "DC21",
+			CreatedAt: now, UpdatedAt: now,
+		}, driven.ProjectMemberRow{
+			ID: uuid.New(), ProjectID: theirs, UserID: stranger, Role: "owner",
+			CreatedAt: now, UpdatedAt: now,
+		}); err != nil {
+			t.Fatal(err)
+		}
+
+		// A decision proposed, then accepted: two events from one row.
+		decisionID := uuid.New()
+		decided := now.Add(-1 * time.Hour)
+		if err := h.Repo.CreateDecision(ctx, driven.DecisionRow{
+			ID: decisionID, OrganisationID: orgID, ProjectID: mine,
+			Statement: "Proceed with 90 kW", Status: "accepted", Source: "llm",
+			DecidedAt: &decided, CreatedAt: now.Add(-6 * time.Hour), UpdatedAt: decided,
+		}); err != nil {
+			t.Fatal(err)
+		}
+		// The same shape on the project the caller cannot see.
+		if err := h.Repo.CreateDecision(ctx, driven.DecisionRow{
+			ID: uuid.New(), OrganisationID: orgID, ProjectID: theirs,
+			Statement: "Invisible decision", Status: "accepted", Source: "user",
+			DecidedAt: &decided, CreatedAt: now.Add(-6 * time.Hour), UpdatedAt: decided,
+		}); err != nil {
+			t.Fatal(err)
+		}
+
+		// An issue opened and resolved.
+		issueID := uuid.New()
+		resolved := now.Add(-30 * time.Minute)
+		if err := h.Repo.CreateIssue(ctx, driven.IssueRow{
+			ID: issueID, OrganisationID: orgID, ProjectID: mine, Title: "Leak",
+			Status: "resolved", CreatedAt: now.Add(-5 * time.Hour),
+			UpdatedAt: resolved, ResolvedAt: &resolved,
+		}); err != nil {
+			t.Fatal(err)
+		}
+
+		// A contradiction, still open.
+		if err := h.Repo.CreateContradiction(ctx, driven.ContradictionRow{
+			ID: uuid.New(), OrganisationID: orgID, ProjectID: mine, Status: "open",
+			Summary: "Duty stated twice", CreatedAt: now.Add(-2 * time.Hour), UpdatedAt: now.Add(-2 * time.Hour),
+		}); err != nil {
+			t.Fatal(err)
+		}
+
+		// Correspondence filed onto the project: must NOT appear in the feed.
+		conv := "conv-activity"
+		insertMsg(t, h.Repo, accountID, "filed mail", conv, "body", now)
+		if err := h.Repo.UpsertThreadAssignment(ctx, driven.AssignmentRow{
+			ID: uuid.New(), OrganisationID: orgID, AccountID: accountID, ConversationID: conv,
+			ProjectID: &mine, Status: "provisional", Reason: "llm", Source: "llm",
+			CreatedAt: now, UpdatedAt: now,
+		}); err != nil {
+			t.Fatal(err)
+		}
+
+		items, err := h.Repo.ListActivity(ctx, userID, orgID, driven.ActivityFilter{Limit: 50})
+		if err != nil {
+			t.Fatal(err)
+		}
+
+		byKind := map[string]int{}
+		for _, it := range items {
+			byKind[it.Kind]++
+			if it.ProjectID != mine {
+				t.Errorf("feed leaked a project the caller is not a member of: %s", it.ProjectCode)
+			}
+			if it.ProjectCode != "DC20" {
+				t.Errorf("project code = %q, want DC20", it.ProjectCode)
+			}
+			if strings.Contains(strings.ToLower(it.Kind), "assign") {
+				t.Errorf("provisional assignments must not appear: %+v", it)
+			}
+		}
+		// One decision row yields both a proposed and an accepted event.
+		for _, want := range []string{"decision_proposed", "decision_accepted", "issue_opened", "issue_resolved", "contradiction_opened"} {
+			if byKind[want] == 0 {
+				t.Errorf("missing %s; got %v", want, byKind)
+			}
+		}
+		if byKind["contradiction_resolved"] != 0 {
+			t.Errorf("open contradiction must not report a resolution event")
+		}
+
+		// Newest first.
+		for i := 1; i < len(items); i++ {
+			if items[i].OccurredAt.After(items[i-1].OccurredAt) {
+				t.Fatalf("feed out of order at %d: %v after %v", i, items[i].OccurredAt, items[i-1].OccurredAt)
+			}
+		}
+	})
+
+	t.Run("activity_pages_without_repeats_or_gaps", func(t *testing.T) {
+		h := factory(t)
+		ctx := context.Background()
+		now := time.Now().UTC()
+		userID, orgID, _ := seedUserAccount(t, h.Repo, uuid.New(), now)
+		projectID := createProject(t, h.Repo, orgID, userID, "DC22", "Paging")
+
+		// Several events share a timestamp, which is what makes a naive
+		// timestamp-only cursor loop.
+		shared := now.Add(-time.Hour)
+		const total = 12
+		for i := 0; i < total; i++ {
+			at := shared
+			if i%3 == 0 {
+				at = now.Add(-time.Duration(i) * time.Minute)
+			}
+			if err := h.Repo.CreateIssue(ctx, driven.IssueRow{
+				ID: uuid.New(), OrganisationID: orgID, ProjectID: projectID,
+				Title: fmt.Sprintf("issue %d", i), Status: "open",
+				CreatedAt: at, UpdatedAt: at,
+			}); err != nil {
+				t.Fatal(err)
+			}
+		}
+
+		seen := map[string]int{}
+		var before *time.Time
+		var beforeID *uuid.UUID
+		for page := 0; page < 10; page++ {
+			got, err := h.Repo.ListActivity(ctx, userID, orgID, driven.ActivityFilter{
+				Limit: 5, Before: before, BeforeID: beforeID,
+			})
+			if err != nil {
+				t.Fatal(err)
+			}
+			if len(got) == 0 {
+				break
+			}
+			for _, it := range got {
+				seen[it.Kind+":"+it.RefID.String()]++
+			}
+			last := got[len(got)-1]
+			at := last.OccurredAt
+			id := last.RefID
+			before = &at
+			beforeID = &id
+		}
+		if len(seen) != total {
+			t.Fatalf("paged through %d distinct events, want %d", len(seen), total)
+		}
+		for key, n := range seen {
+			if n != 1 {
+				t.Errorf("event %s returned %d times across pages", key, n)
+			}
+		}
+	})
+
+	t.Run("overview_counts_and_last_activity", func(t *testing.T) {
+		h := factory(t)
+		ctx := context.Background()
+		now := time.Now().UTC()
+		userID, orgID, _ := seedUserAccount(t, h.Repo, uuid.New(), now)
+		busy := createProject(t, h.Repo, orgID, userID, "DC23", "Busy")
+		createProject(t, h.Repo, orgID, userID, "DC24", "Quiet")
+
+		if err := h.Repo.CreateContradiction(ctx, driven.ContradictionRow{
+			ID: uuid.New(), OrganisationID: orgID, ProjectID: busy, Status: "open",
+			Summary: "conflict", CreatedAt: now.Add(-time.Hour), UpdatedAt: now.Add(-time.Hour),
+		}); err != nil {
+			t.Fatal(err)
+		}
+		if err := h.Repo.CreateDecision(ctx, driven.DecisionRow{
+			ID: uuid.New(), OrganisationID: orgID, ProjectID: busy,
+			Statement: "Maybe", Status: "proposed", Source: "llm",
+			CreatedAt: now, UpdatedAt: now,
+		}); err != nil {
+			t.Fatal(err)
+		}
+
+		counts, err := h.Repo.CountOverview(ctx, userID, orgID)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if counts.OpenContradictions != 1 {
+			t.Errorf("open contradictions = %d, want 1", counts.OpenContradictions)
+		}
+		if counts.ProposedDecisions != 1 {
+			t.Errorf("proposed decisions = %d, want 1", counts.ProposedDecisions)
+		}
+		if counts.ActiveProjects != 2 {
+			t.Errorf("active projects = %d, want 2", counts.ActiveProjects)
+		}
+
+		projects, err := h.Repo.ListOverviewProjects(ctx, userID, orgID, 8)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if len(projects) != 2 {
+			t.Fatalf("overview projects = %d, want 2", len(projects))
+		}
+		// The project with activity sorts first; the quiet one still appears,
+		// with no activity time rather than being dropped.
+		if projects[0].Code != "DC23" {
+			t.Errorf("first project = %s, want DC23 (it has activity)", projects[0].Code)
+		}
+		if projects[0].LastActivityAt == nil {
+			t.Error("busy project should report a last activity time")
+		}
+		if projects[1].Code != "DC24" || projects[1].LastActivityAt != nil {
+			t.Errorf("quiet project = %+v, want DC24 with no activity", projects[1])
+		}
+	})
+
+	t.Run("overview_and_activity_are_set_based", func(t *testing.T) {
+		h := factory(t)
+		if h.Counter == nil {
+			t.Skip("handle has no query counter")
+		}
+		ctx := context.Background()
+		now := time.Now().UTC()
+		userID, orgID, _ := seedUserAccount(t, h.Repo, uuid.New(), now)
+		for i := 0; i < 12; i++ {
+			pid := createProject(t, h.Repo, orgID, userID, fmt.Sprintf("P%02d", i), "Project")
+			for j := 0; j < 4; j++ {
+				if err := h.Repo.CreateIssue(ctx, driven.IssueRow{
+					ID: uuid.New(), OrganisationID: orgID, ProjectID: pid,
+					Title: "issue", Status: "open",
+					CreatedAt: now.Add(-time.Duration(i*10+j) * time.Minute),
+					UpdatedAt: now,
+				}); err != nil {
+					t.Fatal(err)
+				}
+			}
+		}
+
+		h.Counter.Reset()
+		if _, err := h.Repo.ListActivity(ctx, userID, orgID, driven.ActivityFilter{Limit: 25}); err != nil {
+			t.Fatal(err)
+		}
+		if n := h.Counter.Count(); n != 1 {
+			t.Errorf("ListActivity issued %d statements over 12 projects, want 1", n)
+		}
+
+		h.Counter.Reset()
+		if _, err := h.Repo.CountOverview(ctx, userID, orgID); err != nil {
+			t.Fatal(err)
+		}
+		if n := h.Counter.Count(); n != 1 {
+			t.Errorf("CountOverview issued %d statements, want 1", n)
+		}
+
+		h.Counter.Reset()
+		if _, err := h.Repo.ListOverviewProjects(ctx, userID, orgID, 8); err != nil {
+			t.Fatal(err)
+		}
+		if n := h.Counter.Count(); n != 1 {
+			t.Errorf("ListOverviewProjects issued %d statements, want 1", n)
 		}
 	})
 }
