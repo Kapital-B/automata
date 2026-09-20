@@ -527,13 +527,13 @@ blocked the work:
   unset in CI, so the suite always skipped. With a database attached it
   deadlocked, then failed on a syntax error. Both are fixed (§16.3), and the
   suite now runs against PostgreSQL 16.
-- **`ListProjectTimeline` can deadlock on a small pool.** It issues
+- **`ListProjectTimeline` deadlocked on a small pool.** It issued
   `timelineContactsForMessage` and `FindIssueIDByMessage` per row *while the
-  outer result set is still streaming* (`postgres/domains.go:1340-1360`). With
-  `MaxOpenConns: 1` it hangs forever; the factory defaults postgres/DSQL to 3
-  (`factory.go:77-83`), so production survives on pool headroom rather than by
-  design, and concurrent requests can still starve it. **Not fixed — it is the
-  timeline, not triage.** It needs the same set-based treatment as §5.1.
+  outer result set was still streaming*, holding two connections at once. With
+  `MaxOpenConns: 1` that is a guaranteed self-deadlock; the factory defaults
+  postgres/DSQL to 3 (`factory.go:77-83`), so production survived on pool
+  headroom rather than by design and could still starve under concurrency.
+  **Fixed — see §17.**
 
 ### 16.3 Test-harness changes
 
@@ -559,3 +559,69 @@ blocked the work:
 | `npm run test` | 43 pass |
 | `npm run build` | pass |
 | Aurora DSQL | **not verified** — no cluster available. §6 window function and the §5.1 plan still need a dev-DSQL run before promotion |
+
+
+---
+
+## 17. Timeline hydration (follow-up)
+
+Found while implementing §16.2 and fixed in the same branch. Out of the
+original scope — this is the project timeline, not triage — but the same
+defect class as §5.1, and a hard hang rather than a slow page.
+
+### 17.1 The defect
+
+`ListProjectTimeline` built each item inside the loop that was still streaming
+the outer result set, calling `timelineContactsForMessage` and
+`FindIssueIDByMessage` per row. A query issued while a cursor is open needs a
+second connection, and the first is not released until its rows are drained:
+
+| Pool size | Behaviour |
+| --------- | --------- |
+| 1 | Hangs forever. The nested query waits on a connection the outer query will not release. |
+| 3 (postgres/DSQL default) | Works for a single caller; three concurrent timeline requests can hold all three connections and starve each other. |
+
+It was also an N+1: up to 500 mail rows plus every manual item, two statements
+each.
+
+### 17.2 The fix
+
+Hydration moved out of the streaming loop and into a bulk pass that runs once
+per request, after every source has contributed its rows:
+
+1. Each source (mail, manual, connector) produces bare `TimelineItem`s and
+   closes its cursor.
+2. `hydrateTimelineItems` collects the message and manual-item ids, then
+   resolves participants and issue links with one statement per relation,
+   batched with `IN` lists chunked at 200 ids.
+3. The `unassigned_to_issue` filter runs after hydration, since it depends on
+   the issue links.
+
+Statement count goes from `2N + 2M` to at most four (plus a chunk per 200 ids),
+and no statement is ever issued while a cursor is open.
+
+The per-row helpers (`timelineContactsForMessage`, `timelineContactsForManual`)
+are deleted rather than left in place, so the pattern cannot be reintroduced by
+reaching for the convenient function.
+
+Shared helpers live in `persistence/sqlkit` so the two adapters cannot drift.
+
+### 17.3 Tests
+
+- `TestProjectTimelineOnSingleConnectionPool` (both adapters) pins the pool to
+  one connection and fails on a deadline rather than hanging CI. Verified to
+  reproduce the original defect: it hangs for the full 15 s and fails against
+  the pre-fix code, and passes in ~20 ms after.
+- `timeline_hydration_is_batched_and_correct` in the shared contract suite
+  asserts contacts and issue links are attached to the right items across mail
+  and manual sources, that `unassigned_to_issue` still filters correctly, and
+  that the whole call stays within a bounded statement count.
+- `sqlkit` has unit tests for the chunking and placeholder helpers, including
+  that an empty id set issues no statement at all rather than an `IN ()`.
+
+### 17.4 Not addressed
+
+The connector/slack branch still calls `GetConnectorAccount` once per distinct
+connector account. That runs after its cursor is closed, so it is not a
+deadlock risk, and it is bounded by the number of connected accounts rather
+than by timeline length. Left alone deliberately.

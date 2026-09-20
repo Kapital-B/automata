@@ -24,6 +24,7 @@ type Repository interface {
 	driven.ContactRepository
 	driven.ProjectRepository
 	driven.ManualItemRepository
+	driven.IssueRepository
 	driven.TimelineRepository
 	driven.AssignmentRepository
 	driven.SummaryRepository
@@ -650,6 +651,136 @@ func Run(t *testing.T, factory Factory) {
 				if strings.Contains(strings.ToLower(stmt), "body_text") {
 					t.Errorf("%s reads body_text:\n%s", name, stmt)
 				}
+			}
+		}
+	})
+
+	t.Run("timeline_hydration_is_batched_and_correct", func(t *testing.T) {
+		h := factory(t)
+		ctx := context.Background()
+		now := time.Now().UTC()
+		userID, orgID, accountID := seedUserAccount(t, h.Repo, uuid.New(), now)
+		projectID := createProject(t, h.Repo, orgID, userID, "DC05", "Timeline")
+
+		// A contact who participates in both a mail thread and a paste.
+		contactID := uuid.New()
+		if err := h.Repo.CreateContact(ctx, driven.ContactRow{
+			ID: contactID, OrganisationID: orgID, DisplayName: "Dana Reed", CreatedAt: now, UpdatedAt: now,
+		}); err != nil {
+			t.Fatal(err)
+		}
+
+		const mailCount = 12
+		messageIDs := make([]uuid.UUID, 0, mailCount)
+		for i := 0; i < mailCount; i++ {
+			conv := fmt.Sprintf("tl-conv-%d", i)
+			msgID := insertMsg(t, h.Repo, accountID, "project mail", conv, "body", now.Add(-time.Duration(i)*time.Minute))
+			messageIDs = append(messageIDs, msgID)
+			if err := h.Repo.UpsertThreadAssignment(ctx, driven.AssignmentRow{
+				ID: uuid.New(), OrganisationID: orgID, AccountID: accountID, ConversationID: conv,
+				ProjectID: &projectID, Status: "committed", Reason: "seed",
+				Source: string(domainprojects.SourceUser), CreatedAt: now, UpdatedAt: now,
+			}); err != nil {
+				t.Fatal(err)
+			}
+			mid := msgID
+			if err := h.Repo.UpsertParticipant(ctx, driven.CorrespondenceParticipantRow{
+				ID: uuid.New(), OrganisationID: orgID, ContactID: contactID, Role: "to", MessageID: &mid,
+			}); err != nil {
+				t.Fatal(err)
+			}
+		}
+
+		manualID := uuid.New()
+		reason, source := "user_paste", string(domainprojects.SourceUser)
+		if err := h.Repo.CreateManualItem(ctx, driven.ManualItemRow{
+			ID: manualID, OrganisationID: orgID, Channel: "note", OccurredAt: now,
+			Title: "Site note", BodyText: "pasted", ProjectID: &projectID,
+			AssignmentStatus: "committed", AssignmentReason: &reason, AssignmentSource: &source,
+			CreatedByUserID: userID, CreatedAt: now,
+		}); err != nil {
+			t.Fatal(err)
+		}
+		if err := h.Repo.UpsertParticipant(ctx, driven.CorrespondenceParticipantRow{
+			ID: uuid.New(), OrganisationID: orgID, ContactID: contactID, Role: "to", ManualItemID: &manualID,
+		}); err != nil {
+			t.Fatal(err)
+		}
+
+		// One message and the paste belong to an issue.
+		issueID := uuid.New()
+		if err := h.Repo.CreateIssue(ctx, driven.IssueRow{
+			ID: issueID, OrganisationID: orgID, ProjectID: projectID, Title: "Leak",
+			Status: "open", CreatedAt: now, UpdatedAt: now,
+		}); err != nil {
+			t.Fatal(err)
+		}
+		linkedMsg := messageIDs[0]
+		if err := h.Repo.AddIssueItem(ctx, driven.IssueItemRow{
+			ID: uuid.New(), IssueID: issueID, MessageID: &linkedMsg, AddedAt: now,
+		}); err != nil {
+			t.Fatal(err)
+		}
+		linkedManual := manualID
+		if err := h.Repo.AddIssueItem(ctx, driven.IssueItemRow{
+			ID: uuid.New(), IssueID: issueID, ManualItemID: &linkedManual, AddedAt: now,
+		}); err != nil {
+			t.Fatal(err)
+		}
+
+		if h.Counter != nil {
+			h.Counter.Reset()
+		}
+		items, err := h.Repo.ListProjectTimeline(ctx, userID, orgID, projectID, driven.TimelineFilter{Limit: 100})
+		if err != nil {
+			t.Fatal(err)
+		}
+		if len(items) != mailCount+1 {
+			t.Fatalf("timeline returned %d items, want %d", len(items), mailCount+1)
+		}
+
+		// Hydration is batched, not per row. Before this it cost two extra
+		// statements for every item on the timeline.
+		if h.Counter != nil {
+			if n := h.Counter.Count(); n > 12 {
+				t.Errorf("ListProjectTimeline issued %d statements for %d items, want a bounded handful", n, len(items))
+			}
+		}
+
+		var withIssue, withContact int
+		for _, it := range items {
+			if len(it.Contacts) > 0 {
+				withContact++
+				if it.Contacts[0].ID != contactID || it.Contacts[0].DisplayName != "Dana Reed" {
+					t.Errorf("contact hydrated wrongly: %+v", it.Contacts[0])
+				}
+			}
+			if it.IssueID != nil {
+				withIssue++
+				if *it.IssueID != issueID {
+					t.Errorf("issue id = %s, want %s", it.IssueID, issueID)
+				}
+			}
+		}
+		if withContact != mailCount+1 {
+			t.Errorf("%d items carry contacts, want %d", withContact, mailCount+1)
+		}
+		if withIssue != 2 {
+			t.Errorf("%d items carry an issue link, want 2", withIssue)
+		}
+
+		// The unassigned-to-issue filter depends on hydration having happened.
+		unlinked, err := h.Repo.ListProjectTimeline(ctx, userID, orgID, projectID,
+			driven.TimelineFilter{Limit: 100, UnassignedToIssue: true})
+		if err != nil {
+			t.Fatal(err)
+		}
+		if len(unlinked) != mailCount+1-2 {
+			t.Fatalf("unassigned-to-issue returned %d, want %d", len(unlinked), mailCount+1-2)
+		}
+		for _, it := range unlinked {
+			if it.IssueID != nil {
+				t.Error("unassigned-to-issue returned an item already on an issue")
 			}
 		}
 	})
