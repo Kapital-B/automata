@@ -43,8 +43,12 @@ export function ProjectAssignControl({ messageID, hasConversation }: Props) {
     },
     onSuccess: async () => {
       toast({ title: "Project assigned" });
-      await queryClient.invalidateQueries({ queryKey: ["unassigned"] });
-      await queryClient.invalidateQueries({ queryKey: ["unassigned-summary"] });
+      // In parallel: the summary query counts the whole queue, so serialising
+      // these made every assignment wait on two full passes.
+      await Promise.all([
+        queryClient.invalidateQueries({ queryKey: ["unassigned"] }),
+        queryClient.invalidateQueries({ queryKey: ["unassigned-summary"] }),
+      ]);
     },
     onError: (err) => {
       toast({

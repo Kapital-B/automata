@@ -450,6 +450,22 @@ export type UnassignedItem = {
   reason?: string;
   source?: string;
   project_id?: string;
+  confidence?: number;
+  /** Queued messages this row stands for. Always >= 1. */
+  thread_count?: number;
+};
+
+export type BatchAssignItem = {
+  kind: "message" | "manual";
+  id: string;
+  project_id: string | null;
+  scope?: "thread" | "message";
+};
+
+export type BatchAssignResponse = {
+  results: { id: string; ok: boolean; error?: string }[];
+  assigned: number;
+  failed: number;
 };
 
 export type TimelineContact = {
@@ -730,6 +746,22 @@ export async function assignMessageProject(
     method: "POST",
     headers: toAuthHeader(accessToken),
     body: JSON.stringify(body),
+  });
+}
+
+export async function assignProjectsBatch(accessToken: string, items: BatchAssignItem[]) {
+  return apiRequest<BatchAssignResponse>("/api/project-assignments/batch", {
+    method: "POST",
+    headers: toAuthHeader(accessToken),
+    body: JSON.stringify({ items }),
+  });
+}
+
+export async function rescanUnassigned(accessToken: string, accountID?: string) {
+  return apiRequest<{ run_ids: string[] }>("/api/unassigned/rescan", {
+    method: "POST",
+    headers: toAuthHeader(accessToken),
+    body: JSON.stringify(accountID ? { account_id: accountID } : {}),
   });
 }
 
