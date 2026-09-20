@@ -31,20 +31,57 @@ import { useAccountsData } from "@/hooks/useAccountsData";
 import { getUnassignedSummary, listDraftSuggestions, getAttention } from "@/lib/auth";
 import { unassignedSummaryQueryOptions } from "@/lib/triage";
 
-const primaryNav = [
-  { title: "Home", url: "/", icon: Home, end: true, badge: "needsMe" as const },
-  { title: "Projects", url: "/projects", icon: FolderKanban },
-  { title: "Triage", url: "/triage", icon: CircleHelp, badge: "triage" as const },
-  { title: "People", url: "/people", icon: Users },
-];
+type NavItem = {
+  title: string;
+  url: string;
+  icon: typeof Home;
+  end?: boolean;
+  badge?: "needsMe" | "triage" | "drafts";
+};
 
-const moreNav = [
-  { title: "Inbox", url: "/inbox", icon: Inbox },
-  { title: "Drafts", url: "/drafts", icon: PenLine, badge: "drafts" as const },
-  { title: "Rules", url: "/rules", icon: Forward },
-  { title: "Connectors", url: "/accounts", icon: Plug },
-  { title: "Runs", url: "/runs", icon: History },
-  { title: "Settings", url: "/settings", icon: SettingsIcon },
+type NavGroup = {
+  /** Undefined renders the items without a heading. */
+  label?: string;
+  items: NavItem[];
+};
+
+/**
+ * Grouped by what each destination is *about*, rather than by how important we
+ * think it is. "Primary" and "More" described our ranking; these describe the
+ * domain — project memory, the correspondence that feeds it, and the machinery
+ * underneath.
+ *
+ * Order follows the product's own priority: project memory first, channel
+ * tooling below it.
+ */
+const navGroups: NavGroup[] = [
+  {
+    items: [{ title: "Home", url: "/", icon: Home, end: true, badge: "needsMe" }],
+  },
+  {
+    label: "Project memory",
+    items: [
+      { title: "Projects", url: "/projects", icon: FolderKanban },
+      { title: "People", url: "/people", icon: Users },
+    ],
+  },
+  {
+    label: "Correspondence",
+    items: [
+      { title: "Triage", url: "/triage", icon: CircleHelp, badge: "triage" },
+      { title: "Inbox", url: "/inbox", icon: Inbox },
+      { title: "Drafts", url: "/drafts", icon: PenLine, badge: "drafts" },
+      { title: "Rules", url: "/rules", icon: Forward },
+      { title: "Connectors", url: "/accounts", icon: Plug },
+    ],
+  },
+  {
+    label: "System",
+    items: [
+      { title: "Runs", url: "/runs", icon: History },
+      { title: "Settings", url: "/settings", icon: SettingsIcon },
+    ],
+  },
 ];
 
 export function AppSidebar() {
@@ -87,7 +124,20 @@ export function AppSidebar() {
         : "text-sidebar-foreground/80 hover:bg-sidebar-accent/60 hover:text-sidebar-accent-foreground",
     );
 
-  const badgeFor = (badge?: "needsMe" | "triage" | "drafts") => {
+  const badgeTitle = (badge?: NavItem["badge"]) => {
+    switch (badge) {
+      case "needsMe":
+        return "Needs my input";
+      case "triage":
+        return "Triage queue";
+      case "drafts":
+        return "Drafts ready";
+      default:
+        return undefined;
+    }
+  };
+
+  const badgeFor = (badge?: NavItem["badge"]) => {
     if (badge === "needsMe" && needsMeBadge > 0) return needsMeBadge;
     if (badge === "triage" && triageBadge > 0) return triageBadge;
     if (badge === "drafts" && draftsBadge > 0) return draftsBadge;
@@ -117,90 +167,48 @@ export function AppSidebar() {
       </SidebarHeader>
 
       <SidebarContent className="px-2">
-        <SidebarGroup>
-          {!collapsed && (
-            <SidebarGroupLabel className="px-2 text-[10px] uppercase tracking-widest text-muted-foreground">
-              Primary
-            </SidebarGroupLabel>
-          )}
-          <SidebarGroupContent>
-            <SidebarMenu>
-              {primaryNav.map((item) => (
-                <SidebarMenuItem key={item.title}>
-                  <SidebarMenuButton asChild>
-                    <NavLink to={item.url} end={item.end}>
-                      {({ isActive: a }) => {
-                        const count = badgeFor(item.badge);
-                        return (
-                          <span className={linkClass(a || isActive(item.url, item.end))}>
-                            <item.icon className="h-4 w-4 shrink-0" />
-                            {!collapsed && (
-                              <>
-                                <span className="flex-1">{item.title}</span>
-                                {count != null && (
-                                  <span
-                                    className="rounded-full border border-sidebar-border px-1.5 py-0.5 text-[10px] font-medium leading-none"
-                                    title={
-                                      item.badge === "needsMe"
-                                        ? "Needs my input"
-                                        : item.badge === "triage"
-                                          ? "Triage queue"
-                                          : undefined
-                                    }
-                                  >
-                                    {count}
-                                  </span>
-                                )}
-                              </>
-                            )}
-                          </span>
-                        );
-                      }}
-                    </NavLink>
-                  </SidebarMenuButton>
-                </SidebarMenuItem>
-              ))}
-            </SidebarMenu>
-          </SidebarGroupContent>
-        </SidebarGroup>
-
-        <SidebarGroup>
-          {!collapsed && (
-            <SidebarGroupLabel className="px-2 text-[10px] uppercase tracking-widest text-muted-foreground">
-              More
-            </SidebarGroupLabel>
-          )}
-          <SidebarGroupContent>
-            <SidebarMenu>
-              {moreNav.map((item) => (
-                <SidebarMenuItem key={item.title}>
-                  <SidebarMenuButton asChild>
-                    <NavLink to={item.url}>
-                      {({ isActive: a }) => {
-                        const count = badgeFor(item.badge);
-                        return (
-                          <span className={linkClass(a || isActive(item.url))}>
-                            <item.icon className="h-4 w-4 shrink-0" />
-                            {!collapsed && (
-                              <>
-                                <span className="flex-1">{item.title}</span>
-                                {count != null && (
-                                  <span className="rounded-full border border-sidebar-border px-1.5 py-0.5 text-[10px] font-medium leading-none">
-                                    {count}
-                                  </span>
-                                )}
-                              </>
-                            )}
-                          </span>
-                        );
-                      }}
-                    </NavLink>
-                  </SidebarMenuButton>
-                </SidebarMenuItem>
-              ))}
-            </SidebarMenu>
-          </SidebarGroupContent>
-        </SidebarGroup>
+        {navGroups.map((group, index) => (
+          <SidebarGroup key={group.label ?? `group-${index}`}>
+            {!collapsed && group.label && (
+              <SidebarGroupLabel className="px-2 text-[10px] uppercase tracking-widest text-muted-foreground">
+                {group.label}
+              </SidebarGroupLabel>
+            )}
+            <SidebarGroupContent>
+              <SidebarMenu>
+                {group.items.map((item) => (
+                  <SidebarMenuItem key={item.title}>
+                    <SidebarMenuButton asChild>
+                      <NavLink to={item.url} end={item.end}>
+                        {({ isActive: a }) => {
+                          const count = badgeFor(item.badge);
+                          return (
+                            <span className={linkClass(a || isActive(item.url, item.end))}>
+                              <item.icon className="h-4 w-4 shrink-0" />
+                              {!collapsed && (
+                                <>
+                                  <span className="flex-1">{item.title}</span>
+                                  {count != null && (
+                                    <span
+                                      className="rounded-full border border-sidebar-border px-1.5 py-0.5 text-[10px] font-medium leading-none"
+                                      title={badgeTitle(item.badge)}
+                                    >
+                                      {count}
+                                    </span>
+                                  )}
+                                </>
+                              )}
+                            </span>
+                          );
+                        }}
+                      </NavLink>
+                    </SidebarMenuButton>
+                  </SidebarMenuItem>
+                ))}
+              </SidebarMenu>
+            </SidebarGroupContent>
+          </SidebarGroup>
+        ))}
 
         {!collapsed && (
           <SidebarGroup>

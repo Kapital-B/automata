@@ -54,24 +54,57 @@ describe("AppSidebar U1 IA", () => {
     getAttention.mockResolvedValue({ items: [], counts: { total: 0 } } as never);
   });
 
-  it("shows primary Home Projects Triage People and Inbox under More", async () => {
+  it("groups destinations by domain rather than by our ranking", async () => {
     renderSidebar();
 
+    // Home leads, ungrouped: it is the landing, not a category.
     expect(await screen.findByRole("link", { name: /^Home/i })).toHaveAttribute("href", "/");
-    expect(screen.getByRole("link", { name: /^Projects/i })).toHaveAttribute("href", "/projects");
-    expect(screen.getByRole("link", { name: /^Triage/i })).toHaveAttribute("href", "/triage");
-    expect(screen.getByRole("link", { name: /^People/i })).toHaveAttribute("href", "/people");
 
-    expect(screen.getByText("More")).toBeInTheDocument();
-    expect(screen.getByRole("link", { name: /^Inbox/i })).toHaveAttribute("href", "/inbox");
-    expect(screen.getByRole("link", { name: /^Drafts/i })).toHaveAttribute("href", "/drafts");
-    expect(screen.getByRole("link", { name: /^Connectors/i })).toHaveAttribute(
-      "href",
-      "/accounts",
-    );
+    // Group labels say what the destinations are about.
+    expect(screen.getByText("Project memory")).toBeInTheDocument();
+    expect(screen.getByText("Correspondence")).toBeInTheDocument();
+    expect(screen.getByText("System")).toBeInTheDocument();
+
+    // The old ranking labels are gone.
+    expect(screen.queryByText("Primary")).not.toBeInTheDocument();
+    expect(screen.queryByText("More")).not.toBeInTheDocument();
+  });
+
+  it("keeps every destination reachable", async () => {
+    renderSidebar();
+    await screen.findByRole("link", { name: /^Home/i });
+
+    const expected: [RegExp, string][] = [
+      [/^Projects/i, "/projects"],
+      [/^People/i, "/people"],
+      [/^Triage/i, "/triage"],
+      [/^Inbox/i, "/inbox"],
+      [/^Drafts/i, "/drafts"],
+      [/^Rules/i, "/rules"],
+      [/^Connectors/i, "/accounts"],
+      [/^Runs/i, "/runs"],
+      [/^Settings/i, "/settings"],
+    ];
+    for (const [name, href] of expected) {
+      expect(screen.getByRole("link", { name })).toHaveAttribute("href", href);
+    }
 
     expect(screen.queryByRole("link", { name: /^Today$/i })).not.toBeInTheDocument();
     expect(screen.queryByRole("link", { name: /^Assistant$/i })).not.toBeInTheDocument();
     expect(screen.queryByRole("link", { name: /^Unassigned$/i })).not.toBeInTheDocument();
+  });
+
+  it("badges the queues that have work waiting", async () => {
+    getUnassignedSummary.mockResolvedValue({ unassigned: 3, provisional: 2, not_relevant: 9 });
+    listDraftSuggestions.mockResolvedValue([{ id: "d1" }] as never);
+    getAttention.mockResolvedValue({ items: [], counts: { total: 4 } } as never);
+    renderSidebar();
+
+    // Triage counts work to do; dismissed items are not work.
+    expect(await screen.findByTitle("Triage queue")).toHaveTextContent("5");
+    expect(screen.getByTitle("Needs my input")).toHaveTextContent("4");
+    // Drafts stay unbadged with no connected account, since the query that
+    // feeds them is gated on one.
+    expect(screen.queryByTitle("Drafts ready")).not.toBeInTheDocument();
   });
 });
