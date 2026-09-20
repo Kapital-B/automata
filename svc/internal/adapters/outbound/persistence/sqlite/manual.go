@@ -8,6 +8,7 @@ import (
 	"strings"
 	"unicode/utf8"
 
+	"github.com/Kapital-B/automata/svc/internal/adapters/outbound/persistence/sqlkit"
 	"github.com/Kapital-B/automata/svc/internal/application/ports/driven"
 	"github.com/google/uuid"
 )
@@ -196,7 +197,7 @@ func (r *Repository) ListProjectTimeline(ctx context.Context, userID, organisati
 	out := make([]driven.TimelineItem, 0)
 
 	if source == "all" || source == "mail" {
-		mailItems, err := r.listMailTimelineItems(ctx, userID, organisationID, projectID)
+		mailItems, err := r.listMailTimelineItems(ctx, userID, projectID)
 		if err != nil {
 			return nil, err
 		}
@@ -214,11 +215,6 @@ func (r *Repository) ListProjectTimeline(ctx context.Context, userID, organisati
 			}
 			mid := m.ID
 			item.ManualItemID = &mid
-			contacts, _ := r.timelineContactsForManual(ctx, organisationID, m.ID)
-			item.Contacts = contacts
-			if issueID, err := r.FindIssueIDByManualItem(ctx, m.ID); err == nil {
-				item.IssueID = issueID
-			}
 			out = append(out, item)
 		}
 	}
@@ -251,6 +247,13 @@ func (r *Repository) ListProjectTimeline(ctx context.Context, userID, organisati
 		}
 	}
 
+	// Contacts and issue links are attached in bulk once every source has
+	// contributed. Resolving them per row is what made this endpoint both slow
+	// and deadlock-prone.
+	if err := r.hydrateTimelineItems(ctx, organisationID, out); err != nil {
+		return nil, err
+	}
+
 	if filter.UnassignedToIssue {
 		filtered := make([]driven.TimelineItem, 0, len(out))
 		for _, it := range out {
@@ -274,7 +277,7 @@ func (r *Repository) ListProjectTimeline(ctx context.Context, userID, organisati
 	return out[offset:end], nil
 }
 
-func (r *Repository) listMailTimelineItems(ctx context.Context, userID, organisationID, projectID uuid.UUID) ([]driven.TimelineItem, error) {
+func (r *Repository) listMailTimelineItems(ctx context.Context, userID, projectID uuid.UUID) ([]driven.TimelineItem, error) {
 	rows, err := r.db.QueryContext(ctx, `
 		SELECT m.id, m.account_id, a.label, m.subject, m.body_text, m.received_at
 		FROM messages m
@@ -322,58 +325,7 @@ func (r *Repository) listMailTimelineItems(ctx context.Context, userID, organisa
 		}
 		item.AccountID = &accID
 		item.MessageID = &msgID
-		contacts, _ := r.timelineContactsForMessage(ctx, organisationID, msgID)
-		item.Contacts = contacts
-		if issueID, err := r.FindIssueIDByMessage(ctx, msgID); err == nil {
-			item.IssueID = issueID
-		}
 		out = append(out, item)
-	}
-	return out, rows.Err()
-}
-
-func (r *Repository) timelineContactsForMessage(ctx context.Context, organisationID, messageID uuid.UUID) ([]driven.TimelineContact, error) {
-	rows, err := r.db.QueryContext(ctx, `
-		SELECT c.id, c.display_name, cp.role
-		FROM correspondence_participants cp
-		INNER JOIN contacts c ON c.id = cp.contact_id
-		WHERE cp.organisation_id = ? AND cp.message_id = ?
-		ORDER BY cp.role ASC
-	`, organisationID.String(), messageID.String())
-	if err != nil {
-		return nil, err
-	}
-	defer rows.Close()
-	return scanTimelineContacts(rows)
-}
-
-func (r *Repository) timelineContactsForManual(ctx context.Context, organisationID, manualItemID uuid.UUID) ([]driven.TimelineContact, error) {
-	rows, err := r.db.QueryContext(ctx, `
-		SELECT c.id, c.display_name, cp.role
-		FROM correspondence_participants cp
-		INNER JOIN contacts c ON c.id = cp.contact_id
-		WHERE cp.organisation_id = ? AND cp.manual_item_id = ?
-		ORDER BY cp.role ASC
-	`, organisationID.String(), manualItemID.String())
-	if err != nil {
-		return nil, err
-	}
-	defer rows.Close()
-	return scanTimelineContacts(rows)
-}
-
-func scanTimelineContacts(rows *sql.Rows) ([]driven.TimelineContact, error) {
-	out := make([]driven.TimelineContact, 0)
-	for rows.Next() {
-		var idStr, name, role string
-		if err := rows.Scan(&idStr, &name, &role); err != nil {
-			return nil, err
-		}
-		id, err := uuid.Parse(idStr)
-		if err != nil {
-			return nil, err
-		}
-		out = append(out, driven.TimelineContact{ID: id, DisplayName: name, Role: role})
 	}
 	return out, rows.Err()
 }
@@ -385,4 +337,157 @@ func snippetText(s string, max int) string {
 	}
 	runes := []rune(s)
 	return string(runes[:max]) + "…"
+}
+
+// timelineHydrateChunk bounds how many ids go into one IN list.
+const timelineHydrateChunk = 200
+
+// hydrateTimelineItems attaches contacts and issue links to an already-built
+// timeline.
+//
+// This must run after every cursor that produced these items has been closed.
+// Issuing a query while a result set is still streaming holds two connections
+// at once; SQLite here runs a single-connection pool (factory.go), so doing it
+// inline is a self-deadlock. Batching also turns 2 queries per row into a
+// handful in total. Mirrors the postgres adapter.
+func (r *Repository) hydrateTimelineItems(ctx context.Context, organisationID uuid.UUID, items []driven.TimelineItem) error {
+	if len(items) == 0 {
+		return nil
+	}
+	messageIDs := make([]uuid.UUID, 0, len(items))
+	manualIDs := make([]uuid.UUID, 0, len(items))
+	for _, it := range items {
+		if it.MessageID != nil {
+			messageIDs = append(messageIDs, *it.MessageID)
+		}
+		if it.ManualItemID != nil {
+			manualIDs = append(manualIDs, *it.ManualItemID)
+		}
+	}
+
+	msgContacts, err := r.timelineContactsFor(ctx, organisationID, "message_id", messageIDs)
+	if err != nil {
+		return err
+	}
+	manualContacts, err := r.timelineContactsFor(ctx, organisationID, "manual_item_id", manualIDs)
+	if err != nil {
+		return err
+	}
+	msgIssues, err := r.issueIDsFor(ctx, "message_id", messageIDs)
+	if err != nil {
+		return err
+	}
+	manualIssues, err := r.issueIDsFor(ctx, "manual_item_id", manualIDs)
+	if err != nil {
+		return err
+	}
+
+	for i := range items {
+		if id := items[i].MessageID; id != nil {
+			items[i].Contacts = msgContacts[*id]
+			if issueID, ok := msgIssues[*id]; ok {
+				issue := issueID
+				items[i].IssueID = &issue
+			}
+		}
+		if id := items[i].ManualItemID; id != nil {
+			items[i].Contacts = manualContacts[*id]
+			if issueID, ok := manualIssues[*id]; ok {
+				issue := issueID
+				items[i].IssueID = &issue
+			}
+		}
+	}
+	return nil
+}
+
+// timelineContactsFor loads participants for many messages or manual items.
+// column is a trusted internal literal, never caller input.
+func (r *Repository) timelineContactsFor(ctx context.Context, organisationID uuid.UUID, column string, ids []uuid.UUID) (map[uuid.UUID][]driven.TimelineContact, error) {
+	out := map[uuid.UUID][]driven.TimelineContact{}
+	for _, chunk := range sqlkit.ChunkUUIDs(sqlkit.DedupeUUIDs(ids), timelineHydrateChunk) {
+		args := make([]any, 0, len(chunk)+1)
+		args = append(args, organisationID.String())
+		for _, id := range chunk {
+			args = append(args, id.String())
+		}
+		rows, err := r.db.QueryContext(ctx, `
+			SELECT cp.`+column+`, c.id, c.display_name, cp.role
+			FROM correspondence_participants cp
+			INNER JOIN contacts c ON c.id = cp.contact_id
+			WHERE cp.organisation_id = ? AND cp.`+column+` IN (`+sqlkit.PlaceholderList(len(chunk))+`)
+			ORDER BY cp.role ASC
+		`, args...)
+		if err != nil {
+			return nil, err
+		}
+		if err := scanTimelineContactsByOwner(rows, out); err != nil {
+			return nil, err
+		}
+	}
+	return out, nil
+}
+
+func scanTimelineContactsByOwner(rows *sql.Rows, out map[uuid.UUID][]driven.TimelineContact) error {
+	defer rows.Close()
+	for rows.Next() {
+		var ownerStr, contactStr, displayName, role string
+		if err := rows.Scan(&ownerStr, &contactStr, &displayName, &role); err != nil {
+			return err
+		}
+		ownerID, err := uuid.Parse(ownerStr)
+		if err != nil {
+			return err
+		}
+		contactID, err := uuid.Parse(contactStr)
+		if err != nil {
+			return err
+		}
+		out[ownerID] = append(out[ownerID], driven.TimelineContact{
+			ID: contactID, DisplayName: displayName, Role: role,
+		})
+	}
+	return rows.Err()
+}
+
+// issueIDsFor maps messages or manual items to the issue they belong to.
+func (r *Repository) issueIDsFor(ctx context.Context, column string, ids []uuid.UUID) (map[uuid.UUID]uuid.UUID, error) {
+	out := map[uuid.UUID]uuid.UUID{}
+	for _, chunk := range sqlkit.ChunkUUIDs(sqlkit.DedupeUUIDs(ids), timelineHydrateChunk) {
+		args := make([]any, 0, len(chunk))
+		for _, id := range chunk {
+			args = append(args, id.String())
+		}
+		rows, err := r.db.QueryContext(ctx, `
+			SELECT `+column+`, issue_id FROM issue_items
+			WHERE `+column+` IN (`+sqlkit.PlaceholderList(len(chunk))+`)
+		`, args...)
+		if err != nil {
+			return nil, err
+		}
+		if err := scanIssueIDsByOwner(rows, out); err != nil {
+			return nil, err
+		}
+	}
+	return out, nil
+}
+
+func scanIssueIDsByOwner(rows *sql.Rows, out map[uuid.UUID]uuid.UUID) error {
+	defer rows.Close()
+	for rows.Next() {
+		var ownerStr, issueStr string
+		if err := rows.Scan(&ownerStr, &issueStr); err != nil {
+			return err
+		}
+		ownerID, err := uuid.Parse(ownerStr)
+		if err != nil {
+			return err
+		}
+		issueID, err := uuid.Parse(issueStr)
+		if err != nil {
+			return err
+		}
+		out[ownerID] = issueID
+	}
+	return rows.Err()
 }
