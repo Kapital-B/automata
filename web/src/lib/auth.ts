@@ -431,6 +431,7 @@ export type ProjectDetail = ProjectListItem & {
 export type UnassignedSummary = {
   unassigned: number;
   provisional: number;
+  not_relevant?: number;
 };
 
 export type UnassignedItem = {
@@ -453,6 +454,8 @@ export type UnassignedItem = {
   confidence?: number;
   /** Queued messages this row stands for. Always >= 1. */
   thread_count?: number;
+  /** Set when the operator decided this is not project work. */
+  not_relevant_at?: string;
 };
 
 export type BatchAssignItem = {
@@ -460,6 +463,8 @@ export type BatchAssignItem = {
   id: string;
   project_id: string | null;
   scope?: "thread" | "message";
+  /** true marks as not project-related, false restores to the queue. */
+  not_relevant?: boolean;
 };
 
 export type BatchAssignResponse = {

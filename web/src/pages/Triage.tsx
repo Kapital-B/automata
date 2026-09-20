@@ -14,6 +14,7 @@ import { useAccountsData } from "@/hooks/useAccountsData";
 import {
   ApiError,
   assignProjectsBatch,
+  getUnassignedSummary,
   listProjects,
   listUnassigned,
   rescanUnassigned,
@@ -26,11 +27,12 @@ import {
   headlineFor,
   itemID,
   itemKey,
+  unassignedSummaryQueryOptions,
   type TriageProject as Project,
 } from "@/lib/triage";
 import { toast } from "@/hooks/use-toast";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { CheckCircle2, FolderKanban, Inbox, Loader2, RefreshCw, Sparkles } from "lucide-react";
+import { Ban, CheckCircle2, FolderKanban, Inbox, Loader2, RefreshCw, Sparkles } from "lucide-react";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Link } from "react-router-dom";
 
@@ -47,11 +49,24 @@ export default function TriagePage() {
   const queryClient = useQueryClient();
   const { accounts } = useAccountsData();
 
+  const [view, setView] = useState<"queue" | "not_relevant">("queue");
+
   const unassignedQuery = useQuery({
-    queryKey: ["unassigned", accessToken, "all"],
-    queryFn: () => listUnassigned(accessToken!, { status: "all", limit: 100 }),
+    queryKey: ["unassigned", accessToken, view],
+    queryFn: () =>
+      listUnassigned(accessToken!, {
+        status: view === "queue" ? "all" : "not_relevant",
+        limit: 100,
+      }),
     enabled: Boolean(accessToken),
   });
+  const summaryQuery = useQuery({
+    queryKey: ["unassigned-summary", accessToken],
+    queryFn: () => getUnassignedSummary(accessToken!),
+    enabled: Boolean(accessToken),
+    ...unassignedSummaryQueryOptions,
+  });
+  const notRelevantCount = summaryQuery.data?.not_relevant ?? 0;
   const projectsQuery = useQuery({
     queryKey: ["projects", accessToken],
     queryFn: () => listProjects(accessToken!),
@@ -79,8 +94,9 @@ export default function TriagePage() {
       const key = item.project_id ?? "";
       byProject.set(key, [...(byProject.get(key) ?? []), item]);
     });
+    if (view === "not_relevant") return items;
     return [...[...byProject.values()].flat(), ...plain];
-  }, [plain, provisional]);
+  }, [items, plain, provisional, view]);
 
   // The numeric shortcuts address most-recently-used projects first.
   const shortcutProjects = useMemo(() => {
@@ -188,6 +204,20 @@ export default function TriagePage() {
     [batchMutation, buildItem, projectFor],
   );
 
+  const setNotRelevant = useCallback(
+    (items: UnassignedItem[], notRelevant: boolean, scope: "thread" | "message" = "thread") => {
+      const batch: BatchAssignItem[] = items.map((item) => ({
+        kind: item.kind,
+        id: itemID(item),
+        project_id: null,
+        not_relevant: notRelevant,
+        ...(item.kind === "message" ? { scope } : {}),
+      }));
+      if (batch.length > 0) batchMutation.mutate(batch);
+    },
+    [batchMutation],
+  );
+
   const assignSelected = useCallback(
     (scope: "thread" | "message") => {
       if (!bulkProject) return;
@@ -273,6 +303,12 @@ export default function TriagePage() {
           event.preventDefault();
           assignOne(item, "thread");
           return;
+        case "x":
+          if (!item) return;
+          event.preventDefault();
+          // Marking from the dismissed view would be a no-op, so x restores there.
+          setNotRelevant([item], view === "queue");
+          return;
         case "u":
           event.preventDefault();
           undoLastBatch();
@@ -290,7 +326,7 @@ export default function TriagePage() {
     }
     window.addEventListener("keydown", onKeyDown);
     return () => window.removeEventListener("keydown", onKeyDown);
-  }, [assignOne, focusIndex, moveFocus, shortcutProjects, undoLastBatch, visibleItems]);
+  }, [assignOne, focusIndex, moveFocus, setNotRelevant, shortcutProjects, undoLastBatch, view, visibleItems]);
 
   // Keep the cursor inside the list as rows leave the queue.
   useEffect(() => {
@@ -325,9 +361,24 @@ export default function TriagePage() {
           />
           Rescan suggestions
         </Button>
+        {notRelevantCount > 0 || view === "not_relevant" ? (
+          <Button
+            variant={view === "not_relevant" ? "default" : "outline"}
+            size="sm"
+            aria-pressed={view === "not_relevant"}
+            onClick={() => {
+              setView((v) => (v === "queue" ? "not_relevant" : "queue"));
+              setSelected(new Set());
+            }}
+          >
+            <Ban className="mr-1.5 h-3.5 w-3.5" />
+            Not project-related ({notRelevantCount})
+          </Button>
+        ) : null}
         <p className="text-xs text-muted-foreground">
           <kbd>j</kbd>/<kbd>k</kbd> move · <kbd>space</kbd> select · <kbd>enter</kbd> confirm ·{" "}
-          <kbd>1</kbd>–<kbd>9</kbd> file to a recent project · <kbd>u</kbd> undo
+          <kbd>1</kbd>–<kbd>9</kbd> file to a recent project · <kbd>x</kbd> not project-related ·{" "}
+          <kbd>u</kbd> undo
         </p>
       </div>
 
@@ -342,7 +393,7 @@ export default function TriagePage() {
             ? unassignedQuery.error.message
             : "Could not load triage items."}
         </p>
-      ) : provisional.length === 0 && plain.length === 0 ? (
+      ) : view === "queue" && provisional.length === 0 && plain.length === 0 ? (
         <div className="space-y-4 border-y border-border/70 py-8">
           <div className="flex items-start gap-3 text-sm text-muted-foreground">
             <CheckCircle2 className="mt-0.5 h-4 w-4 shrink-0 text-success" />
@@ -363,6 +414,22 @@ export default function TriagePage() {
             </Button>
           </div>
         </div>
+      ) : view === "not_relevant" ? (
+        <Section
+          title="Not project-related"
+          empty="Nothing has been marked as not project-related."
+          focusedKey={focusedKey}
+          items={items}
+          projects={projects}
+          accountFor={accountFor}
+          busy={busy}
+          selected={selected}
+          setSelected={setSelected}
+          projectFor={projectFor}
+          setOverride={(key, value) => setOverrides((p) => ({ ...p, [key]: value }))}
+          onAssign={assignOne}
+          onRestore={(item) => setNotRelevant([item], false)}
+        />
       ) : (
         <>
           <SuggestionSection
@@ -376,6 +443,7 @@ export default function TriagePage() {
             projectFor={projectFor}
             setOverride={(key, value) => setOverrides((p) => ({ ...p, [key]: value }))}
             onAssign={assignOne}
+            onMarkNotRelevant={(item) => setNotRelevant([item], true)}
             onConfirmAll={confirmAll}
           />
           <Section
@@ -391,6 +459,7 @@ export default function TriagePage() {
             projectFor={projectFor}
             setOverride={(key, value) => setOverrides((p) => ({ ...p, [key]: value }))}
             onAssign={assignOne}
+            onMarkNotRelevant={(item) => setNotRelevant([item], true)}
           />
         </>
       )}
@@ -427,6 +496,37 @@ export default function TriagePage() {
           >
             This message only
           </Button>
+          {view === "queue" ? (
+            <Button
+              size="sm"
+              variant="outline"
+              disabled={busy}
+              onClick={() => {
+                const byKey = new Map(items.map((i) => [itemKey(i), i]));
+                const chosen = [...selected]
+                  .map((k) => byKey.get(k))
+                  .filter((i): i is UnassignedItem => Boolean(i));
+                setNotRelevant(chosen, true);
+              }}
+            >
+              Not project-related
+            </Button>
+          ) : (
+            <Button
+              size="sm"
+              variant="outline"
+              disabled={busy}
+              onClick={() => {
+                const byKey = new Map(items.map((i) => [itemKey(i), i]));
+                const chosen = [...selected]
+                  .map((k) => byKey.get(k))
+                  .filter((i): i is UnassignedItem => Boolean(i));
+                setNotRelevant(chosen, false);
+              }}
+            >
+              Restore to queue
+            </Button>
+          )}
           <Button size="sm" variant="ghost" onClick={() => setSelected(new Set())}>
             Clear selection
           </Button>
@@ -447,6 +547,10 @@ type SectionProps = {
   projectFor: (item: UnassignedItem) => string;
   setOverride: (key: string, value: string) => void;
   onAssign: (item: UnassignedItem, scope: "thread" | "message", projectID?: string) => void;
+  /** Present in the queue view: dismiss this row. */
+  onMarkNotRelevant?: (item: UnassignedItem) => void;
+  /** Present in the dismissed view: put this row back in the queue. */
+  onRestore?: (item: UnassignedItem) => void;
 };
 
 /**
@@ -594,6 +698,8 @@ function RowList(props: SectionProps) {
             projectID={props.projectFor(item)}
             setProjectID={(value) => props.setOverride(itemKey(item), value)}
             onAssign={props.onAssign}
+            onMarkNotRelevant={props.onMarkNotRelevant}
+            onRestore={props.onRestore}
           />
         ))}
       </ul>
@@ -613,6 +719,8 @@ function UnassignedRow({
   projectID,
   setProjectID,
   onAssign,
+  onMarkNotRelevant,
+  onRestore,
 }: {
   item: UnassignedItem;
   index: number;
@@ -625,6 +733,8 @@ function UnassignedRow({
   projectID: string;
   setProjectID: (value: string) => void;
   onAssign: (item: UnassignedItem, scope: "thread" | "message", projectID?: string) => void;
+  onMarkNotRelevant?: (item: UnassignedItem) => void;
+  onRestore?: (item: UnassignedItem) => void;
 }) {
   const isManual = item.kind === "manual";
   const headline = headlineFor(item);
@@ -675,6 +785,11 @@ function UnassignedRow({
           {from ? <p className="text-xs text-muted-foreground">{from}</p> : null}
           {when ? (
             <p className="text-xs text-muted-foreground">{new Date(when).toLocaleString()}</p>
+          ) : null}
+          {item.not_relevant_at ? (
+            <p className="text-xs text-muted-foreground">
+              {`Marked not project-related ${new Date(item.not_relevant_at).toLocaleString()}`}
+            </p>
           ) : null}
           {explanation ? (
             <p className="text-xs text-muted-foreground">
@@ -743,6 +858,21 @@ function UnassignedRow({
             </Button>
           </>
         )}
+        {onMarkNotRelevant ? (
+          <Button
+            size="sm"
+            variant="ghost"
+            disabled={busy}
+            onClick={() => onMarkNotRelevant(item)}
+          >
+            Not project-related
+          </Button>
+        ) : null}
+        {onRestore ? (
+          <Button size="sm" variant="ghost" disabled={busy} onClick={() => onRestore(item)}>
+            Restore to queue
+          </Button>
+        ) : null}
       </div>
     </li>
   );
