@@ -19,9 +19,8 @@ vi.mock("@/lib/auth", async () => {
   return {
     ...actual,
     getAttention: vi.fn(),
-    listProjects: vi.fn(),
-    getUnassignedSummary: vi.fn(),
-    getCurrentPosition: vi.fn(),
+    getOverview: vi.fn(),
+    listActivity: vi.fn(),
     markActionItemDone: vi.fn(),
     getApiHealth: vi.fn(),
     askAcross: vi.fn(),
@@ -30,9 +29,8 @@ vi.mock("@/lib/auth", async () => {
 
 const mockedUseAssistantHomeData = vi.mocked(useAssistantHomeData);
 const getAttention = vi.mocked(auth.getAttention);
-const listProjects = vi.mocked(auth.listProjects);
-const getUnassignedSummary = vi.mocked(auth.getUnassignedSummary);
-const getCurrentPosition = vi.mocked(auth.getCurrentPosition);
+const getOverview = vi.mocked(auth.getOverview);
+const listActivity = vi.mocked(auth.listActivity);
 const getApiHealth = vi.mocked(auth.getApiHealth);
 const askAcross = vi.mocked(auth.askAcross);
 
@@ -98,9 +96,8 @@ describe("AssistantHomePage", () => {
   beforeEach(() => {
     mockedUseAssistantHomeData.mockReset();
     getAttention.mockReset();
-    listProjects.mockReset();
-    getUnassignedSummary.mockReset();
-    getCurrentPosition.mockReset();
+    getOverview.mockReset();
+    listActivity.mockReset();
     getApiHealth.mockReset();
     askAcross.mockReset();
     getAttention.mockResolvedValue({
@@ -115,19 +112,108 @@ describe("AssistantHomePage", () => {
         mail_action_item: 0,
       },
     });
-    listProjects.mockResolvedValue([]);
-    getUnassignedSummary.mockResolvedValue({ unassigned: 0, provisional: 0 });
-    getCurrentPosition.mockResolvedValue({ facts: [], decisions: [] });
+    getOverview.mockResolvedValue({
+      counts: {
+        needs_you: 0,
+        triage_unassigned: 0,
+        triage_provisional: 0,
+        open_contradictions: 0,
+        provisional_facts: 0,
+        proposed_decisions: 0,
+        active_projects: 0,
+      },
+      projects: [],
+    });
+    listActivity.mockResolvedValue({ items: [] });
     getApiHealth.mockResolvedValue({ status: "ok", llm: true });
   });
 
-  it("shows empty Needs my input with Projects and Triage CTAs", async () => {
+  it("shows the overview heading and an empty attention list with CTAs", async () => {
     mockedUseAssistantHomeData.mockReturnValue(baseMailState());
     renderPage();
-    expect(await screen.findByRole("heading", { name: "Needs my input" })).toBeInTheDocument();
+    expect(await screen.findByRole("heading", { name: "Across your projects" })).toBeInTheDocument();
     expect(screen.getByText(/Nothing waiting on you/i)).toBeInTheDocument();
     expect(screen.getByRole("link", { name: /^Projects$/i })).toHaveAttribute("href", "/projects");
     expect(screen.getByRole("link", { name: /^Triage$/i })).toHaveAttribute("href", "/triage");
+  });
+
+  it("renders the metric card row, including zeroes", async () => {
+    mockedUseAssistantHomeData.mockReturnValue(baseMailState());
+    renderPage();
+    // A card that vanishes at zero makes the row jump between loads.
+    for (const label of ["Needs you", "Triage", "Contradictions", "Unconfirmed", "Projects"]) {
+      expect(await screen.findByRole("link", { name: new RegExp(`^${label}, \\d+$`) })).toBeInTheDocument();
+    }
+    expect(screen.getByRole("link", { name: "Triage, 0" })).toHaveAttribute("href", "/triage");
+  });
+
+  it("surfaces counts on the cards", async () => {
+    getOverview.mockResolvedValue({
+      counts: {
+        needs_you: 4,
+        triage_unassigned: 2,
+        triage_provisional: 1,
+        open_contradictions: 3,
+        provisional_facts: 5,
+        proposed_decisions: 2,
+        active_projects: 9,
+      },
+      projects: [],
+    });
+    mockedUseAssistantHomeData.mockReturnValue(baseMailState());
+    renderPage();
+    expect(await screen.findByRole("link", { name: "Triage, 3" })).toBeInTheDocument();
+    expect(screen.getByRole("link", { name: "Contradictions, 3" })).toBeInTheDocument();
+    // Unconfirmed merges provisional facts and proposed decisions.
+    expect(screen.getByRole("link", { name: "Unconfirmed, 7" })).toBeInTheDocument();
+    expect(screen.getByRole("link", { name: "Projects, 9" })).toBeInTheDocument();
+  });
+
+  it("shows what changed across projects, grouped and attributed", async () => {
+    const now = new Date();
+    listActivity.mockResolvedValue({
+      items: [
+        {
+          kind: "decision_accepted",
+          occurred_at: now.toISOString(),
+          project_id: "p1",
+          project_code: "DC01",
+          project_name: "Cooling",
+          title: "Proceed with 90 kW",
+          ref_type: "decision",
+          ref_id: "d1",
+          source: "llm",
+        },
+        {
+          kind: "contradiction_opened",
+          occurred_at: new Date(now.getTime() - 26 * 60 * 60 * 1000).toISOString(),
+          project_id: "p1",
+          project_code: "DC01",
+          project_name: "Cooling",
+          title: "Duty stated twice",
+          ref_type: "contradiction",
+          ref_id: "c1",
+        },
+      ],
+    });
+    mockedUseAssistantHomeData.mockReturnValue(baseMailState());
+    renderPage();
+
+    expect(await screen.findByRole("heading", { name: "What changed" })).toBeInTheDocument();
+    expect(screen.getByText("Decision accepted")).toBeInTheDocument();
+    expect(screen.getByText("Contradiction opened")).toBeInTheDocument();
+    // Provenance matters now that the LLM writes facts and decisions.
+    expect(screen.getByText("llm")).toBeInTheDocument();
+    expect(screen.getByRole("link", { name: "Proceed with 90 kW" })).toHaveAttribute(
+      "href",
+      "/projects/p1?mode=position",
+    );
+    expect(screen.getByRole("link", { name: "Duty stated twice" })).toHaveAttribute(
+      "href",
+      "/projects/p1?mode=open",
+    );
+    expect(screen.getByRole("heading", { name: "Today" })).toBeInTheDocument();
+    expect(screen.getByRole("heading", { name: "Yesterday" })).toBeInTheDocument();
   });
 
   it("makes Needs my input the hero list merging attention and mail", async () => {
@@ -162,44 +248,41 @@ describe("AssistantHomePage", () => {
         mail_action_item: 1,
       },
     });
-    listProjects.mockResolvedValue([
-      {
-        id: "p1",
-        organisation_id: "o1",
-        name: "Cooling",
-        code: "DC01",
-        keywords: [],
-        created_at: "2026-01-01T00:00:00Z",
-        updated_at: "2026-08-01T00:00:00Z",
+    getOverview.mockResolvedValue({
+      counts: {
+        needs_you: 2,
+        triage_unassigned: 2,
+        triage_provisional: 1,
+        open_contradictions: 0,
+        provisional_facts: 0,
+        proposed_decisions: 1,
+        active_projects: 1,
       },
-    ]);
-    getUnassignedSummary.mockResolvedValue({ unassigned: 2, provisional: 1 });
-    getCurrentPosition.mockResolvedValue({
-      facts: [
+      projects: [
         {
-          fact_id: "f1",
-          subject_key: "duty",
-          label: "Duty",
-          version_id: "v1",
-          value_json: 90,
-          value_text: "90 kW",
-          evidence_count: 1,
+          id: "p1",
+          code: "DC01",
+          name: "Cooling",
+          teaser: "Duty: 90 kW",
+          last_activity_at: new Date().toISOString(),
+          attention_count: 2,
         },
       ],
-      decisions: [],
     });
     mockedUseAssistantHomeData.mockReturnValue(baseMailState({ draftsReady: 2 }));
     renderPage();
 
-    expect(await screen.findByRole("heading", { name: "Needs my input" })).toBeInTheDocument();
+    expect(await screen.findByRole("heading", { name: "Across your projects" })).toBeInTheDocument();
     expect(screen.getByText(/Confirm decision: Proceed with 90 kW/i)).toBeInTheDocument();
     expect(screen.getByText("Reply to invoice")).toBeInTheDocument();
     expect(screen.queryByRole("heading", { name: "Action items" })).not.toBeInTheDocument();
     expect(screen.queryByRole("heading", { name: "Suggestions" })).not.toBeInTheDocument();
 
-    expect(await screen.findByRole("heading", { name: "Recent projects" })).toBeInTheDocument();
+    expect(await screen.findByRole("heading", { name: "Projects" })).toBeInTheDocument();
     expect(screen.getByText("DC01")).toBeInTheDocument();
+    // The teaser arrives with the overview, not from a per-project request.
     expect(await screen.findByText(/Duty: 90 kW/i)).toBeInTheDocument();
+    expect(screen.getByText(/2 needs you/i)).toBeInTheDocument();
 
     expect(screen.getByText(/3 items waiting to be assigned/i)).toBeInTheDocument();
     expect(screen.getByRole("link", { name: /2 drafts ready/i })).toHaveAttribute("href", "/drafts");

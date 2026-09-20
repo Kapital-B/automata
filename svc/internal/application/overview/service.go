@@ -68,6 +68,7 @@ type Project struct {
 	ID             uuid.UUID
 	Code           string
 	Name           string
+	Teaser         string
 	LastActivityAt *time.Time
 	AttentionCount int
 }
@@ -128,7 +129,7 @@ func (s *Service) Get(ctx context.Context, userID uuid.UUID) (*Result, error) {
 	out.Projects = make([]Project, 0, len(projects))
 	for _, p := range projects {
 		out.Projects = append(out.Projects, Project{
-			ID: p.ID, Code: p.Code, Name: p.Name,
+			ID: p.ID, Code: p.Code, Name: p.Name, Teaser: p.Teaser,
 			LastActivityAt: p.LastActivityAt,
 			AttentionCount: perProject[p.ID],
 		})

@@ -38,6 +38,7 @@ func (h *Handlers) overview(w http.ResponseWriter, r *http.Request) {
 			"code":            p.Code,
 			"name":            p.Name,
 			"attention_count": p.AttentionCount,
+			"teaser":          p.Teaser,
 		}
 		if p.LastActivityAt != nil {
 			row["last_activity_at"] = p.LastActivityAt.UTC().Format(time.RFC3339Nano)

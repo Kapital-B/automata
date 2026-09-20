@@ -1,6 +1,13 @@
 import { Link } from "react-router-dom";
-import { useMutation, useQueries, useQuery, useQueryClient } from "@tanstack/react-query";
-import { CheckCircle2, FolderKanban, Inbox, Loader2, PenLine, Plug } from "lucide-react";
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import {
+  AlertTriangle,
+  CheckCircle2,
+  FolderKanban,
+  Inbox,
+  PenLine,
+  Plug,
+} from "lucide-react";
 import type { AccountFilter } from "@/components/AppShell";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -11,14 +18,15 @@ import {
   askAcross,
   getApiHealth,
   getAttention,
-  getCurrentPosition,
-  getUnassignedSummary,
-  listProjects,
+  getOverview,
+  listActivity,
   markActionItemDone,
+  type ActivityItem,
   type AskAnswer,
   type AskCitation,
-  type ProjectListItem,
+  type OverviewProject,
 } from "@/lib/auth";
+import { activityHref, activityLabel, groupActivityByDay, isAdverse } from "@/lib/activity";
 import { mergeNeedsMeRows } from "@/lib/needsMe";
 import { toast } from "@/hooks/use-toast";
 import { useAssistantHomeData } from "@/hooks/useAssistantHomeData";
@@ -55,16 +63,18 @@ export default function AssistantHomePage({ accountFilter }: Props) {
     queryFn: () => getAttention(accessToken!),
     enabled: Boolean(accessToken),
   });
-  const projectsQuery = useQuery({
-    queryKey: ["projects", accessToken],
-    queryFn: () => listProjects(accessToken!),
-    enabled: Boolean(accessToken),
-  });
-  const triageQuery = useQuery({
-    queryKey: ["unassigned-summary", accessToken],
-    queryFn: () => getUnassignedSummary(accessToken!),
+  // One request for counts and projects. This page used to list projects and
+  // then fan out a current-position request per project from the browser.
+  const overviewQuery = useQuery({
+    queryKey: ["overview", accessToken],
+    queryFn: () => getOverview(accessToken!),
     enabled: Boolean(accessToken),
     ...unassignedSummaryQueryOptions,
+  });
+  const activityQuery = useQuery({
+    queryKey: ["activity", accessToken],
+    queryFn: () => listActivity(accessToken!, { limit: 25 }),
+    enabled: Boolean(accessToken),
   });
   const healthQuery = useQuery({
     queryKey: ["api-health"],
@@ -73,23 +83,11 @@ export default function AssistantHomePage({ accountFilter }: Props) {
   });
   const llmEnabled = healthQuery.data?.llm === true;
 
-  const recentProjects = (projectsQuery.data ?? [])
-    .slice()
-    .sort((a, b) => b.updated_at.localeCompare(a.updated_at))
-    .slice(0, 5);
-
-  const positionQueries = useQueries({
-    queries: recentProjects.map((p) => ({
-      queryKey: ["current-position", accessToken, p.id],
-      queryFn: () => getCurrentPosition(accessToken!, p.id),
-      enabled: Boolean(accessToken) && recentProjects.length > 0,
-      staleTime: 60_000,
-    })),
-  });
-
+  const counts = overviewQuery.data?.counts;
+  const recentProjects = overviewQuery.data?.projects ?? [];
   const needsMe = mergeNeedsMeRows(attentionQuery.data?.items ?? []);
-  const triageCount =
-    (triageQuery.data?.unassigned ?? 0) + (triageQuery.data?.provisional ?? 0);
+  const activityGroups = groupActivityByDay(activityQuery.data?.items ?? []);
+  const triageCount = (counts?.triage_unassigned ?? 0) + (counts?.triage_provisional ?? 0);
 
   const doneMutation = useMutation({
     mutationFn: async (id: string) => {
@@ -127,7 +125,7 @@ export default function AssistantHomePage({ accountFilter }: Props) {
     },
   });
 
-  const loading = Boolean(accessToken) && (attentionQuery.isLoading || projectsQuery.isLoading);
+  const loading = Boolean(accessToken) && (attentionQuery.isLoading || overviewQuery.isLoading);
 
   if (loading) {
     return (
@@ -161,12 +159,29 @@ export default function AssistantHomePage({ accountFilter }: Props) {
         <div className="space-y-2">
           <p className="font-display text-sm tracking-wide text-muted-foreground">Automata</p>
           <h1 id="home-needs-heading" className="font-display text-3xl md:text-4xl font-medium leading-tight">
-            Needs my input
+            Across your projects
           </h1>
           <p className="max-w-2xl text-sm text-muted-foreground">
-            What you should decide, confirm, or clear — across projects and mail.
+            What needs you, what changed, and where things stand.
           </p>
         </div>
+
+        <nav aria-label="Overview" className="grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-5">
+          <MetricCard label="Needs you" value={counts?.needs_you ?? 0} to="#home-needs-list" />
+          <MetricCard label="Triage" value={triageCount} to="/triage" />
+          <MetricCard
+            label="Contradictions"
+            value={counts?.open_contradictions ?? 0}
+            to="/projects"
+            adverse
+          />
+          <MetricCard
+            label="Unconfirmed"
+            value={(counts?.provisional_facts ?? 0) + (counts?.proposed_decisions ?? 0)}
+            to="/projects"
+          />
+          <MetricCard label="Projects" value={counts?.active_projects ?? 0} to="/projects" />
+        </nav>
 
         {needsMe.length === 0 ? (
           <div className="space-y-4 border-y border-border/70 py-8">
@@ -198,7 +213,7 @@ export default function AssistantHomePage({ accountFilter }: Props) {
             </div>
           </div>
         ) : (
-          <ul className="divide-y divide-border/70 border-y border-border/70">
+          <ul id="home-needs-list" className="divide-y divide-border/70 border-y border-border/70">
             {needsMe.map((row) => (
               <li key={row.id} className="flex items-start gap-3 py-3.5">
                 <div className="min-w-0 flex-1">
@@ -290,16 +305,46 @@ export default function AssistantHomePage({ accountFilter }: Props) {
         ) : null}
       </section>
 
+      <section className="space-y-4" aria-labelledby="home-changed-heading">
+        <div className="flex items-end justify-between gap-3">
+          <h2 id="home-changed-heading" className="font-display text-2xl">
+            What changed
+          </h2>
+        </div>
+        {activityQuery.isError ? (
+          <p className="text-sm text-destructive">Could not load recent activity.</p>
+        ) : activityGroups.length === 0 ? (
+          <p className="text-sm text-muted-foreground">
+            No recorded changes yet. Decisions, facts and issues appear here as they move.
+          </p>
+        ) : (
+          <div className="space-y-6">
+            {activityGroups.map((group) => (
+              <div key={group.key} className="space-y-2">
+                <h3 className="text-[10px] uppercase tracking-[0.14em] text-muted-foreground">
+                  {group.label}
+                </h3>
+                <ul className="divide-y divide-border/70 border-y border-border/70">
+                  {group.items.map((item) => (
+                    <ActivityRow key={`${item.kind}:${item.ref_id}`} item={item} />
+                  ))}
+                </ul>
+              </div>
+            ))}
+          </div>
+        )}
+      </section>
+
       <section className="space-y-4" aria-labelledby="home-recent-heading">
         <div className="flex items-end justify-between gap-3">
           <h2 id="home-recent-heading" className="font-display text-2xl">
-            Recent projects
+            Projects
           </h2>
           <Button asChild variant="ghost" size="sm">
             <Link to="/projects">All projects</Link>
           </Button>
         </div>
-        {projectsQuery.isError ? (
+        {overviewQuery.isError ? (
           <p className="text-sm text-destructive">Could not load projects.</p>
         ) : recentProjects.length === 0 ? (
           <div className="flex flex-wrap items-center gap-3 text-sm text-muted-foreground">
@@ -310,13 +355,8 @@ export default function AssistantHomePage({ accountFilter }: Props) {
           </div>
         ) : (
           <ul className="space-y-3">
-            {recentProjects.map((project, index) => (
-              <RecentProjectRow
-                key={project.id}
-                project={project}
-                teaser={positionTeaser(positionQueries[index]?.data)}
-                loading={positionQueries[index]?.isLoading}
-              />
+            {recentProjects.map((project) => (
+              <RecentProjectRow key={project.id} project={project} />
             ))}
           </ul>
         )}
@@ -369,32 +409,70 @@ export default function AssistantHomePage({ accountFilter }: Props) {
   );
 }
 
-function positionTeaser(
-  position: { facts: { label: string; value_text: string }[]; decisions: { statement: string }[] } | undefined,
-): string | undefined {
-  if (!position) return undefined;
-  const fact = position.facts[0];
-  if (fact) {
-    const value = fact.value_text?.trim();
-    return value ? `${fact.label}: ${value}` : fact.label;
-  }
-  const decision = position.decisions[0];
-  if (decision?.statement) {
-    const s = decision.statement.trim();
-    return s.length > 90 ? `${s.slice(0, 87)}…` : s;
-  }
-  return undefined;
+function MetricCard({
+  label,
+  value,
+  to,
+  adverse,
+}: {
+  label: string;
+  value: number;
+  to: string;
+  adverse?: boolean;
+}) {
+  // Zero renders muted rather than hiding the card: a row that changes shape
+  // between loads teaches people not to trust it.
+  const highlight = adverse && value > 0;
+  return (
+    <Link
+      to={to}
+      aria-label={`${label}, ${value}`}
+      className="surface-card px-4 py-3 transition hover:border-foreground/30"
+    >
+      <p className="text-[10px] uppercase tracking-widest text-muted-foreground">{label}</p>
+      <p
+        className={`mt-1 flex items-center gap-1.5 font-display text-2xl ${
+          value === 0 ? "text-muted-foreground" : ""
+        } ${highlight ? "text-destructive" : ""}`}
+      >
+        {highlight ? <AlertTriangle className="h-4 w-4" aria-hidden="true" /> : null}
+        {value}
+      </p>
+    </Link>
+  );
 }
 
-function RecentProjectRow({
-  project,
-  teaser,
-  loading,
-}: {
-  project: ProjectListItem;
-  teaser?: string;
-  loading?: boolean;
-}) {
+function ActivityRow({ item }: { item: ActivityItem }) {
+  const at = new Date(item.occurred_at);
+  return (
+    <li className="flex items-start gap-3 py-3">
+      <div className="min-w-0 flex-1 space-y-1">
+        <p className="flex flex-wrap items-center gap-1.5 text-[10px] uppercase tracking-[0.14em] text-muted-foreground">
+          <span className={isAdverse(item.kind) ? "text-destructive" : ""}>
+            {activityLabel(item.kind)}
+          </span>
+          <span aria-hidden="true">·</span>
+          <span className="font-mono normal-case tracking-normal">{item.project_code}</span>
+          {item.source ? (
+            <span className="rounded bg-muted px-1.5 py-0.5 tracking-normal">{item.source}</span>
+          ) : null}
+        </p>
+        <Link to={activityHref(item)} className="block text-sm font-medium hover:underline">
+          {item.title}
+        </Link>
+      </div>
+      <time
+        className="shrink-0 text-xs text-muted-foreground"
+        dateTime={item.occurred_at}
+        title={at.toLocaleString()}
+      >
+        {relativeTime(item.occurred_at)}
+      </time>
+    </li>
+  );
+}
+
+function RecentProjectRow({ project }: { project: OverviewProject }) {
   return (
     <li>
       <Link
@@ -406,17 +484,19 @@ function RecentProjectRow({
             {project.code}
           </span>
           <span className="text-sm font-medium">{project.name}</span>
+          {project.attention_count > 0 ? (
+            <span className="rounded bg-muted px-1.5 py-0.5 text-xs text-foreground">
+              {project.attention_count} needs you
+            </span>
+          ) : null}
           <span className="text-xs text-muted-foreground">
-            Updated {relativeTime(project.updated_at)}
+            {project.last_activity_at
+              ? `Active ${relativeTime(project.last_activity_at)}`
+              : "No activity yet"}
           </span>
         </div>
-        {loading ? (
-          <p className="flex items-center gap-1.5 text-xs text-muted-foreground">
-            <Loader2 className="h-3 w-3 animate-spin" />
-            Loading position…
-          </p>
-        ) : teaser ? (
-          <p className="text-xs text-muted-foreground line-clamp-2">{teaser}</p>
+        {project.teaser ? (
+          <p className="text-xs text-muted-foreground line-clamp-2">{project.teaser}</p>
         ) : (
           <p className="text-xs text-muted-foreground">No current position yet.</p>
         )}
