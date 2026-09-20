@@ -20,6 +20,24 @@ jobs:
   test:
     name: Run Tests
     runs-on: ubuntu-latest
+    # The repository contract suite runs against both adapters. Without a real
+    # Postgres the postgres half skips silently, so dialect-only constructs
+    # (row-value comparison, casts in UNION branches, window functions) reach
+    # dev untested. Matches the engine used in docker-compose.
+    services:
+      postgres:
+        image: postgres:16-alpine
+        env:
+          POSTGRES_USER: automata
+          POSTGRES_PASSWORD: automata
+          POSTGRES_DB: automata
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U automata -d automata"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 20
     defaults:
       run:
         working-directory: svc
@@ -33,6 +51,8 @@ jobs:
           cache-dependency-path: svc/go.sum
 
       - name: Run go test
+        env:
+          AUTOMATA_TEST_POSTGRES_DSN: postgres://automata:automata@localhost:5432/automata?sslmode=disable
         run: go test ./...
 
   plan:
