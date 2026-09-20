@@ -6,6 +6,7 @@
 **Parent PRD:** [docs/prds/initial.md](initial.md)  
 **Supersedes (chrome / IA only):** [AI-First Assistant Experience](addendum-ai-first-assistant.md) for **navigation and landing composition** — mail safety, provenance, and structured drill-downs remain in force  
 **Depends on:** [Wave 1](addendum-project-correspondence.md), [Wave 2](addendum-project-correspondence-wave2.md)  
+**Revised by:** [Home Overview](../specs/addendum-home-overview.md) for **Home composition (§6.1, §6.3)** — Home becomes a portfolio overview with a metric card row; the rest of this addendum stands  
 **Related:** [Wave 3](addendum-project-correspondence-wave3.md) (Path B / live connectors — **out of this UI slice**)
 
 This addendum freezes a **full UI information-architecture redesign** for the pivot from mail-assistant-first to **project memory first**, while keeping a **user-focused Home** as the default landing page.
@@ -101,6 +102,12 @@ One composition, brand + job:
 
 No detached promo chips on the hero. No competing “Assistant vs Today” dual homes.
 
+> **Revised 2026-09-20** — point 3 no longer holds. A row of metric cards sits
+> **above** the attention list; see [Home Overview §2.1 and §5.1](../specs/addendum-home-overview.md).
+> The list is not displaced, and each card must link to a filtered view — the
+> intent behind the original rule — but "not metric cards" is withdrawn.
+> Do not re-remove the row on the strength of point 3 alone.
+
 ### 6.2 Needs my input (list-first)
 
 Single ranked list. Each row:
@@ -122,6 +129,11 @@ Empty state: clear + CTAs to Projects / Triage.
 - **Recent projects** — up to ~5 with a one-line current-position teaser when available  
 - **Triage waiting** — count + link  
 - Optional **channel pulse** — drafts ready / inbox new (links into More routes)
+
+> **Revised 2026-09-20** — a cross-project **What changed** feed is added, and
+> "recent projects" is ordered by real last activity rather than
+> `projects.updated_at`, which only tracks metadata edits. Triage waiting moves
+> into the card row. See [Home Overview §5](../specs/addendum-home-overview.md).
 
 ### 6.4 Multi-project Ask (in scope)
 
