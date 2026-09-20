@@ -659,7 +659,37 @@ failure: re-adding `DESC` fails the lint with the same diagnosis.
 Recorded in [addendum-aurora-dsql.md §3.2](addendum-aurora-dsql.md), whose
 limits list did not mention it.
 
-### 18.2 Still unverified
+### 18.2 A comment header changed how a migration executed
+
+With the sort order fixed, the next deploy failed differently:
+
+```
+dsql/003_triage_indexes.sql: ERROR: multiple ddl statements not supported
+in a transaction (SQLSTATE 0A000)
+```
+
+`CREATE INDEX ASYNC` returns a job id, so the migrator sends it down the query
+path and then waits on `sys.wait_for_job`. That routing was decided with
+`strings.HasPrefix(stmt, "CREATE INDEX ASYNC")` against the raw chunk — and
+`003` is the first migration in the repo to open with a `--` comment header.
+The prefix check failed, the statement fell through to the generic exec path,
+and DSQL rejected it.
+
+Postgres accepts the same statement either way, so nothing local or in CI
+could see it. Every pre-existing `dsql/*.sql` file starts directly with DDL,
+which is why the bug had never fired.
+
+Fixed by classifying on the statement body rather than the raw chunk:
+`classifyStatements` strips leading blank lines and `--` comments, drops
+comment-only chunks, and marks async indexes. `applyStatements` iterates its
+output, so documenting a migration can no longer change how it runs.
+
+`TestDSQLAsyncIndexesAreClassifiedAsync` asserts every index statement in the
+`dsql/` set classifies async, and `TestClassifyStatementsIgnoresCommentHeaders`
+pins the behaviour directly. Both verified to fail against the pre-fix
+classification.
+
+### 18.3 Still unverified
 
 | Construct | Status |
 | --------- | ------ |
