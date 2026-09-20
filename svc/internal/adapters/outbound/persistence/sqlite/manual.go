@@ -6,6 +6,7 @@ import (
 	"errors"
 	"sort"
 	"strings"
+	"time"
 	"unicode/utf8"
 
 	"github.com/Kapital-B/automata/svc/internal/adapters/outbound/persistence/sqlkit"
@@ -39,19 +40,19 @@ func (r *Repository) CreateManualItem(ctx context.Context, row driven.ManualItem
 	_, err := r.db.ExecContext(ctx, `
 		INSERT INTO manual_items (
 			id, organisation_id, channel, occurred_at, title, body_text, project_id,
-			assignment_status, assignment_reason, assignment_source, created_by_user_id, created_at
-		) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+			assignment_status, assignment_reason, assignment_source, created_by_user_id, created_at, not_relevant_at
+		) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 	`, row.ID.String(), row.OrganisationID.String(), row.Channel,
 		formatRFC3339(row.OccurredAt.UTC()), row.Title, row.BodyText, proj,
 		row.AssignmentStatus, reason, source, row.CreatedByUserID.String(),
-		formatRFC3339(row.CreatedAt.UTC()))
+		formatRFC3339(row.CreatedAt.UTC()), nullTimeStr(row.NotRelevantAt))
 	return err
 }
 
 func (r *Repository) GetManualItem(ctx context.Context, organisationID, id uuid.UUID) (*driven.ManualItemRow, error) {
 	row := r.db.QueryRowContext(ctx, `
 		SELECT id, organisation_id, channel, occurred_at, title, body_text, project_id,
-			assignment_status, assignment_reason, assignment_source, created_by_user_id, created_at
+			assignment_status, assignment_reason, assignment_source, created_by_user_id, created_at, not_relevant_at
 		FROM manual_items WHERE id = ? AND organisation_id = ?
 	`, id.String(), organisationID.String())
 	m, err := scanManualItem(row)
@@ -61,16 +62,16 @@ func (r *Repository) GetManualItem(ctx context.Context, organisationID, id uuid.
 	return m, err
 }
 
-func (r *Repository) UpdateManualItemAssignment(ctx context.Context, organisationID, id uuid.UUID, projectID *uuid.UUID, status, reason, source string) error {
+func (r *Repository) UpdateManualItemAssignment(ctx context.Context, organisationID, id uuid.UUID, projectID *uuid.UUID, status, reason, source string, notRelevantAt *time.Time) error {
 	var proj any
 	if projectID != nil {
 		proj = projectID.String()
 	}
 	res, err := r.db.ExecContext(ctx, `
 		UPDATE manual_items
-		SET project_id = ?, assignment_status = ?, assignment_reason = ?, assignment_source = ?
+		SET project_id = ?, assignment_status = ?, assignment_reason = ?, assignment_source = ?, not_relevant_at = ?
 		WHERE id = ? AND organisation_id = ?
-	`, proj, status, reason, source, id.String(), organisationID.String())
+	`, proj, status, reason, source, nullTimeStr(notRelevantAt), id.String(), organisationID.String())
 	if err != nil {
 		return err
 	}
@@ -84,7 +85,7 @@ func (r *Repository) UpdateManualItemAssignment(ctx context.Context, organisatio
 func (r *Repository) ListManualItemsForProject(ctx context.Context, organisationID, projectID uuid.UUID) ([]driven.ManualItemRow, error) {
 	rows, err := r.db.QueryContext(ctx, `
 		SELECT id, organisation_id, channel, occurred_at, title, body_text, project_id,
-			assignment_status, assignment_reason, assignment_source, created_by_user_id, created_at
+			assignment_status, assignment_reason, assignment_source, created_by_user_id, created_at, not_relevant_at
 		FROM manual_items
 		WHERE organisation_id = ? AND project_id = ?
 		ORDER BY occurred_at DESC
@@ -102,7 +103,7 @@ func (r *Repository) ListUnassignedManualItems(ctx context.Context, organisation
 	}
 	rows, err := r.db.QueryContext(ctx, `
 		SELECT id, organisation_id, channel, occurred_at, title, body_text, project_id,
-			assignment_status, assignment_reason, assignment_source, created_by_user_id, created_at
+			assignment_status, assignment_reason, assignment_source, created_by_user_id, created_at, not_relevant_at
 		FROM manual_items
 		WHERE organisation_id = ?
 		  AND (
@@ -134,9 +135,9 @@ func scanManualItemRows(rows *sql.Rows) ([]driven.ManualItemRow, error) {
 
 func scanManualItem(s rowScanner) (*driven.ManualItemRow, error) {
 	var idStr, orgStr, channel, occurredAt, title, body, status, createdBy, createdAt string
-	var proj, reason, source sql.NullString
+	var proj, reason, source, notRelevantAt sql.NullString
 	if err := s.Scan(&idStr, &orgStr, &channel, &occurredAt, &title, &body, &proj,
-		&status, &reason, &source, &createdBy, &createdAt); err != nil {
+		&status, &reason, &source, &createdBy, &createdAt, &notRelevantAt); err != nil {
 		return nil, err
 	}
 	id, err := uuid.Parse(idStr)
@@ -176,6 +177,13 @@ func scanManualItem(s rowScanner) (*driven.ManualItemRow, error) {
 	}
 	if source.Valid {
 		m.AssignmentSource = &source.String
+	}
+	if notRelevantAt.Valid && notRelevantAt.String != "" {
+		at, err := parseTime(notRelevantAt.String)
+		if err != nil {
+			return nil, err
+		}
+		m.NotRelevantAt = &at
 	}
 	return m, nil
 }

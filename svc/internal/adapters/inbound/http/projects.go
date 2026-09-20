@@ -256,7 +256,11 @@ func (h *Handlers) unassignedSummary(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "internal"})
 		return
 	}
-	writeJSON(w, http.StatusOK, map[string]any{"unassigned": sum.Unassigned, "provisional": sum.Provisional})
+	writeJSON(w, http.StatusOK, map[string]any{
+		"unassigned":   sum.Unassigned,
+		"provisional":  sum.Provisional,
+		"not_relevant": sum.NotRelevant,
+	})
 }
 
 func (h *Handlers) listUnassigned(w http.ResponseWriter, r *http.Request) {
@@ -309,6 +313,9 @@ func (h *Handlers) listUnassigned(w http.ResponseWriter, r *http.Request) {
 		}
 		if it.Confidence != nil {
 			row["confidence"] = *it.Confidence
+		}
+		if it.NotRelevantAt != nil {
+			row["not_relevant_at"] = it.NotRelevantAt.UTC().Format(time.RFC3339Nano)
 		}
 		if it.Kind == "manual" {
 			if it.ManualItemID != nil {
@@ -733,10 +740,11 @@ func (h *Handlers) assignProjectsBatch(w http.ResponseWriter, r *http.Request) {
 	}
 	var body struct {
 		Items []struct {
-			Kind      string  `json:"kind"`
-			ID        string  `json:"id"`
-			ProjectID *string `json:"project_id"`
-			Scope     string  `json:"scope"`
+			Kind        string  `json:"kind"`
+			ID          string  `json:"id"`
+			ProjectID   *string `json:"project_id"`
+			Scope       string  `json:"scope"`
+			NotRelevant *bool   `json:"not_relevant"`
 		} `json:"items"`
 	}
 	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
@@ -756,9 +764,10 @@ func (h *Handlers) assignProjectsBatch(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		item := appprojects.BatchAssignItem{
-			Kind:  strings.TrimSpace(in.Kind),
-			ID:    id,
-			Scope: domainprojects.AssignScope(strings.TrimSpace(in.Scope)),
+			Kind:        strings.TrimSpace(in.Kind),
+			ID:          id,
+			Scope:       domainprojects.AssignScope(strings.TrimSpace(in.Scope)),
+			NotRelevant: in.NotRelevant,
 		}
 		if in.ProjectID != nil && strings.TrimSpace(*in.ProjectID) != "" {
 			pid, err := uuid.Parse(strings.TrimSpace(*in.ProjectID))

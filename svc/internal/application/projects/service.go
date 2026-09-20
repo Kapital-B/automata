@@ -476,7 +476,9 @@ func (s *Service) AssignManualItem(ctx context.Context, userID, manualItemID uui
 		}
 		status = string(domainprojects.StatusCommitted)
 	}
-	if err := s.Manuals.UpdateManualItemAssignment(ctx, orgID, manualItemID, projectID, status, reason, source); err != nil {
+	// Assigning a project clears any prior dismissal: an item cannot be both
+	// filed and not-project-related.
+	if err := s.Manuals.UpdateManualItemAssignment(ctx, orgID, manualItemID, projectID, status, reason, source, nil); err != nil {
 		return nil, err
 	}
 	if status == string(domainprojects.StatusCommitted) && projectID != nil {

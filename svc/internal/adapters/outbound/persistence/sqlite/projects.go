@@ -286,9 +286,10 @@ const assignmentUpsertChunk = 100
 const upsertThreadAssignmentSQL = `
 		INSERT INTO thread_assignments (
 			id, organisation_id, account_id, conversation_id, project_id, status, confidence, reason, source,
-			run_id, assigned_by_user_id, created_at, updated_at
-		) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+			run_id, assigned_by_user_id, created_at, updated_at, not_relevant_at
+		) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 		ON CONFLICT(account_id, conversation_id) DO UPDATE SET
+			not_relevant_at = excluded.not_relevant_at,
 			project_id = excluded.project_id,
 			status = excluded.status,
 			confidence = excluded.confidence,
@@ -318,7 +319,8 @@ func threadAssignmentArgs(row driven.AssignmentRow) []any {
 	proj, runID, assignedBy, conf := assignmentNullables(row)
 	return []any{row.ID.String(), row.OrganisationID.String(), row.AccountID.String(), row.ConversationID,
 		proj, row.Status, conf, row.Reason, row.Source, runID, assignedBy,
-		formatRFC3339(row.CreatedAt.UTC()), formatRFC3339(row.UpdatedAt.UTC())}
+		formatRFC3339(row.CreatedAt.UTC()), formatRFC3339(row.UpdatedAt.UTC()),
+		nullTimeStr(row.NotRelevantAt)}
 }
 
 func (r *Repository) UpsertThreadAssignment(ctx context.Context, row driven.AssignmentRow) error {
@@ -359,7 +361,7 @@ func (r *Repository) chunkedAssignmentTx(ctx context.Context, rows []driven.Assi
 func (r *Repository) GetThreadAssignment(ctx context.Context, accountID uuid.UUID, conversationID string) (*driven.AssignmentRow, error) {
 	row := r.db.QueryRowContext(ctx, `
 		SELECT id, organisation_id, account_id, conversation_id, project_id, status, confidence, reason, source,
-			run_id, assigned_by_user_id, created_at, updated_at
+			run_id, assigned_by_user_id, created_at, updated_at, not_relevant_at
 		FROM thread_assignments WHERE account_id = ? AND conversation_id = ?
 	`, accountID.String(), conversationID)
 	a, err := scanThreadAssignment(row)
@@ -379,9 +381,10 @@ func (r *Repository) DeleteThreadAssignment(ctx context.Context, accountID uuid.
 const upsertMessageOverrideSQL = `
 		INSERT INTO message_assignment_overrides (
 			message_id, organisation_id, account_id, project_id, status, confidence, reason, source,
-			run_id, assigned_by_user_id, created_at, updated_at
-		) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+			run_id, assigned_by_user_id, created_at, updated_at, not_relevant_at
+		) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 		ON CONFLICT(message_id) DO UPDATE SET
+			not_relevant_at = excluded.not_relevant_at,
 			project_id = excluded.project_id,
 			status = excluded.status,
 			confidence = excluded.confidence,
@@ -395,7 +398,8 @@ func messageOverrideArgs(row driven.AssignmentRow) []any {
 	proj, runID, assignedBy, conf := assignmentNullables(row)
 	return []any{row.MessageID.String(), row.OrganisationID.String(), row.AccountID.String(),
 		proj, row.Status, conf, row.Reason, row.Source, runID, assignedBy,
-		formatRFC3339(row.CreatedAt.UTC()), formatRFC3339(row.UpdatedAt.UTC())}
+		formatRFC3339(row.CreatedAt.UTC()), formatRFC3339(row.UpdatedAt.UTC()),
+		nullTimeStr(row.NotRelevantAt)}
 }
 
 func (r *Repository) UpsertMessageOverride(ctx context.Context, row driven.AssignmentRow) error {
@@ -418,7 +422,7 @@ func (r *Repository) UpsertMessageOverrides(ctx context.Context, rows []driven.A
 func (r *Repository) GetMessageOverride(ctx context.Context, messageID uuid.UUID) (*driven.AssignmentRow, error) {
 	row := r.db.QueryRowContext(ctx, `
 		SELECT message_id, organisation_id, account_id, project_id, status, confidence, reason, source,
-			run_id, assigned_by_user_id, created_at, updated_at
+			run_id, assigned_by_user_id, created_at, updated_at, not_relevant_at
 		FROM message_assignment_overrides WHERE message_id = ?
 	`, messageID.String())
 	a, err := scanOverrideAssignment(row)
@@ -463,6 +467,7 @@ func (r *Repository) EffectiveAssignment(ctx context.Context, userID, messageID 
 		out.Reason = ov.Reason
 		out.Source = ov.Source
 		out.Scope = "message"
+		out.NotRelevantAt = ov.NotRelevantAt
 		return out, nil
 	}
 	if msg.ConversationID != nil && strings.TrimSpace(*msg.ConversationID) != "" {
@@ -479,6 +484,7 @@ func (r *Repository) EffectiveAssignment(ctx context.Context, userID, messageID 
 			out.Reason = th.Reason
 			out.Source = th.Source
 			out.Scope = "thread"
+			out.NotRelevantAt = th.NotRelevantAt
 			return out, nil
 		}
 	}
@@ -522,6 +528,7 @@ const unassignedEffCTE = `
 			CASE WHEN o.message_id IS NOT NULL THEN o.reason     ELSE t.reason     END AS reason,
 			CASE WHEN o.message_id IS NOT NULL THEN o.source     ELSE t.source     END AS source,
 			CASE WHEN o.message_id IS NOT NULL THEN o.confidence ELSE t.confidence END AS confidence,
+			CASE WHEN o.message_id IS NOT NULL THEN o.not_relevant_at ELSE t.not_relevant_at END AS not_relevant_at,
 			CASE
 				WHEN o.message_id IS NOT NULL THEN NULL
 				WHEN m.conversation_id IS NULL OR m.conversation_id = '' THEN NULL
@@ -539,14 +546,14 @@ const unassignedEffCTE = `
 	queued AS (
 		SELECT
 			message_id, account_id, account_label, subject, from_json, conversation_id,
-			received_at, project_id,
+			received_at, project_id, not_relevant_at,
 			COALESCE(reason, '') AS reason,
 			COALESCE(source, '') AS source,
 			confidence,
 			CASE WHEN project_id IS NULL THEN 'unassigned' ELSE raw_status END AS status,
 			COALESCE(thread_key, message_id) AS group_key
 		FROM eff
-		WHERE project_id IS NULL OR raw_status = 'provisional'
+		WHERE (project_id IS NULL OR raw_status = 'provisional')
 	),
 	grouped AS (
 		SELECT
@@ -562,6 +569,7 @@ const unassignedEffCTE = `
 			mi.channel,
 			mi.occurred_at,
 			mi.project_id,
+			mi.not_relevant_at,
 			CASE WHEN mi.project_id IS NULL THEN 'unassigned' ELSE mi.assignment_status END AS status,
 			COALESCE(mi.assignment_reason, '') AS reason,
 			COALESCE(mi.assignment_source, '') AS source
@@ -569,6 +577,9 @@ const unassignedEffCTE = `
 		WHERE mi.organisation_id = ?
 		  AND (mi.project_id IS NULL OR mi.assignment_status = 'provisional')
 	)`
+
+// notRelevantStatus lists dismissed correspondence instead of the queue.
+const notRelevantStatus = "not_relevant"
 
 func normalizeUnassignedStatus(status string) string {
 	s := strings.TrimSpace(strings.ToLower(status))
@@ -597,28 +608,37 @@ func (r *Repository) ListUnassigned(ctx context.Context, userID uuid.UUID, filte
 	args := []any{userID.String(), orgID.String()}
 	mailWhere := "rn = 1"
 	manualWhere := "1 = 1"
-	if status != "all" {
-		mailWhere += " AND status = ?"
-		manualWhere += " AND status = ?"
+	// not_relevant partitions the rows: the queue statuses all exclude
+	// dismissed items, including "all", which means all of the queue.
+	if status == notRelevantStatus {
+		mailWhere += " AND not_relevant_at IS NOT NULL"
+		manualWhere += " AND not_relevant_at IS NOT NULL"
+	} else {
+		mailWhere += " AND not_relevant_at IS NULL"
+		manualWhere += " AND not_relevant_at IS NULL"
+		if status != "all" {
+			mailWhere += " AND status = ?"
+			manualWhere += " AND status = ?"
+		}
 	}
 
 	q := unassignedEffCTE + `
 	SELECT 'message' AS kind, message_id AS id, account_id,
 		account_label, subject, from_json, '' AS channel, conversation_id,
 		received_at AS occurred_at, project_id, status, reason, source,
-		confidence, thread_count
+		confidence, thread_count, not_relevant_at
 	FROM grouped
 	WHERE ` + mailWhere + `
 	UNION ALL
 	SELECT 'manual', manual_item_id, NULL, '', title, '', channel, NULL,
 		occurred_at, project_id, status, reason, source,
-		NULL, 1
+		NULL, 1, not_relevant_at
 	FROM manual
 	WHERE ` + manualWhere + `
 	ORDER BY occurred_at DESC
 	LIMIT ? OFFSET ?`
 
-	if status != "all" {
+	if status != "all" && status != notRelevantStatus {
 		args = append(args, status, status)
 	}
 	args = append(args, limit, offset)
@@ -639,9 +659,10 @@ func scanUnassignedRows(rows *sql.Rows) ([]driven.UnassignedItem, error) {
 		var confidence sql.NullFloat64
 		var threadCount int64
 		var occurredAt string
+		var notRelevantAt sql.NullString
 		if err := rows.Scan(&kind, &idStr, &accountID, &accountLabel, &subject, &fromJSON,
 			&channel, &conversationID, &occurredAt, &projectID, &status, &reason, &source,
-			&confidence, &threadCount); err != nil {
+			&confidence, &threadCount, &notRelevantAt); err != nil {
 			return nil, err
 		}
 		id, err := uuid.Parse(idStr)
@@ -664,6 +685,13 @@ func scanUnassignedRows(rows *sql.Rows) ([]driven.UnassignedItem, error) {
 			Reason:      reason,
 			Source:      source,
 			ThreadCount: int(threadCount),
+		}
+		if notRelevantAt.Valid && notRelevantAt.String != "" {
+			at, err := parseTime(notRelevantAt.String)
+			if err != nil {
+				return nil, err
+			}
+			item.NotRelevantAt = &at
 		}
 		if kind == "manual" {
 			mid := id
@@ -705,12 +733,12 @@ func (r *Repository) CountUnassignedSummary(ctx context.Context, userID uuid.UUI
 		return sum, err
 	}
 	q := unassignedEffCTE + `
-	SELECT status, COUNT(*) FROM (
-		SELECT status FROM grouped WHERE rn = 1
+	SELECT status, not_relevant_at IS NOT NULL AS dismissed, COUNT(*) FROM (
+		SELECT status, not_relevant_at FROM grouped WHERE rn = 1
 		UNION ALL
-		SELECT status FROM manual
+		SELECT status, not_relevant_at FROM manual
 	) counted
-	GROUP BY status`
+	GROUP BY status, not_relevant_at IS NOT NULL`
 	rows, err := r.db.QueryContext(ctx, q, userID.String(), orgID.String())
 	if err != nil {
 		return sum, err
@@ -718,9 +746,16 @@ func (r *Repository) CountUnassignedSummary(ctx context.Context, userID uuid.UUI
 	defer rows.Close()
 	for rows.Next() {
 		var status string
+		var dismissed bool
 		var n int
-		if err := rows.Scan(&status, &n); err != nil {
+		if err := rows.Scan(&status, &dismissed, &n); err != nil {
 			return driven.UnassignedSummary{}, err
+		}
+		// Dismissed items are reported separately and never counted toward the
+		// badge, whatever status their row carries.
+		if dismissed {
+			sum.NotRelevant += n
+			continue
 		}
 		if status == "provisional" {
 			sum.Provisional += n
@@ -794,27 +829,29 @@ func scanThreadAssignment(s rowScanner) (*driven.AssignmentRow, error) {
 	var idStr, orgStr, accStr, conv, status, reason, source, createdAt, updatedAt string
 	var proj, runID, assignedBy sql.NullString
 	var conf sql.NullFloat64
-	if err := s.Scan(&idStr, &orgStr, &accStr, &conv, &proj, &status, &conf, &reason, &source, &runID, &assignedBy, &createdAt, &updatedAt); err != nil {
+	var notRelevantAt sql.NullString
+	if err := s.Scan(&idStr, &orgStr, &accStr, &conv, &proj, &status, &conf, &reason, &source, &runID, &assignedBy, &createdAt, &updatedAt, &notRelevantAt); err != nil {
 		return nil, err
 	}
-	return buildAssignmentRow(idStr, orgStr, accStr, conv, nil, proj, status, conf, reason, source, runID, assignedBy, createdAt, updatedAt)
+	return buildAssignmentRow(idStr, orgStr, accStr, conv, nil, proj, status, conf, reason, source, runID, assignedBy, createdAt, updatedAt, notRelevantAt)
 }
 
 func scanOverrideAssignment(s rowScanner) (*driven.AssignmentRow, error) {
 	var msgStr, orgStr, accStr, status, reason, source, createdAt, updatedAt string
 	var proj, runID, assignedBy sql.NullString
 	var conf sql.NullFloat64
-	if err := s.Scan(&msgStr, &orgStr, &accStr, &proj, &status, &conf, &reason, &source, &runID, &assignedBy, &createdAt, &updatedAt); err != nil {
+	var notRelevantAt sql.NullString
+	if err := s.Scan(&msgStr, &orgStr, &accStr, &proj, &status, &conf, &reason, &source, &runID, &assignedBy, &createdAt, &updatedAt, &notRelevantAt); err != nil {
 		return nil, err
 	}
 	msgID, err := uuid.Parse(msgStr)
 	if err != nil {
 		return nil, err
 	}
-	return buildAssignmentRow(uuid.Nil.String(), orgStr, accStr, "", &msgID, proj, status, conf, reason, source, runID, assignedBy, createdAt, updatedAt)
+	return buildAssignmentRow(uuid.Nil.String(), orgStr, accStr, "", &msgID, proj, status, conf, reason, source, runID, assignedBy, createdAt, updatedAt, notRelevantAt)
 }
 
-func buildAssignmentRow(idStr, orgStr, accStr, conv string, messageID *uuid.UUID, proj sql.NullString, status string, conf sql.NullFloat64, reason, source string, runID, assignedBy sql.NullString, createdAt, updatedAt string) (*driven.AssignmentRow, error) {
+func buildAssignmentRow(idStr, orgStr, accStr, conv string, messageID *uuid.UUID, proj sql.NullString, status string, conf sql.NullFloat64, reason, source string, runID, assignedBy sql.NullString, createdAt, updatedAt string, notRelevantAt sql.NullString) (*driven.AssignmentRow, error) {
 	var id uuid.UUID
 	var err error
 	if idStr != "" && idStr != uuid.Nil.String() {
@@ -870,6 +907,13 @@ func buildAssignmentRow(idStr, orgStr, accStr, conv string, messageID *uuid.UUID
 			return nil, err
 		}
 		row.AssignedByUserID = &aid
+	}
+	if notRelevantAt.Valid && notRelevantAt.String != "" {
+		at, err := parseTime(notRelevantAt.String)
+		if err != nil {
+			return nil, err
+		}
+		row.NotRelevantAt = &at
 	}
 	return row, nil
 }

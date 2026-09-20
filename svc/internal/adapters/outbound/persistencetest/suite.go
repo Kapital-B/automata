@@ -661,6 +661,7 @@ func Run(t *testing.T, factory Factory) {
 	runHomeOverviewTimestampTests(t, factory)
 	runActivityFeedTests(t, factory)
 	runAttentionTests(t, factory)
+	runNotRelevantTests(t, factory)
 
 	t.Run("timeline_hydration_is_batched_and_correct", func(t *testing.T) {
 		h := factory(t)
@@ -1439,6 +1440,179 @@ func runAttentionTests(t *testing.T, factory Factory) {
 		// must not also appear under member_role.
 		if len(rows) != 5 {
 			t.Errorf("attention rows = %d, want 5: %v", len(rows), byKind)
+		}
+	})
+}
+
+// runNotRelevantTests covers dismissing correspondence that is not project work.
+func runNotRelevantTests(t *testing.T, factory Factory) {
+	t.Helper()
+
+	markThread := func(t *testing.T, h Handle, orgID, accountID uuid.UUID, conv string, at time.Time) {
+		t.Helper()
+		if err := h.Repo.UpsertThreadAssignment(context.Background(), driven.AssignmentRow{
+			ID: uuid.New(), OrganisationID: orgID, AccountID: accountID, ConversationID: conv,
+			Status: "committed", Reason: "not_relevant", Source: string(domainprojects.SourceUser),
+			CreatedAt: at, UpdatedAt: at, NotRelevantAt: &at,
+		}); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	t.Run("not_relevant_leaves_the_queue_and_is_listed_separately", func(t *testing.T) {
+		h := factory(t)
+		ctx := context.Background()
+		now := time.Now().UTC()
+		userID, orgID, accountID := seedUserAccount(t, h.Repo, uuid.New(), now)
+
+		insertMsg(t, h.Repo, accountID, "keep me", "conv-keep", "body", now)
+		insertMsg(t, h.Repo, accountID, "newsletter", "conv-dismiss", "body", now.Add(-time.Minute))
+		markThread(t, h, orgID, accountID, "conv-dismiss", now)
+
+		queue, err := h.Repo.ListUnassigned(ctx, userID, driven.UnassignedListFilter{Status: "all", Limit: 50})
+		if err != nil {
+			t.Fatal(err)
+		}
+		if len(queue) != 1 || queue[0].Subject != "keep me" {
+			t.Fatalf("queue = %d rows, want only the undismissed one: %+v", len(queue), queue)
+		}
+
+		dismissed, err := h.Repo.ListUnassigned(ctx, userID, driven.UnassignedListFilter{Status: "not_relevant", Limit: 50})
+		if err != nil {
+			t.Fatal(err)
+		}
+		if len(dismissed) != 1 || dismissed[0].Subject != "newsletter" {
+			t.Fatalf("dismissed = %d rows, want the newsletter: %+v", len(dismissed), dismissed)
+		}
+		if dismissed[0].NotRelevantAt == nil {
+			t.Error("dismissed row should carry when it was marked")
+		}
+
+		// The two lists partition the rows; neither leaks into the other.
+		for _, q := range queue {
+			for _, d := range dismissed {
+				if q.MessageID != nil && d.MessageID != nil && *q.MessageID == *d.MessageID {
+					t.Error("a row appears in both the queue and the dismissed list")
+				}
+			}
+		}
+
+		sum, err := h.Repo.CountUnassignedSummary(ctx, userID)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if sum.Unassigned != 1 || sum.NotRelevant != 1 {
+			t.Errorf("summary = %+v, want 1 unassigned and 1 not-relevant", sum)
+		}
+	})
+
+	t.Run("later_replies_in_a_marked_thread_stay_out", func(t *testing.T) {
+		h := factory(t)
+		ctx := context.Background()
+		now := time.Now().UTC()
+		userID, orgID, accountID := seedUserAccount(t, h.Repo, uuid.New(), now)
+
+		insertMsg(t, h.Repo, accountID, "first", "conv-news", "body", now.Add(-time.Hour))
+		markThread(t, h, orgID, accountID, "conv-news", now.Add(-30*time.Minute))
+		// A reply arrives after the decision.
+		insertMsg(t, h.Repo, accountID, "reply", "conv-news", "body", now)
+
+		queue, err := h.Repo.ListUnassigned(ctx, userID, driven.UnassignedListFilter{Status: "all", Limit: 50})
+		if err != nil {
+			t.Fatal(err)
+		}
+		if len(queue) != 0 {
+			t.Fatalf("a reply to a dismissed thread must not re-enter the queue: %+v", queue)
+		}
+
+		// And the scorer must not re-propose it either.
+		needing, err := h.Repo.ListMessagesNeedingAssign(ctx, userID, accountID, 100)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if len(needing) != 0 {
+			t.Fatalf("dismissed thread offered to the scorer: %d messages", len(needing))
+		}
+	})
+
+	t.Run("message_scope_marking_leaves_the_rest_of_the_thread", func(t *testing.T) {
+		h := factory(t)
+		ctx := context.Background()
+		now := time.Now().UTC()
+		userID, orgID, accountID := seedUserAccount(t, h.Repo, uuid.New(), now)
+
+		a := insertMsg(t, h.Repo, accountID, "dismiss just me", "conv-mixed", "body", now)
+		insertMsg(t, h.Repo, accountID, "still queued", "conv-mixed", "body", now.Add(-time.Minute))
+
+		mid := a
+		at := now
+		if err := h.Repo.UpsertMessageOverride(ctx, driven.AssignmentRow{
+			OrganisationID: orgID, AccountID: accountID, MessageID: &mid,
+			Status: "committed", Reason: "not_relevant", Source: string(domainprojects.SourceUser),
+			CreatedAt: now, UpdatedAt: now, NotRelevantAt: &at,
+		}); err != nil {
+			t.Fatal(err)
+		}
+
+		queue, err := h.Repo.ListUnassigned(ctx, userID, driven.UnassignedListFilter{Status: "all", Limit: 50})
+		if err != nil {
+			t.Fatal(err)
+		}
+		if len(queue) != 1 {
+			t.Fatalf("queue = %d rows, want the rest of the thread: %+v", len(queue), queue)
+		}
+		if queue[0].MessageID != nil && *queue[0].MessageID == a {
+			t.Error("the dismissed message is still in the queue")
+		}
+
+		// The message-scope decision overrides the thread, as Wave 1 §7 requires.
+		eff, err := h.Repo.EffectiveAssignment(ctx, userID, a)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if eff.NotRelevantAt == nil {
+			t.Error("effective assignment should report the dismissal")
+		}
+		if eff.Scope != "message" {
+			t.Errorf("scope = %q, want message", eff.Scope)
+		}
+	})
+
+	t.Run("assigning_a_project_clears_the_dismissal", func(t *testing.T) {
+		h := factory(t)
+		ctx := context.Background()
+		now := time.Now().UTC()
+		userID, orgID, accountID := seedUserAccount(t, h.Repo, uuid.New(), now)
+		projectID := createProject(t, h.Repo, orgID, userID, "DC40", "Later")
+
+		msgID := insertMsg(t, h.Repo, accountID, "turns out relevant", "conv-turn", "body", now)
+		markThread(t, h, orgID, accountID, "conv-turn", now)
+
+		// Assigning writes the whole row, so the dismissal must not survive.
+		if err := h.Repo.UpsertThreadAssignment(ctx, driven.AssignmentRow{
+			ID: uuid.New(), OrganisationID: orgID, AccountID: accountID, ConversationID: "conv-turn",
+			ProjectID: &projectID, Status: "committed", Reason: "user_assign",
+			Source: string(domainprojects.SourceUser), CreatedAt: now, UpdatedAt: now,
+		}); err != nil {
+			t.Fatal(err)
+		}
+
+		eff, err := h.Repo.EffectiveAssignment(ctx, userID, msgID)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if eff.ProjectID == nil || *eff.ProjectID != projectID {
+			t.Fatalf("expected the project to be assigned, got %+v", eff)
+		}
+		if eff.NotRelevantAt != nil {
+			t.Error("assigning a project must clear the dismissal; an item cannot be both")
+		}
+		dismissed, err := h.Repo.ListUnassigned(ctx, userID, driven.UnassignedListFilter{Status: "not_relevant", Limit: 50})
+		if err != nil {
+			t.Fatal(err)
+		}
+		if len(dismissed) != 0 {
+			t.Errorf("assigned item still listed as not-relevant: %+v", dismissed)
 		}
 	})
 }

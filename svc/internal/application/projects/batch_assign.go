@@ -25,6 +25,10 @@ type BatchAssignItem struct {
 	ID        uuid.UUID
 	ProjectID *uuid.UUID
 	Scope     domainprojects.AssignScope // messages only; defaults to thread
+	// NotRelevant marks (true) or restores (false) correspondence that is not
+	// project work. Nil leaves the flag untouched, so existing callers are
+	// unaffected.
+	NotRelevant *bool
 }
 
 // BatchAssignResult reports the outcome of one item. Errors are machine
@@ -97,6 +101,10 @@ func (s *Service) AssignBatch(ctx context.Context, userID uuid.UUID, items []Bat
 	}
 
 	for i, it := range items {
+		if it.ProjectID != nil && it.NotRelevant != nil && *it.NotRelevant {
+			fail(i, "project_and_not_relevant")
+			continue
+		}
 		if it.ProjectID != nil && projects[*it.ProjectID] == nil {
 			fail(i, "not_found")
 			continue
@@ -107,7 +115,7 @@ func (s *Service) AssignBatch(ctx context.Context, userID uuid.UUID, items []Bat
 				fail(i, batchErrorCode(err))
 				continue
 			}
-			if it.ProjectID != nil {
+			if it.ProjectID != nil && !marksNotRelevant(it) {
 				mid := it.ID
 				commits = append(commits, batchCommit{projectID: *it.ProjectID, manualItemID: &mid})
 			}
@@ -134,7 +142,22 @@ func (s *Service) AssignBatch(ctx context.Context, userID uuid.UUID, items []Bat
 					fail(i, "conversation_required")
 					continue
 				}
+				if marksNotRelevant(it) {
+					// A settled decision that there is no project: committed,
+					// with no project id and the time it was decided.
+					threadRows = append(threadRows, driven.AssignmentRow{
+						ID: uuid.New(), OrganisationID: orgID, AccountID: msg.AccountID,
+						ConversationID: *msg.ConversationID,
+						Status:         string(domainprojects.StatusCommitted), Reason: notRelevantReason,
+						Source: string(domainprojects.SourceUser), AssignedByUserID: &uid,
+						CreatedAt: now, UpdatedAt: now, NotRelevantAt: &now,
+					})
+					threadIdx = append(threadIdx, i)
+					continue
+				}
 				if it.ProjectID == nil {
+					// Covers both an explicit clear and a restore: removing the
+					// row returns the thread to the queue.
 					threadClears = append(threadClears, threadClear{index: i, accountID: msg.AccountID, conversationID: *msg.ConversationID})
 					continue
 				}
@@ -148,15 +171,21 @@ func (s *Service) AssignBatch(ctx context.Context, userID uuid.UUID, items []Bat
 				threadIdx = append(threadIdx, i)
 			case domainprojects.ScopeMessage:
 				mid := it.ID
-				overrideRows = append(overrideRows, driven.AssignmentRow{
+				row := driven.AssignmentRow{
 					OrganisationID: orgID, AccountID: msg.AccountID, MessageID: &mid,
 					ProjectID: it.ProjectID, Status: string(domainprojects.StatusCommitted),
 					Reason: "user_assign", Source: string(domainprojects.SourceUser),
 					AssignedByUserID: &uid, CreatedAt: now, UpdatedAt: now,
-				})
+				}
+				if marksNotRelevant(it) {
+					row.ProjectID = nil
+					row.Reason = notRelevantReason
+					row.NotRelevantAt = &now
+				}
+				overrideRows = append(overrideRows, row)
 				overrideIdx = append(overrideIdx, i)
 			}
-			if it.ProjectID != nil {
+			if it.ProjectID != nil && !marksNotRelevant(it) {
 				mid := it.ID
 				commits = append(commits, batchCommit{projectID: *it.ProjectID, messageID: &mid, msg: msg})
 			}
@@ -222,6 +251,15 @@ type batchCommit struct {
 	msg          *driven.MessageRow
 }
 
+// notRelevantReason labels an assignment row that records "no project".
+const notRelevantReason = "not_relevant"
+
+// marksNotRelevant reports whether the item dismisses correspondence. A nil
+// flag leaves the existing decision alone.
+func marksNotRelevant(it BatchAssignItem) bool {
+	return it.NotRelevant != nil && *it.NotRelevant
+}
+
 type threadClear struct {
 	index          int
 	accountID      uuid.UUID
@@ -240,11 +278,22 @@ func (s *Service) batchAssignManual(ctx context.Context, orgID uuid.UUID, it Bat
 		return ErrNotFound
 	}
 	status := "unassigned"
-	if it.ProjectID != nil {
+	reason := "user_assign"
+	var notRelevantAt *time.Time
+	if marksNotRelevant(it) {
+		status = string(domainprojects.StatusCommitted)
+		reason = notRelevantReason
+		at := time.Now().UTC()
+		notRelevantAt = &at
+	} else if it.ProjectID != nil {
 		status = string(domainprojects.StatusCommitted)
 	}
-	return s.Manuals.UpdateManualItemAssignment(ctx, orgID, it.ID, it.ProjectID, status,
-		"user_assign", string(domainprojects.SourceUser))
+	projectID := it.ProjectID
+	if notRelevantAt != nil {
+		projectID = nil
+	}
+	return s.Manuals.UpdateManualItemAssignment(ctx, orgID, it.ID, projectID, status,
+		reason, string(domainprojects.SourceUser), notRelevantAt)
 }
 
 func markFailed(results []BatchAssignResult, idx []int, code string) {

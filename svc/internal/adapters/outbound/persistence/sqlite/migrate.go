@@ -566,6 +566,7 @@ func migrateProjectsAssignments(db *sql.DB) error {
 			source TEXT NOT NULL CHECK (source IN ('user', 'rule', 'llm')),
 			run_id TEXT REFERENCES job_runs(id) ON DELETE SET NULL,
 			assigned_by_user_id TEXT REFERENCES users(id) ON DELETE SET NULL,
+			not_relevant_at TEXT,
 			created_at TEXT NOT NULL,
 			updated_at TEXT NOT NULL,
 			UNIQUE (account_id, conversation_id)
@@ -583,6 +584,7 @@ func migrateProjectsAssignments(db *sql.DB) error {
 			source TEXT NOT NULL CHECK (source IN ('user', 'rule', 'llm')),
 			run_id TEXT REFERENCES job_runs(id) ON DELETE SET NULL,
 			assigned_by_user_id TEXT REFERENCES users(id) ON DELETE SET NULL,
+			not_relevant_at TEXT,
 			created_at TEXT NOT NULL,
 			updated_at TEXT NOT NULL
 		)`,
@@ -591,6 +593,17 @@ func migrateProjectsAssignments(db *sql.DB) error {
 	for _, stmt := range statements {
 		if _, err := db.Exec(stmt); err != nil {
 			return err
+		}
+	}
+	for _, table := range []string{"thread_assignments", "message_assignment_overrides"} {
+		has, err := tableHasColumn(db, table, "not_relevant_at")
+		if err != nil {
+			return err
+		}
+		if !has {
+			if _, err := db.Exec(`ALTER TABLE ` + table + ` ADD COLUMN not_relevant_at TEXT`); err != nil {
+				return err
+			}
 		}
 	}
 	return extendJobRunTypes(db)
@@ -681,7 +694,8 @@ func migrateManualItems(db *sql.DB) error {
 			assignment_reason TEXT,
 			assignment_source TEXT CHECK (assignment_source IS NULL OR assignment_source IN ('user', 'rule', 'llm')),
 			created_by_user_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
-			created_at TEXT NOT NULL
+			created_at TEXT NOT NULL,
+			not_relevant_at TEXT
 		)`,
 		`CREATE INDEX IF NOT EXISTS idx_manual_items_org ON manual_items(organisation_id)`,
 		`CREATE INDEX IF NOT EXISTS idx_manual_items_project ON manual_items(project_id)`,
@@ -693,6 +707,15 @@ func migrateManualItems(db *sql.DB) error {
 	}
 	for _, stmt := range statements {
 		if _, err := db.Exec(stmt); err != nil {
+			return err
+		}
+	}
+	hasNotRelevant, err := tableHasColumn(db, "manual_items", "not_relevant_at")
+	if err != nil {
+		return err
+	}
+	if !hasNotRelevant {
+		if _, err := db.Exec(`ALTER TABLE manual_items ADD COLUMN not_relevant_at TEXT`); err != nil {
 			return err
 		}
 	}
