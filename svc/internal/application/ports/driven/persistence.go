@@ -591,6 +591,9 @@ type AssignmentRow struct {
 	AssignedByUserID *uuid.UUID
 	CreatedAt        time.Time
 	UpdatedAt        time.Time
+	// NotRelevantAt marks correspondence the operator decided is not project
+	// work. Set with a nil ProjectID; assigning a project clears it.
+	NotRelevantAt *time.Time
 }
 
 // EffectiveAssignment is the resolved project for a message.
@@ -603,6 +606,8 @@ type EffectiveAssignment struct {
 	ConversationID *string
 	AccountID      uuid.UUID
 	MessageID      uuid.UUID
+	// NotRelevantAt is set when the effective decision is "not project work".
+	NotRelevantAt *time.Time
 }
 
 // UnassignedItem is a mail or manual row for the Unassigned queue.
@@ -627,11 +632,15 @@ type UnassignedItem struct {
 	Source         string
 	Confidence     *float64 // scorer confidence; nil when never scored
 	ThreadCount    int      // queued messages this row stands for; always >= 1
+	NotRelevantAt  *time.Time
 }
 
 // UnassignedListFilter narrows the unassigned queue.
 type UnassignedListFilter struct {
-	Status string // unassigned | provisional | all
+	// Status is unassigned | provisional | all | not_relevant.
+	// The first three describe the queue and all exclude not-relevant items;
+	// not_relevant returns only those.
+	Status string
 	Limit  int
 	Offset int
 }
@@ -640,6 +649,8 @@ type UnassignedListFilter struct {
 type UnassignedSummary struct {
 	Unassigned  int
 	Provisional int
+	// NotRelevant is reported separately and excluded from the badge.
+	NotRelevant int
 }
 
 // ManualItemRow is a pasted correspondence item.
@@ -656,6 +667,7 @@ type ManualItemRow struct {
 	AssignmentSource *string
 	CreatedByUserID  uuid.UUID
 	CreatedAt        time.Time
+	NotRelevantAt    *time.Time
 }
 
 // TimelineContact is a compact contact summary on a timeline row.
@@ -900,7 +912,9 @@ type DecisionRepository interface {
 type ManualItemRepository interface {
 	CreateManualItem(ctx context.Context, row ManualItemRow) error
 	GetManualItem(ctx context.Context, organisationID, id uuid.UUID) (*ManualItemRow, error)
-	UpdateManualItemAssignment(ctx context.Context, organisationID, id uuid.UUID, projectID *uuid.UUID, status, reason, source string) error
+	// UpdateManualItemAssignment writes the whole assignment decision, including
+	// notRelevantAt, so a project and a dismissal cannot both be set.
+	UpdateManualItemAssignment(ctx context.Context, organisationID, id uuid.UUID, projectID *uuid.UUID, status, reason, source string, notRelevantAt *time.Time) error
 	ListManualItemsForProject(ctx context.Context, organisationID, projectID uuid.UUID) ([]ManualItemRow, error)
 	ListUnassignedManualItems(ctx context.Context, organisationID uuid.UUID, limit int) ([]ManualItemRow, error)
 }

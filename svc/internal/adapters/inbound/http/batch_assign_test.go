@@ -371,3 +371,110 @@ func TestAssignBatchWritesAcrossChunkBoundary(t *testing.T) {
 		}
 	}
 }
+
+func TestBatchMarksAndRestoresNotRelevant(t *testing.T) {
+	f := newBatchFixture(t, "batchnotrelevant")
+	ctx := context.Background()
+	now := time.Now().UTC()
+
+	keep := f.insertMessage(t, "keep", "conv-keep", now)
+	drop := f.insertMessage(t, "newsletter", "conv-drop", now.Add(-time.Minute))
+
+	// Mark.
+	yes := true
+	status, out := f.postBatch(t, []map[string]any{
+		{"kind": "message", "id": drop.String(), "not_relevant": yes, "scope": "thread"},
+	})
+	if status != http.StatusOK || int(out["assigned"].(float64)) != 1 {
+		t.Fatalf("mark status=%d out=%v", status, out)
+	}
+
+	queue, err := f.repo.ListUnassigned(ctx, f.userID, driven.UnassignedListFilter{Status: "all", Limit: 50})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(queue) != 1 || queue[0].MessageID == nil || *queue[0].MessageID != keep {
+		t.Fatalf("queue should hold only the kept message, got %+v", queue)
+	}
+
+	dismissed, err := f.repo.ListUnassigned(ctx, f.userID, driven.UnassignedListFilter{Status: "not_relevant", Limit: 50})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(dismissed) != 1 {
+		t.Fatalf("dismissed = %d, want 1", len(dismissed))
+	}
+
+	// Restore.
+	no := false
+	status, out = f.postBatch(t, []map[string]any{
+		{"kind": "message", "id": drop.String(), "not_relevant": no, "scope": "thread"},
+	})
+	if status != http.StatusOK || int(out["assigned"].(float64)) != 1 {
+		t.Fatalf("restore status=%d out=%v", status, out)
+	}
+	queue, err = f.repo.ListUnassigned(ctx, f.userID, driven.UnassignedListFilter{Status: "all", Limit: 50})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(queue) != 2 {
+		t.Fatalf("restored item should be back in the queue, got %d rows", len(queue))
+	}
+}
+
+func TestBatchRejectsProjectAndNotRelevantTogether(t *testing.T) {
+	f := newBatchFixture(t, "batchbothflags")
+	ctx := context.Background()
+	p, err := f.projectSvc.Create(ctx, f.userID, appprojects.CreateProjectInput{Name: "Cooling", Code: "DC01"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	id := f.insertMessage(t, "subject", "conv-1", time.Now().UTC())
+
+	yes := true
+	status, out := f.postBatch(t, []map[string]any{
+		{"kind": "message", "id": id.String(), "project_id": p.ID.String(), "not_relevant": yes, "scope": "thread"},
+	})
+	if status != http.StatusOK {
+		t.Fatalf("status = %d", status)
+	}
+	if int(out["failed"].(float64)) != 1 {
+		t.Fatalf("an item cannot be both filed and dismissed: %v", out)
+	}
+	res := out["results"].([]any)[0].(map[string]any)
+	if res["error"] != "project_and_not_relevant" {
+		t.Errorf("error = %v, want project_and_not_relevant", res["error"])
+	}
+}
+
+func TestSummaryReportsNotRelevantSeparately(t *testing.T) {
+	f := newBatchFixture(t, "batchsummary")
+	now := time.Now().UTC()
+	f.insertMessage(t, "keep", "conv-keep", now)
+	drop := f.insertMessage(t, "drop", "conv-drop", now.Add(-time.Minute))
+
+	yes := true
+	if status, _ := f.postBatch(t, []map[string]any{
+		{"kind": "message", "id": drop.String(), "not_relevant": yes, "scope": "thread"},
+	}); status != http.StatusOK {
+		t.Fatalf("mark status %d", status)
+	}
+
+	req, _ := http.NewRequest(http.MethodGet, f.srv.URL+"/api/unassigned/summary", nil)
+	req.Header.Set("Authorization", "Bearer "+f.token)
+	res, err := http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer res.Body.Close()
+	var sum map[string]any
+	_ = json.NewDecoder(res.Body).Decode(&sum)
+
+	// The badge counts work to do; dismissed items are not work.
+	if int(sum["unassigned"].(float64)) != 1 {
+		t.Errorf("unassigned = %v, want 1", sum["unassigned"])
+	}
+	if int(sum["not_relevant"].(float64)) != 1 {
+		t.Errorf("not_relevant = %v, want 1", sum["not_relevant"])
+	}
+}
