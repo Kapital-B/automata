@@ -319,22 +319,68 @@ func readDir(dir string) ([]Migration, error) {
 	return out, nil
 }
 
+// splitStatements splits a migration on `;` at statement level.
+//
+// It must understand comments, not just string literals. An apostrophe inside
+// a `--` comment ("DSQL's grammar") would otherwise open a string literal that
+// never closes, so every following `;` counts as literal text and the whole
+// file collapses into a single statement — which then reaches the driver as
+// multiple commands in one prepared statement.
 func splitStatements(sqlText string) []string {
 	var (
 		out      []string
 		buf      strings.Builder
 		inSingle bool
+		inDouble bool
+		inLine   bool
+		inBlock  bool
 	)
 	runes := []rune(sqlText)
 	for i := 0; i < len(runes); i++ {
 		r := runes[i]
-		if r == '\'' {
+
+		if inLine {
+			buf.WriteRune(r)
+			if r == '\n' {
+				inLine = false
+			}
+			continue
+		}
+		if inBlock {
+			buf.WriteRune(r)
+			if r == '*' && i+1 < len(runes) && runes[i+1] == '/' {
+				i++
+				buf.WriteRune(runes[i])
+				inBlock = false
+			}
+			continue
+		}
+
+		// Comment openers only count outside string literals.
+		if !inSingle && !inDouble {
+			if r == '-' && i+1 < len(runes) && runes[i+1] == '-' {
+				inLine = true
+				buf.WriteRune(r)
+				i++
+				buf.WriteRune(runes[i])
+				continue
+			}
+			if r == '/' && i+1 < len(runes) && runes[i+1] == '*' {
+				inBlock = true
+				buf.WriteRune(r)
+				i++
+				buf.WriteRune(runes[i])
+				continue
+			}
+		}
+
+		if r == '\'' && !inDouble {
 			buf.WriteRune(r)
 			if inSingle {
 				// SQL escaped quote: ''
 				if i+1 < len(runes) && runes[i+1] == '\'' {
-					buf.WriteRune('\'')
 					i++
+					buf.WriteRune(runes[i])
 					continue
 				}
 				inSingle = false
@@ -343,7 +389,13 @@ func splitStatements(sqlText string) []string {
 			}
 			continue
 		}
-		if r == ';' && !inSingle {
+		// A quoted identifier can contain a semicolon too.
+		if r == '"' && !inSingle {
+			buf.WriteRune(r)
+			inDouble = !inDouble
+			continue
+		}
+		if r == ';' && !inSingle && !inDouble {
 			stmt := strings.TrimSpace(buf.String())
 			if stmt != "" {
 				out = append(out, stmt)
