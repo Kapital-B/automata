@@ -1547,15 +1547,15 @@ func snippetText(s string, max int) string {
 
 func (r *Repository) CreateIssue(ctx context.Context, row driven.IssueRow) error {
 	_, err := r.execContext(ctx, `
-		INSERT INTO issues (id, organisation_id, project_id, title, current_position_note, status, assignee_user_id, assignee_contact_id, created_at, updated_at)
-		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-	`, row.ID.String(), row.OrganisationID.String(), row.ProjectID.String(), row.Title, row.CurrentPositionNote, row.Status, nullUUID(row.AssigneeUserID), nullUUID(row.AssigneeContactID), row.CreatedAt.UTC(), row.UpdatedAt.UTC())
+		INSERT INTO issues (id, organisation_id, project_id, title, current_position_note, status, assignee_user_id, assignee_contact_id, created_at, updated_at, resolved_at)
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+	`, row.ID.String(), row.OrganisationID.String(), row.ProjectID.String(), row.Title, row.CurrentPositionNote, row.Status, nullUUID(row.AssigneeUserID), nullUUID(row.AssigneeContactID), row.CreatedAt.UTC(), row.UpdatedAt.UTC(), nullTime(row.ResolvedAt))
 	return err
 }
 
 func (r *Repository) GetIssue(ctx context.Context, organisationID, issueID uuid.UUID) (*driven.IssueRow, error) {
 	row := r.queryRowContext(ctx, `
-		SELECT id, organisation_id, project_id, title, current_position_note, status, assignee_user_id, assignee_contact_id, created_at, updated_at
+		SELECT id, organisation_id, project_id, title, current_position_note, status, assignee_user_id, assignee_contact_id, created_at, updated_at, resolved_at
 		FROM issues WHERE id = ? AND organisation_id = ?
 	`, issueID.String(), organisationID.String())
 	item, err := scanIssueRow(row)
@@ -1567,7 +1567,7 @@ func (r *Repository) GetIssue(ctx context.Context, organisationID, issueID uuid.
 
 func (r *Repository) ListIssuesByProject(ctx context.Context, organisationID, projectID uuid.UUID) ([]driven.IssueRow, error) {
 	rows, err := r.queryContext(ctx, `
-		SELECT id, organisation_id, project_id, title, current_position_note, status, assignee_user_id, assignee_contact_id, created_at, updated_at
+		SELECT id, organisation_id, project_id, title, current_position_note, status, assignee_user_id, assignee_contact_id, created_at, updated_at, resolved_at
 		FROM issues WHERE organisation_id = ? AND project_id = ?
 		ORDER BY updated_at DESC
 	`, organisationID.String(), projectID.String())
@@ -1588,9 +1588,9 @@ func (r *Repository) ListIssuesByProject(ctx context.Context, organisationID, pr
 
 func (r *Repository) UpdateIssue(ctx context.Context, row driven.IssueRow) error {
 	res, err := r.execContext(ctx, `
-		UPDATE issues SET title = ?, current_position_note = ?, status = ?, assignee_user_id = ?, assignee_contact_id = ?, updated_at = ?
+		UPDATE issues SET title = ?, current_position_note = ?, status = ?, assignee_user_id = ?, assignee_contact_id = ?, updated_at = ?, resolved_at = ?
 		WHERE id = ? AND organisation_id = ?
-	`, row.Title, row.CurrentPositionNote, row.Status, nullUUID(row.AssigneeUserID), nullUUID(row.AssigneeContactID), row.UpdatedAt.UTC(), row.ID.String(), row.OrganisationID.String())
+	`, row.Title, row.CurrentPositionNote, row.Status, nullUUID(row.AssigneeUserID), nullUUID(row.AssigneeContactID), row.UpdatedAt.UTC(), nullTime(row.ResolvedAt), row.ID.String(), row.OrganisationID.String())
 	if err != nil {
 		return err
 	}
@@ -1695,7 +1695,8 @@ func scanIssueRow(s rowScanner) (*driven.IssueRow, error) {
 	var idStr, orgStr, projectStr, title, note, status string
 	var assigneeUser, assigneeContact sql.NullString
 	var createdAt, updatedAt time.Time
-	if err := s.Scan(&idStr, &orgStr, &projectStr, &title, &note, &status, &assigneeUser, &assigneeContact, &createdAt, &updatedAt); err != nil {
+	var resolvedAt sql.NullTime
+	if err := s.Scan(&idStr, &orgStr, &projectStr, &title, &note, &status, &assigneeUser, &assigneeContact, &createdAt, &updatedAt, &resolvedAt); err != nil {
 		return nil, err
 	}
 	id, _ := uuid.Parse(idStr)
@@ -1709,6 +1710,7 @@ func scanIssueRow(s rowScanner) (*driven.IssueRow, error) {
 		return nil, err
 	}
 	row.AssigneeContactID = contactID
+	row.ResolvedAt = nullTimePtr(resolvedAt)
 	return row, nil
 }
 
@@ -1801,10 +1803,10 @@ func (r *Repository) CreateFactVersion(ctx context.Context, row driven.FactVersi
 		_, err := r.execContext(ctx, `
 			INSERT INTO fact_versions (
 				id, fact_id, status, value_json, value_text, unit, source, confidence, interpretation_id,
-				supersedes_version_id, superseded_by_version_id, superseded_at, created_by_user_id, created_at
-			) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+				supersedes_version_id, superseded_by_version_id, superseded_at, created_by_user_id, created_at, activated_at
+			) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 		`, row.ID.String(), row.FactID.String(), row.Status, row.ValueJSON, row.ValueText, nullStr(row.Unit), row.Source, nullFloat(row.Confidence),
-			nullUUID(row.InterpretationID), nullUUID(row.SupersedesVersionID), nullUUID(row.SupersededByVersionID), nullTime(row.SupersededAt), nullUUID(row.CreatedByUserID), row.CreatedAt.UTC())
+			nullUUID(row.InterpretationID), nullUUID(row.SupersedesVersionID), nullUUID(row.SupersededByVersionID), nullTime(row.SupersededAt), nullUUID(row.CreatedByUserID), row.CreatedAt.UTC(), nullTime(row.ActivatedAt))
 		return err
 	})
 }
@@ -1812,7 +1814,7 @@ func (r *Repository) CreateFactVersion(ctx context.Context, row driven.FactVersi
 func (r *Repository) GetFactVersion(ctx context.Context, organisationID, versionID uuid.UUID) (*driven.FactVersionRow, error) {
 	row := r.queryRowContext(ctx, `
 		SELECT fv.id, fv.fact_id, fv.status, fv.value_json, fv.value_text, fv.unit, fv.source, fv.confidence, fv.interpretation_id,
-			fv.supersedes_version_id, fv.superseded_by_version_id, fv.superseded_at, fv.created_by_user_id, fv.created_at
+			fv.supersedes_version_id, fv.superseded_by_version_id, fv.superseded_at, fv.created_by_user_id, fv.created_at, fv.activated_at
 		FROM fact_versions fv
 		INNER JOIN facts f ON f.id = fv.fact_id
 		WHERE fv.id = ? AND f.organisation_id = ?
@@ -1827,7 +1829,7 @@ func (r *Repository) GetFactVersion(ctx context.Context, organisationID, version
 func (r *Repository) ListFactVersions(ctx context.Context, factID uuid.UUID) ([]driven.FactVersionRow, error) {
 	rows, err := r.queryContext(ctx, `
 		SELECT id, fact_id, status, value_json, value_text, unit, source, confidence, interpretation_id,
-			supersedes_version_id, superseded_by_version_id, superseded_at, created_by_user_id, created_at
+			supersedes_version_id, superseded_by_version_id, superseded_at, created_by_user_id, created_at, activated_at
 		FROM fact_versions WHERE fact_id = ?
 		ORDER BY created_at ASC
 	`, factID.String())
@@ -1849,7 +1851,7 @@ func (r *Repository) ListFactVersions(ctx context.Context, factID uuid.UUID) ([]
 func (r *Repository) GetActiveFactVersion(ctx context.Context, factID uuid.UUID) (*driven.FactVersionRow, error) {
 	row := r.queryRowContext(ctx, `
 		SELECT id, fact_id, status, value_json, value_text, unit, source, confidence, interpretation_id,
-			supersedes_version_id, superseded_by_version_id, superseded_at, created_by_user_id, created_at
+			supersedes_version_id, superseded_by_version_id, superseded_at, created_by_user_id, created_at, activated_at
 		FROM fact_versions WHERE fact_id = ? AND status = 'active'
 	`, factID.String())
 	out, err := scanFactVersionRow(row)
@@ -1863,10 +1865,12 @@ func (r *Repository) UpdateFactVersion(ctx context.Context, row driven.FactVersi
 	return withSerializableWrite(ctx, func() error {
 		res, err := r.execContext(ctx, `
 			UPDATE fact_versions SET status = ?, value_json = ?, value_text = ?, unit = ?, source = ?, confidence = ?,
-				interpretation_id = ?, supersedes_version_id = ?, superseded_by_version_id = ?, superseded_at = ?, created_by_user_id = ?
+				interpretation_id = ?, supersedes_version_id = ?, superseded_by_version_id = ?, superseded_at = ?, created_by_user_id = ?,
+				activated_at = ?
 			WHERE id = ?
 		`, row.Status, row.ValueJSON, row.ValueText, nullStr(row.Unit), row.Source, nullFloat(row.Confidence), nullUUID(row.InterpretationID),
-			nullUUID(row.SupersedesVersionID), nullUUID(row.SupersededByVersionID), nullTime(row.SupersededAt), nullUUID(row.CreatedByUserID), row.ID.String())
+			nullUUID(row.SupersedesVersionID), nullUUID(row.SupersededByVersionID), nullTime(row.SupersededAt), nullUUID(row.CreatedByUserID),
+			nullTime(row.ActivatedAt), row.ID.String())
 		if err != nil {
 			return err
 		}
@@ -1960,9 +1964,9 @@ func scanFactVersionRow(s rowScanner) (*driven.FactVersionRow, error) {
 	var idStr, factStr, status, valueJSON, valueText, source string
 	var unit, interpretationID, supersedesID, supersededByID, createdBy sql.NullString
 	var confidence sql.NullFloat64
-	var supersededAt sql.NullTime
+	var supersededAt, activatedAt sql.NullTime
 	var createdAt time.Time
-	if err := s.Scan(&idStr, &factStr, &status, &valueJSON, &valueText, &unit, &source, &confidence, &interpretationID, &supersedesID, &supersededByID, &supersededAt, &createdBy, &createdAt); err != nil {
+	if err := s.Scan(&idStr, &factStr, &status, &valueJSON, &valueText, &unit, &source, &confidence, &interpretationID, &supersedesID, &supersededByID, &supersededAt, &createdBy, &createdAt, &activatedAt); err != nil {
 		return nil, err
 	}
 	id, _ := uuid.Parse(idStr)
@@ -1976,6 +1980,7 @@ func scanFactVersionRow(s rowScanner) (*driven.FactVersionRow, error) {
 	row.SupersedesVersionID, _ = scanUUID(supersedesID)
 	row.SupersededByVersionID, _ = scanUUID(supersededByID)
 	row.CreatedByUserID, _ = scanUUID(createdBy)
+	row.ActivatedAt = nullTimePtr(activatedAt)
 	return row, nil
 }
 

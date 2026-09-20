@@ -305,6 +305,10 @@ func (s *Service) Create(ctx context.Context, userID, projectID uuid.UUID, in Cr
 		Source: source, Confidence: in.Confidence, InterpretationID: in.InterpretationID,
 		CreatedByUserID: &uid, SupersedesVersionID: supersedes, CreatedAt: now,
 	}
+	if status == domainfacts.StatusActive {
+		activated := now
+		ver.ActivatedAt = &activated
+	}
 	if err := s.Facts.CreateFactVersion(ctx, ver); err != nil {
 		return nil, err
 	}
@@ -383,6 +387,10 @@ func (s *Service) Confirm(ctx context.Context, userID, versionID uuid.UUID, in C
 	}
 
 	ver.Status = string(domainfacts.StatusActive)
+	// Dates the activity feed by when the operator confirmed, not when the
+	// version was proposed — those can be days apart.
+	activated := now
+	ver.ActivatedAt = &activated
 	if err := s.Facts.UpdateFactVersion(ctx, *ver); err != nil {
 		return nil, err
 	}

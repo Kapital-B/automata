@@ -228,6 +228,16 @@ func (s *Service) Update(ctx context.Context, userID, issueID uuid.UUID, in Upda
 		if !st.Valid() {
 			return nil, ErrInvalidStatus
 		}
+		// Stamp the transition, not the edit: updated_at moves every time the
+		// issue is touched, so it cannot date the resolution.
+		if string(st) != row.Status {
+			if st == domainissues.StatusResolved {
+				resolved := time.Now().UTC()
+				row.ResolvedAt = &resolved
+			} else {
+				row.ResolvedAt = nil
+			}
+		}
 		row.Status = string(st)
 	}
 	if in.ClearAssignee {

@@ -711,6 +711,7 @@ func migrateIssues(db *sql.DB) error {
 			assignee_contact_id TEXT REFERENCES contacts(id) ON DELETE SET NULL,
 			created_at TEXT NOT NULL,
 			updated_at TEXT NOT NULL,
+			resolved_at TEXT,
 			CHECK (
 				assignee_user_id IS NULL OR assignee_contact_id IS NULL
 			)
@@ -736,6 +737,16 @@ func migrateIssues(db *sql.DB) error {
 	}
 	for _, stmt := range statements {
 		if _, err := db.Exec(stmt); err != nil {
+			return err
+		}
+	}
+	// Databases created before the Home overview feed need the column added.
+	hasResolvedAt, err := tableHasColumn(db, "issues", "resolved_at")
+	if err != nil {
+		return err
+	}
+	if !hasResolvedAt {
+		if _, err := db.Exec(`ALTER TABLE issues ADD COLUMN resolved_at TEXT`); err != nil {
 			return err
 		}
 	}
@@ -770,6 +781,7 @@ func migrateFacts(db *sql.DB) error {
 			supersedes_version_id TEXT REFERENCES fact_versions(id) ON DELETE SET NULL,
 			superseded_by_version_id TEXT REFERENCES fact_versions(id) ON DELETE SET NULL,
 			superseded_at TEXT,
+			activated_at TEXT,
 			created_by_user_id TEXT REFERENCES users(id) ON DELETE SET NULL,
 			created_at TEXT NOT NULL
 		)`,
@@ -795,6 +807,16 @@ func migrateFacts(db *sql.DB) error {
 	}
 	for _, stmt := range statements {
 		if _, err := db.Exec(stmt); err != nil {
+			return err
+		}
+	}
+	// Databases created before the Home overview feed need the column added.
+	hasActivatedAt, err := tableHasColumn(db, "fact_versions", "activated_at")
+	if err != nil {
+		return err
+	}
+	if !hasActivatedAt {
+		if _, err := db.Exec(`ALTER TABLE fact_versions ADD COLUMN activated_at TEXT`); err != nil {
 			return err
 		}
 	}
