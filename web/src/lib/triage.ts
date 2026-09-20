@@ -46,3 +46,14 @@ export function explainReason(
   });
   return parts.join(", ");
 }
+
+/**
+ * Shared options for the unassigned-summary badge.
+ *
+ * The badge is mounted on every page and its query counts the whole triage
+ * queue, so it must not refetch on every navigation or window focus.
+ */
+export const unassignedSummaryQueryOptions = {
+  staleTime: 30_000,
+  refetchOnWindowFocus: false,
+} as const;

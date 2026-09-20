@@ -28,15 +28,10 @@ import AccountsConnectedPage from "./pages/AccountsConnected";
 import AccountsErrorPage from "./pages/AccountsError";
 
 const queryClient = new QueryClient({
-  defaultOptions: {
-    queries: {
-      // The triage badge is queried on every page. Without a stale window it
-      // refetched constantly, and that query counts the whole unassigned queue.
-      staleTime: 30_000,
-      refetchOnWindowFocus: false,
-      retry: 1,
-    },
-  },
+  // Kept deliberately narrow: a global staleTime would stale-cache every screen
+  // in the app. The expensive triage-badge query sets its own window via
+  // unassignedSummaryQueryOptions.
+  defaultOptions: { queries: { retry: 1 } },
 });
 
 const App = () => (

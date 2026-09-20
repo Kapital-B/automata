@@ -617,6 +617,43 @@ func Run(t *testing.T, factory Factory) {
 		}
 	})
 
+	t.Run("triage_read_path_never_reads_bodies", func(t *testing.T) {
+		h := factory(t)
+		if h.Counter == nil {
+			t.Skip("handle has no query counter")
+		}
+		ctx := context.Background()
+		now := time.Now().UTC()
+		userID, _, accountID := seedUserAccount(t, h.Repo, uuid.New(), now)
+		for i := 0; i < 5; i++ {
+			insertMsg(t, h.Repo, accountID, "subject", fmt.Sprintf("conv-%d", i), "body", now)
+		}
+
+		// The queue renders subject, sender and timestamp. Pulling mail bodies
+		// to decide an assignment status is what made this path so expensive,
+		// and on DSQL it eats the 128 MiB query-memory budget.
+		for name, call := range map[string]func() error{
+			"ListUnassigned": func() error {
+				_, err := h.Repo.ListUnassigned(ctx, userID, driven.UnassignedListFilter{Status: "all", Limit: 50})
+				return err
+			},
+			"CountUnassignedSummary": func() error {
+				_, err := h.Repo.CountUnassignedSummary(ctx, userID)
+				return err
+			},
+		} {
+			h.Counter.Reset()
+			if err := call(); err != nil {
+				t.Fatal(err)
+			}
+			for _, stmt := range h.Counter.Statements() {
+				if strings.Contains(strings.ToLower(stmt), "body_text") {
+					t.Errorf("%s reads body_text:\n%s", name, stmt)
+				}
+			}
+		}
+	})
+
 	t.Run("triage_messages_needing_assign_excludes_assigned", func(t *testing.T) {
 		h := factory(t)
 		ctx := context.Background()

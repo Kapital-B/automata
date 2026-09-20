@@ -29,6 +29,7 @@ import { cn } from "@/lib/utils";
 import { useAuth } from "@/components/auth/AuthProvider";
 import { useAccountsData } from "@/hooks/useAccountsData";
 import { getUnassignedSummary, listDraftSuggestions, getAttention } from "@/lib/auth";
+import { unassignedSummaryQueryOptions } from "@/lib/triage";
 
 const primaryNav = [
   { title: "Home", url: "/", icon: Home, end: true, badge: "needsMe" as const },
@@ -62,6 +63,7 @@ export function AppSidebar() {
     queryKey: ["unassigned-summary", accessToken],
     queryFn: () => getUnassignedSummary(accessToken!),
     enabled: Boolean(accessToken),
+    ...unassignedSummaryQueryOptions,
   });
   const attentionBadgeQuery = useQuery({
     queryKey: ["attention", accessToken],

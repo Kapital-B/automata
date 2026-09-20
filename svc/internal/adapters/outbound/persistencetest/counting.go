@@ -5,6 +5,7 @@ import (
 	"database/sql"
 	"database/sql/driver"
 	"fmt"
+	"sync"
 	"sync/atomic"
 )
 
@@ -13,16 +14,37 @@ import (
 // per-row lookups. The triage queue regressed into thousands of round-trips
 // once; this is the guard against it happening again.
 type QueryCounter struct {
-	n atomic.Int64
+	n  atomic.Int64
+	mu sync.Mutex
+	// statements records the SQL issued since the last Reset, so tests can
+	// assert on shape (for example that a hot path never reads mail bodies).
+	statements []string
 }
 
 // Count returns the number of statements issued since the last Reset.
 func (c *QueryCounter) Count() int { return int(c.n.Load()) }
 
 // Reset zeroes the counter, typically just before the call under assertion.
-func (c *QueryCounter) Reset() { c.n.Store(0) }
+func (c *QueryCounter) Reset() {
+	c.n.Store(0)
+	c.mu.Lock()
+	c.statements = nil
+	c.mu.Unlock()
+}
 
-func (c *QueryCounter) add() { c.n.Add(1) }
+// Statements returns the SQL issued since the last Reset.
+func (c *QueryCounter) Statements() []string {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	return append([]string(nil), c.statements...)
+}
+
+func (c *QueryCounter) add(query string) {
+	c.n.Add(1)
+	c.mu.Lock()
+	c.statements = append(c.statements, query)
+	c.mu.Unlock()
+}
 
 var countingDriverSeq atomic.Int64
 
@@ -69,7 +91,7 @@ func (c *countingConn) Prepare(query string) (driver.Stmt, error) {
 	if err != nil {
 		return nil, err
 	}
-	return &countingStmt{base: s, counter: c.counter}, nil
+	return &countingStmt{base: s, counter: c.counter, query: query}, nil
 }
 
 func (c *countingConn) Close() error { return c.base.Close() }
@@ -82,7 +104,7 @@ func (c *countingConn) PrepareContext(ctx context.Context, query string) (driver
 		if err != nil {
 			return nil, err
 		}
-		return &countingStmt{base: s, counter: c.counter}, nil
+		return &countingStmt{base: s, counter: c.counter, query: query}, nil
 	}
 	return c.Prepare(query)
 }
@@ -99,7 +121,7 @@ func (c *countingConn) QueryContext(ctx context.Context, query string, args []dr
 	if !ok {
 		return nil, driver.ErrSkip
 	}
-	c.counter.add()
+	c.counter.add(query)
 	return q.QueryContext(ctx, query, args)
 }
 
@@ -108,7 +130,7 @@ func (c *countingConn) ExecContext(ctx context.Context, query string, args []dri
 	if !ok {
 		return nil, driver.ErrSkip
 	}
-	c.counter.add()
+	c.counter.add(query)
 	return e.ExecContext(ctx, query, args)
 }
 
@@ -136,18 +158,19 @@ func (c *countingConn) IsValid() bool {
 type countingStmt struct {
 	base    driver.Stmt
 	counter *QueryCounter
+	query   string
 }
 
 func (s *countingStmt) Close() error  { return s.base.Close() }
 func (s *countingStmt) NumInput() int { return s.base.NumInput() }
 
 func (s *countingStmt) Exec(args []driver.Value) (driver.Result, error) {
-	s.counter.add()
+	s.counter.add(s.query)
 	return s.base.Exec(args) //nolint:staticcheck // driver fallback
 }
 
 func (s *countingStmt) Query(args []driver.Value) (driver.Rows, error) {
-	s.counter.add()
+	s.counter.add(s.query)
 	return s.base.Query(args) //nolint:staticcheck // driver fallback
 }
 
@@ -156,7 +179,7 @@ func (s *countingStmt) ExecContext(ctx context.Context, args []driver.NamedValue
 	if !ok {
 		return nil, driver.ErrSkip
 	}
-	s.counter.add()
+	s.counter.add(s.query)
 	return e.ExecContext(ctx, args)
 }
 
@@ -165,6 +188,6 @@ func (s *countingStmt) QueryContext(ctx context.Context, args []driver.NamedValu
 	if !ok {
 		return nil, driver.ErrSkip
 	}
-	s.counter.add()
+	s.counter.add(s.query)
 	return q.QueryContext(ctx, args)
 }

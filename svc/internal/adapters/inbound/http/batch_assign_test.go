@@ -283,3 +283,91 @@ func TestAssignBatchClearsAssignment(t *testing.T) {
 		t.Fatalf("expected cleared assignment, got %v", eff.ProjectID)
 	}
 }
+
+func TestAssignBatchPreservesItemOrder(t *testing.T) {
+	f := newBatchFixture(t, "batchorder")
+	ctx := context.Background()
+	now := time.Now().UTC()
+	p, err := f.projectSvc.Create(ctx, f.userID, appprojects.CreateProjectInput{Name: "Cooling", Code: "DC01"})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// Alternate assignable and unassignable items so a result list that is
+	// merely "all the successes then all the failures" cannot pass.
+	items := []map[string]any{}
+	wantOK := []bool{}
+	ids := []string{}
+	for i := 0; i < 6; i++ {
+		var id uuid.UUID
+		if i%2 == 0 {
+			id = f.insertMessage(t, "ok", "conv-"+uuid.NewString(), now.Add(-time.Duration(i)*time.Minute))
+			wantOK = append(wantOK, true)
+		} else {
+			id = f.insertMessage(t, "no conversation", "", now.Add(-time.Duration(i)*time.Minute))
+			wantOK = append(wantOK, false)
+		}
+		ids = append(ids, id.String())
+		items = append(items, map[string]any{
+			"kind": "message", "id": id.String(), "project_id": p.ID.String(), "scope": "thread",
+		})
+	}
+
+	status, out := f.postBatch(t, items)
+	if status != http.StatusOK {
+		t.Fatalf("status = %d", status)
+	}
+	results := out["results"].([]any)
+	if len(results) != len(items) {
+		t.Fatalf("results = %d, want %d", len(results), len(items))
+	}
+	for i, raw := range results {
+		row := raw.(map[string]any)
+		if row["id"] != ids[i] {
+			t.Errorf("result %d id = %v, want %v", i, row["id"], ids[i])
+		}
+		if row["ok"].(bool) != wantOK[i] {
+			t.Errorf("result %d ok = %v, want %v", i, row["ok"], wantOK[i])
+		}
+	}
+}
+
+func TestAssignBatchWritesAcrossChunkBoundary(t *testing.T) {
+	f := newBatchFixture(t, "batchchunk")
+	ctx := context.Background()
+	now := time.Now().UTC()
+	p, err := f.projectSvc.Create(ctx, f.userID, appprojects.CreateProjectInput{Name: "Cooling", Code: "DC01"})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// Repository writes commit in chunks of 100; span more than one chunk so a
+	// boundary bug cannot hide.
+	const count = 150
+	items := make([]map[string]any, 0, count)
+	ids := make([]uuid.UUID, 0, count)
+	for i := 0; i < count; i++ {
+		id := f.insertMessage(t, "subject", "conv-"+uuid.NewString(), now.Add(-time.Duration(i)*time.Minute))
+		ids = append(ids, id)
+		items = append(items, map[string]any{
+			"kind": "message", "id": id.String(), "project_id": p.ID.String(), "scope": "thread",
+		})
+	}
+
+	status, out := f.postBatch(t, items)
+	if status != http.StatusOK {
+		t.Fatalf("status = %d", status)
+	}
+	if got := int(out["assigned"].(float64)); got != count {
+		t.Fatalf("assigned = %d, want %d", got, count)
+	}
+	for _, id := range ids {
+		eff, err := f.repo.EffectiveAssignment(ctx, f.userID, id)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if eff.ProjectID == nil || *eff.ProjectID != p.ID {
+			t.Fatalf("message %s not assigned across chunk boundary", id)
+		}
+	}
+}
