@@ -558,7 +558,7 @@ blocked the work:
 | `npm run lint` | 0 errors (8 pre-existing fast-refresh warnings in `ui/`) |
 | `npm run test` | 43 pass |
 | `npm run build` | pass |
-| Aurora DSQL | **not verified** — no cluster available. §6 window function and the §5.1 plan still need a dev-DSQL run before promotion |
+| Aurora DSQL | Partially verified via the PR #9 dev deploy — see §18 |
 
 
 ---
@@ -625,3 +625,49 @@ The connector/slack branch still calls `GetConnectorAccount` once per distinct
 connector account. That runs after its cursor is closed, so it is not a
 deadlock risk, and it is bounded by the number of connected accounts rather
 than by timeline length. Left alone deliberately.
+
+
+---
+
+## 18. Aurora DSQL findings
+
+The PR opened for this work applies to dev, which ran migration `003` against
+a real DSQL cluster — the verification §16.4 recorded as missing.
+
+### 18.1 No sort order on index keys
+
+`003_triage_indexes.sql` failed the dev deploy:
+
+```
+dsql/003_triage_indexes.sql: ERROR: specifying sort order not supported
+for index keys (SQLSTATE 0A000)
+```
+
+DSQL's `CREATE INDEX` grammar has no `ASC`/`DESC` — only `NULLS FIRST|LAST`.
+Vanilla Postgres accepts `received_at DESC`, which is why it passed both the
+local contract suite and CI.
+
+Fixed by dropping the keyword from the `dsql/` migration only; the `postgres/`
+one keeps it. An ascending index still serves `ORDER BY received_at DESC`, so
+§5.5's intent is unchanged.
+
+Because CI has no DSQL cluster, `TestDSQLIndexesHaveNoSortOrder` and
+`TestDSQLIndexesAreAsync` now lint the `dsql/*.sql` set for this grammar, with
+`TestPostgresIndexesAreNotAsync` as the mirror. Verified to reproduce the
+failure: re-adding `DESC` fails the lint with the same diagnosis.
+
+Recorded in [addendum-aurora-dsql.md §3.2](addendum-aurora-dsql.md), whose
+limits list did not mention it.
+
+### 18.2 Still unverified
+
+| Construct | Status |
+| --------- | ------ |
+| Window functions (§6 thread dedupe) | Documented as supported in [addendum-aurora-dsql.md §2](addendum-aurora-dsql.md); not yet executed against DSQL |
+| Row-value comparison `(received_at, id) < (?, ?)` (§12 keyset) | Not documented either way; not yet executed against DSQL |
+| `UNION ALL` with casts in branches (§5.1) | `UNION` documented as supported; this exact shape not executed |
+| The §5.1 query plan | Unknown — needs `EXPLAIN` on dev once the deploy is green |
+
+These only execute at request time, so a successful migration does not
+exercise them. They need a dev smoke test of `/api/unassigned` and a project
+timeline after deploy.
