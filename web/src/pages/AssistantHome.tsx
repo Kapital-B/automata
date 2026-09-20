@@ -37,6 +37,9 @@ type Props = {
   accountFilter: AccountFilter;
 };
 
+/** How many attention rows Home shows before asking to expand. */
+const NEEDS_ME_PREVIEW = 5;
+
 function citationHref(c: AskCitation): string | undefined {
   if (!c.project_id) return undefined;
   if (c.type === "issue") return `/projects/${c.project_id}/issues/${c.id}`;
@@ -86,6 +89,10 @@ export default function AssistantHomePage({ accountFilter }: Props) {
   const counts = overviewQuery.data?.counts;
   const recentProjects = overviewQuery.data?.projects ?? [];
   const needsMe = mergeNeedsMeRows(attentionQuery.data?.items ?? []);
+  // Long attention lists push everything else off the page; show a working set
+  // and let the operator open the rest.
+  const [showAllNeedsMe, setShowAllNeedsMe] = useState(false);
+  const visibleNeedsMe = showAllNeedsMe ? needsMe : needsMe.slice(0, NEEDS_ME_PREVIEW);
   const activityGroups = groupActivityByDay(activityQuery.data?.items ?? []);
   const triageCount = (counts?.triage_unassigned ?? 0) + (counts?.triage_provisional ?? 0);
 
@@ -182,7 +189,21 @@ export default function AssistantHomePage({ accountFilter }: Props) {
           />
           <MetricCard label="Projects" value={counts?.active_projects ?? 0} to="/projects" />
         </nav>
+      </section>
 
+      <AskAcrossProjects
+        llmEnabled={llmEnabled}
+        question={askQuestion}
+        setQuestion={setAskQuestion}
+        answer={askAnswer}
+        pending={askMutation.isPending}
+        onAsk={() => askMutation.mutate()}
+      />
+
+      <section className="space-y-4" aria-labelledby="home-actions-heading">
+        <h2 id="home-actions-heading" className="font-display text-2xl">
+          Needs you
+        </h2>
         {needsMe.length === 0 ? (
           <div className="space-y-4 border-y border-border/70 py-8">
             <div className="flex items-start gap-3 text-sm text-muted-foreground">
@@ -213,8 +234,9 @@ export default function AssistantHomePage({ accountFilter }: Props) {
             </div>
           </div>
         ) : (
+          <>
           <ul id="home-needs-list" className="divide-y divide-border/70 border-y border-border/70">
-            {needsMe.map((row) => (
+            {visibleNeedsMe.map((row) => (
               <li key={row.id} className="flex items-start gap-3 py-3.5">
                 <div className="min-w-0 flex-1">
                   <p className="text-[10px] uppercase tracking-[0.14em] text-muted-foreground">
@@ -238,71 +260,20 @@ export default function AssistantHomePage({ accountFilter }: Props) {
               </li>
             ))}
           </ul>
+          {needsMe.length > NEEDS_ME_PREVIEW ? (
+            <Button
+              variant="ghost"
+              size="sm"
+              aria-expanded={showAllNeedsMe}
+              onClick={() => setShowAllNeedsMe((v) => !v)}
+            >
+              {showAllNeedsMe
+                ? "Show fewer"
+                : `Show all ${needsMe.length}`}
+            </Button>
+          ) : null}
+          </>
         )}
-      </section>
-
-      <section aria-label="Ask across projects" className="space-y-3">
-        <div className="space-y-1">
-          <h2 className="font-display text-xl">Ask across projects</h2>
-          <p className="text-sm text-muted-foreground">
-            Grounded answers from your project facts and decisions — with citations.
-          </p>
-        </div>
-        <div className="flex flex-col gap-2 sm:flex-row">
-          <Input
-            value={askQuestion}
-            onChange={(e) => setAskQuestion(e.target.value)}
-            placeholder="Ask across projects…"
-            disabled={!llmEnabled || askMutation.isPending}
-            onKeyDown={(e) => {
-              if (e.key === "Enter" && askQuestion.trim()) askMutation.mutate();
-            }}
-          />
-          <Button
-            variant="outline"
-            disabled={!llmEnabled || !askQuestion.trim() || askMutation.isPending}
-            title={
-              llmEnabled
-                ? "Answer from structured project state across your projects"
-                : "Configure LLM_BASE_URL and LLM_MODEL on the API"
-            }
-            onClick={() => askMutation.mutate()}
-          >
-            {askMutation.isPending ? "Asking…" : llmEnabled ? "Ask" : "Ask (LLM off)"}
-          </Button>
-        </div>
-        {askAnswer ? (
-          <div className="space-y-2 border-t border-border/70 pt-3 text-sm">
-            <p>{askAnswer.answer}</p>
-            {askAnswer.citations.length > 0 ? (
-              <ul className="space-y-1 text-xs text-muted-foreground">
-                {askAnswer.citations.map((c) => {
-                  const href = citationHref(c);
-                  const label = [
-                    c.project_code,
-                    c.type,
-                    c.id.slice(0, 8),
-                  ]
-                    .filter(Boolean)
-                    .join(" · ");
-                  return (
-                    <li key={`${c.type}:${c.id}`}>
-                      {href ? (
-                        <Link to={href} className="hover:underline">
-                          {label}
-                        </Link>
-                      ) : (
-                        label
-                      )}
-                    </li>
-                  );
-                })}
-              </ul>
-            ) : (
-              <p className="text-xs text-muted-foreground">No citations returned.</p>
-            )}
-          </div>
-        ) : null}
       </section>
 
       <section className="space-y-4" aria-labelledby="home-changed-heading">
@@ -406,6 +377,79 @@ export default function AssistantHomePage({ accountFilter }: Props) {
         </div>
       </section>
     </div>
+  );
+}
+
+function AskAcrossProjects({
+  llmEnabled,
+  question,
+  setQuestion,
+  answer,
+  pending,
+  onAsk,
+}: {
+  llmEnabled: boolean;
+  question: string;
+  setQuestion: (v: string) => void;
+  answer: AskAnswer | null;
+  pending: boolean;
+  onAsk: () => void;
+}) {
+  return (
+    <section aria-label="Ask across projects" className="space-y-3">
+      <div className="flex flex-col gap-2 sm:flex-row">
+        <Input
+          value={question}
+          onChange={(e) => setQuestion(e.target.value)}
+          placeholder="Ask across projects…"
+          aria-label="Ask across projects"
+          disabled={!llmEnabled || pending}
+          onKeyDown={(e) => {
+            if (e.key === "Enter" && question.trim()) onAsk();
+          }}
+        />
+        <Button
+          variant="outline"
+          disabled={!llmEnabled || !question.trim() || pending}
+          title={
+            llmEnabled
+              ? "Answer from structured project state across your projects"
+              : "Configure LLM_BASE_URL and LLM_MODEL on the API"
+          }
+          onClick={onAsk}
+        >
+          {pending ? "Asking…" : llmEnabled ? "Ask" : "Ask (LLM off)"}
+        </Button>
+      </div>
+      {answer ? (
+        <div className="space-y-2 border-t border-border/70 pt-3 text-sm">
+          <p>{answer.answer}</p>
+          {answer.citations.length > 0 ? (
+            <ul className="space-y-1 text-xs text-muted-foreground">
+              {answer.citations.map((c) => {
+                const href = citationHref(c);
+                const label = [c.project_code, c.type, c.id.slice(0, 8)]
+                  .filter(Boolean)
+                  .join(" · ");
+                return (
+                  <li key={`${c.type}:${c.id}`}>
+                    {href ? (
+                      <Link to={href} className="hover:underline">
+                        {label}
+                      </Link>
+                    ) : (
+                      label
+                    )}
+                  </li>
+                );
+              })}
+            </ul>
+          ) : (
+            <p className="text-xs text-muted-foreground">No citations returned.</p>
+          )}
+        </div>
+      ) : null}
+    </section>
   );
 }
 

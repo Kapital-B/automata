@@ -60,7 +60,7 @@ function baseMailState(overrides: Partial<ReturnType<typeof useAssistantHomeData
         primaryEmail: "work@example.com",
         kind: "work" as const,
         status: "connected" as const,
-        colorVar: "acct-1",
+        colorVar: "acct-1" as const,
       },
     ],
     connectedAccounts: [
@@ -70,7 +70,7 @@ function baseMailState(overrides: Partial<ReturnType<typeof useAssistantHomeData
         primaryEmail: "work@example.com",
         kind: "work" as const,
         status: "connected" as const,
-        colorVar: "acct-1",
+        colorVar: "acct-1" as const,
       },
     ],
     erroredAccounts: [],
@@ -293,6 +293,92 @@ describe("AssistantHomePage", () => {
       "href",
       "/inbox?message_id=m1&account_id=a1",
     );
+  });
+
+  it("places Ask between the cards and the actions", async () => {
+    mockedUseAssistantHomeData.mockReturnValue(baseMailState());
+    renderPage();
+    await screen.findByRole("heading", { name: "Across your projects" });
+
+    const cards = screen.getByRole("navigation", { name: /overview/i });
+    const ask = screen.getByRole("region", { name: /ask across projects/i });
+    const actions = screen.getByRole("heading", { name: "Needs you" });
+
+    // Ask sits after the card row and before the attention list.
+    expect(cards.compareDocumentPosition(ask) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    expect(ask.compareDocumentPosition(actions) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+  });
+
+  it("shows five actions and expands to the rest", async () => {
+    const items = Array.from({ length: 8 }, (_, i) => ({
+      id: `decision:d${i}`,
+      why_me: "provisional_decision",
+      title: `Confirm decision number ${i}`,
+      project_id: "p1",
+      project_name: "Cooling",
+      ref_type: "decision",
+      ref_id: `d${i}`,
+    }));
+    getAttention.mockResolvedValue({
+      items,
+      counts: {
+        total: 8,
+        issue_assignee: 0,
+        member_role: 0,
+        provisional_fact: 0,
+        provisional_decision: 8,
+        open_contradiction: 0,
+        mail_action_item: 0,
+      },
+    });
+    mockedUseAssistantHomeData.mockReturnValue(baseMailState());
+    renderPage();
+
+    expect(await screen.findByText("Confirm decision number 0")).toBeInTheDocument();
+    expect(screen.getByText("Confirm decision number 4")).toBeInTheDocument();
+    // A long queue should not push the rest of the page off screen.
+    expect(screen.queryByText("Confirm decision number 5")).not.toBeInTheDocument();
+
+    const expand = screen.getByRole("button", { name: /show all 8/i });
+    expect(expand).toHaveAttribute("aria-expanded", "false");
+    fireEvent.click(expand);
+
+    expect(await screen.findByText("Confirm decision number 7")).toBeInTheDocument();
+    const collapse = screen.getByRole("button", { name: /show fewer/i });
+    expect(collapse).toHaveAttribute("aria-expanded", "true");
+    fireEvent.click(collapse);
+    await waitFor(() =>
+      expect(screen.queryByText("Confirm decision number 7")).not.toBeInTheDocument(),
+    );
+  });
+
+  it("does not offer to expand five or fewer actions", async () => {
+    getAttention.mockResolvedValue({
+      items: [
+        {
+          id: "decision:d1",
+          why_me: "provisional_decision",
+          title: "Only one",
+          project_id: "p1",
+          project_name: "Cooling",
+          ref_type: "decision",
+          ref_id: "d1",
+        },
+      ],
+      counts: {
+        total: 1,
+        issue_assignee: 0,
+        member_role: 0,
+        provisional_fact: 0,
+        provisional_decision: 1,
+        open_contradiction: 0,
+        mail_action_item: 0,
+      },
+    });
+    mockedUseAssistantHomeData.mockReturnValue(baseMailState());
+    renderPage();
+    expect(await screen.findByText("Only one")).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: /show all/i })).not.toBeInTheDocument();
   });
 
   it("asks across projects and shows cited answer", async () => {
