@@ -638,6 +638,9 @@ type IssueRow struct {
 	AssigneeContactID   *uuid.UUID
 	CreatedAt           time.Time
 	UpdatedAt           time.Time
+	// ResolvedAt is when the issue was resolved. Nil on rows written before
+	// the column existed; readers fall back to UpdatedAt.
+	ResolvedAt *time.Time
 }
 
 // IssueItemRow links correspondence to an issue.
@@ -691,6 +694,9 @@ type FactVersionRow struct {
 	SupersededAt          *time.Time
 	CreatedByUserID       *uuid.UUID
 	CreatedAt             time.Time
+	// ActivatedAt is when this version became the active one. Nil on rows
+	// written before the column existed; readers fall back to CreatedAt.
+	ActivatedAt *time.Time
 }
 
 // FactEvidenceRow links correspondence evidence to a fact version.

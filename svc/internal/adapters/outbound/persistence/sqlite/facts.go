@@ -114,11 +114,11 @@ func (r *Repository) CreateFactVersion(ctx context.Context, row driven.FactVersi
 		INSERT INTO fact_versions (
 			id, fact_id, status, value_json, value_text, unit, source, confidence,
 			interpretation_id, supersedes_version_id, superseded_by_version_id,
-			superseded_at, created_by_user_id, created_at
-		) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+			superseded_at, created_by_user_id, created_at, activated_at
+		) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 	`, row.ID.String(), row.FactID.String(), row.Status, row.ValueJSON, row.ValueText,
 		unit, row.Source, conf, interp, supersedes, supersededBy, supersededAt, createdBy,
-		formatRFC3339(row.CreatedAt.UTC()))
+		formatRFC3339(row.CreatedAt.UTC()), nullTimeStr(row.ActivatedAt))
 	return err
 }
 
@@ -126,7 +126,7 @@ func (r *Repository) GetFactVersion(ctx context.Context, organisationID, version
 	row := r.db.QueryRowContext(ctx, `
 		SELECT fv.id, fv.fact_id, fv.status, fv.value_json, fv.value_text, fv.unit, fv.source,
 			fv.confidence, fv.interpretation_id, fv.supersedes_version_id, fv.superseded_by_version_id,
-			fv.superseded_at, fv.created_by_user_id, fv.created_at
+			fv.superseded_at, fv.created_by_user_id, fv.created_at, fv.activated_at
 		FROM fact_versions fv
 		INNER JOIN facts f ON f.id = fv.fact_id
 		WHERE fv.id = ? AND f.organisation_id = ?
@@ -142,7 +142,7 @@ func (r *Repository) ListFactVersions(ctx context.Context, factID uuid.UUID) ([]
 	rows, err := r.db.QueryContext(ctx, `
 		SELECT id, fact_id, status, value_json, value_text, unit, source,
 			confidence, interpretation_id, supersedes_version_id, superseded_by_version_id,
-			superseded_at, created_by_user_id, created_at
+			superseded_at, created_by_user_id, created_at, activated_at
 		FROM fact_versions WHERE fact_id = ?
 		ORDER BY created_at ASC
 	`, factID.String())
@@ -165,7 +165,7 @@ func (r *Repository) GetActiveFactVersion(ctx context.Context, factID uuid.UUID)
 	row := r.db.QueryRowContext(ctx, `
 		SELECT id, fact_id, status, value_json, value_text, unit, source,
 			confidence, interpretation_id, supersedes_version_id, superseded_by_version_id,
-			superseded_at, created_by_user_id, created_at
+			superseded_at, created_by_user_id, created_at, activated_at
 		FROM fact_versions WHERE fact_id = ? AND status = 'active'
 	`, factID.String())
 	ver, err := scanFactVersionRow(row)
@@ -201,10 +201,11 @@ func (r *Repository) UpdateFactVersion(ctx context.Context, row driven.FactVersi
 	res, err := r.db.ExecContext(ctx, `
 		UPDATE fact_versions SET status = ?, value_json = ?, value_text = ?, unit = ?, source = ?,
 			confidence = ?, interpretation_id = ?, supersedes_version_id = ?,
-			superseded_by_version_id = ?, superseded_at = ?, created_by_user_id = ?
+			superseded_by_version_id = ?, superseded_at = ?, created_by_user_id = ?,
+			activated_at = ?
 		WHERE id = ?
 	`, row.Status, row.ValueJSON, row.ValueText, unit, row.Source, conf, interp,
-		supersedes, supersededBy, supersededAt, createdBy, row.ID.String())
+		supersedes, supersededBy, supersededAt, createdBy, nullTimeStr(row.ActivatedAt), row.ID.String())
 	if err != nil {
 		return err
 	}
@@ -334,10 +335,11 @@ func scanFactVersionRow(s rowScanner) (*driven.FactVersionRow, error) {
 	var idStr, factStr, status, valueJSON, valueText, source, createdAt string
 	var unit sql.NullString
 	var conf sql.NullFloat64
-	var interp, supersedes, supersededBy, supersededAt, createdBy sql.NullString
+	var interp, supersedes, supersededBy, supersededAt, createdBy, activatedAt sql.NullString
 	if err := s.Scan(
 		&idStr, &factStr, &status, &valueJSON, &valueText, &unit, &source,
 		&conf, &interp, &supersedes, &supersededBy, &supersededAt, &createdBy, &createdAt,
+		&activatedAt,
 	); err != nil {
 		return nil, err
 	}
@@ -392,6 +394,13 @@ func scanFactVersionRow(s rowScanner) (*driven.FactVersionRow, error) {
 			return nil, err
 		}
 		row.SupersededAt = &t
+	}
+	if activatedAt.Valid && activatedAt.String != "" {
+		t, err := parseTime(activatedAt.String)
+		if err != nil {
+			return nil, err
+		}
+		row.ActivatedAt = &t
 	}
 	if createdBy.Valid && createdBy.String != "" {
 		uid, err := uuid.Parse(createdBy.String)

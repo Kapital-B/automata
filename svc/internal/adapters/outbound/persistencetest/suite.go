@@ -25,6 +25,7 @@ type Repository interface {
 	driven.ProjectRepository
 	driven.ManualItemRepository
 	driven.IssueRepository
+	driven.FactRepository
 	driven.TimelineRepository
 	driven.AssignmentRepository
 	driven.SummaryRepository
@@ -655,6 +656,8 @@ func Run(t *testing.T, factory Factory) {
 		}
 	})
 
+	runHomeOverviewTimestampTests(t, factory)
+
 	t.Run("timeline_hydration_is_batched_and_correct", func(t *testing.T) {
 		h := factory(t)
 		ctx := context.Background()
@@ -911,4 +914,120 @@ func createProject(t *testing.T, repo Repository, orgID, userID uuid.UUID, code,
 		t.Fatal(err)
 	}
 	return id
+}
+
+// runHomeOverviewTimestampTests covers the two columns added for the Home
+// activity feed, whose whole value is dating events correctly.
+func runHomeOverviewTimestampTests(t *testing.T, factory Factory) {
+	t.Helper()
+
+	t.Run("fact_activation_is_dated_when_confirmed", func(t *testing.T) {
+		h := factory(t)
+		ctx := context.Background()
+		now := time.Now().UTC()
+		userID, orgID, _ := seedUserAccount(t, h.Repo, uuid.New(), now)
+		projectID := createProject(t, h.Repo, orgID, userID, "DC10", "Timestamps")
+
+		factID := uuid.New()
+		if err := h.Repo.CreateFact(ctx, driven.FactRow{
+			ID: factID, OrganisationID: orgID, ProjectID: projectID,
+			SubjectKey: "pump.duty", Label: "Pump duty", CreatedAt: now, UpdatedAt: now,
+		}); err != nil {
+			t.Fatal(err)
+		}
+
+		// Proposed a week ago, with no activation time.
+		proposed := now.Add(-7 * 24 * time.Hour)
+		verID := uuid.New()
+		if err := h.Repo.CreateFactVersion(ctx, driven.FactVersionRow{
+			ID: verID, FactID: factID, Status: "proposed", ValueJSON: `{"amount":90}`,
+			ValueText: "90 kW", Source: "llm", CreatedAt: proposed,
+		}); err != nil {
+			t.Fatal(err)
+		}
+		got, err := h.Repo.GetFactVersion(ctx, orgID, verID)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if got.ActivatedAt != nil {
+			t.Fatalf("proposed version should have no activation time, got %v", got.ActivatedAt)
+		}
+
+		// Confirmed today.
+		got.Status = "active"
+		activated := now
+		got.ActivatedAt = &activated
+		if err := h.Repo.UpdateFactVersion(ctx, *got); err != nil {
+			t.Fatal(err)
+		}
+		reloaded, err := h.Repo.GetFactVersion(ctx, orgID, verID)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if reloaded.ActivatedAt == nil {
+			t.Fatal("expected an activation time after confirm")
+		}
+		if !reloaded.ActivatedAt.Truncate(time.Second).Equal(activated.Truncate(time.Second)) {
+			t.Errorf("activated_at = %v, want %v", reloaded.ActivatedAt, activated)
+		}
+		// The point of the column: activation is days after creation.
+		if !reloaded.ActivatedAt.After(reloaded.CreatedAt) {
+			t.Errorf("activated_at %v should be after created_at %v", reloaded.ActivatedAt, reloaded.CreatedAt)
+		}
+	})
+
+	t.Run("issue_resolution_is_dated_and_cleared_on_reopen", func(t *testing.T) {
+		h := factory(t)
+		ctx := context.Background()
+		now := time.Now().UTC()
+		userID, orgID, _ := seedUserAccount(t, h.Repo, uuid.New(), now)
+		projectID := createProject(t, h.Repo, orgID, userID, "DC11", "Timestamps")
+
+		issueID := uuid.New()
+		if err := h.Repo.CreateIssue(ctx, driven.IssueRow{
+			ID: issueID, OrganisationID: orgID, ProjectID: projectID, Title: "Leak",
+			Status: "open", CreatedAt: now.Add(-48 * time.Hour), UpdatedAt: now.Add(-48 * time.Hour),
+		}); err != nil {
+			t.Fatal(err)
+		}
+		open, err := h.Repo.GetIssue(ctx, orgID, issueID)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if open.ResolvedAt != nil {
+			t.Fatalf("open issue should have no resolution time, got %v", open.ResolvedAt)
+		}
+
+		resolved := now
+		open.Status = "resolved"
+		open.ResolvedAt = &resolved
+		open.UpdatedAt = resolved
+		if err := h.Repo.UpdateIssue(ctx, *open); err != nil {
+			t.Fatal(err)
+		}
+		got, err := h.Repo.GetIssue(ctx, orgID, issueID)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if got.ResolvedAt == nil {
+			t.Fatal("expected a resolution time")
+		}
+
+		// Editing the issue afterwards must not move the resolution time.
+		got.Title = "Leak (renamed)"
+		got.UpdatedAt = now.Add(time.Hour)
+		if err := h.Repo.UpdateIssue(ctx, *got); err != nil {
+			t.Fatal(err)
+		}
+		after, err := h.Repo.GetIssue(ctx, orgID, issueID)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if after.ResolvedAt == nil || !after.ResolvedAt.Truncate(time.Second).Equal(resolved.Truncate(time.Second)) {
+			t.Errorf("resolved_at moved on edit: %v, want %v", after.ResolvedAt, resolved)
+		}
+		if !after.UpdatedAt.After(*after.ResolvedAt) {
+			t.Error("updated_at should have moved past resolved_at, which is why updated_at cannot date the resolution")
+		}
+	})
 }
