@@ -1227,6 +1227,14 @@ func runActivityFeedTests(t *testing.T, factory Factory) {
 		}); err != nil {
 			t.Fatal(err)
 		}
+		decided := now
+		if err := h.Repo.CreateDecision(ctx, driven.DecisionRow{
+			ID: uuid.New(), OrganisationID: orgID, ProjectID: busy,
+			Statement: "Proceed with 90 kW", Status: "accepted", Source: "user",
+			DecidedAt: &decided, CreatedAt: now, UpdatedAt: now,
+		}); err != nil {
+			t.Fatal(err)
+		}
 
 		counts, err := h.Repo.CountOverview(ctx, userID, orgID)
 		if err != nil {
@@ -1256,6 +1264,11 @@ func runActivityFeedTests(t *testing.T, factory Factory) {
 		}
 		if projects[0].LastActivityAt == nil {
 			t.Error("busy project should report a last activity time")
+		}
+		// The teaser comes from the overview payload, so Home needs no
+		// per-project request to render it.
+		if projects[0].Teaser == "" {
+			t.Error("busy project should carry a position teaser from its accepted decision or active fact")
 		}
 		if projects[1].Code != "DC24" || projects[1].LastActivityAt != nil {
 			t.Errorf("quiet project = %+v, want DC24 with no activity", projects[1])

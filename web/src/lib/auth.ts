@@ -468,6 +468,59 @@ export type BatchAssignResponse = {
   failed: number;
 };
 
+export type OverviewCounts = {
+  needs_you: number;
+  triage_unassigned: number;
+  triage_provisional: number;
+  open_contradictions: number;
+  provisional_facts: number;
+  proposed_decisions: number;
+  active_projects: number;
+};
+
+export type OverviewProject = {
+  id: string;
+  code: string;
+  name: string;
+  teaser?: string;
+  last_activity_at?: string;
+  attention_count: number;
+};
+
+export type Overview = {
+  counts: OverviewCounts;
+  projects: OverviewProject[];
+};
+
+export type ActivityKind =
+  | "decision_proposed"
+  | "decision_accepted"
+  | "decision_withdrawn"
+  | "fact_recorded"
+  | "fact_superseded"
+  | "contradiction_opened"
+  | "contradiction_resolved"
+  | "issue_opened"
+  | "issue_resolved";
+
+export type ActivityItem = {
+  kind: ActivityKind;
+  occurred_at: string;
+  project_id: string;
+  project_code: string;
+  project_name: string;
+  title: string;
+  ref_type: string;
+  ref_id: string;
+  source?: "user" | "rule" | "llm";
+};
+
+export type ActivityPage = {
+  items: ActivityItem[];
+  next_before?: string;
+  next_before_id?: string;
+};
+
 export type TimelineContact = {
   id: string;
   display_name: string;
@@ -719,6 +772,28 @@ export async function updateProjectMember(
 
 export async function getUnassignedSummary(accessToken: string) {
   return apiRequest<UnassignedSummary>("/api/unassigned/summary", {
+    headers: toAuthHeader(accessToken),
+  });
+}
+
+export async function getOverview(accessToken: string) {
+  return apiRequest<Overview>("/api/overview", {
+    headers: toAuthHeader(accessToken),
+  });
+}
+
+export async function listActivity(
+  accessToken: string,
+  opts?: { limit?: number; before?: string; beforeID?: string; kinds?: ActivityKind[]; projectID?: string },
+) {
+  const params = new URLSearchParams();
+  if (typeof opts?.limit === "number") params.set("limit", String(opts.limit));
+  if (opts?.before) params.set("before", opts.before);
+  if (opts?.beforeID) params.set("before_id", opts.beforeID);
+  if (opts?.projectID) params.set("project_id", opts.projectID);
+  (opts?.kinds ?? []).forEach((k) => params.append("kind", k));
+  const qs = params.toString();
+  return apiRequest<ActivityPage>(`/api/activity${qs ? `?${qs}` : ""}`, {
     headers: toAuthHeader(accessToken),
   });
 }

@@ -519,9 +519,12 @@ type OverviewCounts struct {
 
 // OverviewProject is one row of the Home projects list.
 type OverviewProject struct {
-	ID             uuid.UUID
-	Code           string
-	Name           string
+	ID   uuid.UUID
+	Code string
+	Name string
+	// Teaser is the project's newest active fact, or failing that its newest
+	// accepted decision. Empty when the project has neither.
+	Teaser         string
 	LastActivityAt *time.Time
 }
 

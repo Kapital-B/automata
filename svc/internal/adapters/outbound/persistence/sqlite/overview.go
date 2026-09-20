@@ -235,7 +235,21 @@ func (r *Repository) ListOverviewProjects(ctx context.Context, userID, organisat
 			WHERE p.organisation_id = ? AND e.occurred_at IS NOT NULL
 			GROUP BY e.project_id
 		)
-		SELECT p.id, p.code, p.name, la.last_activity_at
+		SELECT p.id, p.code, p.name, la.last_activity_at,
+			COALESCE(
+				(SELECT f.label || ': ' || fv.value_text
+					FROM fact_versions fv
+					INNER JOIN facts f ON f.id = fv.fact_id
+					WHERE f.project_id = p.id AND fv.status = 'active'
+					ORDER BY COALESCE(fv.activated_at, fv.created_at) DESC
+					LIMIT 1),
+				(SELECT d.statement
+					FROM decisions d
+					WHERE d.project_id = p.id AND d.status = 'accepted'
+					ORDER BY COALESCE(d.decided_at, d.updated_at) DESC
+					LIMIT 1),
+				''
+			) AS teaser
 		FROM projects p
 		INNER JOIN project_members pm ON pm.project_id = p.id AND pm.user_id = ?
 		LEFT JOIN last_activity la ON la.project_id = p.id
@@ -254,16 +268,16 @@ func (r *Repository) ListOverviewProjects(ctx context.Context, userID, organisat
 func scanOverviewProjects(rows *sql.Rows) ([]driven.OverviewProject, error) {
 	out := make([]driven.OverviewProject, 0)
 	for rows.Next() {
-		var idStr, code, name string
+		var idStr, code, name, teaser string
 		var lastActivity sql.NullString
-		if err := rows.Scan(&idStr, &code, &name, &lastActivity); err != nil {
+		if err := rows.Scan(&idStr, &code, &name, &lastActivity, &teaser); err != nil {
 			return nil, err
 		}
 		id, err := uuid.Parse(idStr)
 		if err != nil {
 			return nil, fmt.Errorf("parse project id: %w", err)
 		}
-		item := driven.OverviewProject{ID: id, Code: code, Name: name}
+		item := driven.OverviewProject{ID: id, Code: code, Name: name, Teaser: teaser}
 		if lastActivity.Valid && lastActivity.String != "" {
 			t, err := parseTime(lastActivity.String)
 			if err != nil {
