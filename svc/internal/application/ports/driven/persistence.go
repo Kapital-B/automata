@@ -474,6 +474,45 @@ type ProjectMemberRow struct {
 	UpdatedAt         time.Time
 }
 
+// ActivityItem is one change to what a project knows, for the Home feed.
+type ActivityItem struct {
+	Kind        string // see the kind table in addendum-home-overview.md §6.3
+	OccurredAt  time.Time
+	ProjectID   uuid.UUID
+	ProjectCode string
+	ProjectName string
+	Title       string
+	RefType     string
+	RefID       uuid.UUID
+	Source      string // user | rule | llm, empty when the row has no source
+}
+
+// ActivityFilter narrows the activity feed. Before is a keyset, not an offset:
+// the feed orders by a timestamp over a mutating set.
+type ActivityFilter struct {
+	Limit     int
+	Before    *time.Time
+	BeforeID  *uuid.UUID
+	Kinds     []string
+	ProjectID *uuid.UUID
+}
+
+// OverviewCounts backs the Home metric cards.
+type OverviewCounts struct {
+	OpenContradictions int
+	ProvisionalFacts   int
+	ProposedDecisions  int
+	ActiveProjects     int
+}
+
+// OverviewProject is one row of the Home projects list.
+type OverviewProject struct {
+	ID             uuid.UUID
+	Code           string
+	Name           string
+	LastActivityAt *time.Time
+}
+
 // ProjectParticipantRow links a contact to a project they correspond on.
 type ProjectParticipantRow struct {
 	ProjectID uuid.UUID
@@ -507,6 +546,14 @@ type ProjectRepository interface {
 	// ListProjectParticipants returns every (project, contact) pair in the org.
 	// Used to score assignment candidates by participant overlap.
 	ListProjectParticipants(ctx context.Context, organisationID uuid.UUID) ([]ProjectParticipantRow, error)
+	// ListActivity returns recent changes across the projects the caller is a
+	// member of, newest first.
+	ListActivity(ctx context.Context, userID, organisationID uuid.UUID, filter ActivityFilter) ([]ActivityItem, error)
+	// CountOverview returns the Home metric-card counts, membership scoped.
+	CountOverview(ctx context.Context, userID, organisationID uuid.UUID) (OverviewCounts, error)
+	// ListOverviewProjects returns the caller's projects with their real last
+	// activity time, derived from the same events as ListActivity.
+	ListOverviewProjects(ctx context.Context, userID, organisationID uuid.UUID, limit int) ([]OverviewProject, error)
 	CountProjectMembers(ctx context.Context, projectID uuid.UUID) (int, error)
 }
 

@@ -31,6 +31,7 @@ import (
 	appissues "github.com/Kapital-B/automata/svc/internal/application/issues"
 	appjobs "github.com/Kapital-B/automata/svc/internal/application/jobs"
 	appmessages "github.com/Kapital-B/automata/svc/internal/application/messages"
+	appoverview "github.com/Kapital-B/automata/svc/internal/application/overview"
 	"github.com/Kapital-B/automata/svc/internal/application/ports/driven"
 	appprojectai "github.com/Kapital-B/automata/svc/internal/application/projectai"
 	appprojects "github.com/Kapital-B/automata/svc/internal/application/projects"
@@ -372,6 +373,12 @@ func (r *Runtime) buildServices(ctx context.Context) error {
 		Contradictions: repo,
 		Summaries:      repo,
 	}
+	overviewSvc := &appoverview.Service{
+		Users:     repo,
+		Projects:  repo,
+		Attention: attentionSvc,
+		Triage:    repo,
+	}
 	projectAISvc := &appprojectai.Service{
 		Users:     repo,
 		Projects:  repo,
@@ -520,6 +527,7 @@ func (r *Runtime) buildServices(ctx context.Context) error {
 		ReconcileSvc:         reconcileSvc,
 		DecisionSvc:          decisionSvc,
 		AttentionSvc:         attentionSvc,
+		OverviewSvc:          overviewSvc,
 		ProjectAISvc:         projectAISvc,
 		Accounts:             repo,
 		Messages:             repo,

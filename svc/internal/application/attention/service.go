@@ -308,3 +308,27 @@ func countItems(items []Item) Counts {
 	}
 	return c
 }
+
+// CountsForUser returns the total attention count and a per-project breakdown,
+// for the Home metric cards and project badges.
+//
+// Mail action items have no project, so they count toward the total but not
+// toward any project's badge.
+func (s *Service) CountsForUser(ctx context.Context, userID uuid.UUID) (int, map[uuid.UUID]int, error) {
+	res, err := s.ForUser(ctx, userID)
+	if err != nil {
+		return 0, nil, err
+	}
+	byProject := map[uuid.UUID]int{}
+	for _, it := range res.Items {
+		if strings.TrimSpace(it.ProjectID) == "" {
+			continue
+		}
+		id, err := uuid.Parse(it.ProjectID)
+		if err != nil {
+			continue
+		}
+		byProject[id]++
+	}
+	return res.Counts.Total, byProject, nil
+}

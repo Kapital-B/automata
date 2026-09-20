@@ -25,6 +25,7 @@ import (
 	appinterpret "github.com/Kapital-B/automata/svc/internal/application/interpret"
 	appissues "github.com/Kapital-B/automata/svc/internal/application/issues"
 	appmessages "github.com/Kapital-B/automata/svc/internal/application/messages"
+	appoverview "github.com/Kapital-B/automata/svc/internal/application/overview"
 	"github.com/Kapital-B/automata/svc/internal/application/ports/driven"
 	appprojectai "github.com/Kapital-B/automata/svc/internal/application/projectai"
 	appprojects "github.com/Kapital-B/automata/svc/internal/application/projects"
@@ -55,6 +56,7 @@ type Handlers struct {
 	ReconcileSvc         *appreconcile.Service
 	DecisionSvc          *appdecisions.Service
 	AttentionSvc         *appattention.Service
+	OverviewSvc          *appoverview.Service
 	ProjectAISvc         *appprojectai.Service
 	Accounts             driven.AccountRepository
 	Messages             driven.MessageRepository
@@ -141,6 +143,8 @@ func (h *Handlers) Routes() http.Handler {
 	r.Post("/api/decisions/{id}/confirm", h.confirmDecision)
 	r.Post("/api/decisions/{id}/withdraw", h.withdrawDecision)
 	r.Patch("/api/decisions/{id}", h.patchDecision)
+	r.Get("/api/overview", h.overview)
+	r.Get("/api/activity", h.activity)
 	r.Get("/api/attention", h.listAttention)
 	r.Get("/api/projects/{id}/attention", h.listProjectAttention)
 	r.Post("/api/ask", h.askAcross)

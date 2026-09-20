@@ -547,6 +547,7 @@ func migrateProjectsAssignments(db *sql.DB) error {
 			UNIQUE (project_id, user_id)
 		)`,
 		`CREATE INDEX IF NOT EXISTS idx_project_members_user ON project_members(user_id)`,
+		`CREATE INDEX IF NOT EXISTS idx_project_members_user_project ON project_members(user_id, project_id)`,
 		`CREATE TABLE IF NOT EXISTS project_participants (
 			project_id TEXT NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
 			contact_id TEXT NOT NULL REFERENCES contacts(id) ON DELETE CASCADE,
@@ -717,6 +718,7 @@ func migrateIssues(db *sql.DB) error {
 			)
 		)`,
 		`CREATE INDEX IF NOT EXISTS idx_issues_project ON issues(project_id)`,
+		`CREATE INDEX IF NOT EXISTS idx_issues_project_created ON issues(project_id, created_at)`,
 		`CREATE INDEX IF NOT EXISTS idx_issues_org ON issues(organisation_id)`,
 		`CREATE TABLE IF NOT EXISTS issue_items (
 			id TEXT PRIMARY KEY NOT NULL,
