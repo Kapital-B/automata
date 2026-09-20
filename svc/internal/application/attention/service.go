@@ -4,6 +4,7 @@ import (
 	"context"
 	"sort"
 	"strings"
+	"time"
 
 	"github.com/Kapital-B/automata/svc/internal/application/ports/driven"
 	domaindec "github.com/Kapital-B/automata/svc/internal/domain/decisions"
@@ -32,6 +33,9 @@ type Item struct {
 	RefID       string `json:"ref_id"`
 	AccountID   string `json:"account_id,omitempty"`
 	MessageID   string `json:"message_id,omitempty"`
+	// OccurredAt dates the underlying row, so the list can be ordered by
+	// recency within a why_me group.
+	OccurredAt time.Time `json:"occurred_at"`
 }
 
 type Counts struct {
@@ -68,21 +72,20 @@ func (s *Service) ForUser(ctx context.Context, userID uuid.UUID) (*Result, error
 	if err != nil {
 		return nil, err
 	}
-	projects, err := s.Projects.ListProjects(ctx, orgID, driven.ProjectListFilter{Limit: 200})
+	// One query across the caller's projects. This used to loop every project
+	// and run a fact-version query per fact; Home makes it the hottest
+	// endpoint in the product.
+	rows, err := s.Projects.ListAttention(ctx, userID, orgID)
 	if err != nil {
 		return nil, err
 	}
-	out := &Result{Items: make([]Item, 0)}
-	for _, p := range projects {
-		m, err := s.Projects.GetProjectMember(ctx, p.ID, userID)
-		if err != nil || m == nil {
+	out := &Result{Items: make([]Item, 0, len(rows))}
+	for _, row := range rows {
+		item, ok := attentionItemFromRow(row)
+		if !ok {
 			continue
 		}
-		part, err := s.forProject(ctx, userID, orgID, p, m)
-		if err != nil {
-			return nil, err
-		}
-		out.Items = append(out.Items, part.Items...)
+		out.Items = append(out.Items, item)
 	}
 	if err := s.appendMailItems(ctx, userID, out); err != nil {
 		return nil, err
@@ -90,6 +93,48 @@ func (s *Service) ForUser(ctx context.Context, userID uuid.UUID) (*Result, error
 	sortItems(out.Items)
 	out.Counts = countItems(out.Items)
 	return out, nil
+}
+
+// attentionItemFromRow formats a repository row into the API shape, keeping
+// the titles and ids identical to the per-project implementation.
+func attentionItemFromRow(row driven.AttentionRow) (Item, bool) {
+	item := Item{
+		Title:       row.Title,
+		ProjectID:   row.ProjectID.String(),
+		ProjectName: row.ProjectName,
+		RefType:     row.RefType,
+		RefID:       row.RefID.String(),
+		OccurredAt:  row.OccurredAt,
+	}
+	switch row.Kind {
+	case "issue_assignee":
+		item.ID = "issue:" + row.RefID.String()
+		item.WhyMe = WhyIssueAssignee
+	case "member_role":
+		item.ID = "issue-role:" + row.RefID.String()
+		item.WhyMe = WhyMemberRole
+	case "provisional_fact":
+		item.ID = "fact-version:" + row.RefID.String()
+		item.WhyMe = WhyProvisionalFact
+		item.Title = "Confirm fact: " + row.Title
+	case "provisional_decision":
+		item.ID = "decision:" + row.RefID.String()
+		item.WhyMe = WhyProvisionalDecision
+		item.Title = "Confirm decision: " + truncateTitle(row.Title, 80)
+	case "open_contradiction":
+		item.ID = "contradiction:" + row.RefID.String()
+		item.WhyMe = WhyOpenContradiction
+	default:
+		return Item{}, false
+	}
+	return item, true
+}
+
+func truncateTitle(s string, max int) string {
+	if len(s) <= max {
+		return s
+	}
+	return s[:max-3] + "…"
 }
 
 // ProjectIDsNeedingInput returns home-org projects that currently have project-scoped attention.
@@ -283,6 +328,11 @@ func sortItems(items []Item) {
 		}
 		if ri != rj {
 			return ri < rj
+		}
+		// Within a severity group, newest first so "recent outstanding" is
+		// meaningful. Title breaks remaining ties to keep ordering stable.
+		if !items[i].OccurredAt.Equal(items[j].OccurredAt) {
+			return items[i].OccurredAt.After(items[j].OccurredAt)
 		}
 		return items[i].Title < items[j].Title
 	})

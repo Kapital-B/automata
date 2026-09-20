@@ -276,3 +276,89 @@ func scanOverviewProjects(rows *sql.Rows) ([]driven.OverviewProject, error) {
 	}
 	return out, rows.Err()
 }
+
+// attentionRowsSQL resolves every kind of pending item in one relation.
+//
+// Replaces a loop over every project that ran issues + facts + a fact-version
+// query per fact + decisions + contradictions. Home makes this the most-hit
+// endpoint in the product, so it cannot stay an N+1 inside an N+1.
+//
+// The member_role branch requires only membership: memberTouchesRole always
+// returned true for a member, so "any member sees awaiting_input" is the rule
+// that was actually in force.
+const attentionRowsSQL = `
+	SELECT 'issue_assignee' AS kind, i.title, i.project_id, 'issue' AS ref_type, i.id AS ref_id, i.created_at
+	FROM issues i
+	INNER JOIN project_members pm ON pm.project_id = i.project_id AND pm.user_id = ?
+	WHERE i.status <> 'resolved' AND i.assignee_user_id = ?
+
+	UNION ALL
+	SELECT 'member_role', i.title, i.project_id, 'issue', i.id, i.created_at
+	FROM issues i
+	INNER JOIN project_members pm ON pm.project_id = i.project_id AND pm.user_id = ?
+	WHERE i.status = 'awaiting_input'
+	  AND (i.assignee_user_id IS NULL OR i.assignee_user_id <> ?)
+
+	UNION ALL
+	SELECT 'provisional_fact', f.label, f.project_id, 'fact_version', fv.id, fv.created_at
+	FROM fact_versions fv
+	INNER JOIN facts f ON f.id = fv.fact_id
+	INNER JOIN project_members pm ON pm.project_id = f.project_id AND pm.user_id = ?
+	WHERE fv.status = 'proposed'
+
+	UNION ALL
+	SELECT 'provisional_decision', d.statement, d.project_id, 'decision', d.id, d.created_at
+	FROM decisions d
+	INNER JOIN project_members pm ON pm.project_id = d.project_id AND pm.user_id = ?
+	WHERE d.status = 'proposed'
+
+	UNION ALL
+	SELECT 'open_contradiction', c.summary, c.project_id, 'contradiction', c.id, c.created_at
+	FROM contradictions c
+	INNER JOIN project_members pm ON pm.project_id = c.project_id AND pm.user_id = ?
+	WHERE c.status = 'open'
+`
+
+func (r *Repository) ListAttention(ctx context.Context, userID, organisationID uuid.UUID) ([]driven.AttentionRow, error) {
+	uid := userID.String()
+	args := []any{uid, uid, uid, uid, uid, uid, uid, organisationID.String()}
+	q := `
+		SELECT a.kind, a.title, a.project_id, p.name, a.ref_type, a.ref_id, a.created_at
+		FROM (` + attentionRowsSQL + `) AS a
+		INNER JOIN projects p ON p.id = a.project_id
+		WHERE p.organisation_id = ? AND p.archived_at IS NULL`
+	rows, err := r.db.QueryContext(ctx, q, args...)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	return scanAttentionRows(rows)
+}
+
+func scanAttentionRows(rows *sql.Rows) ([]driven.AttentionRow, error) {
+	out := make([]driven.AttentionRow, 0)
+	for rows.Next() {
+		var kind, title, projectStr, projectName, refType, refStr string
+		var occurredAt string
+		if err := rows.Scan(&kind, &title, &projectStr, &projectName, &refType, &refStr, &occurredAt); err != nil {
+			return nil, err
+		}
+		at, err := parseTime(occurredAt)
+		if err != nil {
+			return nil, err
+		}
+		projectID, err := uuid.Parse(projectStr)
+		if err != nil {
+			return nil, err
+		}
+		refID, err := uuid.Parse(refStr)
+		if err != nil {
+			return nil, err
+		}
+		out = append(out, driven.AttentionRow{
+			Kind: kind, Title: title, ProjectID: projectID, ProjectName: projectName,
+			RefType: refType, RefID: refID, OccurredAt: at.UTC(),
+		})
+	}
+	return out, rows.Err()
+}
