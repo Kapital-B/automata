@@ -20,18 +20,18 @@ func (r *Repository) CreateIssue(ctx context.Context, row driven.IssueRow) error
 	_, err := r.db.ExecContext(ctx, `
 		INSERT INTO issues (
 			id, organisation_id, project_id, title, current_position_note, status,
-			assignee_user_id, assignee_contact_id, created_at, updated_at, resolved_at
-		) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+			assignee_user_id, assignee_contact_id, created_at, updated_at, resolved_at, discarded_at
+		) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 	`, row.ID.String(), row.OrganisationID.String(), row.ProjectID.String(), row.Title,
 		row.CurrentPositionNote, row.Status, assigneeUser, assigneeContact,
-		formatRFC3339(row.CreatedAt.UTC()), formatRFC3339(row.UpdatedAt.UTC()), nullTimeStr(row.ResolvedAt))
+		formatRFC3339(row.CreatedAt.UTC()), formatRFC3339(row.UpdatedAt.UTC()), nullTimeStr(row.ResolvedAt), nullTimeStr(row.DiscardedAt))
 	return err
 }
 
 func (r *Repository) GetIssue(ctx context.Context, organisationID, issueID uuid.UUID) (*driven.IssueRow, error) {
 	row := r.db.QueryRowContext(ctx, `
 		SELECT id, organisation_id, project_id, title, current_position_note, status,
-			assignee_user_id, assignee_contact_id, created_at, updated_at, resolved_at
+			assignee_user_id, assignee_contact_id, created_at, updated_at, resolved_at, discarded_at
 		FROM issues WHERE id = ? AND organisation_id = ?
 	`, issueID.String(), organisationID.String())
 	iss, err := scanIssueRow(row)
@@ -44,7 +44,7 @@ func (r *Repository) GetIssue(ctx context.Context, organisationID, issueID uuid.
 func (r *Repository) ListIssuesByProject(ctx context.Context, organisationID, projectID uuid.UUID) ([]driven.IssueRow, error) {
 	rows, err := r.db.QueryContext(ctx, `
 		SELECT id, organisation_id, project_id, title, current_position_note, status,
-			assignee_user_id, assignee_contact_id, created_at, updated_at, resolved_at
+			assignee_user_id, assignee_contact_id, created_at, updated_at, resolved_at, discarded_at
 		FROM issues WHERE organisation_id = ? AND project_id = ?
 		ORDER BY updated_at DESC
 	`, organisationID.String(), projectID.String())
@@ -73,10 +73,10 @@ func (r *Repository) UpdateIssue(ctx context.Context, row driven.IssueRow) error
 	}
 	res, err := r.db.ExecContext(ctx, `
 		UPDATE issues SET title = ?, current_position_note = ?, status = ?,
-			assignee_user_id = ?, assignee_contact_id = ?, updated_at = ?, resolved_at = ?
+			assignee_user_id = ?, assignee_contact_id = ?, updated_at = ?, resolved_at = ?, discarded_at = ?
 		WHERE id = ? AND organisation_id = ?
 	`, row.Title, row.CurrentPositionNote, row.Status, assigneeUser, assigneeContact,
-		formatRFC3339(row.UpdatedAt.UTC()), nullTimeStr(row.ResolvedAt), row.ID.String(), row.OrganisationID.String())
+		formatRFC3339(row.UpdatedAt.UTC()), nullTimeStr(row.ResolvedAt), nullTimeStr(row.DiscardedAt), row.ID.String(), row.OrganisationID.String())
 	if err != nil {
 		return err
 	}
@@ -191,8 +191,8 @@ func (r *Repository) FindIssueIDByManualItem(ctx context.Context, manualItemID u
 
 func scanIssueRow(s rowScanner) (*driven.IssueRow, error) {
 	var idStr, orgStr, projStr, title, note, status, createdAt, updatedAt string
-	var assigneeUser, assigneeContact, resolvedAt sql.NullString
-	if err := s.Scan(&idStr, &orgStr, &projStr, &title, &note, &status, &assigneeUser, &assigneeContact, &createdAt, &updatedAt, &resolvedAt); err != nil {
+	var assigneeUser, assigneeContact, resolvedAt, discardedAt sql.NullString
+	if err := s.Scan(&idStr, &orgStr, &projStr, &title, &note, &status, &assigneeUser, &assigneeContact, &createdAt, &updatedAt, &resolvedAt, &discardedAt); err != nil {
 		return nil, err
 	}
 	id, err := uuid.Parse(idStr)
@@ -239,6 +239,13 @@ func scanIssueRow(s rowScanner) (*driven.IssueRow, error) {
 			return nil, err
 		}
 		row.ResolvedAt = &t
+	}
+	if discardedAt.Valid && discardedAt.String != "" {
+		t, err := parseTime(discardedAt.String)
+		if err != nil {
+			return nil, err
+		}
+		row.DiscardedAt = &t
 	}
 	return row, nil
 }

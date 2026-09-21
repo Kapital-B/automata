@@ -64,6 +64,7 @@ type CandidateView struct {
 	Kind                string
 	SubjectKey          string
 	Label               string
+	Title               string
 	Value               any
 	Unit                string
 	Statement           string
@@ -84,6 +85,7 @@ type interpretCandidate struct {
 	Kind                string          `json:"kind"`
 	SubjectKey          string          `json:"subject_key"`
 	Label               string          `json:"label"`
+	Title               string          `json:"title"`
 	Value               json.RawMessage `json:"value"`
 	Unit                string          `json:"unit"`
 	Statement           string          `json:"statement"`
@@ -462,7 +464,7 @@ func (s *Service) buildView(ctx context.Context, row driven.InterpretationRow) (
 			_ = json.Unmarshal(c.Value, &value)
 		}
 		cands = append(cands, CandidateView{
-			Kind: c.Kind, SubjectKey: c.SubjectKey, Label: c.Label, Value: value,
+			Kind: c.Kind, SubjectKey: c.SubjectKey, Label: c.Label, Title: c.Title, Value: value,
 			Unit: c.Unit, Statement: c.Statement, MessageIDs: c.MessageIDs,
 			ManualItemIDs: c.ManualItemIDs, ConnectorMessageIDs: c.ConnectorMessageIDs,
 			Confidence: c.Confidence, Reason: c.Reason,
@@ -473,11 +475,17 @@ func (s *Service) buildView(ctx context.Context, row driven.InterpretationRow) (
 
 func buildInterpretPrompt(projectID uuid.UUID, name, code string, items []interpretItem, activeFacts []string) string {
 	var b strings.Builder
-	b.WriteString("Extract durable project fact and decision candidates from the correspondence below. ")
+	b.WriteString("Extract durable project candidates from the correspondence below. ")
 	b.WriteString("Respond with a single JSON object only: ")
-	b.WriteString(`{"schema_version":1,"project_id":"` + projectID.String() + `","candidates":[{"kind":"fact|decision","subject_key":"a.b.c","label":"...","value":...,"unit":"","statement":"","message_ids":[],"manual_item_ids":[],"connector_message_ids":[],"confidence":0..1,"reason":"..."}]}. `)
-	b.WriteString("subject_key must be lowercase dotted (e.g. pump.p03.duty_kw). Only use message_ids/manual_item_ids/connector_message_ids from the list. ")
-	b.WriteString("Prefer facts for measurable assertions and decisions for approvals/proceed-with language. ")
+	b.WriteString(`{"schema_version":1,"project_id":"` + projectID.String() + `","candidates":[{"kind":"fact|decision|issue","subject_key":"a.b.c","label":"...","title":"...","value":...,"unit":"","statement":"","message_ids":[],"manual_item_ids":[],"connector_message_ids":[],"confidence":0..1,"reason":"..."}]}. `)
+	// The three kinds are the distinction operators also find unclear, so the
+	// prompt states it plainly rather than relying on the field names.
+	b.WriteString("There are three kinds. ")
+	b.WriteString(`A "fact" is a value that is currently true (subject_key lowercase dotted like pump.p03.duty_kw, plus label, value and optional unit). `)
+	b.WriteString(`A "decision" is a choice that was made (statement, e.g. approvals or proceed-with language). `)
+	b.WriteString(`An "issue" is an open question or piece of work that someone must act on (title, plus statement as an opening note). `)
+	b.WriteString("A problem still being discussed is an issue, not a fact. A settled number is a fact, not an issue. ")
+	b.WriteString("Only use message_ids/manual_item_ids/connector_message_ids from the list. ")
 	b.WriteString("If nothing durable, return an empty candidates array.\n\n")
 	b.WriteString("Project: " + name + " (" + code + ")\n")
 	if len(activeFacts) > 0 {
@@ -510,7 +518,7 @@ func (s *Service) callInterpretLLM(ctx context.Context, prompt string) (*interpr
 		return &out, nil
 	}
 	resp, err := s.LLM.ChatCompletion(ctx, []driven.LLMMessage{
-		{Role: "system", Content: "You extract project facts and decisions from correspondence. Return JSON only."},
+		{Role: "system", Content: "You extract project facts, decisions and issues from correspondence. Return JSON only."},
 		{Role: "user", Content: prompt},
 	})
 	if err != nil {

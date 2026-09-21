@@ -383,6 +383,9 @@ func issueJSON(v appissues.IssueView, withItems bool) map[string]any {
 		"created_at":            iss.CreatedAt.UTC().Format(time.RFC3339Nano),
 		"updated_at":            iss.UpdatedAt.UTC().Format(time.RFC3339Nano),
 	}
+	if iss.DiscardedAt != nil {
+		out["discarded_at"] = iss.DiscardedAt.UTC().Format(time.RFC3339Nano)
+	}
 	if iss.AssigneeUserID != nil {
 		out["assignee_user_id"] = iss.AssigneeUserID.String()
 	}
@@ -423,4 +426,33 @@ func issueJSON(v appissues.IssueView, withItems bool) map[string]any {
 		out["items"] = items
 	}
 	return out
+}
+
+// discardIssue marks an extracted issue as one that should not have been
+// raised, as distinct from resolving work that is done.
+func (h *Handlers) discardIssue(w http.ResponseWriter, r *http.Request) {
+	uid, ok := UserIDFromContext(r.Context())
+	if !ok || uid == uuid.Nil {
+		writeJSON(w, http.StatusUnauthorized, map[string]string{"error": "unauthorized"})
+		return
+	}
+	if h.IssueSvc == nil {
+		writeJSON(w, http.StatusServiceUnavailable, map[string]string{"error": "issues not configured"})
+		return
+	}
+	id, err := uuid.Parse(chi.URLParam(r, "id"))
+	if err != nil {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "bad id"})
+		return
+	}
+	view, err := h.IssueSvc.Discard(r.Context(), uid, id)
+	if err != nil {
+		if errors.Is(err, appissues.ErrNotFound) {
+			writeJSON(w, http.StatusNotFound, map[string]string{"error": "not found"})
+			return
+		}
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": err.Error()})
+		return
+	}
+	writeJSON(w, http.StatusOK, issueJSON(*view, true))
 }

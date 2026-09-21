@@ -732,6 +732,9 @@ type IssueRow struct {
 	// ResolvedAt is when the issue was resolved. Nil on rows written before
 	// the column existed; readers fall back to UpdatedAt.
 	ResolvedAt *time.Time
+	// DiscardedAt marks an issue that should never have been raised, as
+	// opposed to one whose work is done.
+	DiscardedAt *time.Time
 }
 
 // IssueItemRow links correspondence to an issue.

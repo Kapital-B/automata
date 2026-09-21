@@ -159,6 +159,7 @@ func (h *Handlers) Routes() http.Handler {
 	r.Post("/api/projects/{id}/issues", h.createProjectIssue)
 	r.Get("/api/issues/{id}", h.getIssue)
 	r.Patch("/api/issues/{id}", h.updateIssue)
+	r.Post("/api/issues/{id}/discard", h.discardIssue)
 	r.Post("/api/issues/{id}/items", h.addIssueItem)
 	r.Delete("/api/issues/{id}/items/{itemID}", h.removeIssueItem)
 	r.Get("/api/unassigned/summary", h.unassignedSummary)

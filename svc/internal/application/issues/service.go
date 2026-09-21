@@ -417,3 +417,30 @@ func (s *Service) enrichTrailItem(ctx context.Context, userID, orgID uuid.UUID, 
 	}
 	return out
 }
+
+// Discard marks an issue as one that should never have been raised.
+//
+// Distinct from resolving, which means the work is done. Keeping them separate
+// preserves the signal for whether extraction is proposing useful issues.
+func (s *Service) Discard(ctx context.Context, userID, issueID uuid.UUID) (*IssueView, error) {
+	orgID, err := s.homeOrg(ctx, userID)
+	if err != nil {
+		return nil, err
+	}
+	row, err := s.Issues.GetIssue(ctx, orgID, issueID)
+	if err != nil {
+		return nil, err
+	}
+	if row == nil {
+		return nil, ErrNotFound
+	}
+	if row.DiscardedAt == nil {
+		now := time.Now().UTC()
+		row.DiscardedAt = &now
+		row.UpdatedAt = now
+		if err := s.Issues.UpdateIssue(ctx, *row); err != nil {
+			return nil, err
+		}
+	}
+	return s.Get(ctx, userID, issueID)
+}

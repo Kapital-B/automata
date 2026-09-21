@@ -371,6 +371,8 @@ func (r *Runtime) buildServices(ctx context.Context) error {
 		Facts:           factSvc,
 		Decisions:       decisionSvc,
 		Contradictions:  repo,
+		Issues:          issueSvc,
+		IssuesRepo:      repo,
 		JobRuns:         jobRuns,
 	}
 	attentionSvc := &appattention.Service{
