@@ -1736,4 +1736,36 @@ func runExtractionDebounceTests(t *testing.T, factory Factory) {
 		}
 	})
 
+	t.Run("extraction_watermark_is_readable_on_the_project", func(t *testing.T) {
+		h := factory(t)
+		ctx := context.Background()
+		now := time.Now().UTC().Truncate(time.Second)
+		userID, orgID, _ := seedUserAccount(t, h.Repo, uuid.New(), now)
+		projectID := createProject(t, h.Repo, orgID, userID, "DC54", "Watermark")
+
+		// The UI reports "reviewed N minutes ago" from this, so the watermark
+		// has to survive the round trip, not just drive the due query.
+		before, err := h.Repo.GetProject(ctx, orgID, projectID)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if before.LastExtractedAt != nil {
+			t.Errorf("a project that never ran reports %v, want nil", before.LastExtractedAt)
+		}
+
+		if err := h.Repo.MarkProjectExtracted(ctx, projectID, now); err != nil {
+			t.Fatal(err)
+		}
+		after, err := h.Repo.GetProject(ctx, orgID, projectID)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if after.LastExtractedAt == nil {
+			t.Fatal("watermark did not survive the round trip")
+		}
+		if got := after.LastExtractedAt.UTC(); !got.Equal(now) {
+			t.Errorf("watermark is %s, want %s", got, now)
+		}
+	})
+
 }

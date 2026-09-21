@@ -132,6 +132,7 @@ func (h *Handlers) Routes() http.Handler {
 	r.Get("/api/projects/{id}/current-position", h.getProjectCurrentPosition)
 	r.Get("/api/projects/{id}/facts", h.listProjectFacts)
 	r.Post("/api/projects/{id}/facts", h.createProjectFact)
+	r.Post("/api/projects/{id}/extract", h.extractProject)
 	r.Post("/api/projects/{id}/interpret", h.interpretProject)
 	r.Get("/api/projects/{id}/interpretations", h.listProjectInterpretations)
 	r.Post("/api/interpretations/{id}/dismiss", h.dismissInterpretation)
