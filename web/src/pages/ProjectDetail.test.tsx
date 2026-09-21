@@ -33,7 +33,6 @@ vi.mock("@/lib/auth", async () => {
     listContacts: vi.fn(),
     listProjectIssues: vi.fn(),
     createProjectIssue: vi.fn(),
-    suggestProjectIssue: vi.fn(),
     discardIssue: vi.fn(),
     getApiHealth: vi.fn(),
     addIssueItem: vi.fn(),
@@ -62,7 +61,6 @@ const createManualItem = vi.mocked(auth.createManualItem);
 const listContacts = vi.mocked(auth.listContacts);
 const listProjectIssues = vi.mocked(auth.listProjectIssues);
 const createProjectIssue = vi.mocked(auth.createProjectIssue);
-const suggestProjectIssue = vi.mocked(auth.suggestProjectIssue);
 const discardIssue = vi.mocked(auth.discardIssue);
 const getApiHealth = vi.mocked(auth.getApiHealth);
 const addIssueItem = vi.mocked(auth.addIssueItem);
@@ -143,12 +141,6 @@ describe("Project workspace UI", () => {
     });
     getApiHealth.mockResolvedValue({ status: "ok", llm: true });
     askProject.mockResolvedValue({ answer: "", citations: [], confidence: 0 });
-    suggestProjectIssue.mockResolvedValue({
-      title: "Pump P-03",
-      item_refs: [{ manual_item_id: "man1" }],
-      confidence: 0.9,
-      reason: "mentions P-03",
-    });
     getProject.mockResolvedValue({
       id: "p1",
       organisation_id: "o1",
@@ -183,25 +175,6 @@ describe("Project workspace UI", () => {
     ]);
   });
 
-  it("suggests an issue and creates with item refs on confirm", async () => {
-    createProjectIssue.mockResolvedValue(issueDetail());
-    renderPage(newClient());
-
-    expect(await screen.findByText("Cooling Upgrade")).toBeInTheDocument();
-    selectMode(/^Open$/i);
-    fireEvent.click(screen.getByRole("button", { name: /suggest issue/i }));
-    await waitFor(() => expect(suggestProjectIssue).toHaveBeenCalledWith("token", "p1"));
-    expect(await screen.findByDisplayValue("Pump P-03")).toBeInTheDocument();
-    fireEvent.click(screen.getByRole("button", { name: /^create$/i }));
-    await waitFor(() =>
-      expect(createProjectIssue).toHaveBeenCalledWith("token", "p1", {
-        title: "Pump P-03",
-        current_position_note: undefined,
-        item_refs: [{ manual_item_id: "man1" }],
-      }),
-    );
-  });
-
   it("creates an issue from the project page", async () => {
     createProjectIssue.mockResolvedValue(issueDetail());
     renderPage(newClient());
@@ -218,6 +191,23 @@ describe("Project workspace UI", () => {
         title: "Pump P-03",
         current_position_note: undefined,
         item_refs: undefined,
+      }),
+    );
+  });
+
+  it("creates an issue from a timeline row with that row pre-attached", async () => {
+    createProjectIssue.mockResolvedValue(issueDetail());
+    renderPage(newClient());
+
+    expect(await screen.findByText("Teams note")).toBeInTheDocument();
+    fireEvent.click(screen.getAllByRole("button", { name: /^new issue…$/i })[0]!);
+    expect(await screen.findByText(/pre-attached from timeline/i)).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: /^create$/i }));
+    await waitFor(() =>
+      expect(createProjectIssue).toHaveBeenCalledWith("token", "p1", {
+        title: "Teams note",
+        current_position_note: undefined,
+        item_refs: [{ manual_item_id: "man1" }],
       }),
     );
   });

@@ -12,9 +12,6 @@ export function OpenMode({
   issues,
   issuesLoading,
   projectID,
-  llmEnabled,
-  suggesting,
-  onSuggestIssue,
   onNewIssue,
   onDiscard,
   discarding,
@@ -24,9 +21,6 @@ export function OpenMode({
   issues: IssueListItem[];
   issuesLoading: boolean;
   projectID: string;
-  llmEnabled: boolean;
-  suggesting: boolean;
-  onSuggestIssue: () => void;
   onNewIssue: () => void;
   onDiscard: (issueID: string) => void;
   discarding: boolean;
@@ -36,19 +30,6 @@ export function OpenMode({
       <div className="flex flex-wrap gap-2">
         <Button variant="outline" size="sm" onClick={onNewIssue}>
           New issue
-        </Button>
-        <Button
-          variant="outline"
-          size="sm"
-          disabled={!llmEnabled || suggesting}
-          title={
-            llmEnabled
-              ? "Propose an issue from unassigned correspondence"
-              : "Configure LLM_BASE_URL and LLM_MODEL on the API to enable suggestions"
-          }
-          onClick={onSuggestIssue}
-        >
-          {suggesting ? "Suggesting…" : llmEnabled ? "Suggest issue" : "Suggest (LLM off)"}
         </Button>
       </div>
 
