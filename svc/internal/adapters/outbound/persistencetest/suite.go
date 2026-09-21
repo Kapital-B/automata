@@ -1036,6 +1036,115 @@ func runHomeOverviewTimestampTests(t *testing.T, factory Factory) {
 			t.Error("updated_at should have moved past resolved_at, which is why updated_at cannot date the resolution")
 		}
 	})
+
+	t.Run("issue_source_round_trips_and_defaults_empty", func(t *testing.T) {
+		h := factory(t)
+		ctx := context.Background()
+		now := time.Now().UTC()
+		userID, orgID, _ := seedUserAccount(t, h.Repo, uuid.New(), now)
+		projectID := createProject(t, h.Repo, orgID, userID, "DC12", "Provenance")
+
+		extracted := uuid.New()
+		if err := h.Repo.CreateIssue(ctx, driven.IssueRow{
+			ID: extracted, OrganisationID: orgID, ProjectID: projectID, Title: "Seal leak",
+			Status: "open", Source: "llm", CreatedAt: now, UpdatedAt: now,
+		}); err != nil {
+			t.Fatal(err)
+		}
+		// A row written before the column existed reads as empty, not as an
+		// error, so the API can default it to human.
+		legacy := uuid.New()
+		if err := h.Repo.CreateIssue(ctx, driven.IssueRow{
+			ID: legacy, OrganisationID: orgID, ProjectID: projectID, Title: "Raised by hand",
+			Status: "open", CreatedAt: now, UpdatedAt: now,
+		}); err != nil {
+			t.Fatal(err)
+		}
+
+		got, err := h.Repo.GetIssue(ctx, orgID, extracted)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if got.Source != "llm" {
+			t.Errorf("source = %q, want llm", got.Source)
+		}
+		old, err := h.Repo.GetIssue(ctx, orgID, legacy)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if old.Source != "" {
+			t.Errorf("source = %q, want empty", old.Source)
+		}
+
+		// Source survives an unrelated edit.
+		got.Title = "Seal leak (renamed)"
+		got.UpdatedAt = now.Add(time.Hour)
+		if err := h.Repo.UpdateIssue(ctx, *got); err != nil {
+			t.Fatal(err)
+		}
+		after, err := h.Repo.GetIssue(ctx, orgID, extracted)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if after.Source != "llm" {
+			t.Errorf("source = %q after edit, want llm", after.Source)
+		}
+	})
+
+	t.Run("issue_item_counts_resolve_per_project_in_one_query", func(t *testing.T) {
+		h := factory(t)
+		ctx := context.Background()
+		now := time.Now().UTC()
+		userID, orgID, _ := seedUserAccount(t, h.Repo, uuid.New(), now)
+		projectID := createProject(t, h.Repo, orgID, userID, "DC13", "Counts")
+		otherProjectID := createProject(t, h.Repo, orgID, userID, "DC14", "Other")
+
+		withEvidence := uuid.New()
+		withoutEvidence := uuid.New()
+		elsewhere := uuid.New()
+		for id, pid := range map[uuid.UUID]uuid.UUID{
+			withEvidence: projectID, withoutEvidence: projectID, elsewhere: otherProjectID,
+		} {
+			if err := h.Repo.CreateIssue(ctx, driven.IssueRow{
+				ID: id, OrganisationID: orgID, ProjectID: pid, Title: "Issue",
+				Status: "open", CreatedAt: now, UpdatedAt: now,
+			}); err != nil {
+				t.Fatal(err)
+			}
+		}
+		for i := 0; i < 2; i++ {
+			manualID := uuid.New()
+			if err := h.Repo.CreateManualItem(ctx, driven.ManualItemRow{
+				ID: manualID, OrganisationID: orgID, Channel: "note", OccurredAt: now,
+				Title: "Note", BodyText: "text", ProjectID: &projectID,
+				AssignmentStatus: "committed", CreatedByUserID: userID, CreatedAt: now,
+			}); err != nil {
+				t.Fatal(err)
+			}
+			if err := h.Repo.AddIssueItem(ctx, driven.IssueItemRow{
+				ID: uuid.New(), IssueID: withEvidence, ManualItemID: &manualID, AddedAt: now,
+			}); err != nil {
+				t.Fatal(err)
+			}
+		}
+
+		counts, err := h.Repo.CountIssueItemsByProject(ctx, orgID, projectID)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if counts[withEvidence] != 2 {
+			t.Errorf("count = %d, want 2", counts[withEvidence])
+		}
+		// An issue with no evidence is absent rather than zero; callers read
+		// the zero value from the map.
+		if _, ok := counts[withoutEvidence]; ok {
+			t.Error("an issue with no evidence should not appear in the counts")
+		}
+		// Scoped to the project, so another project's issues cannot inflate it.
+		if _, ok := counts[elsewhere]; ok {
+			t.Error("counts must not reach outside the project")
+		}
+	})
 }
 
 // runActivityFeedTests covers the cross-project Home feed.

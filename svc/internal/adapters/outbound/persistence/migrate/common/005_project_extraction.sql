@@ -10,3 +10,11 @@ ALTER TABLE projects ADD COLUMN IF NOT EXISTS last_extracted_at TIMESTAMPTZ;
 -- signal for whether extraction is useful. Additive rather than widening the
 -- status CHECK, which is unnamed and cannot be safely dropped on DSQL.
 ALTER TABLE issues ADD COLUMN IF NOT EXISTS discarded_at TIMESTAMPTZ;
+
+-- Issue provenance (addendum-project-renovation.md §8.3).
+-- Extraction now creates issues without an operator, so "where did this come
+-- from?" is the first question the project page has to answer. Left free of a
+-- CHECK for the same reason as discarded_at. NULL means a row written before
+-- extraction existed, all of which were created by hand, so readers treat it
+-- as 'human'.
+ALTER TABLE issues ADD COLUMN IF NOT EXISTS source TEXT;

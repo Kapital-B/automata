@@ -254,6 +254,7 @@ func (s *Service) reconcileIssueCandidate(ctx context.Context, userID, orgID, pr
 		Title:               title,
 		CurrentPositionNote: strings.TrimSpace(c.Statement),
 		ItemRefs:            refs,
+		Source:              string(domainissues.SourceLLM),
 	})
 	if err != nil {
 		return CandidateOutcome{}, err

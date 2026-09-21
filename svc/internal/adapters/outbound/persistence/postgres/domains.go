@@ -1582,15 +1582,15 @@ func snippetText(s string, max int) string {
 
 func (r *Repository) CreateIssue(ctx context.Context, row driven.IssueRow) error {
 	_, err := r.execContext(ctx, `
-		INSERT INTO issues (id, organisation_id, project_id, title, current_position_note, status, assignee_user_id, assignee_contact_id, created_at, updated_at, resolved_at, discarded_at)
-		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-	`, row.ID.String(), row.OrganisationID.String(), row.ProjectID.String(), row.Title, row.CurrentPositionNote, row.Status, nullUUID(row.AssigneeUserID), nullUUID(row.AssigneeContactID), row.CreatedAt.UTC(), row.UpdatedAt.UTC(), nullTime(row.ResolvedAt), nullTime(row.DiscardedAt))
+		INSERT INTO issues (id, organisation_id, project_id, title, current_position_note, status, assignee_user_id, assignee_contact_id, created_at, updated_at, resolved_at, discarded_at, source)
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+	`, row.ID.String(), row.OrganisationID.String(), row.ProjectID.String(), row.Title, row.CurrentPositionNote, row.Status, nullUUID(row.AssigneeUserID), nullUUID(row.AssigneeContactID), row.CreatedAt.UTC(), row.UpdatedAt.UTC(), nullTime(row.ResolvedAt), nullTime(row.DiscardedAt), row.Source)
 	return err
 }
 
 func (r *Repository) GetIssue(ctx context.Context, organisationID, issueID uuid.UUID) (*driven.IssueRow, error) {
 	row := r.queryRowContext(ctx, `
-		SELECT id, organisation_id, project_id, title, current_position_note, status, assignee_user_id, assignee_contact_id, created_at, updated_at, resolved_at, discarded_at
+		SELECT id, organisation_id, project_id, title, current_position_note, status, assignee_user_id, assignee_contact_id, created_at, updated_at, resolved_at, discarded_at, source
 		FROM issues WHERE id = ? AND organisation_id = ?
 	`, issueID.String(), organisationID.String())
 	item, err := scanIssueRow(row)
@@ -1602,7 +1602,7 @@ func (r *Repository) GetIssue(ctx context.Context, organisationID, issueID uuid.
 
 func (r *Repository) ListIssuesByProject(ctx context.Context, organisationID, projectID uuid.UUID) ([]driven.IssueRow, error) {
 	rows, err := r.queryContext(ctx, `
-		SELECT id, organisation_id, project_id, title, current_position_note, status, assignee_user_id, assignee_contact_id, created_at, updated_at, resolved_at, discarded_at
+		SELECT id, organisation_id, project_id, title, current_position_note, status, assignee_user_id, assignee_contact_id, created_at, updated_at, resolved_at, discarded_at, source
 		FROM issues WHERE organisation_id = ? AND project_id = ?
 		ORDER BY updated_at DESC
 	`, organisationID.String(), projectID.String())
@@ -1623,9 +1623,9 @@ func (r *Repository) ListIssuesByProject(ctx context.Context, organisationID, pr
 
 func (r *Repository) UpdateIssue(ctx context.Context, row driven.IssueRow) error {
 	res, err := r.execContext(ctx, `
-		UPDATE issues SET title = ?, current_position_note = ?, status = ?, assignee_user_id = ?, assignee_contact_id = ?, updated_at = ?, resolved_at = ?, discarded_at = ?
+		UPDATE issues SET title = ?, current_position_note = ?, status = ?, assignee_user_id = ?, assignee_contact_id = ?, updated_at = ?, resolved_at = ?, discarded_at = ?, source = ?
 		WHERE id = ? AND organisation_id = ?
-	`, row.Title, row.CurrentPositionNote, row.Status, nullUUID(row.AssigneeUserID), nullUUID(row.AssigneeContactID), row.UpdatedAt.UTC(), nullTime(row.ResolvedAt), nullTime(row.DiscardedAt), row.ID.String(), row.OrganisationID.String())
+	`, row.Title, row.CurrentPositionNote, row.Status, nullUUID(row.AssigneeUserID), nullUUID(row.AssigneeContactID), row.UpdatedAt.UTC(), nullTime(row.ResolvedAt), nullTime(row.DiscardedAt), row.Source, row.ID.String(), row.OrganisationID.String())
 	if err != nil {
 		return err
 	}
@@ -1694,6 +1694,34 @@ func (r *Repository) ListIssueItems(ctx context.Context, issueID uuid.UUID) ([]d
 	return out, rows.Err()
 }
 
+func (r *Repository) CountIssueItemsByProject(ctx context.Context, organisationID, projectID uuid.UUID) (map[uuid.UUID]int, error) {
+	rows, err := r.queryContext(ctx, `
+		SELECT ii.issue_id, COUNT(*)
+		FROM issue_items ii
+		INNER JOIN issues i ON i.id = ii.issue_id
+		WHERE i.organisation_id = ? AND i.project_id = ?
+		GROUP BY ii.issue_id
+	`, organisationID.String(), projectID.String())
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	out := make(map[uuid.UUID]int)
+	for rows.Next() {
+		var idStr string
+		var n int
+		if err := rows.Scan(&idStr, &n); err != nil {
+			return nil, err
+		}
+		id, err := uuid.Parse(idStr)
+		if err != nil {
+			return nil, err
+		}
+		out[id] = n
+	}
+	return out, rows.Err()
+}
+
 func (r *Repository) FindIssueIDByMessage(ctx context.Context, messageID uuid.UUID) (*uuid.UUID, error) {
 	var idStr string
 	err := r.queryRowContext(ctx, `SELECT issue_id FROM issue_items WHERE message_id = ?`, messageID.String()).Scan(&idStr)
@@ -1731,7 +1759,8 @@ func scanIssueRow(s rowScanner) (*driven.IssueRow, error) {
 	var assigneeUser, assigneeContact sql.NullString
 	var createdAt, updatedAt time.Time
 	var resolvedAt, discardedAt sql.NullTime
-	if err := s.Scan(&idStr, &orgStr, &projectStr, &title, &note, &status, &assigneeUser, &assigneeContact, &createdAt, &updatedAt, &resolvedAt, &discardedAt); err != nil {
+	var source sql.NullString
+	if err := s.Scan(&idStr, &orgStr, &projectStr, &title, &note, &status, &assigneeUser, &assigneeContact, &createdAt, &updatedAt, &resolvedAt, &discardedAt, &source); err != nil {
 		return nil, err
 	}
 	id, _ := uuid.Parse(idStr)
@@ -1747,6 +1776,7 @@ func scanIssueRow(s rowScanner) (*driven.IssueRow, error) {
 	row.AssigneeContactID = contactID
 	row.ResolvedAt = nullTimePtr(resolvedAt)
 	row.DiscardedAt = nullTimePtr(discardedAt)
+	row.Source = source.String
 	return row, nil
 }
 
