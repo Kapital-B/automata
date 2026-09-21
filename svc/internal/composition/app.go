@@ -3,6 +3,7 @@ package composition
 import (
 	"context"
 	"database/sql"
+	"errors"
 	"fmt"
 	"log/slog"
 	"net/http"
@@ -344,15 +345,23 @@ func (r *Runtime) buildServices(ctx context.Context) error {
 		Connectors:      repo,
 		JobRuns:         jobRuns,
 	}
+	// Extraction runs as a job chain, not inline. Interpret produces candidates
+	// and reconcile applies them; running only the first half is why nothing
+	// ever became a fact. Keeping it off the request path also stops assignment
+	// latency from including an LLM call.
 	projectSvc.AfterProjectCorrespondence = func(ctx context.Context, userID, projectID uuid.UUID, messageID, manualItemID *uuid.UUID) {
-		in := appinterpret.RunInput{Trigger: "api"}
-		if messageID != nil {
-			in.MessageIDs = []uuid.UUID{*messageID}
+		if r.Enqueuer == nil {
+			return
 		}
-		if manualItemID != nil {
-			in.ManualItemIDs = []uuid.UUID{*manualItemID}
+		pid := projectID
+		_, err := r.Enqueuer.EnqueueChain(ctx, userID, nil, driven.JobTriggerAPI,
+			[]string{appjobs.TypeInterpretProject, appjobs.TypeReconcileProject},
+			driven.JobPayload{ProjectID: &pid}, nil, nil)
+		// A held lock means extraction is already queued or running for this
+		// project: the coalescing working as intended, not a failure.
+		if err != nil && !errors.Is(err, driven.ErrJobLockHeld) && !errors.Is(err, driven.ErrJobConflict) {
+			r.Log.Error("enqueue project extraction", "err", err, "project_id", pid)
 		}
-		interpretSvc.TryRunBestEffort(ctx, userID, projectID, in)
 	}
 	reconcileSvc := &appreconcile.Service{
 		Users:           repo,

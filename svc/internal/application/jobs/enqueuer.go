@@ -65,9 +65,14 @@ func (e *Enqueuer) Enqueue(ctx context.Context, in driven.CreateJobInput) (*driv
 			in.LockScope = def.LockScope
 		}
 		if in.LockKey == "" {
-			if def.LockScope == "connector" && in.Payload.ConnectorAccountID != nil {
+			switch {
+			case def.LockScope == "connector" && in.Payload.ConnectorAccountID != nil:
 				in.LockKey = in.Payload.ConnectorAccountID.String()
-			} else if in.AccountID != nil {
+			case def.LockScope == "project" && in.Payload.ProjectID != nil:
+				// One extraction per project at a time, so a burst of
+				// assignments coalesces into a single run.
+				in.LockKey = in.Payload.ProjectID.String()
+			case in.AccountID != nil:
 				in.LockKey = in.AccountID.String()
 			}
 		}

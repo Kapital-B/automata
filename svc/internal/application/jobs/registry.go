@@ -122,7 +122,7 @@ func DefaultRegistry() *Registry {
 		{Type: TypeForwardRules, Mode: ModeStreamed, MaxChunk: 10, CursorKind: CursorMessageKeyset, RetryClass: RetryEffect, EffectPolicy: EffectAtMostOnce, Description: "≤10 candidates, at-most-once", Aliases: []string{"forward", "forward_rule"}},
 		{Type: TypeResolveContacts, Mode: ModeStreamed, MaxChunk: 100, CursorKind: CursorMessageKeyset, RetryClass: RetryTransient, EffectPolicy: EffectNone, Description: "≤100 messages"},
 		{Type: TypeAssignProjects, Mode: ModeStreamed, MaxChunk: 25, CursorKind: CursorMessageKeyset, RetryClass: RetryTransient, EffectPolicy: EffectNone, Description: "≤25 messages"},
-		{Type: TypeInterpretProject, Mode: ModeStreamed, MaxChunk: 40, CursorKind: CursorNone, RetryClass: RetryTransient, EffectPolicy: EffectNone, Description: "one project, one LLM call"},
+		{Type: TypeInterpretProject, Mode: ModeStreamed, MaxChunk: 40, CursorKind: CursorNone, RetryClass: RetryTransient, EffectPolicy: EffectNone, RequiresLock: true, LockScope: "project", Description: "one project, one LLM call"},
 		{Type: TypeReconcileProject, Mode: ModeStreamed, MaxChunk: 100, CursorKind: CursorMessageKeyset, RetryClass: RetryTransient, EffectPolicy: EffectNone, Description: "≤100 candidates"},
 		{Type: TypeProjectAI, Mode: ModeSync, MaxChunk: 8, CursorKind: CursorNone, RetryClass: RetryTransient, EffectPolicy: EffectNone, Description: "sync audit, ≤8 projects"},
 	}

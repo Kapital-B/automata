@@ -281,15 +281,6 @@ func (s *Service) Run(ctx context.Context, userID, projectID uuid.UUID, in RunIn
 	return s.buildView(ctx, row)
 }
 
-// TryRunBestEffort runs interpret when LLM is available; swallows all errors.
-func (s *Service) TryRunBestEffort(ctx context.Context, userID, projectID uuid.UUID, in RunInput) {
-	if s == nil || !s.HasLLM() {
-		return
-	}
-	in.Trigger = "api"
-	_, _ = s.Run(ctx, userID, projectID, in)
-}
-
 func (s *Service) resolveItems(ctx context.Context, userID, orgID, projectID uuid.UUID, in RunInput) ([]interpretItem, *uuid.UUID, error) {
 	explicit := len(in.MessageIDs) > 0 || len(in.ManualItemIDs) > 0 || len(in.ConnectorMessageIDs) > 0
 	items := make([]interpretItem, 0)
