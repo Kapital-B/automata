@@ -24,7 +24,6 @@ import {
   getProject,
   rejectFactVersion,
   resolveContradiction,
-  suggestProjectIssue,
   updateProject,
   updateProjectMember,
   withdrawDecision,
@@ -94,7 +93,7 @@ export default function ProjectDetailPage() {
   const [pendingItemRefs, setPendingItemRefs] = useState<
     { message_id?: string; manual_item_id?: string }[]
   >([]);
-  const [suggestMeta, setSuggestMeta] = useState<string | null>(null);
+  const [issueDialogHint, setIssueDialogHint] = useState<string | null>(null);
   const [createFactOpen, setCreateFactOpen] = useState(false);
   const [factSubjectKey, setFactSubjectKey] = useState("pump.p03.duty_kw");
   const [factLabel, setFactLabel] = useState("");
@@ -147,35 +146,11 @@ export default function ProjectDetailPage() {
       setNewIssueTitle("");
       setNewIssueNote("");
       setPendingItemRefs([]);
-      setSuggestMeta(null);
+      setIssueDialogHint(null);
       await queryClient.invalidateQueries({ queryKey: ["project-issues"] });
       await queryClient.invalidateQueries({ queryKey: ["project-timeline"] });
     },
     onError: failed("Could not create issue"),
-  });
-
-  const suggestIssueMutation = useMutation({
-    mutationFn: async () => {
-      if (!accessToken || !id) throw new Error("Not authenticated");
-      return suggestProjectIssue(accessToken, id);
-    },
-    onSuccess: (res) => {
-      setNewIssueTitle(res.title);
-      setPendingItemRefs(res.item_refs ?? []);
-      const conf = typeof res.confidence === "number" ? Math.round(res.confidence * 100) : null;
-      setSuggestMeta(
-        [
-          conf != null ? `${conf}% confidence` : null,
-          res.reason?.trim() || null,
-          res.item_refs?.length ? `${res.item_refs.length} item(s) pre-selected` : null,
-        ]
-          .filter(Boolean)
-          .join(" · ") || null,
-      );
-      setCreateIssueOpen(true);
-      toast({ title: "Suggestion ready", description: "Review and create to confirm." });
-    },
-    onError: failed("Suggest failed"),
   });
 
   const discardIssueMutation = useMutation({
@@ -531,7 +506,7 @@ export default function ProjectDetailPage() {
         onOpenChange={(open) => {
           setCreateIssueOpen(open);
           if (!open) {
-            setSuggestMeta(null);
+            setIssueDialogHint(null);
             setPendingItemRefs([]);
           }
         }}
@@ -544,8 +519,8 @@ export default function ProjectDetailPage() {
             </DialogDescription>
           </DialogHeader>
           <div className="space-y-3">
-            {suggestMeta ? (
-              <p className="text-xs text-muted-foreground">{suggestMeta}</p>
+            {issueDialogHint ? (
+              <p className="text-xs text-muted-foreground">{issueDialogHint}</p>
             ) : null}
             <Input
               value={newIssueTitle}
@@ -826,7 +801,7 @@ export default function ProjectDetailPage() {
           onCreateIssue={(item) => {
             setPendingItemRefs([itemRef(item)].filter((r) => r.message_id || r.manual_item_id));
             setNewIssueTitle(item.title?.trim() || "");
-            setSuggestMeta("Pre-attached from timeline");
+            setIssueDialogHint("Pre-attached from timeline");
             setCreateIssueOpen(true);
           }}
           onAddFactEvidence={(item) => {
@@ -855,9 +830,6 @@ export default function ProjectDetailPage() {
           issues={data.openIssues}
           issuesLoading={data.issuesQuery.isLoading}
           projectID={id!}
-          llmEnabled={data.llmEnabled}
-          suggesting={suggestIssueMutation.isPending}
-          onSuggestIssue={() => suggestIssueMutation.mutate()}
           onNewIssue={() => setCreateIssueOpen(true)}
           onDiscard={(issueID) => discardIssueMutation.mutate(issueID)}
           discarding={discardIssueMutation.isPending}
