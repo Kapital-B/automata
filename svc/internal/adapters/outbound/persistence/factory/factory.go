@@ -7,7 +7,8 @@ import (
 	"strings"
 	"time"
 
-	_ "github.com/jackc/pgx/v5/stdlib"
+	"github.com/jackc/pgx/v5"
+	"github.com/jackc/pgx/v5/stdlib"
 	_ "modernc.org/sqlite"
 )
 
@@ -54,23 +55,12 @@ func Open(ctx context.Context, cfg Config) (*sql.DB, error) {
 		return nil, fmt.Errorf("database url is required")
 	}
 
-	dsn := cfg.DatabaseURL
+	var db *sql.DB
 	if engine == EngineDSQL {
-		tokenized, err := withDSQLAuthToken(ctx, cfg.DatabaseURL)
-		if err != nil {
-			return nil, err
-		}
-		dsn, err = withDSQLSearchPath(tokenized)
-		if err != nil {
-			return nil, err
-		}
-		// Tokens expire after ~15m; recycle connections before that.
-		if cfg.ConnMaxLifetime <= 0 || cfg.ConnMaxLifetime >= dsqlTokenLifetime {
-			cfg.ConnMaxLifetime = 10 * time.Minute
-		}
+		db, err = openDSQL(ctx, cfg.DatabaseURL)
+	} else {
+		db, err = sql.Open(driverName, cfg.DatabaseURL)
 	}
-
-	db, err := sql.Open(driverName, dsn)
 	if err != nil {
 		return nil, err
 	}
@@ -105,6 +95,35 @@ func Open(ctx context.Context, cfg Config) (*sql.DB, error) {
 		}
 	}
 	return db, nil
+}
+
+// openDSQL builds a pool that signs a fresh IAM auth token for every physical
+// connection. The token must not live in the DSN: it expires in ~15 minutes,
+// and database/sql reuses one DSN for the life of the process, so a frozen
+// token means every connection opened after it expires is refused.
+func openDSQL(ctx context.Context, databaseURL string) (*sql.DB, error) {
+	dsn, err := dsqlDSN(databaseURL)
+	if err != nil {
+		return nil, err
+	}
+	authn, err := newDSQLAuthenticator(ctx, databaseURL)
+	if err != nil {
+		return nil, err
+	}
+	connConfig, err := pgx.ParseConfig(dsn)
+	if err != nil {
+		return nil, fmt.Errorf("parse dsql dsn: %w", err)
+	}
+	return stdlib.OpenDB(*connConfig, stdlib.OptionBeforeConnect(
+		func(ctx context.Context, cc *pgx.ConnConfig) error {
+			token, err := authn.Token(ctx)
+			if err != nil {
+				return err
+			}
+			cc.Password = token
+			return nil
+		},
+	)), nil
 }
 
 func driverFor(engine Engine) (string, error) {
