@@ -442,6 +442,9 @@ func projectJSON(p driven.ProjectRow) map[string]any {
 	if p.ArchivedAt != nil {
 		m["archived_at"] = p.ArchivedAt.UTC().Format(time.RFC3339Nano)
 	}
+	if p.LastExtractedAt != nil {
+		m["last_extracted_at"] = p.LastExtractedAt.UTC().Format(time.RFC3339Nano)
+	}
 	return m
 }
 

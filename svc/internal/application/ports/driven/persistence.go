@@ -457,6 +457,9 @@ type ProjectRow struct {
 	ArchivedAt     *time.Time
 	CreatedAt      time.Time
 	UpdatedAt      time.Time
+	// LastExtractedAt is when extraction last succeeded for this project.
+	// Nil means it has never run.
+	LastExtractedAt *time.Time
 }
 
 // ProjectMemberRow is the operator's membership on a project.

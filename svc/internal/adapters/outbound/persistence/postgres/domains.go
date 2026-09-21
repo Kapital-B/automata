@@ -539,7 +539,7 @@ func (r *Repository) ListProjects(ctx context.Context, organisationID uuid.UUID,
 		offset = 0
 	}
 	q := `
-		SELECT id, organisation_id, name, code, description, client, keywords_json, archived_at, created_at, updated_at
+		SELECT id, organisation_id, name, code, description, client, keywords_json, archived_at, created_at, updated_at, last_extracted_at
 		FROM projects WHERE organisation_id = ?`
 	args := []any{organisationID.String()}
 	if !filter.IncludeArchived {
@@ -565,7 +565,7 @@ func (r *Repository) ListProjects(ctx context.Context, organisationID uuid.UUID,
 
 func (r *Repository) GetProject(ctx context.Context, organisationID, projectID uuid.UUID) (*driven.ProjectRow, error) {
 	row := r.queryRowContext(ctx, `
-		SELECT id, organisation_id, name, code, description, client, keywords_json, archived_at, created_at, updated_at
+		SELECT id, organisation_id, name, code, description, client, keywords_json, archived_at, created_at, updated_at, last_extracted_at
 		FROM projects WHERE id = ? AND organisation_id = ?
 	`, projectID.String(), organisationID.String())
 	p, err := scanProjectRow(row)
@@ -577,7 +577,7 @@ func (r *Repository) GetProject(ctx context.Context, organisationID, projectID u
 
 func (r *Repository) GetProjectByCode(ctx context.Context, organisationID uuid.UUID, code string) (*driven.ProjectRow, error) {
 	row := r.queryRowContext(ctx, `
-		SELECT id, organisation_id, name, code, description, client, keywords_json, archived_at, created_at, updated_at
+		SELECT id, organisation_id, name, code, description, client, keywords_json, archived_at, created_at, updated_at, last_extracted_at
 		FROM projects WHERE organisation_id = ? AND code = ?
 	`, organisationID.String(), code)
 	p, err := scanProjectRow(row)
@@ -661,9 +661,9 @@ func (r *Repository) CountProjectMembers(ctx context.Context, projectID uuid.UUI
 func scanProjectRow(s rowScanner) (*driven.ProjectRow, error) {
 	var idStr, orgStr, name, code, kwJSON string
 	var desc, client sql.NullString
-	var archived sql.NullTime
+	var archived, lastExtracted sql.NullTime
 	var createdAt, updatedAt time.Time
-	if err := s.Scan(&idStr, &orgStr, &name, &code, &desc, &client, &kwJSON, &archived, &createdAt, &updatedAt); err != nil {
+	if err := s.Scan(&idStr, &orgStr, &name, &code, &desc, &client, &kwJSON, &archived, &createdAt, &updatedAt, &lastExtracted); err != nil {
 		return nil, err
 	}
 	id, err := uuid.Parse(idStr)
@@ -693,6 +693,7 @@ func scanProjectRow(s rowScanner) (*driven.ProjectRow, error) {
 		UpdatedAt:      updatedAt.UTC(),
 	}
 	p.ArchivedAt = nullTimePtr(archived)
+	p.LastExtractedAt = nullTimePtr(lastExtracted)
 	return p, nil
 }
 
