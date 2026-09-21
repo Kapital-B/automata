@@ -112,6 +112,7 @@ func ignoreRepeatedMigrationError(err error) bool {
 		strings.Contains(msg, "duplicate column name: status") ||
 		strings.Contains(msg, "duplicate column name: sent_at") ||
 		strings.Contains(msg, "duplicate column name: discarded_at") ||
+		strings.Contains(msg, "duplicate column name: source") ||
 		strings.Contains(msg, "duplicate column name: updated_at") ||
 		strings.Contains(msg, "duplicate column name: home_organisation_id") ||
 		strings.Contains(msg, "duplicate column name: to_json") ||
@@ -747,6 +748,7 @@ func migrateIssues(db *sql.DB) error {
 			updated_at TEXT NOT NULL,
 			resolved_at TEXT,
 			discarded_at TEXT,
+			source TEXT,
 			CHECK (
 				assignee_user_id IS NULL OR assignee_contact_id IS NULL
 			)
@@ -792,6 +794,15 @@ func migrateIssues(db *sql.DB) error {
 	}
 	if !hasDiscardedAt {
 		if _, err := db.Exec(`ALTER TABLE issues ADD COLUMN discarded_at TEXT`); err != nil {
+			return err
+		}
+	}
+	hasSource, err := tableHasColumn(db, "issues", "source")
+	if err != nil {
+		return err
+	}
+	if !hasSource {
+		if _, err := db.Exec(`ALTER TABLE issues ADD COLUMN source TEXT`); err != nil {
 			return err
 		}
 	}

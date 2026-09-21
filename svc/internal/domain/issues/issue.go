@@ -18,6 +18,15 @@ func (s Status) Valid() bool {
 	}
 }
 
+// Source records who raised an issue. Extraction creates issues without an
+// operator, so the project page has to be able to say where one came from.
+type Source string
+
+const (
+	SourceHuman Source = "human"
+	SourceLLM   Source = "llm"
+)
+
 // ValidAssigneeXOR reports whether at most one of user/contact assignee is set.
 func ValidAssigneeXOR(userSet, contactSet bool) bool {
 	return !(userSet && contactSet)

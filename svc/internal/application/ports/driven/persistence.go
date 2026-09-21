@@ -738,6 +738,10 @@ type IssueRow struct {
 	// DiscardedAt marks an issue that should never have been raised, as
 	// opposed to one whose work is done.
 	DiscardedAt *time.Time
+	// Source is "llm" for an extracted issue and "human" for one a person
+	// raised. Empty on rows written before extraction existed, all of which
+	// were created by hand.
+	Source string
 }
 
 // IssueItemRow links correspondence to an issue.
@@ -759,6 +763,10 @@ type IssueRepository interface {
 	RemoveIssueItem(ctx context.Context, organisationID, issueID, itemID uuid.UUID) error
 	GetIssueItem(ctx context.Context, organisationID, itemID uuid.UUID) (*IssueItemRow, error)
 	ListIssueItems(ctx context.Context, issueID uuid.UUID) ([]IssueItemRow, error)
+	// CountIssueItemsByProject returns evidence counts keyed by issue id, in
+	// one query, so a project's issue list can show provenance without a
+	// lookup per row.
+	CountIssueItemsByProject(ctx context.Context, organisationID, projectID uuid.UUID) (map[uuid.UUID]int, error)
 	FindIssueIDByMessage(ctx context.Context, messageID uuid.UUID) (*uuid.UUID, error)
 	FindIssueIDByManualItem(ctx context.Context, manualItemID uuid.UUID) (*uuid.UUID, error)
 }

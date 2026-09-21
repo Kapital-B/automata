@@ -49,6 +49,10 @@ type IssueView struct {
 	AwaitingMe    bool
 	AssigneeLabel string
 	Items         []TrailItem
+	// ItemCount is the evidence count. On a listing it is resolved in one
+	// query for the whole project rather than per issue; on a single issue
+	// it is len(Items).
+	ItemCount int
 }
 
 type TrailItem struct {
@@ -67,6 +71,9 @@ type CreateInput struct {
 	AssigneeUserID      *uuid.UUID
 	AssigneeContactID   *uuid.UUID
 	ItemRefs            []ItemRef
+	// Source is "llm" when extraction raised the issue. Empty means a person
+	// did, which is the default for every operator-facing path.
+	Source string
 }
 
 type ItemRef struct {
@@ -101,11 +108,16 @@ func (s *Service) List(ctx context.Context, userID, projectID uuid.UUID) ([]Issu
 	if err != nil {
 		return nil, err
 	}
+	counts, err := s.Issues.CountIssueItemsByProject(ctx, orgID, projectID)
+	if err != nil {
+		return nil, err
+	}
 	out := make([]IssueView, 0, len(rows))
 	for _, row := range rows {
 		out = append(out, IssueView{
 			Issue: row, AwaitingMe: awaitingMe(row, userID),
 			AssigneeLabel: s.assigneeLabel(ctx, orgID, userID, row),
+			ItemCount:     counts[row.ID],
 		})
 	}
 	return out, nil
@@ -151,7 +163,17 @@ func (s *Service) Get(ctx context.Context, userID, issueID uuid.UUID) (*IssueVie
 		Issue: *row, AwaitingMe: awaitingMe(*row, userID),
 		AssigneeLabel: s.assigneeLabel(ctx, orgID, userID, *row),
 		Items:         trail,
+		ItemCount:     len(trail),
 	}, nil
+}
+
+// sourceOrHuman defaults an unset source to human: every operator-facing path
+// leaves it empty, and only extraction sets it.
+func sourceOrHuman(src string) string {
+	if strings.TrimSpace(src) == "" {
+		return string(domainissues.SourceHuman)
+	}
+	return src
 }
 
 func (s *Service) Create(ctx context.Context, userID, projectID uuid.UUID, in CreateInput) (*IssueView, error) {
@@ -193,6 +215,7 @@ func (s *Service) Create(ctx context.Context, userID, projectID uuid.UUID, in Cr
 		Status:         string(domainissues.StatusOpen),
 		AssigneeUserID: assigneeUser, AssigneeContactID: assigneeContact,
 		CreatedAt: now, UpdatedAt: now,
+		Source: sourceOrHuman(in.Source),
 	}
 	if err := s.Issues.CreateIssue(ctx, row); err != nil {
 		return nil, err

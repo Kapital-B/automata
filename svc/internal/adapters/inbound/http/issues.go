@@ -8,6 +8,7 @@ import (
 	"time"
 
 	appissues "github.com/Kapital-B/automata/svc/internal/application/issues"
+	domainissues "github.com/Kapital-B/automata/svc/internal/domain/issues"
 	"github.com/go-chi/chi/v5"
 	"github.com/google/uuid"
 )
@@ -370,6 +371,15 @@ func writeIssueError(w http.ResponseWriter, err error) {
 	}
 }
 
+// sourceOrHuman reports provenance for rows written before the column existed,
+// all of which were raised by hand.
+func sourceOrHuman(src string) string {
+	if src == "" {
+		return string(domainissues.SourceHuman)
+	}
+	return src
+}
+
 func issueJSON(v appissues.IssueView, withItems bool) map[string]any {
 	iss := v.Issue
 	out := map[string]any{
@@ -380,6 +390,8 @@ func issueJSON(v appissues.IssueView, withItems bool) map[string]any {
 		"current_position_note": iss.CurrentPositionNote,
 		"status":                iss.Status,
 		"awaiting_me":           v.AwaitingMe,
+		"item_count":            v.ItemCount,
+		"source":                sourceOrHuman(iss.Source),
 		"created_at":            iss.CreatedAt.UTC().Format(time.RFC3339Nano),
 		"updated_at":            iss.UpdatedAt.UTC().Format(time.RFC3339Nano),
 	}
