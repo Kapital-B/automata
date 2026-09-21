@@ -11,11 +11,13 @@ import (
 
 	appdecisions "github.com/Kapital-B/automata/svc/internal/application/decisions"
 	appfacts "github.com/Kapital-B/automata/svc/internal/application/facts"
+	appissues "github.com/Kapital-B/automata/svc/internal/application/issues"
 	"github.com/Kapital-B/automata/svc/internal/application/ports/driven"
 	domaincontr "github.com/Kapital-B/automata/svc/internal/domain/contradictions"
 	domaindec "github.com/Kapital-B/automata/svc/internal/domain/decisions"
 	domainfacts "github.com/Kapital-B/automata/svc/internal/domain/facts"
 	domaininterp "github.com/Kapital-B/automata/svc/internal/domain/interpretations"
+	domainissues "github.com/Kapital-B/automata/svc/internal/domain/issues"
 	"github.com/google/uuid"
 )
 
@@ -35,7 +37,10 @@ type Service struct {
 	Facts           *appfacts.Service
 	Decisions       *appdecisions.Service
 	Contradictions  driven.ContradictionRepository
-	JobRuns         driven.JobRunRepository
+	// Issues is optional; without it issue candidates are ignored.
+	Issues     *appissues.Service
+	IssuesRepo driven.IssueRepository
+	JobRuns    driven.JobRunRepository
 }
 
 type ReconcileInput struct {
@@ -50,6 +55,7 @@ type CandidateOutcome struct {
 	FactID          string `json:"fact_id,omitempty"`
 	VersionID       string `json:"version_id,omitempty"`
 	DecisionID      string `json:"decision_id,omitempty"`
+	IssueID         string `json:"issue_id,omitempty"`
 	ContradictionID string `json:"contradiction_id,omitempty"`
 }
 
@@ -77,6 +83,7 @@ type candidatePayload struct {
 	Label         string          `json:"label"`
 	Value         json.RawMessage `json:"value"`
 	Unit          string          `json:"unit"`
+	Title         string          `json:"title"`
 	Statement     string          `json:"statement"`
 	MessageIDs    []string        `json:"message_ids"`
 	ManualItemIDs []string        `json:"manual_item_ids"`
@@ -185,11 +192,83 @@ func (s *Service) reconcileOne(ctx context.Context, userID, orgID, projectID uui
 				return nil, 0, err
 			}
 			outs = append(outs, out)
+		case string(domaininterp.KindIssue):
+			out, err := s.reconcileIssueCandidate(ctx, userID, orgID, projectID, c)
+			if err != nil {
+				return nil, 0, err
+			}
+			outs = append(outs, out)
 		default:
 			outs = append(outs, CandidateOutcome{Kind: kind, Outcome: "ignore", Reason: "unknown candidate kind"})
 		}
 	}
 	return outs, opened, nil
+}
+
+// reconcileIssueCandidate creates issues outright rather than proposing them.
+//
+// An issue is a prompt to look at something, not an assertion about what is
+// true, so a wrong one costs attention rather than correctness — the opposite
+// trade-off from a decision. Discarding is one action.
+func (s *Service) reconcileIssueCandidate(ctx context.Context, userID, orgID, projectID uuid.UUID, c candidatePayload) (CandidateOutcome, error) {
+	if s.Issues == nil || s.IssuesRepo == nil {
+		return CandidateOutcome{Kind: "issue", Outcome: "ignore", Reason: "issues not configured"}, nil
+	}
+	title := strings.TrimSpace(c.Title)
+	if title == "" {
+		// Fall back to the statement so a candidate with only a note is not lost.
+		title = strings.TrimSpace(c.Statement)
+	}
+	if title == "" {
+		return CandidateOutcome{Kind: "issue", Outcome: "ignore", Reason: "empty title"}, nil
+	}
+
+	existing, err := s.IssuesRepo.ListIssuesByProject(ctx, orgID, projectID)
+	if err != nil {
+		return CandidateOutcome{}, err
+	}
+	norm := normalizeValue(title)
+	for _, iss := range existing {
+		// Only live issues absorb a recurrence. A resolved or discarded issue
+		// stays as it is; a genuine recurrence becomes a new issue.
+		if iss.Status == string(domainissues.StatusResolved) || iss.DiscardedAt != nil {
+			continue
+		}
+		if normalizeValue(iss.Title) != norm {
+			continue
+		}
+		for _, ref := range evidenceFromCandidate(c) {
+			_ = s.addIssueEvidence(ctx, orgID, iss.ID, ref)
+		}
+		return CandidateOutcome{
+			Kind: "issue", Outcome: "reinforce", Reason: "matches an open issue",
+			IssueID: iss.ID.String(),
+		}, nil
+	}
+
+	refs := make([]appissues.ItemRef, 0)
+	for _, ref := range evidenceFromCandidate(c) {
+		refs = append(refs, appissues.ItemRef{MessageID: ref.MessageID, ManualItemID: ref.ManualItemID})
+	}
+	view, err := s.Issues.Create(ctx, userID, projectID, appissues.CreateInput{
+		Title:               title,
+		CurrentPositionNote: strings.TrimSpace(c.Statement),
+		ItemRefs:            refs,
+	})
+	if err != nil {
+		return CandidateOutcome{}, err
+	}
+	return CandidateOutcome{
+		Kind: "issue", Outcome: "confirm_new", Reason: "new issue from interpretation",
+		IssueID: view.Issue.ID.String(),
+	}, nil
+}
+
+func (s *Service) addIssueEvidence(ctx context.Context, orgID, issueID uuid.UUID, ref appfacts.EvidenceRef) error {
+	return s.IssuesRepo.AddIssueItem(ctx, driven.IssueItemRow{
+		ID: uuid.New(), IssueID: issueID, MessageID: ref.MessageID,
+		ManualItemID: ref.ManualItemID, AddedAt: time.Now().UTC(),
+	})
 }
 
 func (s *Service) reconcileDecisionCandidate(ctx context.Context, userID, projectID uuid.UUID, c candidatePayload) (CandidateOutcome, error) {

@@ -746,6 +746,7 @@ func migrateIssues(db *sql.DB) error {
 			created_at TEXT NOT NULL,
 			updated_at TEXT NOT NULL,
 			resolved_at TEXT,
+			discarded_at TEXT,
 			CHECK (
 				assignee_user_id IS NULL OR assignee_contact_id IS NULL
 			)
@@ -782,6 +783,15 @@ func migrateIssues(db *sql.DB) error {
 	}
 	if !hasResolvedAt {
 		if _, err := db.Exec(`ALTER TABLE issues ADD COLUMN resolved_at TEXT`); err != nil {
+			return err
+		}
+	}
+	hasDiscardedAt, err := tableHasColumn(db, "issues", "discarded_at")
+	if err != nil {
+		return err
+	}
+	if !hasDiscardedAt {
+		if _, err := db.Exec(`ALTER TABLE issues ADD COLUMN discarded_at TEXT`); err != nil {
 			return err
 		}
 	}

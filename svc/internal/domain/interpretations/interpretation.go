@@ -25,11 +25,14 @@ type CandidateKind string
 const (
 	KindFact     CandidateKind = "fact"
 	KindDecision CandidateKind = "decision"
+	// KindIssue is an open question or piece of work, as opposed to a value
+	// that is true (fact) or a choice that was made (decision).
+	KindIssue CandidateKind = "issue"
 )
 
 func (k CandidateKind) Valid() bool {
 	switch k {
-	case KindFact, KindDecision:
+	case KindFact, KindDecision, KindIssue:
 		return true
 	default:
 		return false

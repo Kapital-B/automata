@@ -80,13 +80,14 @@ const activityEventsSQL = `
 		i.title, 'issue', i.id, ''
 	FROM issues i
 	INNER JOIN project_members pm ON pm.project_id = i.project_id AND pm.user_id = ?
+	WHERE i.discarded_at IS NULL
 
 	UNION ALL
 	SELECT 'issue_resolved', COALESCE(i.resolved_at, i.updated_at), i.project_id,
 		i.title, 'issue', i.id, ''
 	FROM issues i
 	INNER JOIN project_members pm ON pm.project_id = i.project_id AND pm.user_id = ?
-	WHERE i.status = 'resolved'
+	WHERE i.status = 'resolved' AND i.discarded_at IS NULL
 `
 
 // activityUserArgs repeats the caller id once per UNION branch.
@@ -305,13 +306,13 @@ const attentionRowsSQL = `
 	SELECT 'issue_assignee' AS kind, i.title, i.project_id, 'issue' AS ref_type, i.id AS ref_id, i.created_at
 	FROM issues i
 	INNER JOIN project_members pm ON pm.project_id = i.project_id AND pm.user_id = ?
-	WHERE i.status <> 'resolved' AND i.assignee_user_id = ?
+	WHERE i.status <> 'resolved' AND i.discarded_at IS NULL AND i.assignee_user_id = ?
 
 	UNION ALL
 	SELECT 'member_role', i.title, i.project_id, 'issue', i.id, i.created_at
 	FROM issues i
 	INNER JOIN project_members pm ON pm.project_id = i.project_id AND pm.user_id = ?
-	WHERE i.status = 'awaiting_input'
+	WHERE i.status = 'awaiting_input' AND i.discarded_at IS NULL
 	  AND (i.assignee_user_id IS NULL OR i.assignee_user_id <> ?)
 
 	UNION ALL
