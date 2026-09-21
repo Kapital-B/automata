@@ -585,6 +585,7 @@ export default function ProjectDetailPage() {
       <ExtractionStatus
         lastExtractedAt={data.extraction.lastExtractedAt}
         reviewing={data.extraction.reviewing}
+        stalled={data.extraction.stalled}
         pending={data.extraction.pending}
         onCheckNow={data.extraction.checkNow}
       />

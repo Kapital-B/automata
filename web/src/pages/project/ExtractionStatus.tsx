@@ -11,11 +11,13 @@ import { relativeTime } from "@/lib/accounts";
 export function ExtractionStatus({
   lastExtractedAt,
   reviewing,
+  stalled,
   pending,
   onCheckNow,
 }: {
   lastExtractedAt?: string;
   reviewing: boolean;
+  stalled: boolean;
   pending: boolean;
   onCheckNow: () => void;
 }) {
@@ -25,6 +27,13 @@ export function ExtractionStatus({
         <span className="flex items-center gap-2">
           <Loader2 className="h-3.5 w-3.5 animate-spin" />
           Reviewing…
+        </span>
+      ) : stalled ? (
+        // A queued run that never moved the watermark. Saying so beats
+        // reverting to the old one, which reads as "nothing is happening"
+        // when in fact something is wedged.
+        <span className="text-destructive">
+          Last check didn&rsquo;t finish — the run may be stuck.
         </span>
       ) : (
         <span>

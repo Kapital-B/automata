@@ -49,8 +49,10 @@ export type ConfirmationRow = {
 };
 
 /**
- * How long "Reviewing…" can persist before the status line falls back to the
- * watermark. Without a ceiling a chain that dies leaves a spinner forever.
+ * How long "Reviewing…" can persist before the run is called stalled. Without
+ * a ceiling a chain that dies leaves a spinner forever — but falling silently
+ * back to the watermark is worse, because a stuck pipeline then looks exactly
+ * like an idle one. Past this the status line says so.
  */
 const REVIEWING_CEILING_MS = 2 * 60 * 1000;
 
@@ -117,6 +119,8 @@ export function useProjectDetailData(projectID: string | undefined, filters: Tim
   // Set while an extraction chain we queued is still in flight, so the status
   // line can say "Reviewing…" rather than showing a stale watermark.
   const [reviewingSince, setReviewingSince] = useState<number | null>(null);
+  // Set when a queued chain passed the ceiling without the watermark moving.
+  const [stalled, setStalled] = useState(false);
 
   const projectQuery = useQuery({
     queryKey: ["project", accessToken, projectID],
@@ -181,24 +185,34 @@ export function useProjectDetailData(projectID: string | undefined, filters: Tim
 
   // Extraction finishing is what makes everything else on this page stale, so
   // the watermark advancing is the signal to refetch — not the click.
+  //
+  // The ceiling has to be a real timer rather than a comparison done inside
+  // this effect: the case it exists for is the watermark never moving, and in
+  // that case nothing in the dependency list ever changes, so an inline check
+  // would never run again and the spinner would never clear.
   useEffect(() => {
     if (reviewingSince === null) return;
     const watermark = lastExtractedAt ? new Date(lastExtractedAt).getTime() : 0;
-    const finished = watermark >= reviewingSince;
-    const timedOut = Date.now() - reviewingSince > REVIEWING_CEILING_MS;
-    if (!finished && !timedOut) return;
-    setReviewingSince(null);
-    if (!finished) return;
-    for (const key of [
-      "project-facts",
-      "project-decisions",
-      "project-contradictions",
-      "project-current-position",
-      "project-issues",
-      "project-attention",
-    ]) {
-      void queryClient.invalidateQueries({ queryKey: [key] });
+    if (watermark >= reviewingSince) {
+      setReviewingSince(null);
+      for (const key of [
+        "project-facts",
+        "project-decisions",
+        "project-contradictions",
+        "project-current-position",
+        "project-issues",
+        "project-attention",
+      ]) {
+        void queryClient.invalidateQueries({ queryKey: [key] });
+      }
+      return;
     }
+    const remaining = Math.max(REVIEWING_CEILING_MS - (Date.now() - reviewingSince), 0);
+    const timer = setTimeout(() => {
+      setReviewingSince(null);
+      setStalled(true);
+    }, remaining);
+    return () => clearTimeout(timer);
   }, [lastExtractedAt, reviewingSince, queryClient]);
 
   const checkNowMutation = useMutation({
@@ -207,6 +221,7 @@ export function useProjectDetailData(projectID: string | undefined, filters: Tim
       return extractProject(accessToken, projectID);
     },
     onSuccess: () => {
+      setStalled(false);
       setReviewingSince(Date.now());
     },
     onError: (err) => {
@@ -259,6 +274,7 @@ export function useProjectDetailData(projectID: string | undefined, filters: Tim
     extraction: {
       lastExtractedAt,
       reviewing: reviewingSince !== null,
+      stalled,
       checkNow: () => checkNowMutation.mutate(),
       pending: checkNowMutation.isPending,
     },

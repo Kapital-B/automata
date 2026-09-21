@@ -390,6 +390,42 @@ describe("Project workspace UI", () => {
     expect(await screen.findByText(/reviewing…/i)).toBeInTheDocument();
   });
 
+  // A queued run that never advances the watermark must say so. Reverting to
+  // the previous watermark made a wedged pipeline look idle.
+  it("reports a stalled run rather than reverting to the old watermark", async () => {
+    vi.useFakeTimers({ shouldAdvanceTime: true });
+    const watermark = new Date(Date.now() - 4 * 60 * 1000).toISOString();
+    getProject.mockResolvedValue({
+      id: "p1",
+      organisation_id: "o1",
+      name: "Cooling Upgrade",
+      code: "DC01",
+      keywords: [],
+      created_at: "2026-01-01T00:00:00Z",
+      updated_at: "2026-01-01T00:00:00Z",
+      last_extracted_at: watermark,
+    });
+    // The endpoint answers 202 for a run already in flight, so a wedged
+    // pipeline is indistinguishable from a fresh queue at this point.
+    extractProject.mockResolvedValue({ status: "already_running" });
+
+    try {
+      renderPage(newClient());
+      expect(await screen.findByText(/reviewed 4m ago/i)).toBeInTheDocument();
+      fireEvent.click(screen.getByRole("button", { name: /check now/i }));
+      expect(await screen.findByText(/reviewing…/i)).toBeInTheDocument();
+
+      // Past the ceiling with the watermark unmoved.
+      await vi.advanceTimersByTimeAsync(2 * 60 * 1000 + 5000);
+      expect(await screen.findByText(/last check didn.t finish/i)).toBeInTheDocument();
+      expect(screen.queryByText(/reviewing…/i)).not.toBeInTheDocument();
+      // Check now stays available so the operator can retry.
+      expect(screen.getByRole("button", { name: /check now/i })).toBeEnabled();
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
   it("says when extraction has never run", async () => {
     renderPage(newClient());
     expect(await screen.findByText(/not reviewed yet/i)).toBeInTheDocument();
