@@ -426,6 +426,8 @@ export type ProjectMember = {
 
 export type ProjectDetail = ProjectListItem & {
   member?: ProjectMember;
+  /** When extraction last succeeded. Absent means it has never run. */
+  last_extracted_at?: string;
 };
 
 export type UnassignedSummary = {
@@ -585,6 +587,12 @@ export type IssueListItem = {
   assignee_contact_id?: string;
   assignee_label?: string;
   awaiting_me: boolean;
+  /** Evidence count — the correspondence behind this issue. */
+  item_count: number;
+  /** "llm" when extraction raised it, "human" when a person did. */
+  source: string;
+  /** Set when the issue should never have been raised, as opposed to resolved. */
+  discarded_at?: string;
   created_at: string;
   updated_at: string;
 };
@@ -666,42 +674,6 @@ export type CurrentPositionDecision = {
 export type CurrentPosition = {
   facts: CurrentPositionFact[];
   decisions: CurrentPositionDecision[];
-};
-
-export type InterpretationCandidate = {
-  kind: "fact" | "decision" | string;
-  subject_key?: string;
-  label?: string;
-  value?: unknown;
-  unit?: string;
-  statement?: string;
-  message_ids?: string[];
-  manual_item_ids?: string[];
-  confidence: number;
-  reason?: string;
-};
-
-export type InterpretationSource = {
-  id: string;
-  interpretation_id: string;
-  message_id?: string;
-  manual_item_id?: string;
-};
-
-export type Interpretation = {
-  id: string;
-  organisation_id: string;
-  project_id: string;
-  account_id?: string;
-  run_id?: string;
-  status: "pending" | "accepted" | "dismissed" | "expired" | string;
-  payload_json?: unknown;
-  confidence?: number;
-  reason?: string;
-  created_at: string;
-  updated_at: string;
-  sources: InterpretationSource[];
-  candidates: InterpretationCandidate[];
 };
 
 export type ManualItem = {
@@ -947,6 +919,14 @@ export async function updateIssue(
   });
 }
 
+/** Marks an issue as one that should never have been raised. */
+export async function discardIssue(accessToken: string, issueID: string) {
+  return apiRequest<IssueDetail>(`/api/issues/${issueID}/discard`, {
+    method: "POST",
+    headers: toAuthHeader(accessToken),
+  });
+}
+
 export async function addIssueItem(
   accessToken: string,
   issueID: string,
@@ -1062,51 +1042,6 @@ export async function removeFactEvidence(
   );
 }
 
-export async function listProjectInterpretations(accessToken: string, projectID: string) {
-  return apiRequest<Interpretation[]>(`/api/projects/${projectID}/interpretations`, {
-    headers: toAuthHeader(accessToken),
-  });
-}
-
-export async function interpretProject(
-  accessToken: string,
-  projectID: string,
-  body?: {
-    account_id?: string;
-    message_ids?: string[];
-    manual_item_ids?: string[];
-  },
-) {
-  return apiRequest<Interpretation>(`/api/projects/${projectID}/interpret`, {
-    method: "POST",
-    headers: toAuthHeader(accessToken),
-    body: JSON.stringify(body ?? {}),
-  });
-}
-
-export async function dismissInterpretation(accessToken: string, interpretationID: string) {
-  return apiRequest<Interpretation>(`/api/interpretations/${interpretationID}/dismiss`, {
-    method: "POST",
-    headers: toAuthHeader(accessToken),
-  });
-}
-
-export type ReconcileOutcome = {
-  kind: string;
-  outcome: string;
-  subject_key?: string;
-  reason: string;
-  fact_id?: string;
-  version_id?: string;
-  contradiction_id?: string;
-};
-
-export type ReconcileResult = {
-  processed_interpretations: number;
-  outcomes: ReconcileOutcome[];
-  contradictions_opened: number;
-};
-
 export type ContradictionSide = {
   id: string;
   contradiction_id: string;
@@ -1128,15 +1063,22 @@ export type Contradiction = {
   sides: ContradictionSide[];
 };
 
-export async function reconcileProject(
-  accessToken: string,
-  projectID: string,
-  body?: { interpretation_ids?: string[] },
-) {
-  return apiRequest<ReconcileResult>(`/api/projects/${projectID}/reconcile`, {
+export type ExtractResult = {
+  status: "queued" | "already_running";
+  job_id?: string;
+  chain_id?: string;
+};
+
+/**
+ * Queues the same extraction chain the scheduler queues, so the "Check now"
+ * button and the automatic path cannot drift. A run already in flight answers
+ * already_running rather than failing: the caller asked for the project to be
+ * up to date, and it is about to be.
+ */
+export async function extractProject(accessToken: string, projectID: string) {
+  return apiRequest<ExtractResult>(`/api/projects/${projectID}/extract`, {
     method: "POST",
     headers: toAuthHeader(accessToken),
-    body: JSON.stringify(body ?? {}),
   });
 }
 

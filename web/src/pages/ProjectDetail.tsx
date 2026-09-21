@@ -1,5 +1,4 @@
 import { PageHeader } from "@/components/PageHeader";
-import { AccountBadge } from "@/components/AccountBadge";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
@@ -10,13 +9,6 @@ import {
   DialogHeader,
   DialogTitle,
 } from "@/components/ui/dialog";
-import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from "@/components/ui/select";
 import { useAuth } from "@/components/auth/AuthProvider";
 import { useAccountsData } from "@/hooks/useAccountsData";
 import {
@@ -25,44 +17,32 @@ import {
   askProject,
   confirmFactVersion,
   confirmDecision,
-  createManualItem,
   createProjectDecision,
   createProjectFact,
   createProjectIssue,
-  dismissInterpretation,
-  getCurrentPosition,
+  discardIssue,
   getProject,
-  getProjectAttention,
-  getProjectTimeline,
-  getApiHealth,
-  interpretProject,
-  listContacts,
-  listProjectContradictions,
-  listProjectDecisions,
-  listProjectFacts,
-  listProjectInterpretations,
-  listProjectIssues,
-  reconcileProject,
   rejectFactVersion,
   resolveContradiction,
   suggestProjectIssue,
   updateProject,
   updateProjectMember,
   withdrawDecision,
-  type Contradiction,
-  type Decision,
-  type FactDetail,
-  type Interpretation,
-  type IssueListItem,
   type TimelineItem,
 } from "@/lib/auth";
-import type { UiAccount } from "@/lib/accounts";
 import { toast } from "@/hooks/use-toast";
-import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import { useProjectDetailData } from "@/hooks/useProjectDetailData";
+import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { Loader2, Plus } from "lucide-react";
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useState } from "react";
 import { Link, useNavigate, useParams, useSearchParams } from "react-router-dom";
-import { cn } from "@/lib/utils";
+import { ExtractionStatus } from "./project/ExtractionStatus";
+import { NeedsConfirmation } from "./project/NeedsConfirmation";
+import { OpenMode } from "./project/OpenMode";
+import { PasteDialog } from "./project/PasteDialog";
+import { PositionMode } from "./project/PositionMode";
+import { TrailMode, type TimelineFilterState } from "./project/TrailMode";
+import { DEFINITIONS } from "./project/definitions";
 
 const PROJECT_MODES = [
   { id: "trail" as const, label: "Trail" },
@@ -77,14 +57,11 @@ function parseProjectMode(raw: string | null): ProjectMode {
   return "trail";
 }
 
-const CHANNELS = [
-  { value: "teams", label: "Teams" },
-  { value: "whatsapp", label: "WhatsApp" },
-  { value: "sms", label: "SMS" },
-  { value: "call", label: "Call" },
-  { value: "meeting", label: "Meeting" },
-  { value: "note", label: "Note" },
-] as const;
+function itemRef(item: TimelineItem) {
+  return item.message_id
+    ? { message_id: item.message_id }
+    : { manual_item_id: item.manual_item_id };
+}
 
 export default function ProjectDetailPage() {
   const { id } = useParams<{ id: string }>();
@@ -105,8 +82,11 @@ export default function ProjectDetailPage() {
   const queryClient = useQueryClient();
   const navigate = useNavigate();
   const { accounts } = useAccountsData();
-  const [sourceFilter, setSourceFilter] = useState<"all" | "mail" | "manual" | "slack">("all");
-  const [unassignedToIssue, setUnassignedToIssue] = useState(false);
+
+  const [filters, setFilters] = useState<TimelineFilterState>({
+    source: "all",
+    unassignedToIssue: false,
+  });
   const [pasteOpen, setPasteOpen] = useState(false);
   const [createIssueOpen, setCreateIssueOpen] = useState(false);
   const [newIssueTitle, setNewIssueTitle] = useState("");
@@ -124,7 +104,6 @@ export default function ProjectDetailPage() {
   const [factEvidence, setFactEvidence] = useState<
     { message_id?: string; manual_item_id?: string }[]
   >([]);
-  const [expandedFactID, setExpandedFactID] = useState<string | null>(null);
   const [createDecisionOpen, setCreateDecisionOpen] = useState(false);
   const [decisionStatement, setDecisionStatement] = useState("");
   const [decisionConfirmNow, setDecisionConfirmNow] = useState(true);
@@ -135,74 +114,24 @@ export default function ProjectDetailPage() {
     confidence: number;
   } | null>(null);
 
-  const projectQuery = useQuery({
-    queryKey: ["project", accessToken, id],
-    queryFn: () => getProject(accessToken!, id!),
-    enabled: Boolean(accessToken && id),
+  const data = useProjectDetailData(id, {
+    source: filters.source,
+    unassignedToIssue: filters.unassignedToIssue,
   });
-  const timelineQuery = useQuery({
-    queryKey: ["project-timeline", accessToken, id, sourceFilter, unassignedToIssue],
-    queryFn: () =>
-      getProjectTimeline(accessToken!, id!, {
-        source: sourceFilter,
-        unassigned_to_issue: unassignedToIssue,
-        limit: 100,
-      }),
-    enabled: Boolean(accessToken && id),
-  });
-  const issuesQuery = useQuery({
-    queryKey: ["project-issues", accessToken, id],
-    queryFn: () => listProjectIssues(accessToken!, id!),
-    enabled: Boolean(accessToken && id),
-  });
-  const currentPositionQuery = useQuery({
-    queryKey: ["project-current-position", accessToken, id],
-    queryFn: () => getCurrentPosition(accessToken!, id!),
-    enabled: Boolean(accessToken && id),
-  });
-  const factsQuery = useQuery({
-    queryKey: ["project-facts", accessToken, id],
-    queryFn: () =>
-      listProjectFacts(accessToken!, id!, { include: ["proposed", "history"] }),
-    enabled: Boolean(accessToken && id),
-  });
-  const interpretationsQuery = useQuery({
-    queryKey: ["project-interpretations", accessToken, id],
-    queryFn: () => listProjectInterpretations(accessToken!, id!),
-    enabled: Boolean(accessToken && id),
-  });
-  const contradictionsQuery = useQuery({
-    queryKey: ["project-contradictions", accessToken, id],
-    queryFn: () => listProjectContradictions(accessToken!, id!, "open"),
-    enabled: Boolean(accessToken && id),
-  });
-  const decisionsQuery = useQuery({
-    queryKey: ["project-decisions", accessToken, id],
-    queryFn: () => listProjectDecisions(accessToken!, id!),
-    enabled: Boolean(accessToken && id),
-  });
-  const attentionQuery = useQuery({
-    queryKey: ["project-attention", accessToken, id],
-    queryFn: () => getProjectAttention(accessToken!, id!),
-    enabled: Boolean(accessToken && id),
-  });
-  const healthQuery = useQuery({
-    queryKey: ["api-health"],
-    queryFn: () => getApiHealth(),
-    staleTime: 60_000,
-  });
-  const llmEnabled = healthQuery.data?.llm === true;
-  const openIssues = useMemo(
-    () => (issuesQuery.data ?? []).filter((iss) => iss.status !== "resolved"),
-    [issuesQuery.data],
-  );
-  const provisionalFacts = useMemo(
-    () =>
-      (factsQuery.data ?? []).filter((f) =>
-        f.versions.some((v) => v.status === "proposed"),
-      ),
-    [factsQuery.data],
-  );
+
+  const invalidateFacts = async () => {
+    await queryClient.invalidateQueries({ queryKey: ["project-facts"] });
+    await queryClient.invalidateQueries({ queryKey: ["project-current-position"] });
+  };
+
+  const failed = (title: string) => (err: unknown) => {
+    toast({
+      title,
+      description: err instanceof ApiError ? err.message : "Please try again.",
+      variant: "destructive",
+    });
+  };
+
   const createIssueMutation = useMutation({
     mutationFn: async () => {
       if (!accessToken || !id) throw new Error("Not authenticated");
@@ -222,13 +151,7 @@ export default function ProjectDetailPage() {
       await queryClient.invalidateQueries({ queryKey: ["project-issues"] });
       await queryClient.invalidateQueries({ queryKey: ["project-timeline"] });
     },
-    onError: (err) => {
-      toast({
-        title: "Could not create issue",
-        description: err instanceof ApiError ? err.message : "Please try again.",
-        variant: "destructive",
-      });
-    },
+    onError: failed("Could not create issue"),
   });
 
   const suggestIssueMutation = useMutation({
@@ -252,20 +175,24 @@ export default function ProjectDetailPage() {
       setCreateIssueOpen(true);
       toast({ title: "Suggestion ready", description: "Review and create to confirm." });
     },
-    onError: (err) => {
-      toast({
-        title: "Suggest failed",
-        description: err instanceof ApiError ? err.message : "Please try again.",
-        variant: "destructive",
-      });
-    },
+    onError: failed("Suggest failed"),
   });
+
+  const discardIssueMutation = useMutation({
+    mutationFn: async (issueID: string) => {
+      if (!accessToken) throw new Error("Not authenticated");
+      return discardIssue(accessToken, issueID);
+    },
+    onSuccess: async () => {
+      toast({ title: "Issue discarded" });
+      await queryClient.invalidateQueries({ queryKey: ["project-issues"] });
+      await queryClient.invalidateQueries({ queryKey: ["project-attention"] });
+    },
+    onError: failed("Discard failed"),
+  });
+
   const attachMutation = useMutation({
-    mutationFn: async (args: {
-      issueID: string;
-      messageID?: string;
-      manualItemID?: string;
-    }) => {
+    mutationFn: async (args: { issueID: string; messageID?: string; manualItemID?: string }) => {
       if (!accessToken) throw new Error("Not authenticated");
       return addIssueItem(accessToken, args.issueID, {
         message_id: args.messageID,
@@ -278,19 +205,8 @@ export default function ProjectDetailPage() {
       await queryClient.invalidateQueries({ queryKey: ["project-issues"] });
       await queryClient.invalidateQueries({ queryKey: ["issue"] });
     },
-    onError: (err) => {
-      toast({
-        title: "Attach failed",
-        description: err instanceof ApiError ? err.message : "Please try again.",
-        variant: "destructive",
-      });
-    },
+    onError: failed("Attach failed"),
   });
-
-  const invalidateFacts = async () => {
-    await queryClient.invalidateQueries({ queryKey: ["project-facts"] });
-    await queryClient.invalidateQueries({ queryKey: ["project-current-position"] });
-  };
 
   const createFactMutation = useMutation({
     mutationFn: async () => {
@@ -301,7 +217,7 @@ export default function ProjectDetailPage() {
         trimmed !== "" && !Number.isNaN(asNumber) && /^-?\d+(\.\d+)?$/.test(trimmed)
           ? asNumber
           : trimmed;
-      const existing = (factsQuery.data ?? []).find((f) => f.subject_key === factSubjectKey.trim());
+      const existing = data.facts.find((f) => f.subject_key === factSubjectKey.trim());
       const active = existing?.versions.find((v) => v.status === "active");
       return createProjectFact(accessToken, id, {
         subject_key: factSubjectKey.trim(),
@@ -309,8 +225,7 @@ export default function ProjectDetailPage() {
         value,
         unit: factUnit.trim() || undefined,
         confirm: factConfirmNow,
-        supersedes_version_id:
-          factConfirmNow && active ? active.id : undefined,
+        supersedes_version_id: factConfirmNow && active ? active.id : undefined,
         evidence: factEvidence.length > 0 ? factEvidence : undefined,
       });
     },
@@ -324,13 +239,7 @@ export default function ProjectDetailPage() {
       setFactConfirmNow(true);
       await invalidateFacts();
     },
-    onError: (err) => {
-      toast({
-        title: "Could not save fact",
-        description: err instanceof ApiError ? err.message : "Please try again.",
-        variant: "destructive",
-      });
-    },
+    onError: failed("Could not save fact"),
   });
 
   const confirmFactMutation = useMutation({
@@ -344,13 +253,7 @@ export default function ProjectDetailPage() {
       toast({ title: "Fact confirmed" });
       await invalidateFacts();
     },
-    onError: (err) => {
-      toast({
-        title: "Confirm failed",
-        description: err instanceof ApiError ? err.message : "Please try again.",
-        variant: "destructive",
-      });
-    },
+    onError: failed("Confirm failed"),
   });
 
   const rejectFactMutation = useMutation({
@@ -362,77 +265,7 @@ export default function ProjectDetailPage() {
       toast({ title: "Proposal rejected" });
       await invalidateFacts();
     },
-    onError: (err) => {
-      toast({
-        title: "Reject failed",
-        description: err instanceof ApiError ? err.message : "Please try again.",
-        variant: "destructive",
-      });
-    },
-  });
-
-  const interpretMutation = useMutation({
-    mutationFn: async () => {
-      if (!accessToken || !id) throw new Error("Not authenticated");
-      return interpretProject(accessToken, id);
-    },
-    onSuccess: async (res) => {
-      const n = res.candidates?.length ?? 0;
-      toast({
-        title: n > 0 ? "Interpretation ready" : "No durable candidates",
-        description: n > 0 ? `${n} candidate(s) pending review.` : res.reason || undefined,
-      });
-      await queryClient.invalidateQueries({ queryKey: ["project-interpretations"] });
-    },
-    onError: (err) => {
-      toast({
-        title: "Interpret failed",
-        description: err instanceof ApiError ? err.message : "Please try again.",
-        variant: "destructive",
-      });
-    },
-  });
-
-  const dismissInterpMutation = useMutation({
-    mutationFn: async (interpretationID: string) => {
-      if (!accessToken) throw new Error("Not authenticated");
-      return dismissInterpretation(accessToken, interpretationID);
-    },
-    onSuccess: async () => {
-      toast({ title: "Interpretation dismissed" });
-      await queryClient.invalidateQueries({ queryKey: ["project-interpretations"] });
-    },
-    onError: (err) => {
-      toast({
-        title: "Dismiss failed",
-        description: err instanceof ApiError ? err.message : "Please try again.",
-        variant: "destructive",
-      });
-    },
-  });
-
-  const reconcileMutation = useMutation({
-    mutationFn: async () => {
-      if (!accessToken || !id) throw new Error("Not authenticated");
-      return reconcileProject(accessToken, id);
-    },
-    onSuccess: async (res) => {
-      toast({
-        title: "Reconcile complete",
-        description: `${res.processed_interpretations} interpretation(s); ${res.contradictions_opened} contradiction(s) opened.`,
-      });
-      await queryClient.invalidateQueries({ queryKey: ["project-interpretations"] });
-      await queryClient.invalidateQueries({ queryKey: ["project-contradictions"] });
-      await invalidateFacts();
-      await queryClient.invalidateQueries({ queryKey: ["project-current-position"] });
-    },
-    onError: (err) => {
-      toast({
-        title: "Reconcile failed",
-        description: err instanceof ApiError ? err.message : "Please try again.",
-        variant: "destructive",
-      });
-    },
+    onError: failed("Reject failed"),
   });
 
   const resolveContradictionMutation = useMutation({
@@ -451,15 +284,8 @@ export default function ProjectDetailPage() {
       toast({ title: "Contradiction resolved" });
       await queryClient.invalidateQueries({ queryKey: ["project-contradictions"] });
       await invalidateFacts();
-      await queryClient.invalidateQueries({ queryKey: ["project-current-position"] });
     },
-    onError: (err) => {
-      toast({
-        title: "Resolve failed",
-        description: err instanceof ApiError ? err.message : "Please try again.",
-        variant: "destructive",
-      });
-    },
+    onError: failed("Resolve failed"),
   });
 
   const createDecisionMutation = useMutation({
@@ -478,13 +304,7 @@ export default function ProjectDetailPage() {
       await queryClient.invalidateQueries({ queryKey: ["project-current-position"] });
       await queryClient.invalidateQueries({ queryKey: ["attention"] });
     },
-    onError: (err) => {
-      toast({
-        title: "Create decision failed",
-        description: err instanceof ApiError ? err.message : "Please try again.",
-        variant: "destructive",
-      });
-    },
+    onError: failed("Create decision failed"),
   });
 
   const confirmDecisionMutation = useMutation({
@@ -498,13 +318,7 @@ export default function ProjectDetailPage() {
       await queryClient.invalidateQueries({ queryKey: ["project-current-position"] });
       await queryClient.invalidateQueries({ queryKey: ["attention"] });
     },
-    onError: (err) => {
-      toast({
-        title: "Confirm failed",
-        description: err instanceof ApiError ? err.message : "Please try again.",
-        variant: "destructive",
-      });
-    },
+    onError: failed("Confirm failed"),
   });
 
   const withdrawDecisionMutation = useMutation({
@@ -518,13 +332,7 @@ export default function ProjectDetailPage() {
       await queryClient.invalidateQueries({ queryKey: ["project-current-position"] });
       await queryClient.invalidateQueries({ queryKey: ["attention"] });
     },
-    onError: (err) => {
-      toast({
-        title: "Withdraw failed",
-        description: err instanceof ApiError ? err.message : "Please try again.",
-        variant: "destructive",
-      });
-    },
+    onError: failed("Withdraw failed"),
   });
 
   const askMutation = useMutation({
@@ -532,16 +340,8 @@ export default function ProjectDetailPage() {
       if (!accessToken || !id) throw new Error("Not authenticated");
       return askProject(accessToken, id, askQuestion.trim());
     },
-    onSuccess: (res) => {
-      setAskAnswer(res);
-    },
-    onError: (err) => {
-      toast({
-        title: "Ask failed",
-        description: err instanceof ApiError ? err.message : "Please try again.",
-        variant: "destructive",
-      });
-    },
+    onSuccess: (res) => setAskAnswer(res),
+    onError: failed("Ask failed"),
   });
 
   const [name, setName] = useState("");
@@ -551,13 +351,13 @@ export default function ProjectDetailPage() {
   const [scope, setScope] = useState("");
 
   useEffect(() => {
-    if (!projectQuery.data) return;
-    setName(projectQuery.data.name);
-    setKeywords((projectQuery.data.keywords ?? []).join(", "));
-    setRole(projectQuery.data.member?.role ?? "");
-    setDiscipline(projectQuery.data.member?.discipline ?? "");
-    setScope(projectQuery.data.member?.current_scope ?? "");
-  }, [projectQuery.data]);
+    if (!data.project) return;
+    setName(data.project.name);
+    setKeywords((data.project.keywords ?? []).join(", "));
+    setRole(data.project.member?.role ?? "");
+    setDiscipline(data.project.member?.discipline ?? "");
+    setScope(data.project.member?.current_scope ?? "");
+  }, [data.project]);
 
   const saveMutation = useMutation({
     mutationFn: async () => {
@@ -580,13 +380,7 @@ export default function ProjectDetailPage() {
       await queryClient.invalidateQueries({ queryKey: ["project", accessToken, id] });
       await queryClient.invalidateQueries({ queryKey: ["projects"] });
     },
-    onError: (err) => {
-      toast({
-        title: "Save failed",
-        description: err instanceof ApiError ? err.message : "Please try again.",
-        variant: "destructive",
-      });
-    },
+    onError: failed("Save failed"),
   });
 
   const archiveMutation = useMutation({
@@ -604,7 +398,7 @@ export default function ProjectDetailPage() {
   const accountFor = (accountID?: string) =>
     accountID ? accounts.find((x) => x.id === accountID) : undefined;
 
-  if (projectQuery.isLoading) {
+  if (data.projectQuery.isLoading) {
     return (
       <div className="flex items-center gap-2 text-sm text-muted-foreground">
         <Loader2 className="h-4 w-4 animate-spin" />
@@ -613,12 +407,12 @@ export default function ProjectDetailPage() {
     );
   }
 
-  if (projectQuery.isError || !projectQuery.data) {
+  if (data.projectQuery.isError || !data.project) {
     return (
       <div className="space-y-4">
         <p className="text-sm text-destructive">
-          {projectQuery.error instanceof ApiError
-            ? projectQuery.error.message
+          {data.projectQuery.error instanceof ApiError
+            ? data.projectQuery.error.message
             : "Project not found."}
         </p>
         <Button variant="outline" onClick={() => navigate("/projects")}>
@@ -628,8 +422,9 @@ export default function ProjectDetailPage() {
     );
   }
 
-  const project = projectQuery.data;
-  const items = timelineQuery.data ?? [];
+  const project = data.project;
+  const positionFacts = data.currentPosition?.facts ?? [];
+  const positionDecisions = data.currentPosition?.decisions ?? [];
 
   return (
     <div className="space-y-6">
@@ -701,7 +496,8 @@ export default function ProjectDetailPage() {
           <DialogHeader>
             <DialogTitle>Add decision</DialogTitle>
             <DialogDescription>
-              Record an approval or go/no-go. Evidence can be attached later via reconcile.
+              Record an approval or go/no-go. Evidence is attached as correspondence
+              supporting it arrives.
             </DialogDescription>
           </DialogHeader>
           <div className="space-y-3">
@@ -783,11 +579,6 @@ export default function ProjectDetailPage() {
               queryKey: ["project-timeline", accessToken, id],
             });
             await queryClient.invalidateQueries({ queryKey: ["unassigned"] });
-            window.setTimeout(() => {
-              void queryClient.invalidateQueries({
-                queryKey: ["project-interpretations"],
-              });
-            }, 800);
           }}
         />
       </Dialog>
@@ -795,7 +586,7 @@ export default function ProjectDetailPage() {
       <PageHeader
         eyebrow={project.code}
         title={project.name}
-        description="Trail, current position, and open work for this project."
+        description="Where this project stands, and what needs you."
         actions={
           <div className="flex flex-wrap gap-2">
             <Button onClick={() => setPasteOpen(true)}>
@@ -814,6 +605,13 @@ export default function ProjectDetailPage() {
             </Button>
           </div>
         }
+      />
+
+      <ExtractionStatus
+        lastExtractedAt={data.extraction.lastExtractedAt}
+        reviewing={data.extraction.reviewing}
+        pending={data.extraction.pending}
+        onCheckNow={data.extraction.checkNow}
       />
 
       <details className="max-w-xl text-sm">
@@ -875,19 +673,19 @@ export default function ProjectDetailPage() {
         aria-label="Current position"
         className="sticky top-14 z-20 border-y border-border/70 bg-background/95 py-3 backdrop-blur"
       >
-        <h2 className="mb-2 text-xs font-medium uppercase tracking-wider text-muted-foreground">
+        <h2 className="mb-1 text-xs font-medium uppercase tracking-wider text-muted-foreground">
           Current position
         </h2>
-        {currentPositionQuery.isLoading ? (
+        <p className="mb-2 max-w-prose text-xs text-muted-foreground">{DEFINITIONS.position}</p>
+        {data.currentPositionQuery.isLoading ? (
           <Loader2 className="h-4 w-4 animate-spin text-muted-foreground" />
-        ) : (currentPositionQuery.data?.facts ?? []).length === 0 &&
-          (currentPositionQuery.data?.decisions ?? []).length === 0 ? (
+        ) : positionFacts.length === 0 && positionDecisions.length === 0 ? (
           <p className="text-sm text-muted-foreground">No active facts or decisions yet.</p>
         ) : (
           <div className="space-y-2">
-            {(currentPositionQuery.data?.facts ?? []).length > 0 ? (
+            {positionFacts.length > 0 ? (
               <ul className="flex flex-wrap gap-x-6 gap-y-2">
-                {(currentPositionQuery.data?.facts ?? []).map((f) => (
+                {positionFacts.map((f) => (
                   <li key={f.version_id} className="text-sm">
                     <span className="text-muted-foreground">{f.label}</span>
                     <span className="mx-1.5 text-muted-foreground/60">·</span>
@@ -895,18 +693,24 @@ export default function ProjectDetailPage() {
                       {f.value_text}
                       {f.unit ? ` ${f.unit}` : ""}
                     </span>
+                    <span className="ml-1.5 text-xs text-muted-foreground">
+                      ({f.evidence_count} evidence)
+                    </span>
                   </li>
                 ))}
               </ul>
             ) : null}
-            {(currentPositionQuery.data?.decisions ?? []).length > 0 ? (
+            {positionDecisions.length > 0 ? (
               <ul className="space-y-1">
-                {(currentPositionQuery.data?.decisions ?? []).map((d) => (
+                {positionDecisions.map((d) => (
                   <li key={d.decision_id} className="text-sm">
                     <span className="text-[10px] uppercase tracking-wider text-muted-foreground">
                       Decision
                     </span>{" "}
                     <span className="font-medium">{d.statement}</span>
+                    <span className="ml-1.5 text-xs text-muted-foreground">
+                      ({d.evidence_count} evidence)
+                    </span>
                   </li>
                 ))}
               </ul>
@@ -914,6 +718,34 @@ export default function ProjectDetailPage() {
           </div>
         )}
       </section>
+
+      <NeedsConfirmation
+        rows={data.confirmationRows}
+        loading={
+          data.factsQuery.isLoading ||
+          data.decisionsQuery.isLoading ||
+          data.contradictionsQuery.isLoading
+        }
+        actions={{
+          confirmFact: (versionID, supersedesVersionID) =>
+            confirmFactMutation.mutate({ versionID, supersedesVersionID }),
+          rejectFact: (versionID) => rejectFactMutation.mutate(versionID),
+          confirmDecision: (decisionID) => confirmDecisionMutation.mutate(decisionID),
+          withdrawDecision: (decisionID) => withdrawDecisionMutation.mutate(decisionID),
+          resolveContradiction: (contradictionID, resolution, keepFactVersionID) =>
+            resolveContradictionMutation.mutate({
+              id: contradictionID,
+              resolution,
+              keep_fact_version_id: keepFactVersionID,
+            }),
+          busy:
+            confirmFactMutation.isPending ||
+            rejectFactMutation.isPending ||
+            confirmDecisionMutation.isPending ||
+            withdrawDecisionMutation.isPending ||
+            resolveContradictionMutation.isPending,
+        }}
+      />
 
       <section aria-label="Ask Project AI" className="space-y-2 border-b border-border/70 pb-4">
         <h2 className="text-xs font-medium uppercase tracking-wider text-muted-foreground">
@@ -924,22 +756,22 @@ export default function ProjectDetailPage() {
             value={askQuestion}
             onChange={(e) => setAskQuestion(e.target.value)}
             placeholder="Ask a grounded question about this project"
-            disabled={!llmEnabled || askMutation.isPending}
+            disabled={!data.llmEnabled || askMutation.isPending}
             onKeyDown={(e) => {
               if (e.key === "Enter" && askQuestion.trim()) askMutation.mutate();
             }}
           />
           <Button
             variant="outline"
-            disabled={!llmEnabled || !askQuestion.trim() || askMutation.isPending}
+            disabled={!data.llmEnabled || !askQuestion.trim() || askMutation.isPending}
             title={
-              llmEnabled
+              data.llmEnabled
                 ? "Answer from project facts, decisions, and correspondence"
                 : "Configure LLM_BASE_URL and LLM_MODEL on the API"
             }
             onClick={() => askMutation.mutate()}
           >
-            {askMutation.isPending ? "Asking…" : llmEnabled ? "Ask" : "Ask (LLM off)"}
+            {askMutation.isPending ? "Asking…" : data.llmEnabled ? "Ask" : "Ask (LLM off)"}
           </Button>
         </div>
         {askAnswer ? (
@@ -975,840 +807,62 @@ export default function ProjectDetailPage() {
       </div>
 
       {mode === "trail" ? (
-        <div className="space-y-4" role="tabpanel" aria-label="Trail">
-          <div className="flex flex-wrap gap-2">
-            {(["all", "mail", "manual", "slack"] as const).map((s) => (
-              <Button
-                key={s}
-                size="sm"
-                variant={sourceFilter === s ? "default" : "outline"}
-                onClick={() => setSourceFilter(s)}
-              >
-                {s === "all" ? "All" : s === "mail" ? "Mail" : s === "manual" ? "Manual" : "Slack"}
-              </Button>
-            ))}
-            <Button
-              size="sm"
-              variant={unassignedToIssue ? "default" : "outline"}
-              onClick={() => setUnassignedToIssue((v) => !v)}
-            >
-              Unassigned to issue
-            </Button>
-          </div>
-
-          {timelineQuery.isLoading ? (
-            <div className="flex items-center gap-2 text-sm text-muted-foreground">
-              <Loader2 className="h-4 w-4 animate-spin" />
-              Loading timeline…
-            </div>
-          ) : items.length === 0 ? (
-            <p className="py-8 text-sm text-muted-foreground">
-              No correspondence yet. Assign mail, sync Slack, or paste a Teams/WhatsApp note.
-            </p>
-          ) : (
-            <ol className="divide-y divide-border/70 border-y border-border/70">
-              {items.map((item) => (
-                <TimelineRow
-                  key={
-                    item.message_id ??
-                    item.manual_item_id ??
-                    item.connector_message_id ??
-                    `${item.source}-${item.occurred_at}-${item.title}`
-                  }
-                  item={item}
-                  account={accountFor(item.account_id)}
-                  projectID={id!}
-                  issues={openIssues}
-                  attaching={attachMutation.isPending}
-                  onAttach={(issueID) =>
-                    attachMutation.mutate({
-                      issueID,
-                      messageID: item.message_id,
-                      manualItemID: item.manual_item_id,
-                    })
-                  }
-                  onCreateIssue={() => {
-                    setPendingItemRefs(
-                      [
-                        item.message_id
-                          ? { message_id: item.message_id }
-                          : { manual_item_id: item.manual_item_id },
-                      ].filter((r) => r.message_id || r.manual_item_id),
-                    );
-                    setNewIssueTitle(item.title?.trim() || "");
-                    setSuggestMeta("Pre-attached from timeline");
-                    setCreateIssueOpen(true);
-                  }}
-                  onAddFactEvidence={() => {
-                    setFactEvidence(
-                      [
-                        item.message_id
-                          ? { message_id: item.message_id }
-                          : { manual_item_id: item.manual_item_id },
-                      ].filter((r) => r.message_id || r.manual_item_id),
-                    );
-                    setFactLabel(item.title?.trim() || "");
-                    setCreateFactOpen(true);
-                  }}
-                />
-              ))}
-            </ol>
-          )}
-        </div>
+        <TrailMode
+          items={data.timeline}
+          loading={data.timelineQuery.isLoading}
+          filters={filters}
+          onFiltersChange={setFilters}
+          projectID={id!}
+          issues={data.openIssues}
+          accountFor={accountFor}
+          attaching={attachMutation.isPending}
+          onAttach={(issueID, item) =>
+            attachMutation.mutate({
+              issueID,
+              messageID: item.message_id,
+              manualItemID: item.manual_item_id,
+            })
+          }
+          onCreateIssue={(item) => {
+            setPendingItemRefs([itemRef(item)].filter((r) => r.message_id || r.manual_item_id));
+            setNewIssueTitle(item.title?.trim() || "");
+            setSuggestMeta("Pre-attached from timeline");
+            setCreateIssueOpen(true);
+          }}
+          onAddFactEvidence={(item) => {
+            setFactEvidence([itemRef(item)].filter((r) => r.message_id || r.manual_item_id));
+            setFactLabel(item.title?.trim() || "");
+            setCreateFactOpen(true);
+          }}
+        />
       ) : null}
 
       {mode === "position" ? (
-        <div className="space-y-8" role="tabpanel" aria-label="Position">
-          <div className="flex flex-wrap gap-2">
-            <Button variant="outline" size="sm" onClick={() => setCreateFactOpen(true)}>
-              Add fact
-            </Button>
-            <Button variant="outline" size="sm" onClick={() => setCreateDecisionOpen(true)}>
-              Add decision
-            </Button>
-            <Button
-              variant="outline"
-              size="sm"
-              disabled={!llmEnabled || interpretMutation.isPending}
-              title={
-                llmEnabled
-                  ? "Extract fact/decision candidates from project correspondence"
-                  : "Configure LLM_BASE_URL and LLM_MODEL on the API to enable interpret"
-              }
-              onClick={() => interpretMutation.mutate()}
-            >
-              {interpretMutation.isPending
-                ? "Interpreting…"
-                : llmEnabled
-                  ? "Interpret"
-                  : "Interpret (LLM off)"}
-            </Button>
-            <Button
-              variant="outline"
-              size="sm"
-              disabled={
-                reconcileMutation.isPending ||
-                (interpretationsQuery.data ?? []).length === 0
-              }
-              title="Apply pending interpretations (Stage B)"
-              onClick={() => reconcileMutation.mutate()}
-            >
-              {reconcileMutation.isPending ? "Reconciling…" : "Reconcile"}
-            </Button>
-          </div>
-
-          <div className="space-y-3">
-            <h2 className="text-sm font-medium uppercase tracking-wider text-muted-foreground">
-              Contradictions
-            </h2>
-            {contradictionsQuery.isLoading ? (
-              <Loader2 className="h-4 w-4 animate-spin text-muted-foreground" />
-            ) : (contradictionsQuery.data ?? []).length === 0 ? (
-              <p className="text-sm text-muted-foreground">No open contradictions.</p>
-            ) : (
-              <ul className="space-y-3">
-                {(contradictionsQuery.data ?? []).map((c) => (
-                  <ContradictionRailItem
-                    key={c.id}
-                    contradiction={c}
-                    resolving={resolveContradictionMutation.isPending}
-                    onResolve={(resolution, keep) =>
-                      resolveContradictionMutation.mutate({
-                        id: c.id,
-                        resolution,
-                        keep_fact_version_id: keep,
-                      })
-                    }
-                  />
-                ))}
-              </ul>
-            )}
-          </div>
-
-          <div className="space-y-3">
-            <h2 className="text-sm font-medium uppercase tracking-wider text-muted-foreground">
-              Facts
-            </h2>
-            {factsQuery.isLoading ? (
-              <Loader2 className="h-4 w-4 animate-spin text-muted-foreground" />
-            ) : (factsQuery.data ?? []).length === 0 ? (
-              <p className="text-sm text-muted-foreground">No facts yet.</p>
-            ) : (
-              <ul className="space-y-3">
-                {(factsQuery.data ?? []).map((fact) => (
-                  <FactRailItem
-                    key={fact.id}
-                    fact={fact}
-                    expanded={expandedFactID === fact.id}
-                    onToggle={() =>
-                      setExpandedFactID((cur) => (cur === fact.id ? null : fact.id))
-                    }
-                    confirming={confirmFactMutation.isPending}
-                    rejecting={rejectFactMutation.isPending}
-                    onConfirm={(versionID, supersedesVersionID) =>
-                      confirmFactMutation.mutate({ versionID, supersedesVersionID })
-                    }
-                    onReject={(versionID) => rejectFactMutation.mutate(versionID)}
-                  />
-                ))}
-              </ul>
-            )}
-          </div>
-
-          <div className="space-y-3">
-            <h2 className="text-sm font-medium uppercase tracking-wider text-muted-foreground">
-              Decisions
-            </h2>
-            {decisionsQuery.isLoading ? (
-              <Loader2 className="h-4 w-4 animate-spin text-muted-foreground" />
-            ) : (decisionsQuery.data ?? []).length === 0 ? (
-              <p className="text-sm text-muted-foreground">No decisions yet.</p>
-            ) : (
-              <ul className="space-y-3">
-                {(decisionsQuery.data ?? []).map((d) => (
-                  <DecisionRailItem
-                    key={d.id}
-                    decision={d}
-                    confirming={confirmDecisionMutation.isPending}
-                    withdrawing={withdrawDecisionMutation.isPending}
-                    onConfirm={() => confirmDecisionMutation.mutate(d.id)}
-                    onWithdraw={() => withdrawDecisionMutation.mutate(d.id)}
-                  />
-                ))}
-              </ul>
-            )}
-          </div>
-        </div>
+        <PositionMode
+          facts={data.facts}
+          factsLoading={data.factsQuery.isLoading}
+          decisions={data.decisions}
+          decisionsLoading={data.decisionsQuery.isLoading}
+          onAddFact={() => setCreateFactOpen(true)}
+          onAddDecision={() => setCreateDecisionOpen(true)}
+        />
       ) : null}
 
       {mode === "open" ? (
-        <div className="space-y-8" role="tabpanel" aria-label="Open">
-          <div className="flex flex-wrap gap-2">
-            <Button variant="outline" size="sm" onClick={() => setCreateIssueOpen(true)}>
-              New issue
-            </Button>
-            <Button
-              variant="outline"
-              size="sm"
-              disabled={!llmEnabled || suggestIssueMutation.isPending}
-              title={
-                llmEnabled
-                  ? "Propose an issue from unassigned correspondence"
-                  : "Configure LLM_BASE_URL and LLM_MODEL on the API to enable suggestions"
-              }
-              onClick={() => suggestIssueMutation.mutate()}
-            >
-              {suggestIssueMutation.isPending
-                ? "Suggesting…"
-                : llmEnabled
-                  ? "Suggest issue"
-                  : "Suggest (LLM off)"}
-            </Button>
-          </div>
-
-          <div className="space-y-3">
-            <h2 className="text-sm font-medium uppercase tracking-wider text-muted-foreground">
-              Needs attention
-            </h2>
-            {attentionQuery.isLoading ? (
-              <Loader2 className="h-4 w-4 animate-spin text-muted-foreground" />
-            ) : (attentionQuery.data?.items ?? []).length === 0 ? (
-              <p className="text-sm text-muted-foreground">Nothing project-scoped waiting on you.</p>
-            ) : (
-              <ul className="divide-y divide-border/70 border-y border-border/70">
-                {(attentionQuery.data?.items ?? []).map((item) => (
-                  <li key={item.id} className="py-2.5 text-sm">
-                    <p className="text-[10px] uppercase tracking-wider text-muted-foreground">
-                      {item.why_me.replaceAll("_", " ")}
-                    </p>
-                    <p className="mt-0.5 font-medium">{item.title}</p>
-                  </li>
-                ))}
-              </ul>
-            )}
-          </div>
-
-          <div className="space-y-3">
-            <h2 className="text-sm font-medium uppercase tracking-wider text-muted-foreground">
-              Interpretations
-            </h2>
-            {interpretationsQuery.isLoading ? (
-              <Loader2 className="h-4 w-4 animate-spin text-muted-foreground" />
-            ) : (interpretationsQuery.data ?? []).length === 0 ? (
-              <p className="text-sm text-muted-foreground">No pending interpretations.</p>
-            ) : (
-              <ul className="space-y-3">
-                {(interpretationsQuery.data ?? []).map((interp) => (
-                  <InterpretationRailItem
-                    key={interp.id}
-                    interpretation={interp}
-                    dismissing={dismissInterpMutation.isPending}
-                    onDismiss={() => dismissInterpMutation.mutate(interp.id)}
-                  />
-                ))}
-              </ul>
-            )}
-          </div>
-
-          <div className="space-y-3">
-            <h2 className="text-sm font-medium uppercase tracking-wider text-muted-foreground">
-              Provisional facts
-            </h2>
-            {factsQuery.isLoading ? (
-              <Loader2 className="h-4 w-4 animate-spin text-muted-foreground" />
-            ) : provisionalFacts.length === 0 ? (
-              <p className="text-sm text-muted-foreground">No provisional facts.</p>
-            ) : (
-              <ul className="space-y-3">
-                {provisionalFacts.map((fact) => (
-                  <FactRailItem
-                    key={fact.id}
-                    fact={fact}
-                    expanded={expandedFactID === fact.id}
-                    onToggle={() =>
-                      setExpandedFactID((cur) => (cur === fact.id ? null : fact.id))
-                    }
-                    confirming={confirmFactMutation.isPending}
-                    rejecting={rejectFactMutation.isPending}
-                    onConfirm={(versionID, supersedesVersionID) =>
-                      confirmFactMutation.mutate({ versionID, supersedesVersionID })
-                    }
-                    onReject={(versionID) => rejectFactMutation.mutate(versionID)}
-                  />
-                ))}
-              </ul>
-            )}
-          </div>
-
-          <div className="space-y-3">
-            <h2 className="text-sm font-medium uppercase tracking-wider text-muted-foreground">
-              Issues
-            </h2>
-            {issuesQuery.isLoading ? (
-              <Loader2 className="h-4 w-4 animate-spin text-muted-foreground" />
-            ) : openIssues.length === 0 ? (
-              <p className="text-sm text-muted-foreground">No open issues yet.</p>
-            ) : (
-              <ul className="space-y-2">
-                {openIssues.map((iss) => (
-                  <li key={iss.id}>
-                    <Link
-                      to={`/projects/${id}/issues/${iss.id}`}
-                      className="block text-sm hover:underline"
-                    >
-                      <span className="font-medium">{iss.title}</span>
-                      <span className="mt-0.5 block text-xs text-muted-foreground">
-                        {iss.assignee_label ?? "Unassigned"} · {iss.status}
-                        {iss.awaiting_me ? " · awaiting you" : ""}
-                      </span>
-                    </Link>
-                  </li>
-                ))}
-              </ul>
-            )}
-          </div>
-        </div>
+        <OpenMode
+          attention={data.attention}
+          attentionLoading={data.attentionQuery.isLoading}
+          issues={data.openIssues}
+          issuesLoading={data.issuesQuery.isLoading}
+          projectID={id!}
+          llmEnabled={data.llmEnabled}
+          suggesting={suggestIssueMutation.isPending}
+          onSuggestIssue={() => suggestIssueMutation.mutate()}
+          onNewIssue={() => setCreateIssueOpen(true)}
+          onDiscard={(issueID) => discardIssueMutation.mutate(issueID)}
+          discarding={discardIssueMutation.isPending}
+        />
       ) : null}
     </div>
-  );
-}
-
-
-function DecisionRailItem({
-  decision,
-  confirming,
-  withdrawing,
-  onConfirm,
-  onWithdraw,
-}: {
-  decision: Decision;
-  confirming: boolean;
-  withdrawing: boolean;
-  onConfirm: () => void;
-  onWithdraw: () => void;
-}) {
-  return (
-    <li className="space-y-1.5 text-sm">
-      <p className="text-xs uppercase tracking-wider text-muted-foreground">{decision.status}</p>
-      <p>{decision.statement}</p>
-      {decision.status === "proposed" ? (
-        <div className="flex flex-wrap gap-1.5">
-          <Button
-            size="sm"
-            variant="outline"
-            className="h-7 text-xs"
-            disabled={confirming}
-            onClick={onConfirm}
-          >
-            Confirm
-          </Button>
-          <Button
-            size="sm"
-            variant="ghost"
-            className="h-7 text-xs"
-            disabled={withdrawing}
-            onClick={onWithdraw}
-          >
-            Withdraw
-          </Button>
-        </div>
-      ) : null}
-    </li>
-  );
-}
-
-function ContradictionRailItem({
-  contradiction,
-  resolving,
-  onResolve,
-}: {
-  contradiction: Contradiction;
-  resolving: boolean;
-  onResolve: (
-    resolution: "supersede" | "reject_a" | "reject_b" | "note",
-    keepFactVersionID?: string,
-  ) => void;
-}) {
-  const sides = contradiction.sides ?? [];
-  const proposed = sides.length >= 2 ? sides[1]?.fact_version_id : sides[0]?.fact_version_id;
-  return (
-    <li className="space-y-2 text-sm">
-      <p className="text-xs">{contradiction.summary}</p>
-      <div className="flex flex-wrap gap-1.5">
-        <Button
-          size="sm"
-          variant="outline"
-          className="h-7 text-xs"
-          disabled={resolving || !proposed}
-          onClick={() => onResolve("supersede", proposed)}
-        >
-          Keep proposed
-        </Button>
-        <Button
-          size="sm"
-          variant="outline"
-          className="h-7 text-xs"
-          disabled={resolving}
-          onClick={() => onResolve("reject_b")}
-        >
-          Reject proposed
-        </Button>
-        <Button
-          size="sm"
-          variant="ghost"
-          className="h-7 text-xs"
-          disabled={resolving}
-          onClick={() => onResolve("note")}
-        >
-          Note only
-        </Button>
-      </div>
-    </li>
-  );
-}
-
-function InterpretationRailItem({
-  interpretation,
-  dismissing,
-  onDismiss,
-}: {
-  interpretation: Interpretation;
-  dismissing: boolean;
-  onDismiss: () => void;
-}) {
-  const candidates = interpretation.candidates ?? [];
-  return (
-    <li className="space-y-2 text-sm">
-      <p className="text-xs text-muted-foreground">
-        {candidates.length} candidate(s)
-        {typeof interpretation.confidence === "number"
-          ? ` · ${Math.round(interpretation.confidence * 100)}%`
-          : ""}
-        {interpretation.sources?.length
-          ? ` · ${interpretation.sources.length} source(s)`
-          : ""}
-      </p>
-      <ul className="space-y-1.5 border-l border-border/60 pl-2">
-        {candidates.length === 0 ? (
-          <li className="text-xs text-muted-foreground">Empty payload</li>
-        ) : (
-          candidates.map((c, idx) => (
-            <li key={`${interpretation.id}-${idx}`} className="text-xs">
-              <span className="font-medium uppercase tracking-wider text-muted-foreground">
-                {c.kind}
-              </span>
-              {c.kind === "fact" ? (
-                <span className="mt-0.5 block">
-                  {c.label ?? c.subject_key}
-                  {c.value != null
-                    ? `: ${typeof c.value === "object" ? JSON.stringify(c.value) : String(c.value)}`
-                    : ""}
-                  {c.unit ? ` ${c.unit}` : ""}
-                </span>
-              ) : (
-                <span className="mt-0.5 block">{c.statement || "(decision)"}</span>
-              )}
-              {c.reason ? (
-                <span className="mt-0.5 block text-muted-foreground">{c.reason}</span>
-              ) : null}
-            </li>
-          ))
-        )}
-      </ul>
-      <Button
-        size="sm"
-        variant="outline"
-        className="h-7 text-xs"
-        disabled={dismissing}
-        onClick={onDismiss}
-      >
-        Dismiss
-      </Button>
-    </li>
-  );
-}
-
-function FactRailItem({
-  fact,
-  expanded,
-  onToggle,
-  confirming,
-  rejecting,
-  onConfirm,
-  onReject,
-}: {
-  fact: FactDetail;
-  expanded: boolean;
-  onToggle: () => void;
-  confirming: boolean;
-  rejecting: boolean;
-  onConfirm: (versionID: string, supersedesVersionID?: string) => void;
-  onReject: (versionID: string) => void;
-}) {
-  const active = fact.versions.find((v) => v.status === "active");
-  const proposed = fact.versions.filter((v) => v.status === "proposed");
-  const history = fact.versions.filter(
-    (v) => v.status === "superseded" || v.status === "rejected",
-  );
-  const display = active ?? proposed[0];
-  return (
-    <li className="text-sm">
-      <button type="button" className="w-full text-left hover:underline" onClick={onToggle}>
-        <span className="font-medium">{fact.label}</span>
-        <span className="mt-0.5 block text-xs text-muted-foreground">
-          {display
-            ? `${display.value_text}${display.unit ? ` ${display.unit}` : ""} · ${display.status}`
-            : fact.subject_key}
-        </span>
-      </button>
-      {expanded ? (
-        <div className="mt-2 space-y-2 border-l border-border/60 pl-2">
-          {proposed.map((v) => (
-            <div key={v.id} className="space-y-1">
-              <p className="text-xs text-muted-foreground">
-                Proposed: {v.value_text}
-                {v.unit ? ` ${v.unit}` : ""}
-              </p>
-              <div className="flex flex-wrap gap-1">
-                <Button
-                  size="sm"
-                  className="h-7 text-xs"
-                  disabled={confirming}
-                  onClick={() => onConfirm(v.id, active?.id)}
-                >
-                  Confirm
-                </Button>
-                <Button
-                  size="sm"
-                  variant="outline"
-                  className="h-7 text-xs"
-                  disabled={rejecting}
-                  onClick={() => onReject(v.id)}
-                >
-                  Reject
-                </Button>
-              </div>
-            </div>
-          ))}
-          {history.length > 0 ? (
-            <ul className="space-y-1 text-xs text-muted-foreground">
-              {history.map((v) => (
-                <li key={v.id}>
-                  {v.status}: {v.value_text}
-                  {v.unit ? ` ${v.unit}` : ""}
-                  {v.evidence?.length
-                    ? ` · ${v.evidence.length} evidence`
-                    : ""}
-                </li>
-              ))}
-            </ul>
-          ) : null}
-        </div>
-      ) : null}
-    </li>
-  );
-}
-
-function TimelineRow({
-  item,
-  account,
-  projectID,
-  issues,
-  attaching,
-  onAttach,
-  onCreateIssue,
-  onAddFactEvidence,
-}: {
-  item: TimelineItem;
-  account: UiAccount | undefined;
-  projectID: string;
-  issues: IssueListItem[];
-  attaching: boolean;
-  onAttach: (issueID: string) => void;
-  onCreateIssue: () => void;
-  onAddFactEvidence: () => void;
-}) {
-  const [expanded, setExpanded] = useState(false);
-  const [attachIssueID, setAttachIssueID] = useState("");
-  const when = useMemo(() => {
-    try {
-      return new Date(item.occurred_at).toLocaleString();
-    } catch {
-      return item.occurred_at;
-    }
-  }, [item.occurred_at]);
-  const contactLabel = item.contacts.map((c) => c.display_name).filter(Boolean).join(", ");
-
-  return (
-    <li className="space-y-2 py-4">
-      <div className="flex flex-wrap items-center gap-2 text-xs text-muted-foreground">
-        <span className="uppercase tracking-wider">{item.source}</span>
-        {item.channel ? <span>· {item.channel}</span> : null}
-        <span>· {when}</span>
-        {item.source === "mail" ? <AccountBadge account={account} /> : null}
-        {item.source === "slack" && item.account_label ? (
-          <span className="rounded border border-border/70 px-1.5 py-0.5">{item.account_label}</span>
-        ) : null}
-        {item.issue_id ? (
-          <Link
-            to={`/projects/${projectID}/issues/${item.issue_id}`}
-            className="rounded border border-border/70 px-1.5 py-0.5 hover:underline"
-          >
-            On issue
-          </Link>
-        ) : null}
-      </div>
-      {item.source === "mail" && item.message_id && item.account_id ? (
-        <Link
-          to={`/inbox?message_id=${encodeURIComponent(item.message_id)}&account_id=${encodeURIComponent(item.account_id)}`}
-          className="font-medium hover:underline"
-        >
-          {item.title || "(no subject)"}
-        </Link>
-      ) : (
-        <p className="font-medium">{item.title || "(untitled)"}</p>
-      )}
-      {contactLabel ? <p className="text-xs text-muted-foreground">{contactLabel}</p> : null}
-      {item.snippet ? <p className="text-sm text-foreground/85">{item.snippet}</p> : null}
-      {(item.source === "manual" || item.source === "slack") && item.body_text ? (
-        <div>
-          <Button size="sm" variant="ghost" className="h-7 px-2" onClick={() => setExpanded((v) => !v)}>
-            {expanded ? "Hide full text" : item.source === "slack" ? "Show full message" : "Show full paste"}
-          </Button>
-          {expanded ? (
-            <pre className="mt-2 whitespace-pre-wrap rounded-md bg-muted/40 p-3 text-xs">
-              {item.body_text}
-            </pre>
-          ) : null}
-        </div>
-      ) : null}
-      {!item.issue_id ? (
-        <div className="flex flex-wrap items-center gap-2 pt-1">
-          {issues.length > 0 ? (
-            <>
-              <select
-                aria-label="Attach to issue"
-                className="h-8 rounded-md border border-input bg-background px-2 text-xs"
-                value={attachIssueID}
-                onChange={(e) => setAttachIssueID(e.target.value)}
-              >
-                <option value="">Attach to issue…</option>
-                {issues.map((iss) => (
-                  <option key={iss.id} value={iss.id}>
-                    {iss.title}
-                  </option>
-                ))}
-              </select>
-              <Button
-                size="sm"
-                className="h-8"
-                disabled={!attachIssueID || attaching}
-                onClick={() => onAttach(attachIssueID)}
-              >
-                Attach
-              </Button>
-            </>
-          ) : null}
-          <Button size="sm" variant="outline" className="h-8" onClick={onCreateIssue}>
-            New issue…
-          </Button>
-          <Button size="sm" variant="outline" className="h-8" onClick={onAddFactEvidence}>
-            Add as fact…
-          </Button>
-        </div>
-      ) : (
-        <div className="flex flex-wrap items-center gap-2 pt-1">
-          <Button size="sm" variant="outline" className="h-8" onClick={onAddFactEvidence}>
-            Add as fact…
-          </Button>
-        </div>
-      )}
-    </li>
-  );
-}
-
-function PasteDialog({
-  projectID,
-  accessToken,
-  onDone,
-}: {
-  projectID: string;
-  accessToken: string;
-  onDone: () => Promise<void>;
-}) {
-  const [channel, setChannel] = useState("teams");
-  const [title, setTitle] = useState("");
-  const [body, setBody] = useState("");
-  const [occurredAt, setOccurredAt] = useState(() => {
-    const d = new Date();
-    d.setMinutes(d.getMinutes() - d.getTimezoneOffset());
-    return d.toISOString().slice(0, 16);
-  });
-  const [selectedContacts, setSelectedContacts] = useState<string[]>([]);
-
-  const contactsQuery = useQuery({
-    queryKey: ["contacts", accessToken, "paste"],
-    queryFn: () => listContacts(accessToken, { limit: 100 }),
-  });
-
-  const mutation = useMutation({
-    mutationFn: async () => {
-      const iso = new Date(occurredAt).toISOString();
-      return createManualItem(accessToken, {
-        channel,
-        occurred_at: iso,
-        title: title.trim() || channel,
-        body_text: body.trim(),
-        project_id: projectID,
-        participant_contact_ids: selectedContacts,
-      });
-    },
-    onSuccess: async () => {
-      toast({ title: "Correspondence added" });
-      await onDone();
-    },
-    onError: (err) => {
-      toast({
-        title: "Could not paste",
-        description: err instanceof ApiError ? err.message : "Please try again.",
-        variant: "destructive",
-      });
-    },
-  });
-
-  return (
-    <DialogContent className="max-h-[90vh] overflow-y-auto sm:max-w-lg">
-      <DialogHeader>
-        <DialogTitle>Paste correspondence</DialogTitle>
-        <DialogDescription>
-          Add a Teams, WhatsApp, or other note to this project timeline. Body text is kept as
-          evidence and cannot be edited later.
-        </DialogDescription>
-      </DialogHeader>
-      <div className="space-y-3">
-        <div className="space-y-1">
-          <label className="text-xs text-muted-foreground">Channel</label>
-          <Select value={channel} onValueChange={setChannel}>
-            <SelectTrigger>
-              <SelectValue />
-            </SelectTrigger>
-            <SelectContent>
-              {CHANNELS.map((c) => (
-                <SelectItem key={c.value} value={c.value}>
-                  {c.label}
-                </SelectItem>
-              ))}
-            </SelectContent>
-          </Select>
-        </div>
-        <div className="space-y-1">
-          <label className="text-xs text-muted-foreground" htmlFor="occurred">
-            When
-          </label>
-          <Input
-            id="occurred"
-            type="datetime-local"
-            value={occurredAt}
-            onChange={(e) => setOccurredAt(e.target.value)}
-          />
-        </div>
-        <div className="space-y-1">
-          <label className="text-xs text-muted-foreground" htmlFor="paste-title">
-            Title
-          </label>
-          <Input
-            id="paste-title"
-            value={title}
-            onChange={(e) => setTitle(e.target.value)}
-            placeholder="Optional short title"
-          />
-        </div>
-        <div className="space-y-1">
-          <label className="text-xs text-muted-foreground" htmlFor="paste-body">
-            Body
-          </label>
-          <Textarea
-            id="paste-body"
-            value={body}
-            onChange={(e) => setBody(e.target.value)}
-            rows={6}
-            placeholder="Paste the message text…"
-          />
-        </div>
-        {(contactsQuery.data?.length ?? 0) > 0 ? (
-          <div className="space-y-2">
-            <p className="text-xs text-muted-foreground">Participants (optional)</p>
-            <ul className="max-h-32 space-y-1 overflow-y-auto text-sm">
-              {contactsQuery.data!.map((c) => {
-                const checked = selectedContacts.includes(c.id);
-                return (
-                  <li key={c.id}>
-                    <label className="flex cursor-pointer items-center gap-2">
-                      <input
-                        type="checkbox"
-                        checked={checked}
-                        onChange={() =>
-                          setSelectedContacts((prev) =>
-                            checked ? prev.filter((x) => x !== c.id) : [...prev, c.id],
-                          )
-                        }
-                      />
-                      <span className={cn(checked && "font-medium")}>{c.display_name}</span>
-                    </label>
-                  </li>
-                );
-              })}
-            </ul>
-          </div>
-        ) : null}
-        <Button
-          className="w-full"
-          disabled={!body.trim() || mutation.isPending}
-          onClick={() => mutation.mutate()}
-        >
-          {mutation.isPending ? "Saving…" : "Add to timeline"}
-        </Button>
-      </div>
-    </DialogContent>
   );
 }
