@@ -529,6 +529,7 @@ func migrateProjectsAssignments(db *sql.DB) error {
 			archived_at TEXT,
 			created_at TEXT NOT NULL,
 			updated_at TEXT NOT NULL,
+			last_extracted_at TEXT,
 			UNIQUE (organisation_id, code)
 		)`,
 		`CREATE INDEX IF NOT EXISTS idx_projects_org ON projects(organisation_id)`,
@@ -592,6 +593,15 @@ func migrateProjectsAssignments(db *sql.DB) error {
 	}
 	for _, stmt := range statements {
 		if _, err := db.Exec(stmt); err != nil {
+			return err
+		}
+	}
+	hasLastExtracted, err := tableHasColumn(db, "projects", "last_extracted_at")
+	if err != nil {
+		return err
+	}
+	if !hasLastExtracted {
+		if _, err := db.Exec(`ALTER TABLE projects ADD COLUMN last_extracted_at TEXT`); err != nil {
 			return err
 		}
 	}

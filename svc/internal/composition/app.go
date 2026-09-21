@@ -501,6 +501,7 @@ func (r *Runtime) buildServices(ctx context.Context) error {
 			AssignProjects:   assignSvc,
 			InterpretProject: interpretSvc,
 			ReconcileProject: reconcileSvc,
+			Projects:         repo,
 			ProjectAI:        projectAISvc,
 		})
 	}
@@ -508,6 +509,7 @@ func (r *Runtime) buildServices(ctx context.Context) error {
 		OAuthStates:       repo,
 		Schedules:         repo,
 		Accounts:          repo,
+		Projects:          repo,
 		Store:             r.JobStore,
 		Enqueuer:          r.Enqueuer,
 		Registry:          r.Registry,

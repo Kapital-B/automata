@@ -30,15 +30,22 @@ type ChainEnqueuer interface {
 }
 
 type SchedulerService struct {
-	OAuthStates       driven.OAuthStateRepository
-	Schedules         driven.ScheduleRepository
-	Accounts          driven.AccountRepository
-	Store             driven.JobStore
-	Enqueuer          ChainEnqueuer
-	Registry          *Registry
-	EffectReconciler  EffectAuditReconciler
-	OAuthStateTTL     time.Duration
-	PendingWakeAfter  time.Duration
+	OAuthStates driven.OAuthStateRepository
+	Schedules   driven.ScheduleRepository
+	Accounts    driven.AccountRepository
+	// Projects is optional; without it the extraction debounce pass is skipped.
+	Projects         driven.ProjectRepository
+	Store            driven.JobStore
+	Enqueuer         ChainEnqueuer
+	Registry         *Registry
+	EffectReconciler EffectAuditReconciler
+	OAuthStateTTL    time.Duration
+	PendingWakeAfter time.Duration
+	// ExtractQuietFor and ExtractCeiling debounce project extraction: run once
+	// correspondence has stopped arriving for ExtractQuietFor, or once the
+	// oldest unextracted item reaches ExtractCeiling, whichever comes first.
+	ExtractQuietFor   time.Duration
+	ExtractCeiling    time.Duration
 	ScheduleBatchSize int
 	Log               *slog.Logger
 }
@@ -77,7 +84,62 @@ func (s *SchedulerService) Tick(ctx context.Context, now time.Time) error {
 		s.log().Error("scheduler effect reconcile failed", "err", err)
 		return err
 	}
+	if err := s.enqueueDueExtractions(ctx, now); err != nil {
+		s.log().Error("scheduler extraction enqueue failed", "err", err)
+		return err
+	}
 	s.log().Info("scheduler tick end", "duration_ms", time.Since(start).Milliseconds())
+	return nil
+}
+
+// DefaultExtractQuietFor and DefaultExtractCeiling implement the debounce in
+// addendum-project-renovation.md §2.2.
+const (
+	DefaultExtractQuietFor = time.Minute
+	DefaultExtractCeiling  = 5 * time.Minute
+)
+
+// enqueueDueExtractions starts the interpret→reconcile chain for projects whose
+// correspondence has settled.
+//
+// Due-ness is derived from assignment timestamps rather than tracked, so a
+// missed tick self-heals and there is no counter to drift.
+func (s *SchedulerService) enqueueDueExtractions(ctx context.Context, now time.Time) error {
+	if s.Projects == nil || s.Enqueuer == nil {
+		return nil
+	}
+	quiet := s.ExtractQuietFor
+	if quiet <= 0 {
+		quiet = DefaultExtractQuietFor
+	}
+	ceiling := s.ExtractCeiling
+	if ceiling <= 0 {
+		ceiling = DefaultExtractCeiling
+	}
+	due, err := s.Projects.ListProjectsDueForExtraction(ctx, now, quiet, ceiling, s.batchLimit())
+	if err != nil {
+		return err
+	}
+	enqueued, coalesced := 0, 0
+	for _, project := range due {
+		pid := project.ProjectID
+		_, err := s.Enqueuer.EnqueueChain(ctx, project.OwnerUserID, nil, driven.JobTriggerSchedule,
+			[]string{TypeInterpretProject, TypeReconcileProject},
+			driven.JobPayload{ProjectID: &pid}, nil, nil)
+		if err != nil {
+			// Already queued or running for this project: the coalescing
+			// working, not a failure.
+			if errors.Is(err, driven.ErrJobLockHeld) || errors.Is(err, driven.ErrJobConflict) {
+				coalesced++
+				continue
+			}
+			return err
+		}
+		enqueued++
+	}
+	if len(due) > 0 {
+		s.log().Info("scheduler extraction", "due", len(due), "enqueued", enqueued, "coalesced", coalesced)
+	}
 	return nil
 }
 

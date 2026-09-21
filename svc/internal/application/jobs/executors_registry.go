@@ -3,6 +3,7 @@ package jobs
 import (
 	"context"
 	"fmt"
+	"time"
 
 	appconnectors "github.com/Kapital-B/automata/svc/internal/application/connectors"
 	appcontacts "github.com/Kapital-B/automata/svc/internal/application/contacts"
@@ -26,7 +27,9 @@ type ExecutorDeps struct {
 	AssignProjects   *appprojects.AssignService
 	InterpretProject *appinterpret.Service
 	ReconcileProject *appreconcile.Service
-	ProjectAI        *appprojectai.Service
+	// Projects records the extraction watermark when a chain completes.
+	Projects  driven.ProjectRepository
+	ProjectAI *appprojectai.Service
 }
 
 func NewExecutorRegistry(deps ExecutorDeps) ExecutorRegistry {
@@ -59,7 +62,7 @@ func NewExecutorRegistry(deps ExecutorDeps) ExecutorRegistry {
 		reg[TypeInterpretProject] = &interpretProjectExecutor{service: deps.InterpretProject}
 	}
 	if deps.ReconcileProject != nil {
-		reg[TypeReconcileProject] = &reconcileProjectExecutor{service: deps.ReconcileProject}
+		reg[TypeReconcileProject] = &reconcileProjectExecutor{service: deps.ReconcileProject, projects: deps.Projects}
 	}
 	if deps.ProjectAI != nil {
 		reg[TypeProjectAI] = &projectAIExecutor{service: deps.ProjectAI}
@@ -103,7 +106,8 @@ func (e *interpretProjectExecutor) ExecuteChunk(ctx context.Context, run driven.
 }
 
 type reconcileProjectExecutor struct {
-	service *appreconcile.Service
+	service  *appreconcile.Service
+	projects driven.ProjectRepository
 }
 
 func (e *reconcileProjectExecutor) JobType() string { return TypeReconcileProject }
@@ -118,6 +122,13 @@ func (e *reconcileProjectExecutor) ExecuteChunk(ctx context.Context, run driven.
 	res, err := e.service.Run(ctx, run.UserID, *run.Payload.ProjectID, appreconcile.ReconcileInput{})
 	if err != nil {
 		return driven.ChunkResult{}, err
+	}
+	// Advance the extraction watermark only on success, so a failed run is
+	// retried rather than skipping the correspondence it never reached.
+	if e.projects != nil {
+		if err := e.projects.MarkProjectExtracted(ctx, *run.Payload.ProjectID, time.Now().UTC()); err != nil {
+			return driven.ChunkResult{}, err
+		}
 	}
 	return driven.ChunkResult{
 		ProgressDelta: driven.JobProgress{

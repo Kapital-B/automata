@@ -662,6 +662,7 @@ func Run(t *testing.T, factory Factory) {
 	runActivityFeedTests(t, factory)
 	runAttentionTests(t, factory)
 	runNotRelevantTests(t, factory)
+	runExtractionDebounceTests(t, factory)
 
 	t.Run("timeline_hydration_is_batched_and_correct", func(t *testing.T) {
 		h := factory(t)
@@ -1615,4 +1616,124 @@ func runNotRelevantTests(t *testing.T, factory Factory) {
 			t.Errorf("assigned item still listed as not-relevant: %+v", dismissed)
 		}
 	})
+}
+
+// runExtractionDebounceTests covers when a project becomes due for extraction.
+func runExtractionDebounceTests(t *testing.T, factory Factory) {
+	t.Helper()
+	const quiet = time.Minute
+	const ceiling = 5 * time.Minute
+
+	assign := func(t *testing.T, h Handle, orgID, accountID, projectID uuid.UUID, conv string, at time.Time) {
+		t.Helper()
+		if err := h.Repo.UpsertThreadAssignment(context.Background(), driven.AssignmentRow{
+			ID: uuid.New(), OrganisationID: orgID, AccountID: accountID, ConversationID: conv,
+			ProjectID: &projectID, Status: "committed", Reason: "user_assign",
+			Source: string(domainprojects.SourceUser), CreatedAt: at, UpdatedAt: at,
+		}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	isDue := func(t *testing.T, h Handle, now time.Time, projectID uuid.UUID) bool {
+		t.Helper()
+		due, err := h.Repo.ListProjectsDueForExtraction(context.Background(), now, quiet, ceiling, 50)
+		if err != nil {
+			t.Fatal(err)
+		}
+		for _, d := range due {
+			if d.ProjectID == projectID {
+				return true
+			}
+		}
+		return false
+	}
+
+	t.Run("extraction_waits_for_quiet_then_fires", func(t *testing.T) {
+		h := factory(t)
+		now := time.Now().UTC()
+		userID, orgID, accountID := seedUserAccount(t, h.Repo, uuid.New(), now)
+		projectID := createProject(t, h.Repo, orgID, userID, "DC50", "Debounce")
+
+		// Correspondence just arrived: still inside the quiet window.
+		assign(t, h, orgID, accountID, projectID, "conv-1", now.Add(-10*time.Second))
+		if isDue(t, h, now, projectID) {
+			t.Error("project should not be due while correspondence is still arriving")
+		}
+
+		// A minute of quiet makes it due.
+		if !isDue(t, h, now.Add(quiet), projectID) {
+			t.Error("project should be due after a minute of quiet")
+		}
+	})
+
+	t.Run("extraction_fires_at_the_ceiling_under_continuous_assignment", func(t *testing.T) {
+		h := factory(t)
+		now := time.Now().UTC()
+		userID, orgID, accountID := seedUserAccount(t, h.Repo, uuid.New(), now)
+		projectID := createProject(t, h.Repo, orgID, userID, "DC51", "Ceiling")
+
+		// A steady trickle: something arrives every 20 seconds for six minutes,
+		// so the quiet window never closes.
+		for i := 0; i < 18; i++ {
+			assign(t, h, orgID, accountID, projectID, fmt.Sprintf("conv-%d", i),
+				now.Add(-6*time.Minute).Add(time.Duration(i*20)*time.Second))
+		}
+		// Newest is 20s old, so quiet alone would keep deferring forever.
+		if !isDue(t, h, now, projectID) {
+			t.Error("the ceiling should force extraction under continuous assignment")
+		}
+	})
+
+	t.Run("extraction_not_due_without_new_correspondence", func(t *testing.T) {
+		h := factory(t)
+		ctx := context.Background()
+		now := time.Now().UTC()
+		userID, orgID, accountID := seedUserAccount(t, h.Repo, uuid.New(), now)
+		projectID := createProject(t, h.Repo, orgID, userID, "DC52", "Quiet")
+
+		// A project with no correspondence is never due.
+		if isDue(t, h, now, projectID) {
+			t.Error("a project with no correspondence should not be due")
+		}
+
+		assign(t, h, orgID, accountID, projectID, "conv-1", now.Add(-10*time.Minute))
+		if !isDue(t, h, now, projectID) {
+			t.Fatal("expected the project to be due before extraction")
+		}
+
+		// After extraction it settles.
+		if err := h.Repo.MarkProjectExtracted(ctx, projectID, now); err != nil {
+			t.Fatal(err)
+		}
+		if isDue(t, h, now.Add(time.Hour), projectID) {
+			t.Error("a project with nothing newer than its watermark should not be due again")
+		}
+
+		// New correspondence after the watermark makes it due once more.
+		assign(t, h, orgID, accountID, projectID, "conv-2", now.Add(time.Minute))
+		if !isDue(t, h, now.Add(10*time.Minute), projectID) {
+			t.Error("correspondence newer than the watermark should make the project due")
+		}
+	})
+
+	t.Run("extraction_ignores_not_project_related", func(t *testing.T) {
+		h := factory(t)
+		now := time.Now().UTC()
+		userID, orgID, accountID := seedUserAccount(t, h.Repo, uuid.New(), now)
+		projectID := createProject(t, h.Repo, orgID, userID, "DC53", "Dismissed")
+
+		// A dismissal carries no project, so it cannot make one due.
+		at := now.Add(-10 * time.Minute)
+		if err := h.Repo.UpsertThreadAssignment(context.Background(), driven.AssignmentRow{
+			ID: uuid.New(), OrganisationID: orgID, AccountID: accountID, ConversationID: "conv-dismissed",
+			Status: "committed", Reason: "not_relevant", Source: string(domainprojects.SourceUser),
+			CreatedAt: at, UpdatedAt: at, NotRelevantAt: &at,
+		}); err != nil {
+			t.Fatal(err)
+		}
+		if isDue(t, h, now, projectID) {
+			t.Error("dismissed correspondence must not trigger extraction")
+		}
+	})
+
 }
