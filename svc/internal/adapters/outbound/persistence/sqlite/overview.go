@@ -5,6 +5,7 @@ import (
 	"database/sql"
 	"fmt"
 	"strings"
+	"time"
 
 	"github.com/Kapital-B/automata/svc/internal/adapters/outbound/persistence/sqlkit"
 	"github.com/Kapital-B/automata/svc/internal/application/ports/driven"
@@ -375,4 +376,97 @@ func scanAttentionRows(rows *sql.Rows) ([]driven.AttentionRow, error) {
 		})
 	}
 	return out, rows.Err()
+}
+
+// projectAssignmentTimesSQL is when correspondence last landed on each project,
+// across all three carriers of an assignment decision.
+//
+// Correspondence marked not project-related is excluded: it has no project and
+// must not make one due for extraction.
+const projectAssignmentTimesSQL = `
+	SELECT t.project_id, t.updated_at AS assigned_at
+	FROM thread_assignments t
+	WHERE t.project_id IS NOT NULL AND t.not_relevant_at IS NULL
+
+	UNION ALL
+	SELECT o.project_id, o.updated_at
+	FROM message_assignment_overrides o
+	WHERE o.project_id IS NOT NULL AND o.not_relevant_at IS NULL
+
+	UNION ALL
+	SELECT mi.project_id, mi.created_at
+	FROM manual_items mi
+	WHERE mi.project_id IS NOT NULL AND mi.not_relevant_at IS NULL
+`
+
+// ListProjectsDueForExtraction derives due-ness rather than tracking it.
+//
+// A queue-side debounce would need either a new store mutation or a re-enqueue
+// from inside a job holding its own lock: ScheduledFor is not a claim-time gate
+// and RetryNotBefore is set only by retry backoff. Deriving on a tick is
+// idempotent and self-healing — a missed tick simply runs the next minute.
+func (r *Repository) ListProjectsDueForExtraction(ctx context.Context, now time.Time, quietFor, ceiling time.Duration, limit int) ([]driven.DueProject, error) {
+	if limit <= 0 {
+		limit = 50
+	}
+	rows, err := r.db.QueryContext(ctx, `
+		WITH assigned AS (`+projectAssignmentTimesSQL+`),
+		pending AS (
+			SELECT a.project_id,
+				MAX(a.assigned_at) AS newest,
+				MIN(a.assigned_at) AS oldest
+			FROM assigned a
+			INNER JOIN projects p ON p.id = a.project_id
+			WHERE p.archived_at IS NULL
+			  AND (p.last_extracted_at IS NULL OR a.assigned_at > p.last_extracted_at)
+			GROUP BY a.project_id
+		)
+		SELECT pending.project_id, (
+			SELECT pm.user_id FROM project_members pm
+			WHERE pm.project_id = pending.project_id
+			ORDER BY pm.created_at ASC
+			LIMIT 1
+		) AS owner_user_id
+		FROM pending
+		WHERE pending.newest <= ? OR pending.oldest <= ?
+		ORDER BY pending.oldest ASC
+		LIMIT ?
+	`, formatRFC3339(now.Add(-quietFor).UTC()), formatRFC3339(now.Add(-ceiling).UTC()), limit)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	return scanDueProjects(rows)
+}
+
+func scanDueProjects(rows *sql.Rows) ([]driven.DueProject, error) {
+	out := make([]driven.DueProject, 0)
+	for rows.Next() {
+		var projectStr string
+		var ownerStr sql.NullString
+		if err := rows.Scan(&projectStr, &ownerStr); err != nil {
+			return nil, err
+		}
+		projectID, err := uuid.Parse(projectStr)
+		if err != nil {
+			return nil, err
+		}
+		// A project with no members has nobody to run extraction as; skip it
+		// rather than inventing a caller.
+		if !ownerStr.Valid || ownerStr.String == "" {
+			continue
+		}
+		ownerID, err := uuid.Parse(ownerStr.String)
+		if err != nil {
+			return nil, err
+		}
+		out = append(out, driven.DueProject{ProjectID: projectID, OwnerUserID: ownerID})
+	}
+	return out, rows.Err()
+}
+
+func (r *Repository) MarkProjectExtracted(ctx context.Context, projectID uuid.UUID, at time.Time) error {
+	_, err := r.db.ExecContext(ctx, `UPDATE projects SET last_extracted_at = ? WHERE id = ?`,
+		formatRFC3339(at.UTC()), projectID.String())
+	return err
 }

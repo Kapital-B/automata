@@ -486,6 +486,13 @@ type AttentionRow struct {
 	OccurredAt  time.Time
 }
 
+// DueProject is a project whose correspondence is ready to be extracted.
+type DueProject struct {
+	ProjectID uuid.UUID
+	// OwnerUserID is a project member the extraction job runs as.
+	OwnerUserID uuid.UUID
+}
+
 // ActivityItem is one change to what a project knows, for the Home feed.
 type ActivityItem struct {
 	Kind        string // see the kind table in addendum-home-overview.md §6.3
@@ -564,6 +571,13 @@ type ProjectRepository interface {
 	// ListAttention returns everything awaiting the caller across the projects
 	// they are a member of, in one query.
 	ListAttention(ctx context.Context, userID, organisationID uuid.UUID) ([]AttentionRow, error)
+	// ListProjectsDueForExtraction returns projects with correspondence assigned
+	// since their last extraction, debounced: either the newest such assignment
+	// is at least quietFor old, or the oldest is at least ceiling old.
+	ListProjectsDueForExtraction(ctx context.Context, now time.Time, quietFor, ceiling time.Duration, limit int) ([]DueProject, error)
+	// MarkProjectExtracted advances the project's extraction watermark. Only
+	// called on success, so a failed run retries rather than skipping.
+	MarkProjectExtracted(ctx context.Context, projectID uuid.UUID, at time.Time) error
 	// ListActivity returns recent changes across the projects the caller is a
 	// member of, newest first.
 	ListActivity(ctx context.Context, userID, organisationID uuid.UUID, filter ActivityFilter) ([]ActivityItem, error)
