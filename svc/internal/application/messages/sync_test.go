@@ -439,4 +439,21 @@ func TestSyncChunkForceResetsOnlyAtTheStart(t *testing.T) {
 	if got := graph.calls[2]; got != "page-2" {
 		t.Fatalf("chunk with a cursor used %q, want page-2", got)
 	}
+
+	// Run detail is merged per chunk, so the last chunk is what the run
+	// reports. A forced run has to stay identifiable through pagination.
+	res, err := svc.SyncChunk(ctx, driven.RunContext{
+		UserID: userID, AccountID: &accountID, JobType: "sync",
+		Payload: driven.JobPayload{Force: true},
+		Cursor:  &driven.JobCursor{Value: "page-3"},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if res.DeltaResetReason != "forced" {
+		t.Errorf("delta reset reason = %q, want forced on every chunk of a forced run", res.DeltaResetReason)
+	}
+	if res.DeltaReused {
+		t.Error("a forced run should not report the delta as reused")
+	}
 }

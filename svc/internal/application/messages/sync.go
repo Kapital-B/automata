@@ -195,11 +195,19 @@ func (s *SyncService) SyncChunk(ctx context.Context, run driven.RunContext) (*Sy
 		n++
 	}
 
+	// Job progress detail is merged per chunk, so the last chunk is what the
+	// run ends up reporting. A forced run resets on its first chunk and
+	// paginates with a cursor after that, so without carrying the reason
+	// forward the run finishes looking like an ordinary one.
+	reportedReset := deltaResetReason
+	if reportedReset == "" && run.Payload.Force {
+		reportedReset = "forced"
+	}
 	out := &SyncChunkResult{
 		MessagesUpserted: n,
 		Fetched:          len(list),
-		DeltaReused:      deltaUsed,
-		DeltaResetReason: deltaResetReason,
+		DeltaReused:      deltaUsed && !run.Payload.Force,
+		DeltaResetReason: reportedReset,
 	}
 	if strings.TrimSpace(deltaRes.NextLink) != "" {
 		out.NextCursor = &driven.JobCursor{Kind: "graph_next_link", Value: strings.TrimSpace(deltaRes.NextLink)}
