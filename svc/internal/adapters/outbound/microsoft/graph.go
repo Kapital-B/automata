@@ -226,14 +226,21 @@ type deltaMessagesResponse struct {
 	DeltaLink string             `json:"@odata.deltaLink"`
 }
 
+type graphRemovedJSON struct {
+	Reason string `json:"reason"`
+}
+
 type graphMessageJSON struct {
-	ID               string `json:"id"`
-	ConversationID   string `json:"conversationId"`
-	ReceivedDateTime string `json:"receivedDateTime"`
-	Subject          string `json:"subject"`
-	BodyPreview      string `json:"bodyPreview"`
-	HasAttachments   bool   `json:"hasAttachments"`
-	ChangeKey        string `json:"changeKey"`
+	ID string `json:"id"`
+	// Removed is present only on delta tombstones, which carry no other
+	// fields. Without this they decode as a message with every field empty.
+	Removed          *graphRemovedJSON `json:"@removed"`
+	ConversationID   string            `json:"conversationId"`
+	ReceivedDateTime string            `json:"receivedDateTime"`
+	Subject          string            `json:"subject"`
+	BodyPreview      string            `json:"bodyPreview"`
+	HasAttachments   bool              `json:"hasAttachments"`
+	ChangeKey        string            `json:"changeKey"`
 	From             struct {
 		EmailAddress struct {
 			Name    string `json:"name"`
@@ -292,6 +299,7 @@ func mapGraphMessage(m graphMessageJSON) driven.GraphMessage {
 		BodyContentType:  m.Body.ContentType,
 		HasAttachments:   m.HasAttachments,
 		ChangeKey:        m.ChangeKey,
+		Removed:          m.Removed != nil,
 	}
 }
 
@@ -343,8 +351,10 @@ func (g *GraphClient) ListInboxDelta(ctx context.Context, accessToken string, de
 	}
 	out := make([]driven.GraphMessage, 0, len(res.Value))
 	for _, m := range res.Value {
-		// Graph delta may include tombstones; skip rows without id.
-		if strings.TrimSpace(m.ID) == "" {
+		// Graph delta includes tombstones for messages that left the folder.
+		// They carry an id and @removed and nothing else, so decoding one as
+		// a message yields empty everything.
+		if strings.TrimSpace(m.ID) == "" || m.Removed != nil {
 			continue
 		}
 		out = append(out, mapGraphMessage(m))

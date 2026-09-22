@@ -42,6 +42,9 @@ type GraphMessage struct {
 	BodyContentType  string // Text or HTML
 	HasAttachments   bool
 	ChangeKey        string
+	// Removed marks a delta tombstone: the message left the folder. Graph
+	// sends these as an id plus @removed and nothing else.
+	Removed bool
 }
 
 // GraphRecipient is a To/Cc mailbox address on a Graph message.
