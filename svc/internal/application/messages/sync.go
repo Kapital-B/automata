@@ -43,6 +43,11 @@ type SyncResult struct {
 type SyncOptions struct {
 	RunID   *uuid.UUID
 	Trigger string
+	// Force starts from an empty delta link instead of the stored one. Graph
+	// only resends messages that changed, so a row whose content was lost
+	// locally is never repaired by an ordinary run; a forced one refetches the
+	// full payloads.
+	Force bool
 }
 
 type SyncChunkResult struct {
@@ -106,10 +111,16 @@ func (s *SyncService) SyncChunk(ctx context.Context, run driven.RunContext) (*Sy
 
 	cursor := ""
 	deltaUsed := false
-	if run.Cursor != nil && strings.TrimSpace(run.Cursor.Value) != "" {
+	deltaResetReason := ""
+	switch {
+	case run.Cursor != nil && strings.TrimSpace(run.Cursor.Value) != "":
+		// Mid-run pagination: a forced reset applies to the start of a sync,
+		// not to every chunk, or the run would restart on each page.
 		cursor = strings.TrimSpace(run.Cursor.Value)
 		deltaUsed = true
-	} else {
+	case run.Payload.Force:
+		deltaResetReason = "forced"
+	default:
 		prevDeltaLink, err := s.Accounts.GetSyncDeltaLink(ctx, run.UserID, accountID)
 		if err != nil {
 			return nil, err
@@ -117,7 +128,6 @@ func (s *SyncService) SyncChunk(ctx context.Context, run driven.RunContext) (*Sy
 		cursor = strings.TrimSpace(strOrEmpty(prevDeltaLink))
 		deltaUsed = cursor != ""
 	}
-	deltaResetReason := ""
 	deltaRes, err := s.Graph.ListInboxDelta(ctx, tok.AccessToken, cursor, 100)
 	if err != nil && deltaUsed && isInvalidDeltaError(err) {
 		deltaResetReason = "invalid_delta_link"
@@ -258,16 +268,22 @@ func (s *SyncService) SyncInboxWithOptions(ctx context.Context, userID uuid.UUID
 		}
 	}
 
-	prevDeltaLink, err := s.Accounts.GetSyncDeltaLink(ctx, userID, accountID)
-	if err != nil {
-		if s.JobRuns != nil {
-			msg := err.Error()
-			_ = s.JobRuns.UpdateJobRunStatus(ctx, jobID, "failed", timePtrSync(time.Now().UTC()), &msg, `{}`)
+	var prevDeltaLink *string
+	if !opts.Force {
+		prevDeltaLink, err = s.Accounts.GetSyncDeltaLink(ctx, userID, accountID)
+		if err != nil {
+			if s.JobRuns != nil {
+				msg := err.Error()
+				_ = s.JobRuns.UpdateJobRunStatus(ctx, jobID, "failed", timePtrSync(time.Now().UTC()), &msg, `{}`)
+			}
+			return nil, err
 		}
-		return nil, err
 	}
 	deltaUsed := strings.TrimSpace(strOrEmpty(prevDeltaLink)) != ""
 	deltaResetReason := ""
+	if opts.Force {
+		deltaResetReason = "forced"
+	}
 	deltaRes, err := s.Graph.ListInboxDelta(ctx, tok.AccessToken, strOrEmpty(prevDeltaLink), 50)
 	if err != nil && deltaUsed && isInvalidDeltaError(err) {
 		deltaResetReason = "invalid_delta_link"

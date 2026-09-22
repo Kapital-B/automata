@@ -409,8 +409,12 @@ func (h *Handlers) syncAccount(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusNotFound, map[string]string{"error": "not found"})
 		return
 	}
+	// A forced sync starts from an empty delta link. Graph only resends what
+	// changed, so this is the only way to repair a message whose stored
+	// content was lost locally.
+	force := r.URL.Query().Get("force") == "true"
 	if h.JobsInline {
-		res, err := h.SyncSvc.SyncInbox(r.Context(), uid, id)
+		res, err := h.SyncSvc.SyncInboxWithOptions(r.Context(), uid, id, appmessages.SyncOptions{Force: force})
 		if err != nil {
 			h.Log.Error("sync", "err", err)
 			writeJSON(w, http.StatusBadRequest, map[string]string{"error": err.Error()})
@@ -424,7 +428,7 @@ func (h *Handlers) syncAccount(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if h.JobEnqueuer != nil {
-		job, err := h.enqueueAccountJob(r.Context(), uid, id, "sync", driven.JobPayload{})
+		job, err := h.enqueueAccountJob(r.Context(), uid, id, "sync", driven.JobPayload{Force: force})
 		if err != nil {
 			h.Log.Error("enqueue sync", "err", err)
 			writeJSON(w, http.StatusBadRequest, map[string]string{"error": err.Error()})
