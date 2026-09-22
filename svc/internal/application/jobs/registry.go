@@ -120,7 +120,7 @@ func DefaultRegistry() *Registry {
 		{Type: TypeSummarize, Mode: ModeStreamed, MaxChunk: 240, CursorKind: CursorSummaryMap, RetryClass: RetryTransient, EffectPolicy: EffectNone, Description: "≤240 messages map/reduce"},
 		{Type: TypeDraftSuggest, Mode: ModeStreamed, MaxChunk: 1, CursorKind: CursorNone, RetryClass: RetryTransient, EffectPolicy: EffectNone, Description: "exactly one message_id", Aliases: []string{"auto-draft", "auto_draft"}},
 		{Type: TypeForwardRules, Mode: ModeStreamed, MaxChunk: 10, CursorKind: CursorMessageKeyset, RetryClass: RetryEffect, EffectPolicy: EffectAtMostOnce, Description: "≤10 candidates, at-most-once", Aliases: []string{"forward", "forward_rule"}},
-		{Type: TypeResolveContacts, Mode: ModeStreamed, MaxChunk: 100, CursorKind: CursorMessageKeyset, RetryClass: RetryTransient, EffectPolicy: EffectNone, Description: "≤100 messages"},
+		{Type: TypeResolveContacts, Mode: ModeStreamed, MaxChunk: 100, CursorKind: CursorNone, RetryClass: RetryTransient, EffectPolicy: EffectNone, Description: "≤100 unresolved messages"},
 		{Type: TypeAssignProjects, Mode: ModeStreamed, MaxChunk: 25, CursorKind: CursorMessageKeyset, RetryClass: RetryTransient, EffectPolicy: EffectNone, Description: "≤25 messages"},
 		{Type: TypeInterpretProject, Mode: ModeStreamed, MaxChunk: 40, CursorKind: CursorNone, RetryClass: RetryTransient, EffectPolicy: EffectNone, RequiresLock: true, LockScope: "project", Description: "one project, one LLM call"},
 		{Type: TypeReconcileProject, Mode: ModeStreamed, MaxChunk: 100, CursorKind: CursorMessageKeyset, RetryClass: RetryTransient, EffectPolicy: EffectNone, Description: "≤100 candidates"},

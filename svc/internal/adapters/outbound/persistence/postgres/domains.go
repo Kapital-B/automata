@@ -417,18 +417,6 @@ func (r *Repository) ResolveEmailContact(ctx context.Context, organisationID uui
 	return contactID, nil
 }
 
-func (r *Repository) ListMessageIDsForAccount(ctx context.Context, accountID uuid.UUID, limit int) ([]uuid.UUID, error) {
-	if limit <= 0 {
-		limit = 5000
-	}
-	rows, err := r.queryContext(ctx, `SELECT id FROM messages WHERE account_id = ? ORDER BY received_at DESC LIMIT ?`, accountID.String(), limit)
-	if err != nil {
-		return nil, err
-	}
-	defer rows.Close()
-	return scanUUIDColumn(rows)
-}
-
 func (r *Repository) ListContactIDsForMessage(ctx context.Context, organisationID, messageID uuid.UUID) ([]uuid.UUID, error) {
 	rows, err := r.queryContext(ctx, `
 		SELECT DISTINCT contact_id FROM correspondence_participants
@@ -1199,6 +1187,34 @@ func (r *Repository) ListMessagesNeedingAssign(ctx context.Context, userID, acco
 	}
 	defer rows.Close()
 	return scanMessageRows(rows)
+}
+
+func (r *Repository) ListMessagesNeedingContactResolution(ctx context.Context, userID, accountID uuid.UUID, limit int) ([]driven.MessageRow, error) {
+	if limit <= 0 {
+		limit = 100
+	}
+	rows, err := r.queryContext(ctx, `
+		SELECT m.id, m.account_id, m.provider_message_id, m.conversation_id, m.received_at, m.subject, m.from_json,
+			m.to_json, m.cc_json, m.to_cc_preview, m.body_text, m.body_fetched_at, m.has_attachments, m.raw_etag,
+			cd.slug, mc.confidence, m.created_at, m.updated_at, m.summary_seen_at, m.forward_seen_at
+		FROM messages m
+		INNER JOIN accounts a ON a.id = m.account_id AND a.user_id = ?
+		LEFT JOIN message_categories mc ON mc.message_id = m.id AND mc.source = 'llm'
+		LEFT JOIN category_definitions cd ON cd.id = mc.category_id
+		WHERE m.account_id = ?
+		  AND m.contacts_resolved_at IS NULL
+		ORDER BY m.received_at ASC
+		LIMIT ?
+	`, userID.String(), accountID.String(), limit)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	return scanMessageRows(rows)
+}
+
+func (r *Repository) MarkContactsResolved(ctx context.Context, userID uuid.UUID, messageIDs []uuid.UUID, at time.Time) error {
+	return r.markMessagesSeen(ctx, "contacts_resolved_at", userID, messageIDs, at)
 }
 
 func (r *Repository) FindCommittedSiblingProject(ctx context.Context, userID, accountID uuid.UUID, conversationID string, excludeMessageID uuid.UUID) (*uuid.UUID, error) {
