@@ -37,8 +37,85 @@ func (s *stubExecutor) ExecuteChunk(_ context.Context, _ driven.RunContext) (dri
 	return r, nil
 }
 
+// nextInputFor builds the chain hand-off the execution service would build.
+func nextInputFor(current *driven.JobRecord, now time.Time) *driven.CreateJobInput {
+	if len(current.RemainingJobs) == 0 {
+		return nil
+	}
+	return &driven.CreateJobInput{
+		ID:            jobs.DeterministicJobID(current.ChainID, current.StepIndex+1, current.RemainingJobs[0]),
+		JobType:       current.RemainingJobs[0],
+		UserID:        current.UserID,
+		AccountID:     current.AccountID,
+		TriggerKind:   current.TriggerKind,
+		ChainID:       current.ChainID,
+		StepIndex:     current.StepIndex + 1,
+		RemainingJobs: append([]string(nil), current.RemainingJobs[1:]...),
+		Payload:       current.Payload,
+		Now:           now,
+	}
+}
+
 func RunContractTests(t *testing.T, factory Factory) {
 	t.Helper()
+
+	// The lock travels with the chain: step one holds it so a second chain
+	// cannot start for the same scope, and once the chain ends the scope is
+	// free again. This asserts the observable guarantee; whether the store
+	// gets there by releasing the lock or by reclaiming it is its own affair,
+	// and the release itself is pinned in the store's own tests.
+	t.Run("a_completed_chain_frees_its_scope", func(t *testing.T) {
+		store, cleanup := factory(t)
+		defer cleanup()
+
+		ctx := context.Background()
+		now := time.Now().UTC()
+		user := uuid.New()
+		account := uuid.New()
+		enq := &jobs.Enqueuer{Store: store}
+
+		// TypeSync holds a mailbox lock; the steps after it do not.
+		first, err := enq.EnqueueChain(ctx, user, &account, driven.JobTriggerAPI,
+			[]string{jobs.TypeSync, jobs.TypeResolveContacts}, driven.JobPayload{}, nil, nil)
+		if err != nil {
+			t.Fatal(err)
+		}
+
+		run := func(job *driven.JobRecord) *driven.JobRecord {
+			t.Helper()
+			running, err := store.KickPending(ctx, job.ID, job.Revision, "worker", now.Add(time.Minute), now)
+			if err != nil {
+				t.Fatal(err)
+			}
+			done, err := store.CompleteStep(ctx, running.ID, running.Revision, *running.AttemptID,
+				driven.JobProgress{Processed: 1}, nextInputFor(running, now), now, time.Hour)
+			if err != nil {
+				t.Fatal(err)
+			}
+			return done
+		}
+
+		run(first)
+		second, err := store.List(ctx, driven.JobListFilter{UserID: user, JobType: jobs.TypeResolveContacts, Limit: 10})
+		if err != nil {
+			t.Fatal(err)
+		}
+		if len(second.Jobs) != 1 {
+			t.Fatalf("chain handed off %d jobs, want 1", len(second.Jobs))
+		}
+		run(&second.Jobs[0])
+
+		// The chain is done, so the scope is free again — immediately, without
+		// waiting for a lease to lapse or for anything to reclaim it.
+		if _, err := store.CreatePending(ctx, driven.CreateJobInput{
+			ID: uuid.New(), JobType: jobs.TypeSync, UserID: user, AccountID: &account,
+			TriggerKind: driven.JobTriggerAPI, ChainID: uuid.New(),
+			AcquireLock: true, LockScope: "mailbox", LockKey: account.String(),
+			Now: now,
+		}); err != nil {
+			t.Fatalf("expected the lock to be free after the chain finished, got %v", err)
+		}
+	})
 
 	// A lock is released by its owner reaching a terminal state. An owner that
 	// never gets there — enqueued but never executed, because nothing was
