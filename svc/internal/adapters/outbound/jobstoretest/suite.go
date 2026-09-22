@@ -40,6 +40,68 @@ func (s *stubExecutor) ExecuteChunk(_ context.Context, _ driven.RunContext) (dri
 func RunContractTests(t *testing.T, factory Factory) {
 	t.Helper()
 
+	// A lock is released by its owner reaching a terminal state. An owner that
+	// never gets there — enqueued but never executed, because nothing was
+	// draining the queue — would otherwise hold its scope forever, with no
+	// path back except deleting the row by hand.
+	t.Run("lock_is_reclaimed_from_an_owner_that_never_progressed", func(t *testing.T) {
+		store, cleanup := factory(t)
+		defer cleanup()
+
+		ctx := context.Background()
+		now := time.Now().UTC()
+		user := uuid.New()
+		account := uuid.New()
+
+		acquire := func(at time.Time) (*driven.JobRecord, error) {
+			return store.CreatePending(ctx, driven.CreateJobInput{
+				ID: uuid.New(), JobType: jobs.TypeSync, UserID: user, AccountID: &account,
+				TriggerKind: driven.JobTriggerAPI, ChainID: uuid.New(),
+				AcquireLock: true, LockScope: "mailbox", LockKey: account.String(),
+				Now: at,
+			})
+		}
+
+		owner, err := acquire(now)
+		if err != nil {
+			t.Fatal(err)
+		}
+
+		// Held while the owner is pending and inside its lease: this is the
+		// coalescing the lock exists for.
+		if _, err := acquire(now.Add(time.Minute)); !errors.Is(err, driven.ErrJobLockHeld) {
+			t.Fatalf("expected the lock to be held, got %v", err)
+		}
+
+		// A running owner keeps the lock even past the lease. Recovering that
+		// is RecoverExpiredLease's job, because a chunk may still be in flight.
+		running, err := store.KickPending(ctx, owner.ID, owner.Revision, "worker", now.Add(time.Minute), now)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if _, err := acquire(now.Add(30 * time.Minute)); !errors.Is(err, driven.ErrJobLockHeld) {
+			t.Fatalf("expected a running owner to keep the lock, got %v", err)
+		}
+
+		// Back to pending with an elapsed lease, which is the stuck case.
+		if _, err := store.DeferRetry(ctx, running.ID, running.Revision, *running.AttemptID,
+			now, "transient", now); err != nil {
+			t.Fatal(err)
+		}
+		taken, err := acquire(now.Add(30 * time.Minute))
+		if err != nil {
+			t.Fatalf("expected the lock to be reclaimable once its owner lapsed, got %v", err)
+		}
+		if taken.ID == owner.ID {
+			t.Fatal("expected a new job to hold the lock")
+		}
+
+		// And the new owner holds it against everyone else.
+		if _, err := acquire(now.Add(31 * time.Minute)); !errors.Is(err, driven.ErrJobLockHeld) {
+			t.Fatalf("expected the new owner to hold the lock, got %v", err)
+		}
+	})
+
 	t.Run("state_machine_chain", func(t *testing.T) {
 		store, cleanup := factory(t)
 		defer cleanup()
