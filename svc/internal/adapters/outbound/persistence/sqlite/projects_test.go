@@ -2,7 +2,6 @@ package sqlite_test
 
 import (
 	"context"
-	"strings"
 	"testing"
 	"time"
 
@@ -183,7 +182,7 @@ func TestAssignDoesNotCreateProjectMembers(t *testing.T) {
 	}
 }
 
-func TestAutoAssignSiblingCodeNameAmbiguous(t *testing.T) {
+func TestAutoAssignCommitsOnSiblingAndCodeOnly(t *testing.T) {
 	db := openMigrated(t)
 	repo := sqlite.NewRepository(db, time.Minute)
 	svc := &appprojects.Service{Users: repo, Projects: repo, Assignments: repo, Contacts: repo, Messages: repo}
@@ -223,38 +222,29 @@ func TestAutoAssignSiblingCodeNameAmbiguous(t *testing.T) {
 		t.Fatalf("code assign: %+v", effCode)
 	}
 
-	// Name provisional
+	// A project name in the subject is not a rule any more. Guessing from name
+	// keywords, sender domains and participants produced more wrong
+	// suggestions than it saved attention, so without the model this is left
+	// for triage rather than guessed at.
 	m4 := insertMsg(t, repo, accountID, "Cooling Upgrade update", "name-conv", "status")
 	if err := assign.AssignAfterSync(ctx, userID, accountID); err != nil {
 		t.Fatal(err)
 	}
 	effName, _ := svc.EffectiveAssignment(ctx, userID, m4)
-	if effName.ProjectID == nil || *effName.ProjectID != p.ID || effName.Status != "provisional" {
-		t.Fatalf("name assign: %+v", effName)
+	if effName.ProjectID != nil {
+		t.Fatalf("a name keyword must not assign on its own: %+v", effName)
 	}
 
-	// Ambiguous codes must never commit. Since the triage-efficiency addendum
-	// (§9.1) they no longer go silent either: the operator gets the top ranked
-	// candidate as a provisional suggestion they can reject in one click.
+	// Ambiguous codes must never commit, and with nothing certain to fall back
+	// on they stay unassigned.
 	m5 := insertMsg(t, repo, accountID, "DC01 and OT02", "amb", "both")
 	_ = p2
 	if err := assign.AssignAfterSync(ctx, userID, accountID); err != nil {
 		t.Fatal(err)
 	}
 	after, _ := svc.EffectiveAssignment(ctx, userID, m5)
-	if after.Status == "committed" {
-		t.Fatalf("ambiguous codes must never auto-commit: %+v", after)
-	}
-	if after.ProjectID == nil || after.Status != "provisional" {
-		t.Fatalf("ambiguous should be suggested provisionally: %+v", after)
-	}
-	// DC01 wins on corroborating evidence (every prior committed message from
-	// this sender domain went to DC01), not on alphabetical order.
-	if *after.ProjectID != p.ID {
-		t.Fatalf("expected corroborated project %s, got %s (reason=%q)", p.ID, *after.ProjectID, after.Reason)
-	}
-	if !strings.Contains(after.Reason, "sender_domain") {
-		t.Fatalf("expected sender-domain corroboration in reason, got %q", after.Reason)
+	if after.ProjectID != nil {
+		t.Fatalf("ambiguous codes must not assign: %+v", after)
 	}
 }
 
@@ -273,7 +263,12 @@ func TestUnassignedSummaryCounts(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if sum.Unassigned < 1 || sum.Provisional < 1 {
-		t.Fatalf("summary=%+v", sum)
+	// Neither message carries a project code and no model is configured here,
+	// so both land in triage rather than becoming provisional guesses.
+	if sum.Unassigned < 2 {
+		t.Fatalf("summary=%+v, want both messages unassigned", sum)
+	}
+	if sum.Provisional != 0 {
+		t.Fatalf("summary=%+v, want no provisional guesses without the model", sum)
 	}
 }

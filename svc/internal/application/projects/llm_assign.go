@@ -43,6 +43,14 @@ type llmAssignPayload struct {
 // scoreWithLLM suggests projects for messages the deterministic tier could not
 // place. Every suggestion is written provisional with source=llm: Wave 1 §7
 // reserves committed for a project code token, so the model never auto-commits.
+// Bounds on a model-supplied confidence. Below the floor a suggestion costs
+// the operator more attention than it saves; the ceiling keeps even a
+// confident answer short of certainty, since only a project code commits.
+const (
+	provisionalFloor = 0.35
+	maxConfidence    = 0.99
+)
+
 func (s *AssignService) scoreWithLLM(ctx context.Context, orgID, accountID uuid.UUID, msgs []driven.MessageRow, projects []driven.ProjectRow, runID *uuid.UUID, now time.Time) (int, error) {
 	if s.LLM == nil || len(msgs) == 0 {
 		return 0, nil

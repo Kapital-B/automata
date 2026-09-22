@@ -538,19 +538,6 @@ type OverviewProject struct {
 	LastActivityAt *time.Time
 }
 
-// ProjectParticipantRow links a contact to a project they correspond on.
-type ProjectParticipantRow struct {
-	ProjectID uuid.UUID
-	ContactID uuid.UUID
-}
-
-// AssignmentSignalRow is one historical committed assignment, used to learn
-// which senders correspond about which project.
-type AssignmentSignalRow struct {
-	ProjectID uuid.UUID
-	FromJSON  string
-}
-
 // ProjectListFilter narrows project listing.
 type ProjectListFilter struct {
 	IncludeArchived bool
@@ -568,9 +555,6 @@ type ProjectRepository interface {
 	GetProjectMember(ctx context.Context, projectID, userID uuid.UUID) (*ProjectMemberRow, error)
 	UpdateProjectMember(ctx context.Context, member ProjectMemberRow) error
 	UpsertProjectParticipant(ctx context.Context, projectID, contactID uuid.UUID, firstSeenAt time.Time) error
-	// ListProjectParticipants returns every (project, contact) pair in the org.
-	// Used to score assignment candidates by participant overlap.
-	ListProjectParticipants(ctx context.Context, organisationID uuid.UUID) ([]ProjectParticipantRow, error)
 	// ListAttention returns everything awaiting the caller across the projects
 	// they are a member of, in one query.
 	ListAttention(ctx context.Context, userID, organisationID uuid.UUID) ([]AttentionRow, error)
@@ -971,9 +955,6 @@ type AssignmentRepository interface {
 	// ListMessagesNeedingAssign returns recent messages on an account with no effective project.
 	ListMessagesNeedingAssign(ctx context.Context, userID, accountID uuid.UUID, limit int) ([]MessageRow, error)
 	FindCommittedSiblingProject(ctx context.Context, userID, accountID uuid.UUID, conversationID string, excludeMessageID uuid.UUID) (*uuid.UUID, error)
-	// ListCommittedAssignmentSignals returns recent committed mail assignments
-	// with the sender payload, so the scorer can learn sender/domain affinity.
-	ListCommittedAssignmentSignals(ctx context.Context, userID, accountID uuid.UUID, limit int) ([]AssignmentSignalRow, error)
 }
 
 // JobRunRepository records sync runs (Phase 1: synchronous insert).

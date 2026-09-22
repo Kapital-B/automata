@@ -20,8 +20,10 @@ export function headlineFor(item: UnassignedItem): string {
 }
 
 /**
- * Turns a raw scorer reason into something an operator can read.
- * The backend stores tokens like `code:DC01+sender_domain:acme.com`.
+ * Turns a stored assignment reason into something an operator can read.
+ * Tokens look like `code:DC01` or `llm:DC01`; the model may also supply free
+ * text, which passes through as written. Tokens from the retired scorer still
+ * appear on assignments made before it was removed.
  */
 export function explainReason(
   reason: string | undefined,
@@ -40,6 +42,9 @@ export function explainReason(
     }
     if (token.startsWith("sender_domain:")) return `sender at ${token.slice(14)} files here`;
     if (token === "participant_overlap") return "shares people with this project";
+    // The model is the primary source now; older rows still carry scorer
+    // tokens, so both have to render.
+    if (token.startsWith("llm:")) return `the model matched ${codeOf(token.slice(4))}`;
     if (token === "thread_sibling") return "same thread as filed mail";
     if (token === "user_assign") return "assigned by you";
     return token;
