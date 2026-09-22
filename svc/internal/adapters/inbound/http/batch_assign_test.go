@@ -120,8 +120,8 @@ func TestAssignBatchPartialFailure(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	// Eleven assignable threads plus one message with no conversation, which
-	// cannot be assigned at thread scope.
+	// Eleven assignable threads plus one id that does not exist, so the batch
+	// reports a partial failure without stranding the rest.
 	items := []map[string]any{}
 	good := []uuid.UUID{}
 	for i := 0; i < 11; i++ {
@@ -129,8 +129,8 @@ func TestAssignBatchPartialFailure(t *testing.T) {
 		good = append(good, id)
 		items = append(items, map[string]any{"kind": "message", "id": id.String(), "project_id": p.ID.String(), "scope": "thread"})
 	}
-	loose := f.insertMessage(t, "loose", "", now.Add(-time.Hour))
-	items = append(items, map[string]any{"kind": "message", "id": loose.String(), "project_id": p.ID.String(), "scope": "thread"})
+	missing := uuid.New()
+	items = append(items, map[string]any{"kind": "message", "id": missing.String(), "project_id": p.ID.String(), "scope": "thread"})
 
 	status, out := f.postBatch(t, items)
 	if status != http.StatusOK {
@@ -148,10 +148,10 @@ func TestAssignBatchPartialFailure(t *testing.T) {
 	}
 	last := results[11].(map[string]any)
 	if last["ok"].(bool) {
-		t.Error("message with no conversation should fail at thread scope")
+		t.Error("an unknown message id should fail")
 	}
-	if last["error"] != "conversation_required" {
-		t.Errorf("error = %v, want conversation_required", last["error"])
+	if last["error"] != "not_found" {
+		t.Errorf("error = %v, want not_found", last["error"])
 	}
 
 	// The eleven good threads really are assigned.
@@ -304,7 +304,9 @@ func TestAssignBatchPreservesItemOrder(t *testing.T) {
 			id = f.insertMessage(t, "ok", "conv-"+uuid.NewString(), now.Add(-time.Duration(i)*time.Minute))
 			wantOK = append(wantOK, true)
 		} else {
-			id = f.insertMessage(t, "no conversation", "", now.Add(-time.Duration(i)*time.Minute))
+			// An id that was never inserted: unassignable for a reason that
+			// cannot be recovered from, unlike a missing conversation.
+			id = uuid.New()
 			wantOK = append(wantOK, false)
 		}
 		ids = append(ids, id.String())
@@ -476,5 +478,67 @@ func TestSummaryReportsNotRelevantSeparately(t *testing.T) {
 	}
 	if int(sum["not_relevant"].(float64)) != 1 {
 		t.Errorf("not_relevant = %v, want 1", sum["not_relevant"])
+	}
+}
+
+// Mail synced from a delta tombstone lost its conversation id. Thread scope
+// cannot be satisfied for such a message, and refusing it left the operator
+// unable to file it or even dismiss it. It is filed on itself instead.
+func TestAssignBatchFilesAMessageWithNoConversation(t *testing.T) {
+	f := newBatchFixture(t, "batchnoconv")
+	ctx := context.Background()
+	now := time.Now().UTC()
+
+	p, err := f.projectSvc.Create(ctx, f.userID, appprojects.CreateProjectInput{Name: "Cooling", Code: "DC01"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	loose := f.insertMessage(t, "loose", "", now.Add(-time.Hour))
+
+	// The client asks for thread scope, as the triage UI does.
+	status, out := f.postBatch(t, []map[string]any{
+		{"kind": "message", "id": loose.String(), "project_id": p.ID.String(), "scope": "thread"},
+	})
+	if status != http.StatusOK {
+		t.Fatalf("status = %d, want 200", status)
+	}
+	if got := int(out["assigned"].(float64)); got != 1 {
+		t.Fatalf("assigned = %d, want 1 (%v)", got, out["results"])
+	}
+	eff, err := f.repo.EffectiveAssignment(ctx, f.userID, loose)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if eff.ProjectID == nil || *eff.ProjectID != p.ID {
+		t.Fatalf("not assigned: %+v", eff)
+	}
+	if eff.Scope != "message" {
+		t.Errorf("scope = %q, want message", eff.Scope)
+	}
+}
+
+// The same message has to be dismissable, which is what the operator actually
+// needs for mail that arrived with nothing in it.
+func TestAssignBatchDismissesAMessageWithNoConversation(t *testing.T) {
+	f := newBatchFixture(t, "batchnoconvdismiss")
+	ctx := context.Background()
+	now := time.Now().UTC()
+
+	loose := f.insertMessage(t, "loose", "", now.Add(-time.Hour))
+	status, out := f.postBatch(t, []map[string]any{
+		{"kind": "message", "id": loose.String(), "project_id": nil, "not_relevant": true, "scope": "thread"},
+	})
+	if status != http.StatusOK {
+		t.Fatalf("status = %d, want 200", status)
+	}
+	if got := int(out["failed"].(float64)); got != 0 {
+		t.Fatalf("failed = %d, want 0 (%v)", got, out["results"])
+	}
+	eff, err := f.repo.EffectiveAssignment(ctx, f.userID, loose)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if eff.NotRelevantAt == nil {
+		t.Errorf("expected the message to be marked not relevant: %+v", eff)
 	}
 }

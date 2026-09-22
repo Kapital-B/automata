@@ -386,8 +386,6 @@ func (h *Handlers) assignMessageProject(w http.ResponseWriter, r *http.Request) 
 		switch {
 		case errors.Is(err, appprojects.ErrNotFound):
 			writeJSON(w, http.StatusNotFound, map[string]string{"error": "not found"})
-		case errors.Is(err, appprojects.ErrConversationRequired):
-			writeJSON(w, http.StatusBadRequest, map[string]string{"error": "conversation_required"})
 		default:
 			writeJSON(w, http.StatusBadRequest, map[string]string{"error": err.Error()})
 		}
