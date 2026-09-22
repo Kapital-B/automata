@@ -5,6 +5,7 @@ import (
 	"database/sql"
 	"encoding/json"
 	"errors"
+	"strings"
 	"testing"
 	"time"
 
@@ -22,9 +23,15 @@ import (
 type fakeLLM struct {
 	content string
 	err     error
+	prompts []string
 }
 
 func (f *fakeLLM) ChatCompletion(ctx context.Context, messages []driven.LLMMessage) (*driven.LLMResponse, error) {
+	for _, m := range messages {
+		if m.Role == "user" {
+			f.prompts = append(f.prompts, m.Content)
+		}
+	}
 	if f.err != nil {
 		return nil, f.err
 	}
@@ -239,5 +246,50 @@ func TestNothingToInterpret(t *testing.T) {
 	_, err := interpSvc.Run(context.Background(), userID, projectID, appinterpret.RunInput{})
 	if !errors.Is(err, appinterpret.ErrNothingToInterpret) {
 		t.Fatalf("want nothing, got %v", err)
+	}
+}
+
+// Extraction used to read the project timeline's snippet, which is sized for a
+// list row at 160 characters. A duty figure or an approval three paragraphs
+// into an email was never in the prompt, so the model had nothing to find and
+// every run came back with no candidates.
+func TestRunPromptCarriesTheStoredBodyNotTheListSnippet(t *testing.T) {
+	repo, interpSvc, projectSvc, _, userID, projectID, accountID := setupInterpret(t, "interpbody")
+	ctx := context.Background()
+
+	lead := strings.Repeat("Thanks for the update on scheduling and access arrangements. ", 5)
+	buried := "Confirmed: Pump P-03 duty is 90 kW."
+	body := lead + buried
+	if len(lead) <= 160 {
+		t.Fatalf("test needs the detail past the snippet cut, lead is %d chars", len(lead))
+	}
+
+	msgID := uuid.New()
+	conv := "conv-body"
+	if err := repo.UpsertMessage(ctx, driven.MessageRow{
+		ID: msgID, AccountID: accountID, ProviderMessageID: msgID.String(),
+		ReceivedAt: time.Now().UTC(), Subject: "Site visit", BodyText: &body,
+		FromJSON: `{}`, ConversationID: &conv,
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := projectSvc.AssignMessage(ctx, userID, msgID, appprojects.AssignInput{
+		ProjectID: &projectID, Scope: domainprojects.ScopeThread, Status: domainprojects.StatusCommitted,
+	}); err != nil {
+		t.Fatal(err)
+	}
+
+	llm := &fakeLLM{content: `{"schema_version":1,"project_id":"` + projectID.String() + `","candidates":[]}`}
+	interpSvc.LLM = llm
+
+	// No explicit ids: this is the path the extraction job takes.
+	if _, err := interpSvc.Run(ctx, userID, projectID, appinterpret.RunInput{}); err != nil {
+		t.Fatal(err)
+	}
+	if len(llm.prompts) == 0 {
+		t.Fatal("no prompt reached the model")
+	}
+	if !strings.Contains(llm.prompts[0], buried) {
+		t.Errorf("prompt does not carry the detail past the snippet cut:\n%s", llm.prompts[0])
 	}
 }

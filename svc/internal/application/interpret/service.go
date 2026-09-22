@@ -106,6 +106,12 @@ type interpretItem struct {
 	AccountID          *uuid.UUID
 }
 
+// extractionBodyChars bounds how much of one item the model sees. The timeline
+// snippet is sized for a list row (160 characters), which is a greeting and
+// half a sentence — not enough to hold a duty figure or an approval. Extraction
+// reads the stored body instead and clamps it here.
+const extractionBodyChars = 1200
+
 func (s *Service) requireProjectMember(ctx context.Context, userID, projectID uuid.UUID) (uuid.UUID, error) {
 	orgID, err := s.homeOrg(ctx, userID)
 	if err != nil {
@@ -321,7 +327,7 @@ func (s *Service) resolveItems(ctx context.Context, userID, orgID, projectID uui
 			midCopy := mid
 			aid := msg.AccountID
 			items = append(items, interpretItem{
-				Source: "mail", Title: title, Snippet: clampText(snippet, 400),
+				Source: "mail", Title: title, Snippet: clampText(snippet, extractionBodyChars),
 				MessageID: &midCopy, AccountID: &aid,
 			})
 		}
@@ -335,7 +341,7 @@ func (s *Service) resolveItems(ctx context.Context, userID, orgID, projectID uui
 			}
 			manCopy := manID
 			items = append(items, interpretItem{
-				Source: "manual", Title: man.Title, Snippet: clampText(man.BodyText, 400),
+				Source: "manual", Title: man.Title, Snippet: clampText(man.BodyText, extractionBodyChars),
 				ManualItemID: &manCopy,
 			})
 		}
@@ -353,7 +359,7 @@ func (s *Service) resolveItems(ctx context.Context, userID, orgID, projectID uui
 			}
 			id := connectorMessageID
 			items = append(items, interpretItem{
-				Source: "slack", Title: message.Title, Snippet: clampText(message.BodyText, 400),
+				Source: "slack", Title: message.Title, Snippet: clampText(message.BodyText, extractionBodyChars),
 				ConnectorMessageID: &id,
 			})
 		}
@@ -379,7 +385,7 @@ func (s *Service) resolveItems(ctx context.Context, userID, orgID, projectID uui
 	for _, it := range timeline {
 		if it.Source == "manual" && it.ManualItemID != nil {
 			manuals = append(manuals, interpretItem{
-				Source: "manual", Title: it.Title, Snippet: clampText(it.Snippet, 400),
+				Source: "manual", Title: it.Title, Snippet: clampText(bodyOrSnippet(it), extractionBodyChars),
 				ManualItemID: it.ManualItemID,
 			})
 			continue
@@ -388,15 +394,21 @@ func (s *Service) resolveItems(ctx context.Context, userID, orgID, projectID uui
 			if in.AccountID != nil && *it.AccountID != *in.AccountID {
 				continue
 			}
+			// The mail timeline carries no body — it is a list projection — so
+			// the stored message supplies it.
+			body := it.Snippet
+			if full := s.mailBody(ctx, userID, *it.MessageID); full != "" {
+				body = full
+			}
 			c := interpretItem{
-				Source: "mail", Title: it.Title, Snippet: clampText(it.Snippet, 400),
+				Source: "mail", Title: it.Title, Snippet: clampText(body, extractionBodyChars),
 				MessageID: it.MessageID, AccountID: it.AccountID,
 			}
 			mailByAccount[*it.AccountID] = append(mailByAccount[*it.AccountID], c)
 		}
 		if it.Source == "slack" && it.ConnectorMessageID != nil {
 			connectors = append(connectors, interpretItem{
-				Source: "slack", Title: it.Title, Snippet: clampText(it.Snippet, 400),
+				Source: "slack", Title: it.Title, Snippet: clampText(bodyOrSnippet(it), extractionBodyChars),
 				ConnectorMessageID: it.ConnectorMessageID,
 			})
 		}
@@ -473,6 +485,28 @@ func (s *Service) buildView(ctx context.Context, row driven.InterpretationRow) (
 	return &InterpretationView{Interpretation: row, Sources: sources, Candidates: cands}, nil
 }
 
+// bodyOrSnippet prefers the stored body, which manual and connector timeline
+// items carry in full, over the list-sized snippet beside it.
+func bodyOrSnippet(it driven.TimelineItem) string {
+	if strings.TrimSpace(it.BodyText) != "" {
+		return it.BodyText
+	}
+	return it.Snippet
+}
+
+// mailBody reads a message's stored body. Best effort: a message that cannot
+// be read falls back to the snippet rather than dropping out of the batch.
+func (s *Service) mailBody(ctx context.Context, userID, messageID uuid.UUID) string {
+	if s.Messages == nil {
+		return ""
+	}
+	msg, err := s.Messages.GetMessage(ctx, userID, messageID)
+	if err != nil || msg == nil || msg.BodyText == nil {
+		return ""
+	}
+	return strings.TrimSpace(*msg.BodyText)
+}
+
 func buildInterpretPrompt(projectID uuid.UUID, name, code string, items []interpretItem, activeFacts []string) string {
 	var b strings.Builder
 	b.WriteString("Extract durable project candidates from the correspondence below. ")
@@ -504,7 +538,7 @@ func buildInterpretPrompt(projectID uuid.UUID, name, code string, items []interp
 		} else if it.ConnectorMessageID != nil {
 			id = "connector_message_id=" + it.ConnectorMessageID.String()
 		}
-		fmt.Fprintf(&b, "%d. [%s] %s | %s | %s\n", i+1, it.Source, id, clampText(it.Title, 120), clampText(it.Snippet, 300))
+		fmt.Fprintf(&b, "%d. [%s] %s | %s | %s\n", i+1, it.Source, id, clampText(it.Title, 120), clampText(it.Snippet, extractionBodyChars))
 	}
 	return b.String()
 }
