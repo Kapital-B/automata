@@ -287,3 +287,64 @@ func TestSyncInboxWritesObservabilityMeta(t *testing.T) {
 		t.Fatalf("expected delta_reused=false on initial sync, got %v", got)
 	}
 }
+
+// A Graph delta page carries tombstones for messages that left the folder, and
+// can carry rows with only the properties that changed. Neither is a full
+// message payload, and upserting one blanks the subject and sender of a row
+// that already had both and redates it to now, so it floats to the top of the
+// inbox looking like a freshly arrived message from "Unknown sender".
+func TestSyncInboxDoesNotOverwriteAMessageWithAPartialDeltaRow(t *testing.T) {
+	received := time.Now().UTC().Add(-72 * time.Hour)
+	graph := &fakeDeltaGraph{
+		results: []*driven.GraphDeltaResult{
+			{
+				Messages: []driven.GraphMessage{{
+					ID:               "provider-1",
+					Subject:          "Your online bill",
+					ReceivedDateTime: received.Format(time.RFC3339),
+					FromName:         "Microsoft",
+					FromAddress:      "billing@microsoft.com",
+				}},
+				DeltaLink: "delta-1",
+			},
+			{
+				Messages: []driven.GraphMessage{
+					// A tombstone: id and nothing else.
+					{ID: "provider-1", Removed: true},
+					// A changed-properties-only row: no timestamp.
+					{ID: "provider-2"},
+				},
+				DeltaLink: "delta-2",
+			},
+		},
+	}
+	svc, repo, userID, accountID := setupSyncService(t, graph)
+	ctx := context.Background()
+
+	if _, err := svc.SyncInbox(ctx, userID, accountID); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := svc.SyncInbox(ctx, userID, accountID); err != nil {
+		t.Fatal(err)
+	}
+
+	rows, err := repo.ListMessagesByAccount(ctx, userID, accountID, 50, 0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	// The contentless rows must not have become messages of their own.
+	if len(rows) != 1 {
+		t.Fatalf("stored %d messages, want 1", len(rows))
+	}
+	got := rows[0]
+	if got.Subject != "Your online bill" {
+		t.Errorf("subject = %q, want %q", got.Subject, "Your online bill")
+	}
+	if !strings.Contains(got.FromJSON, "billing@microsoft.com") {
+		t.Errorf("from_json = %q, want the original sender", got.FromJSON)
+	}
+	// Redating is what pushed these to the top of the inbox.
+	if drift := got.ReceivedAt.Sub(received); drift > time.Minute || drift < -time.Minute {
+		t.Errorf("received_at = %v, want it left at %v", got.ReceivedAt, received)
+	}
+}

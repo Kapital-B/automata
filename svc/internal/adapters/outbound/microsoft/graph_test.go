@@ -138,3 +138,32 @@ func TestReplyToMessagePreservesLineBreaksAsHTML(t *testing.T) {
 		t.Fatalf("unexpected reply body: got %q want %q", gotContent, want)
 	}
 }
+
+// Graph delta reports messages that left the folder as an id plus @removed and
+// no other fields. Decoded as an ordinary message that is a full payload of
+// empty strings, which downstream writes over the real row.
+func TestListInboxDeltaSkipsRemovedTombstones(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		_ = json.NewEncoder(w).Encode(map[string]any{
+			"value": []map[string]any{
+				{"id": "kept", "subject": "still here"},
+				{"id": "gone", "@removed": map[string]any{"reason": "deleted"}},
+			},
+			"@odata.deltaLink": "delta-final",
+		})
+	}))
+	defer server.Close()
+
+	client := &GraphClient{APIRoot: server.URL + "/v1.0"}
+	res, err := client.ListInboxDelta(context.Background(), "token", "", 20)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(res.Messages) != 1 {
+		t.Fatalf("got %d messages, want 1", len(res.Messages))
+	}
+	if res.Messages[0].ID != "kept" {
+		t.Errorf("kept %q, want the message that is still in the folder", res.Messages[0].ID)
+	}
+}

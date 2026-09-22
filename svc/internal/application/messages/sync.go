@@ -130,9 +130,17 @@ func (s *SyncService) SyncChunk(ctx context.Context, run driven.RunContext) (*Sy
 	list := deltaRes.Messages
 	n := 0
 	for _, gm := range list {
+		if gm.Removed {
+			continue
+		}
 		rt, err := parseGraphTime(gm.ReceivedDateTime)
 		if err != nil {
-			rt = time.Now().UTC()
+			// A delta row without a timestamp is not a full message payload.
+			// Materialising one writes an empty subject and sender over a row
+			// that already had both, and dates it now, so it floats to the top
+			// of the inbox as if it had just arrived. Skip it and let a later
+			// full payload carry the change.
+			continue
 		}
 		body := gm.BodyPreview
 		var bodyFetched *time.Time
@@ -281,9 +289,17 @@ func (s *SyncService) SyncInboxWithOptions(ctx context.Context, userID uuid.UUID
 	n := 0
 	providerIDs := make([]string, 0, len(list))
 	for _, gm := range list {
+		if gm.Removed {
+			continue
+		}
 		rt, err := parseGraphTime(gm.ReceivedDateTime)
 		if err != nil {
-			rt = time.Now().UTC()
+			// A delta row without a timestamp is not a full message payload.
+			// Materialising one writes an empty subject and sender over a row
+			// that already had both, and dates it now, so it floats to the top
+			// of the inbox as if it had just arrived. Skip it and let a later
+			// full payload carry the change.
+			continue
 		}
 		body := gm.BodyPreview
 		var bodyFetched *time.Time
