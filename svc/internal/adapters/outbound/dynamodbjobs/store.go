@@ -720,6 +720,15 @@ func (s *Store) completeWithNext(ctx context.Context, current, done *jobItem, ne
 	if err != nil {
 		return nil, err
 	}
+	// The lock travels with the chain, so the step inheriting it has to record
+	// that it holds it. Without this the lock is transferred to a job that does
+	// not know it owns one, and the terminal paths — which release only when
+	// the job itself carries a scope and key — leave it behind when the chain
+	// ends. Every completed chain then orphans its lock and blocks the scope.
+	if current.requiresLock() {
+		nextJob.LockScope = current.LockScope
+		nextJob.LockKey = current.LockKey
+	}
 	nextAV, err := attributevalue.MarshalMap(nextJob)
 	if err != nil {
 		return nil, err

@@ -8,6 +8,7 @@ import (
 
 	"github.com/Kapital-B/automata/svc/internal/adapters/outbound/dynamodbjobs"
 	"github.com/Kapital-B/automata/svc/internal/adapters/outbound/jobstoretest"
+	"github.com/Kapital-B/automata/svc/internal/application/jobs"
 	"github.com/Kapital-B/automata/svc/internal/application/ports/driven"
 	"github.com/aws/aws-sdk-go-v2/aws"
 	"github.com/aws/aws-sdk-go-v2/config"
@@ -136,5 +137,90 @@ func createTestTable(t *testing.T, client *dynamodb.Client, tableName string) {
 	waiter := dynamodb.NewTableExistsWaiter(client)
 	if err := waiter.Wait(ctx, &dynamodb.DescribeTableInput{TableName: aws.String(tableName)}, 60*time.Second); err != nil {
 		t.Fatal(err)
+	}
+}
+
+// A chain's lock is transferred from the step that acquired it to the step
+// that follows. The terminal paths release a lock only when the job itself
+// records the scope and key, so a hand-off that forgets to stamp them leaves
+// the lock behind on success: every completed chain orphans its lock, and the
+// scope only recovers because a later caller reclaims it from a dead owner.
+func TestCompletedChainDeletesItsLockRow(t *testing.T) {
+	endpoint := os.Getenv("AUTOMATA_TEST_DDB_ENDPOINT")
+	if endpoint == "" {
+		t.Skip("AUTOMATA_TEST_DDB_ENDPOINT not set")
+	}
+	ctx := context.Background()
+	client := newDynamoClient(t, endpoint)
+	tableName := "automata-jobs-test-" + uuid.NewString()
+	createTestTable(t, client, tableName)
+	defer func() {
+		_, _ = client.DeleteTable(ctx, &dynamodb.DeleteTableInput{TableName: aws.String(tableName)})
+	}()
+	store := dynamodbjobs.NewStore(client, tableName, []byte("ddb-test-cursor-key"))
+
+	now := time.Now().UTC()
+	user := uuid.New()
+	account := uuid.New()
+	enq := &jobs.Enqueuer{Store: store}
+	first, err := enq.EnqueueChain(ctx, user, &account, driven.JobTriggerAPI,
+		[]string{jobs.TypeSync, jobs.TypeResolveContacts}, driven.JobPayload{}, nil, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	lockKey := map[string]types.AttributeValue{
+		"pk": &types.AttributeValueMemberS{Value: "MAILBOX#" + account.String()},
+		"sk": &types.AttributeValueMemberS{Value: "LOCK#SYNC"},
+	}
+	held, err := client.GetItem(ctx, &dynamodb.GetItemInput{TableName: aws.String(tableName), Key: lockKey})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(held.Item) == 0 {
+		t.Fatal("expected the first step to hold the mailbox lock")
+	}
+
+	step := first
+	for step != nil {
+		running, err := store.KickPending(ctx, step.ID, step.Revision, "worker", now.Add(time.Minute), now)
+		if err != nil {
+			t.Fatal(err)
+		}
+		var next *driven.CreateJobInput
+		if len(running.RemainingJobs) > 0 {
+			next = &driven.CreateJobInput{
+				ID:            jobs.DeterministicJobID(running.ChainID, running.StepIndex+1, running.RemainingJobs[0]),
+				JobType:       running.RemainingJobs[0],
+				UserID:        running.UserID,
+				AccountID:     running.AccountID,
+				TriggerKind:   running.TriggerKind,
+				ChainID:       running.ChainID,
+				StepIndex:     running.StepIndex + 1,
+				RemainingJobs: append([]string(nil), running.RemainingJobs[1:]...),
+				Payload:       running.Payload,
+				Now:           now,
+			}
+		}
+		if _, err := store.CompleteStep(ctx, running.ID, running.Revision, *running.AttemptID,
+			driven.JobProgress{Processed: 1}, next, now, time.Hour); err != nil {
+			t.Fatal(err)
+		}
+		step = nil
+		if next != nil {
+			got, err := store.GetByID(ctx, next.ID)
+			if err != nil {
+				t.Fatal(err)
+			}
+			step = got
+		}
+	}
+
+	after, err := client.GetItem(ctx, &dynamodb.GetItemInput{TableName: aws.String(tableName), Key: lockKey})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(after.Item) != 0 {
+		t.Fatalf("the finished chain left its lock row behind: %v", after.Item)
 	}
 }
