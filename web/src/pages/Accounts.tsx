@@ -133,17 +133,17 @@ export default function AccountsPage() {
   });
 
   const syncMutation = useMutation({
-    mutationFn: async (accountID: string) => {
+    mutationFn: async (args: { accountID: string; force?: boolean }) => {
       if (!accessToken) {
         throw new Error("Not authenticated");
       }
-      return syncAccount(accessToken, accountID);
+      return syncAccount(accessToken, args.accountID, { force: args.force });
     },
-    onSuccess: (result) => {
+    onSuccess: (result, args) => {
       void queryClient.invalidateQueries({ queryKey: ["accounts"] });
       void queryClient.invalidateQueries({ queryKey: ["runs"] });
       toast({
-        title: "Sync queued",
+        title: args.force ? "Full resync queued" : "Sync queued",
         description: `Run ${result.job_run_id.slice(0, 8)} started in background.`,
       });
     },
@@ -375,12 +375,32 @@ export default function AccountsPage() {
               <Button
                 size="sm"
                 variant="outline"
-                onClick={() => syncMutation.mutate(a.id)}
+                onClick={() => syncMutation.mutate({ accountID: a.id })}
                 disabled={syncMutation.isPending || disconnectMutation.isPending}
               >
                 <RefreshCw className="mr-1.5 h-3.5 w-3.5" />
                 {a.status === "connected" ? "Sync now" : "Reconnect"}
               </Button>
+              {a.status === "connected" ? (
+                <Button
+                  size="sm"
+                  variant="ghost"
+                  className="text-muted-foreground"
+                  title="Refetch every message from scratch, not just what changed"
+                  disabled={syncMutation.isPending || disconnectMutation.isPending}
+                  onClick={() => {
+                    if (
+                      window.confirm(
+                        `Refetch the full mailbox for ${a.label}? An ordinary sync only collects what changed since the last one, so use this when a message is missing its sender, subject or body. It takes longer than a normal sync.`,
+                      )
+                    ) {
+                      syncMutation.mutate({ accountID: a.id, force: true });
+                    }
+                  }}
+                >
+                  Full resync
+                </Button>
+              ) : null}
               <Button
                 size="sm"
                 variant="ghost"

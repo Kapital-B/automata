@@ -1284,8 +1284,18 @@ export async function deleteAccount(accessToken: string, accountID: string) {
   }
 }
 
-export async function syncAccount(accessToken: string, accountID: string) {
-  return apiRequest<SyncAccountResponse>(`/api/accounts/${accountID}/sync`, {
+/**
+ * Queues a mailbox sync. `force` starts from an empty delta link rather than
+ * the stored one: Graph only resends messages that changed, so this is the
+ * only way to refetch a message whose stored content was lost locally.
+ */
+export async function syncAccount(
+  accessToken: string,
+  accountID: string,
+  opts?: { force?: boolean },
+) {
+  const qs = opts?.force ? "?force=true" : "";
+  return apiRequest<SyncAccountResponse>(`/api/accounts/${accountID}/sync${qs}`, {
     method: "POST",
     headers: toAuthHeader(accessToken),
   });
