@@ -7,7 +7,6 @@ import (
 	"strings"
 	"time"
 
-	"github.com/Kapital-B/automata/svc/internal/application/jobkit"
 	"github.com/Kapital-B/automata/svc/internal/application/ports/driven"
 	domaincontacts "github.com/Kapital-B/automata/svc/internal/domain/contacts"
 	"github.com/google/uuid"
@@ -47,51 +46,27 @@ func (s *ResolveService) ResolveMessage(ctx context.Context, userID, messageID u
 	return s.resolveStoredMessage(ctx, orgID, msg)
 }
 
-// ResolveAfterSync resolves contacts for the given provider message ids (post-upsert).
-func (s *ResolveService) ResolveAfterSync(ctx context.Context, userID, accountID uuid.UUID, providerMessageIDs []string) error {
-	orgID, err := s.Users.GetHomeOrganisationID(ctx, userID)
-	if err != nil {
-		return err
-	}
-	now := time.Now().UTC()
-	_ = now
-	for _, pmid := range providerMessageIDs {
-		pmid = strings.TrimSpace(pmid)
-		if pmid == "" {
-			continue
-		}
-		msgID, err := s.Messages.GetMessageIDByProvider(ctx, accountID, pmid)
-		if err != nil {
-			continue
-		}
-		msg, err := s.Messages.GetMessage(ctx, userID, msgID)
-		if err != nil || msg == nil {
-			continue
-		}
-		_ = s.resolveStoredMessage(ctx, orgID, msg)
-	}
-	return nil
-}
-
 // BackfillAccount resolves contacts for existing messages on an account (best-effort).
 func (s *ResolveService) BackfillAccount(ctx context.Context, userID, accountID uuid.UUID) error {
 	orgID, err := s.Users.GetHomeOrganisationID(ctx, userID)
 	if err != nil {
 		return err
 	}
-	ids, err := s.Contacts.ListMessageIDsForAccount(ctx, accountID, 5000)
-	if err != nil {
-		return err
-	}
-	for _, id := range ids {
-		msg, err := s.Messages.GetMessage(ctx, userID, id)
-		if err != nil || msg == nil {
-			continue
+	// Inline fallback for a deployment with no queue: drain the same backlog
+	// the job would, in batches, rather than re-reading the whole mailbox.
+	for {
+		_, done, err := s.resolveNextBatch(ctx, orgID, userID, accountID)
+		if err != nil {
+			return err
 		}
-		_ = s.resolveStoredMessage(ctx, orgID, msg)
+		if done {
+			return nil
+		}
 	}
-	return nil
 }
+
+// resolveChunkSize bounds one chunk of contact resolution.
+const resolveChunkSize = 100
 
 func (s *ResolveService) ResolveAccountChunk(ctx context.Context, run driven.RunContext) (*ResolveChunkResult, error) {
 	if s == nil || s.Users == nil || s.Messages == nil || s.Contacts == nil {
@@ -104,30 +79,39 @@ func (s *ResolveService) ResolveAccountChunk(ctx context.Context, run driven.Run
 	if err != nil {
 		return nil, err
 	}
-	offset := jobkit.DecodeOffsetCursor(run.Cursor)
-	rows, err := s.Messages.ListMessages(ctx, run.UserID, driven.MessageListFilter{
-		AccountID: run.AccountID,
-		Limit:     101,
-		Offset:    offset,
-	})
+	processed, done, err := s.resolveNextBatch(ctx, orgID, run.UserID, *run.AccountID)
 	if err != nil {
 		return nil, err
 	}
-	done := len(rows) <= 100
-	if len(rows) > 100 {
-		rows = rows[:100]
+	return &ResolveChunkResult{MessagesProcessed: processed, Done: done}, nil
+}
+
+// resolveNextBatch resolves the next unresolved messages on an account and
+// marks them. The backlog drains instead of being re-read from the start on
+// every run, so there is no cursor: the work queue shrinks as it is done.
+func (s *ResolveService) resolveNextBatch(ctx context.Context, orgID, userID, accountID uuid.UUID) (int, bool, error) {
+	rows, err := s.Messages.ListMessagesNeedingContactResolution(ctx, userID, accountID, resolveChunkSize+1)
+	if err != nil {
+		return 0, false, err
 	}
+	done := len(rows) <= resolveChunkSize
+	if !done {
+		rows = rows[:resolveChunkSize]
+	}
+	resolved := make([]uuid.UUID, 0, len(rows))
 	for i := range rows {
 		msg := rows[i]
 		if err := s.resolveStoredMessage(ctx, orgID, &msg); err != nil {
-			return nil, err
+			return 0, false, err
 		}
+		resolved = append(resolved, msg.ID)
 	}
-	out := &ResolveChunkResult{MessagesProcessed: len(rows), Done: done}
-	if !done {
-		out.NextCursor = jobkit.EncodeOffsetCursor(offset + len(rows))
+	// Mark after resolving, so a batch that fails part-way is retried rather
+	// than skipped. Resolution is idempotent, so the retry costs nothing.
+	if err := s.Messages.MarkContactsResolved(ctx, userID, resolved, time.Now().UTC()); err != nil {
+		return 0, false, err
 	}
-	return out, nil
+	return len(rows), done, nil
 }
 
 func (s *ResolveService) resolveStoredMessage(ctx context.Context, orgID uuid.UUID, msg *driven.MessageRow) error {

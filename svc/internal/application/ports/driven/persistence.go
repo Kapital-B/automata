@@ -341,6 +341,14 @@ type MessageRepository interface {
 	GetMessage(ctx context.Context, userID uuid.UUID, id uuid.UUID) (*MessageRow, error)
 	MarkMessagesSummarySeen(ctx context.Context, userID uuid.UUID, messageIDs []uuid.UUID, at time.Time) error
 	MarkMessagesForwardSeen(ctx context.Context, userID uuid.UUID, messageIDs []uuid.UUID, at time.Time) error
+	// ListMessagesNeedingContactResolution returns messages on an account
+	// whose From/To/Cc have not been turned into contacts yet, oldest first so
+	// a backlog drains in the order it arrived.
+	ListMessagesNeedingContactResolution(ctx context.Context, userID, accountID uuid.UUID, limit int) ([]MessageRow, error)
+	// MarkContactsResolved records that these messages have been looked at,
+	// whether or not they yielded a contact, so one with no usable addresses
+	// is not retried on every run.
+	MarkContactsResolved(ctx context.Context, userID uuid.UUID, messageIDs []uuid.UUID, at time.Time) error
 	UpsertMessageCategory(ctx context.Context, row MessageCategoryRow) error
 	ListCategoryDefinitions(ctx context.Context, userID uuid.UUID) ([]CategoryDefinitionRow, error)
 	GetCategoryDefinitionBySlug(ctx context.Context, userID uuid.UUID, slug string) (*CategoryDefinitionRow, error)
@@ -439,7 +447,6 @@ type ContactRepository interface {
 	MergeContacts(ctx context.Context, organisationID, survivorID, sourceID uuid.UUID, at time.Time) error
 	// ResolveEmailContact finds or creates a contact for an email in the organisation.
 	ResolveEmailContact(ctx context.Context, organisationID uuid.UUID, email, displayName string, now time.Time) (contactID uuid.UUID, err error)
-	ListMessageIDsForAccount(ctx context.Context, accountID uuid.UUID, limit int) ([]uuid.UUID, error)
 	ListContactIDsForMessage(ctx context.Context, organisationID, messageID uuid.UUID) ([]uuid.UUID, error)
 	ListContactIDsForThread(ctx context.Context, organisationID, accountID uuid.UUID, conversationID string) ([]uuid.UUID, error)
 	ListContactIDsForManualItem(ctx context.Context, organisationID, manualItemID uuid.UUID) ([]uuid.UUID, error)

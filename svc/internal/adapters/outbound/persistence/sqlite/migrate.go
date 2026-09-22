@@ -116,7 +116,8 @@ func ignoreRepeatedMigrationError(err error) bool {
 		strings.Contains(msg, "duplicate column name: updated_at") ||
 		strings.Contains(msg, "duplicate column name: home_organisation_id") ||
 		strings.Contains(msg, "duplicate column name: to_json") ||
-		strings.Contains(msg, "duplicate column name: cc_json")
+		strings.Contains(msg, "duplicate column name: cc_json") ||
+		strings.Contains(msg, "duplicate column name: contacts_resolved_at")
 }
 
 func migrateUserCategoryDefinitions(db *sql.DB) error {
@@ -448,6 +449,15 @@ func migrateOrganisationsContacts(db *sql.DB) error {
 	}
 	if !hasCcJSON {
 		if _, err := db.Exec(`ALTER TABLE messages ADD COLUMN cc_json TEXT NOT NULL DEFAULT '[]'`); err != nil {
+			return err
+		}
+	}
+	hasContactsResolvedAt, err := tableHasColumn(db, "messages", "contacts_resolved_at")
+	if err != nil {
+		return err
+	}
+	if !hasContactsResolvedAt {
+		if _, err := db.Exec(`ALTER TABLE messages ADD COLUMN contacts_resolved_at TEXT`); err != nil {
 			return err
 		}
 	}

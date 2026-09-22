@@ -23,7 +23,6 @@ type SyncService struct {
 	Vault    driven.TokenVault
 	JobRuns  driven.JobRunRepository
 	Resolve  interface {
-		ResolveAfterSync(ctx context.Context, userID, accountID uuid.UUID, providerMessageIDs []string) error
 		BackfillAccount(ctx context.Context, userID, accountID uuid.UUID) error
 	}
 	Assign interface {
@@ -33,6 +32,11 @@ type SyncService struct {
 	// scoring a mailbox is real work and sync latency should not include it.
 	// Falls back to the inline Assign hook when nil.
 	AssignEnqueuer driven.JobEnqueuer
+	// ContactsEnqueuer does the same for contact resolution. Without it the
+	// chunked sync path resolved nothing at all: the inline hooks below are
+	// only reached by SyncInboxWithOptions, which a deployed worker never
+	// calls.
+	ContactsEnqueuer driven.JobEnqueuer
 }
 
 type SyncResult struct {
@@ -220,6 +224,10 @@ func (s *SyncService) SyncChunk(ctx context.Context, run driven.RunContext) (*Sy
 		return nil, err
 	}
 	out.Done = true
+	// The mailbox is current, so the work that reads it can run. Scheduling
+	// per chunk would queue the same follow-up once per page.
+	s.scheduleContactResolution(ctx, run.UserID, accountID)
+	s.scheduleAssignment(ctx, run.UserID, accountID)
 	return out, nil
 }
 
@@ -316,7 +324,6 @@ func (s *SyncService) SyncInboxWithOptions(ctx context.Context, userID uuid.UUID
 	}
 
 	n := 0
-	providerIDs := make([]string, 0, len(list))
 	for _, gm := range list {
 		if gm.Removed {
 			continue
@@ -374,19 +381,12 @@ func (s *SyncService) SyncInboxWithOptions(ctx context.Context, userID uuid.UUID
 			}
 			return nil, err
 		}
-		providerIDs = append(providerIDs, gm.ID)
 		n++
 		if s.JobRuns != nil {
 			_ = s.JobRuns.UpdateJobRunMeta(ctx, jobID, syncProgressMetaJSON(len(list), n, n, deltaUsed, deltaResetReason))
 		}
 	}
-	if s.Resolve != nil {
-		if n > 0 {
-			_ = s.Resolve.ResolveAfterSync(ctx, userID, accountID, providerIDs)
-		}
-		// Idempotent backfill so People is populated for mail synced before contacts existed.
-		_ = s.Resolve.BackfillAccount(ctx, userID, accountID)
-	}
+	s.scheduleContactResolution(ctx, userID, accountID)
 	s.scheduleAssignment(ctx, userID, accountID)
 	if err := s.Accounts.UpsertSyncState(ctx, userID, accountID, &deltaRes.DeltaLink, time.Now().UTC()); err != nil {
 		return nil, err
@@ -526,6 +526,28 @@ func timePtrSync(t time.Time) *time.Time {
 // Assignment scores every unassigned message on the account, which is too much
 // work to sit inside a sync response. assign_projects is already a registered
 // streamed job with its own chunking and retry policy.
+// scheduleContactResolution turns synced mail into contacts. Preferring the
+// queue keeps a mailbox-wide scan off the sync path, and the inline fallback
+// means a queue outage degrades rather than silently stopping People filling.
+func (s *SyncService) scheduleContactResolution(ctx context.Context, userID, accountID uuid.UUID) {
+	if s.ContactsEnqueuer != nil {
+		acc := accountID
+		_, err := s.ContactsEnqueuer.Enqueue(ctx, driven.CreateJobInput{
+			JobType:     "resolve_contacts",
+			UserID:      userID,
+			AccountID:   &acc,
+			TriggerKind: driven.JobTriggerAPI,
+			Now:         time.Now().UTC(),
+		})
+		if err == nil {
+			return
+		}
+	}
+	if s.Resolve != nil {
+		_ = s.Resolve.BackfillAccount(ctx, userID, accountID)
+	}
+}
+
 func (s *SyncService) scheduleAssignment(ctx context.Context, userID, accountID uuid.UUID) {
 	if s.AssignEnqueuer != nil {
 		acc := accountID

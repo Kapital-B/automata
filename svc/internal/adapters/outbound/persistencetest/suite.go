@@ -1648,6 +1648,67 @@ func runNotRelevantTests(t *testing.T, factory Factory) {
 	// A Graph delta row need not repeat fields that did not change, and a
 	// tombstone carries none at all. Upserting one must not blank a message
 	// that already has a sender and a subject.
+	// Contact resolution is driven off a watermark rather than a rescan, so
+	// the queue has to shrink as it is worked and never hand back a message
+	// twice.
+	t.Run("contact_resolution_queue_drains_and_is_user_scoped", func(t *testing.T) {
+		h := factory(t)
+		ctx := context.Background()
+		now := time.Now().UTC()
+		userID, _, accountID := seedUserAccount(t, h.Repo, uuid.New(), now)
+
+		ids := make([]uuid.UUID, 0, 3)
+		for i := 0; i < 3; i++ {
+			id := uuid.New()
+			ids = append(ids, id)
+			if err := h.Repo.UpsertMessage(ctx, driven.MessageRow{
+				ID: id, AccountID: accountID, ProviderMessageID: id.String(),
+				ReceivedAt: now.Add(-time.Duration(i) * time.Hour), Subject: "Hello",
+				FromJSON: `{"address":"a@example.com"}`, CreatedAt: now, UpdatedAt: now,
+			}); err != nil {
+				t.Fatal(err)
+			}
+		}
+
+		pending, err := h.Repo.ListMessagesNeedingContactResolution(ctx, userID, accountID, 10)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if len(pending) != 3 {
+			t.Fatalf("pending = %d, want 3", len(pending))
+		}
+		// Oldest first, so a backlog drains in the order it arrived.
+		for i := 1; i < len(pending); i++ {
+			if pending[i].ReceivedAt.Before(pending[i-1].ReceivedAt) {
+				t.Fatalf("results are not oldest first: %v", pending)
+			}
+		}
+
+		if err := h.Repo.MarkContactsResolved(ctx, userID, ids[:2], now); err != nil {
+			t.Fatal(err)
+		}
+		left, err := h.Repo.ListMessagesNeedingContactResolution(ctx, userID, accountID, 10)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if len(left) != 1 {
+			t.Fatalf("pending after marking two = %d, want 1", len(left))
+		}
+
+		// Another user cannot mark this account's mail as done.
+		otherUser, _, _ := seedUserAccount(t, h.Repo, uuid.New(), now)
+		if err := h.Repo.MarkContactsResolved(ctx, otherUser, []uuid.UUID{left[0].ID}, now); err != nil {
+			t.Fatal(err)
+		}
+		still, err := h.Repo.ListMessagesNeedingContactResolution(ctx, userID, accountID, 10)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if len(still) != 1 {
+			t.Errorf("another user's mark took effect: pending = %d, want 1", len(still))
+		}
+	})
+
 	t.Run("a_partial_upsert_does_not_blank_a_populated_message", func(t *testing.T) {
 		h := factory(t)
 		ctx := context.Background()

@@ -422,6 +422,7 @@ func (r *Runtime) buildServices(ctx context.Context) error {
 	// non-nil and disable the inline fallback.
 	if r.Enqueuer != nil {
 		syncSvc.AssignEnqueuer = r.Enqueuer
+		syncSvc.ContactsEnqueuer = r.Enqueuer
 	}
 
 	var categorizeSvc *appmessages.CategorizeService

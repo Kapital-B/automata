@@ -457,3 +457,84 @@ func TestSyncChunkForceResetsOnlyAtTheStart(t *testing.T) {
 		t.Error("a forced run should not report the delta as reused")
 	}
 }
+
+// recordingEnqueuer captures what sync queues as follow-up work.
+type recordingEnqueuer struct {
+	jobs []driven.CreateJobInput
+}
+
+func (r *recordingEnqueuer) Enqueue(ctx context.Context, in driven.CreateJobInput) (*driven.JobRecord, error) {
+	r.jobs = append(r.jobs, in)
+	return &driven.JobRecord{ID: uuid.New(), JobType: in.JobType}, nil
+}
+
+func (r *recordingEnqueuer) EnqueueChain(ctx context.Context, userID uuid.UUID, accountID *uuid.UUID, trigger string, chain []string, payload driven.JobPayload, scheduleID *uuid.UUID, scheduledFor *time.Time) (*driven.JobRecord, error) {
+	return nil, errors.New("not implemented")
+}
+
+func (r *recordingEnqueuer) countOf(jobType string) int {
+	n := 0
+	for _, j := range r.jobs {
+		if j.JobType == jobType {
+			n++
+		}
+	}
+	return n
+}
+
+// Contacts are extracted from synced mail by a job. Nothing enqueued it, and
+// the chunked path — the only one a deployed worker runs — did not resolve
+// inline either, so contacts were never extracted at all.
+func TestSyncChunkQueuesContactResolutionOnceTheMailboxIsCurrent(t *testing.T) {
+	graph := &fakeDeltaGraph{
+		results: []*driven.GraphDeltaResult{
+			{
+				Messages: []driven.GraphMessage{{
+					ID: "provider-1", Subject: "one",
+					ReceivedDateTime: time.Now().UTC().Format(time.RFC3339),
+					FromAddress:      "a@example.com",
+				}},
+				NextLink: "page-2",
+			},
+			{Messages: nil, DeltaLink: "delta-final"},
+		},
+	}
+	svc, _, userID, accountID := setupSyncService(t, graph)
+	enq := &recordingEnqueuer{}
+	svc.ContactsEnqueuer = enq
+	ctx := context.Background()
+
+	// First chunk has more pages to fetch, so the mailbox is not current yet.
+	first, err := svc.SyncChunk(ctx, driven.RunContext{UserID: userID, AccountID: &accountID, JobType: "sync"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if first.Done {
+		t.Fatal("expected the first chunk to report more pages")
+	}
+	if got := enq.countOf("resolve_contacts"); got != 0 {
+		t.Errorf("queued resolution mid-pagination %d times, want 0", got)
+	}
+
+	// Final chunk: now it is worth reading the mailbox.
+	last, err := svc.SyncChunk(ctx, driven.RunContext{
+		UserID: userID, AccountID: &accountID, JobType: "sync",
+		Cursor: &driven.JobCursor{Value: "page-2"},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !last.Done {
+		t.Fatal("expected the last chunk to be done")
+	}
+	if got := enq.countOf("resolve_contacts"); got != 1 {
+		t.Fatalf("queued resolution %d times, want exactly 1", got)
+	}
+	job := enq.jobs[0]
+	if job.AccountID == nil || *job.AccountID != accountID {
+		t.Errorf("job account = %v, want %s", job.AccountID, accountID)
+	}
+	if job.UserID != userID {
+		t.Errorf("job user = %s, want %s", job.UserID, userID)
+	}
+}

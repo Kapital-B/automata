@@ -1,0 +1,12 @@
+-- Contact resolution watermark.
+--
+-- Resolving a message's From/To/Cc into contacts is idempotent, so correctness
+-- never needed this. Convergence did: without a watermark the resolver pages
+-- the whole mailbox from offset zero on every run, so a large account spends
+-- most of a run re-resolving messages it resolved last time and new mail waits
+-- behind them.
+--
+-- Set once a message has been looked at, whether or not it yielded a contact.
+-- A message with no usable sender or recipients must not be retried forever,
+-- which is what an "has no participants yet" test would have done.
+ALTER TABLE messages ADD COLUMN IF NOT EXISTS contacts_resolved_at TIMESTAMPTZ;

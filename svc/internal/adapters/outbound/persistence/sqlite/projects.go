@@ -775,6 +775,59 @@ func (r *Repository) CountUnassignedSummary(ctx context.Context, userID uuid.UUI
 
 // ListMessagesNeedingAssign returns messages on the account with no override row
 // and no thread row, i.e. Wave 1 §9's "effective assignment is Unassigned".
+func (r *Repository) ListMessagesNeedingContactResolution(ctx context.Context, userID, accountID uuid.UUID, limit int) ([]driven.MessageRow, error) {
+	if limit <= 0 {
+		limit = 100
+	}
+	rows, err := r.db.QueryContext(ctx, `
+		SELECT m.id, m.account_id, m.provider_message_id, m.conversation_id, m.received_at, m.subject, m.from_json,
+			m.to_json, m.cc_json, m.to_cc_preview, m.body_text, m.body_fetched_at, m.has_attachments, m.raw_etag,
+			cd.slug, mc.confidence, m.created_at, m.updated_at, m.summary_seen_at, m.forward_seen_at
+		FROM messages m
+		INNER JOIN accounts a ON a.id = m.account_id AND a.user_id = ?
+		LEFT JOIN message_categories mc ON mc.message_id = m.id AND mc.source = 'llm'
+		LEFT JOIN category_definitions cd ON cd.id = mc.category_id
+		WHERE m.account_id = ?
+		  AND m.contacts_resolved_at IS NULL
+		ORDER BY m.received_at ASC
+		LIMIT ?
+	`, userID.String(), accountID.String(), limit)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	return scanMessageRows(rows)
+}
+
+func (r *Repository) MarkContactsResolved(ctx context.Context, userID uuid.UUID, messageIDs []uuid.UUID, at time.Time) error {
+	if len(messageIDs) == 0 {
+		return nil
+	}
+	resolved := formatRFC3339(at.UTC())
+	const batch = 80
+	for i := 0; i < len(messageIDs); i += batch {
+		j := i + batch
+		if j > len(messageIDs) {
+			j = len(messageIDs)
+		}
+		var b strings.Builder
+		b.WriteString(`UPDATE messages SET contacts_resolved_at = ? WHERE account_id IN (SELECT id FROM accounts WHERE user_id = ?) AND id IN (`)
+		args := []any{resolved, userID.String()}
+		for k, id := range messageIDs[i:j] {
+			if k > 0 {
+				b.WriteString(`,`)
+			}
+			b.WriteString(`?`)
+			args = append(args, id.String())
+		}
+		b.WriteString(`)`)
+		if _, err := r.db.ExecContext(ctx, b.String(), args...); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
 func (r *Repository) ListMessagesNeedingAssign(ctx context.Context, userID, accountID uuid.UUID, limit int) ([]driven.MessageRow, error) {
 	if limit <= 0 {
 		limit = 500

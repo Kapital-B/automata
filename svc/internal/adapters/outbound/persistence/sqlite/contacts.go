@@ -463,32 +463,6 @@ func (r *Repository) ResolveEmailContact(ctx context.Context, organisationID uui
 	return contactID, nil
 }
 
-func (r *Repository) ListMessageIDsForAccount(ctx context.Context, accountID uuid.UUID, limit int) ([]uuid.UUID, error) {
-	if limit <= 0 {
-		limit = 5000
-	}
-	rows, err := r.db.QueryContext(ctx, `
-		SELECT id FROM messages WHERE account_id = ? ORDER BY received_at DESC LIMIT ?
-	`, accountID.String(), limit)
-	if err != nil {
-		return nil, err
-	}
-	defer rows.Close()
-	out := make([]uuid.UUID, 0)
-	for rows.Next() {
-		var idStr string
-		if err := rows.Scan(&idStr); err != nil {
-			return nil, err
-		}
-		id, err := uuid.Parse(idStr)
-		if err != nil {
-			return nil, err
-		}
-		out = append(out, id)
-	}
-	return out, rows.Err()
-}
-
 func scanContactRow(s rowScanner) (*driven.ContactRow, error) {
 	var idStr, orgStr, displayName, createdAt, updatedAt string
 	var company, merged sql.NullString
