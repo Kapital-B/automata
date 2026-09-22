@@ -2,6 +2,7 @@ package dynamodbjobs
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"strings"
 	"time"
@@ -182,10 +183,92 @@ func (s *Store) CreatePending(ctx context.Context, in driven.CreateJobInput) (*d
 		if existing, getErr := s.GetByID(ctx, in.ID); getErr == nil {
 			return existing, nil
 		}
-		if holder, heldErr := s.getLock(ctx, in.LockScope, in.LockKey); heldErr == nil {
+		holder, heldErr := s.getLock(ctx, in.LockScope, in.LockKey)
+		if heldErr != nil {
+			return nil, mapConflict(err)
+		}
+		reclaimable, rerr := s.lockReclaimable(ctx, holder, now)
+		if rerr != nil {
+			return nil, rerr
+		}
+		if !reclaimable {
 			return nil, fmt.Errorf("%w: owner=%s", driven.ErrJobLockHeld, holder.OwnerJobID)
 		}
-		return nil, mapConflict(err)
+		return s.takeOverLock(ctx, job, jobAV, lock, holder)
+	}
+	return job.record()
+}
+
+// lockReclaimable reports whether an existing lock can be taken over.
+//
+// A lock is released by its owner reaching a terminal state, so an owner that
+// never gets there holds it forever. Unlike a lease, nothing in this store
+// reclaims it on its own, so without this a job that is enqueued and never
+// executed blocks its scope until the row is deleted by hand.
+func (s *Store) lockReclaimable(ctx context.Context, lk *lockItem, now time.Time) (bool, error) {
+	ownerID, err := uuid.Parse(strings.TrimSpace(lk.OwnerJobID))
+	if err != nil {
+		// An unreadable owner can never release it.
+		return true, nil
+	}
+	owner, err := s.GetByID(ctx, ownerID)
+	if errors.Is(err, driven.ErrJobNotFound) {
+		// The owner is gone — terminal jobs carry a TTL, the lock does not.
+		return true, nil
+	}
+	if err != nil {
+		return false, err
+	}
+	if isTerminal(owner.Status) {
+		return true, nil
+	}
+	if owner.Status != driven.JobStatusPending {
+		// A running owner is RecoverExpiredLease's to resolve: a chunk may
+		// still be in flight, and taking the lock here could double-execute it.
+		return false, nil
+	}
+	lease, err := parseTime(lk.LeaseUntil)
+	if err != nil {
+		return false, err
+	}
+	// Pending and past its lease: enqueued, never progressed.
+	return !lease.After(now), nil
+}
+
+// takeOverLock rewrites the lock to a new owner, conditional on the holder's
+// revision so two callers racing to reclaim cannot both win.
+func (s *Store) takeOverLock(ctx context.Context, job *jobItem, jobAV map[string]types.AttributeValue, lock, holder *lockItem) (*driven.JobRecord, error) {
+	lock.Revision = holder.Revision + 1
+	lockAV, err := attributevalue.MarshalMap(lock)
+	if err != nil {
+		return nil, err
+	}
+	_, err = s.client.TransactWriteItems(ctx, &dynamodb.TransactWriteItemsInput{
+		TransactItems: []types.TransactWriteItem{
+			{
+				Put: &types.Put{
+					TableName:           &s.tableName,
+					Item:                jobAV,
+					ConditionExpression: strPtr("attribute_not_exists(pk) AND attribute_not_exists(sk)"),
+				},
+			},
+			{
+				Put: &types.Put{
+					TableName:           &s.tableName,
+					Item:                lockAV,
+					ConditionExpression: strPtr("entity_type = :lock_entity AND owner_job_id = :owner AND revision = :lock_revision"),
+					ExpressionAttributeValues: map[string]types.AttributeValue{
+						":lock_entity":   &types.AttributeValueMemberS{Value: "lock"},
+						":owner":         &types.AttributeValueMemberS{Value: holder.OwnerJobID},
+						":lock_revision": &types.AttributeValueMemberN{Value: fmt.Sprintf("%d", holder.Revision)},
+					},
+				},
+			},
+		},
+	})
+	if err != nil {
+		// Lost the race, or the owner released it underneath us.
+		return nil, fmt.Errorf("%w: owner=%s", driven.ErrJobLockHeld, holder.OwnerJobID)
 	}
 	return job.record()
 }

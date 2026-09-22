@@ -12,6 +12,11 @@ import (
 	"github.com/google/uuid"
 )
 
+// defaultPendingLockLease bounds how long a pending job may hold its lock
+// without progressing. It matches the DynamoDB store so both reclaim at the
+// same point.
+const defaultPendingLockLease = 5 * time.Minute
+
 // Store is an in-memory JobStore with the same fencing semantics as DynamoDB.
 type Store struct {
 	mu        sync.Mutex
@@ -125,11 +130,11 @@ func (s *Store) CreatePending(_ context.Context, in driven.CreateJobInput) (*dri
 	if in.AcquireLock {
 		key := lockKey(in.LockScope, in.LockKey)
 		if lk, ok := s.locks[key]; ok {
-			if owner, exists := s.jobs[lk.OwnerJobID]; exists && !isTerminal(owner.Status) {
+			if !s.lockReclaimableLocked(lk, now) {
 				return nil, fmt.Errorf("%w: owner=%s", driven.ErrJobLockHeld, lk.OwnerJobID)
 			}
 		}
-		s.locks[key] = &lockItem{OwnerJobID: in.ID, LeaseUntil: now.Add(5 * time.Minute), Revision: 1}
+		s.locks[key] = &lockItem{OwnerJobID: in.ID, LeaseUntil: now.Add(defaultPendingLockLease), Revision: 1}
 	}
 	rec := &driven.JobRecord{
 		ID:             in.ID,
@@ -153,6 +158,28 @@ func (s *Store) CreatePending(_ context.Context, in driven.CreateJobInput) (*dri
 	}
 	s.jobs[in.ID] = rec
 	return cloneJob(rec), nil
+}
+
+// lockReclaimableLocked reports whether an existing lock can be taken over.
+//
+// A lock is released by its owner reaching a terminal state, so an owner that
+// never gets there holds it forever: nothing else reclaims it, and the scope
+// stays blocked until someone deletes the row by hand. Three cases are safe to
+// take over.
+func (s *Store) lockReclaimableLocked(lk *lockItem, now time.Time) bool {
+	owner, exists := s.jobs[lk.OwnerJobID]
+	if !exists {
+		// The owner is gone (expired by TTL, or never written); no other
+		// path can ever release this.
+		return true
+	}
+	if isTerminal(owner.Status) {
+		return true
+	}
+	// A pending owner past its lease was enqueued and never progressed. A
+	// running one is RecoverExpiredLease's to resolve, because a chunk may
+	// still be in flight and taking the lock here could double-execute it.
+	return owner.Status == driven.JobStatusPending && !lk.LeaseUntil.After(now)
 }
 
 func (s *Store) Get(_ context.Context, userID, jobID uuid.UUID) (*driven.JobRecord, error) {
