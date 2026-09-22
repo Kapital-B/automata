@@ -136,12 +136,15 @@ func (s *Service) AssignBatch(ctx context.Context, userID uuid.UUID, items []Bat
 				fail(i, "invalid_scope")
 				continue
 			}
+			// A message with no conversation has no thread to file, so thread
+			// scope cannot be satisfied. Refusing it left such a message
+			// untriageable — not even dismissable — so it is filed on itself
+			// instead, which is the only scope that can carry the intent.
+			if scope == domainprojects.ScopeThread && !hasConversation(msg) {
+				scope = domainprojects.ScopeMessage
+			}
 			switch scope {
 			case domainprojects.ScopeThread:
-				if msg.ConversationID == nil || strings.TrimSpace(*msg.ConversationID) == "" {
-					fail(i, "conversation_required")
-					continue
-				}
 				if marksNotRelevant(it) {
 					// A settled decision that there is no project: committed,
 					// with no project id and the time it was decided.
@@ -329,8 +332,6 @@ func batchErrorCode(err error) string {
 	switch {
 	case err == nil:
 		return ""
-	case strings.Contains(err.Error(), "conversation_required"):
-		return "conversation_required"
 	case strings.Contains(strings.ToLower(err.Error()), "not found"):
 		return "not_found"
 	default:

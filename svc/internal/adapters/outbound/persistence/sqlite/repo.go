@@ -277,7 +277,10 @@ func (r *Repository) UpsertMessage(ctx context.Context, m driven.MessageRow) err
 			to_json, cc_json, to_cc_preview, body_text, body_fetched_at, has_attachments, raw_etag, created_at, updated_at)
 		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 		ON CONFLICT(account_id, provider_message_id) DO UPDATE SET
-			conversation_id = excluded.conversation_id,
+			-- Same rule as subject and sender: an absent conversation means
+			-- "not supplied". Nulling it strands the message outside any
+			-- thread, where thread-scoped triage cannot reach it.
+			conversation_id = COALESCE(excluded.conversation_id, messages.conversation_id),
 			received_at = excluded.received_at,
 			-- A delta row need not repeat fields that did not change, and a
 			-- tombstone carries none at all, so an incoming empty value means

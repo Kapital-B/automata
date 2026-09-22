@@ -18,11 +18,10 @@ import (
 )
 
 var (
-	ErrNotFound             = errors.New("not found")
-	ErrInvalidCode          = errors.New("invalid project code")
-	ErrCodeTaken            = errors.New("project code already exists")
-	ErrConversationRequired = errors.New("conversation_required")
-	ErrCodeImmutable        = errors.New("project code is immutable")
+	ErrNotFound      = errors.New("not found")
+	ErrInvalidCode   = errors.New("invalid project code")
+	ErrCodeTaken     = errors.New("project code already exists")
+	ErrCodeImmutable = errors.New("project code is immutable")
 )
 
 // Service handles project CRUD and manual assignment.
@@ -276,11 +275,14 @@ func (s *Service) AssignMessage(ctx context.Context, userID, messageID uuid.UUID
 	now := time.Now().UTC()
 	uid := userID
 
+	// A message with no conversation has no thread to file; fall back to the
+	// only scope that can express the request rather than refusing it.
+	if scope == domainprojects.ScopeThread && !hasConversation(msg) {
+		scope = domainprojects.ScopeMessage
+	}
+
 	switch scope {
 	case domainprojects.ScopeThread:
-		if msg.ConversationID == nil || strings.TrimSpace(*msg.ConversationID) == "" {
-			return nil, ErrConversationRequired
-		}
 		if in.ProjectID == nil {
 			if err := s.Assignments.DeleteThreadAssignment(ctx, msg.AccountID, *msg.ConversationID); err != nil {
 				return nil, err
@@ -770,6 +772,12 @@ func (s *AssignService) writeAssignment(ctx context.Context, orgID, accountID uu
 		Status: string(status), Confidence: confidence, Reason: reason,
 		Source: string(source), RunID: runID, CreatedAt: now, UpdatedAt: now,
 	})
+}
+
+// hasConversation reports whether a message belongs to a thread. Mail synced
+// from a delta tombstone lost its conversation id, so this is not hypothetical.
+func hasConversation(msg *driven.MessageRow) bool {
+	return msg != nil && msg.ConversationID != nil && strings.TrimSpace(*msg.ConversationID) != ""
 }
 
 func ptrFloat64(v float64) *float64 { return &v }
