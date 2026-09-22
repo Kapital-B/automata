@@ -29,10 +29,6 @@ func (s stubProjects) ListProjects(ctx context.Context, orgID uuid.UUID, f drive
 	return s.rows, nil
 }
 
-func (s stubProjects) ListProjectParticipants(ctx context.Context, orgID uuid.UUID) ([]driven.ProjectParticipantRow, error) {
-	return nil, nil
-}
-
 func (s stubProjects) UpsertProjectParticipant(ctx context.Context, projectID, contactID uuid.UUID, at time.Time) error {
 	return nil
 }
@@ -45,10 +41,6 @@ type failingAssignments struct {
 
 func (f *failingAssignments) ListMessagesNeedingAssign(ctx context.Context, userID, accountID uuid.UUID, limit int) ([]driven.MessageRow, error) {
 	return f.msgs, nil
-}
-
-func (f *failingAssignments) ListCommittedAssignmentSignals(ctx context.Context, userID, accountID uuid.UUID, limit int) ([]driven.AssignmentSignalRow, error) {
-	return nil, nil
 }
 
 func (f *failingAssignments) FindCommittedSiblingProject(ctx context.Context, userID, accountID uuid.UUID, conversationID string, exclude uuid.UUID) (*uuid.UUID, error) {
@@ -155,7 +147,7 @@ func TestAssignAfterSyncRecordsOutcomeBreakdown(t *testing.T) {
 	if runs.status != "success" {
 		t.Errorf("run status = %q, want success", runs.status)
 	}
-	for _, want := range []string{`"unscored":1`, `"errors":0`, `"committed_rule":0`, `"provisional_rule":0`} {
+	for _, want := range []string{`"unscored":1`, `"errors":0`, `"committed_rule":0`, `"provisional_llm":0`} {
 		if !strings.Contains(runs.meta, want) {
 			t.Errorf("run meta %q missing %s", runs.meta, want)
 		}

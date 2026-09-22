@@ -539,19 +539,16 @@ type AssignChunkResult struct {
 // assignTally breaks a run down by outcome so a run that scored nothing is
 // distinguishable from a run that failed.
 type assignTally struct {
-	CommittedRule   int
-	ProvisionalRule int
-	ProvisionalLLM  int
-	Unscored        int
-	Errors          int
+	CommittedRule  int
+	ProvisionalLLM int
+	Unscored       int
+	Errors         int
 }
 
 func (t *assignTally) record(o assignOutcome) {
 	switch o {
 	case outcomeCommittedRule:
 		t.CommittedRule++
-	case outcomeProvisionalRule:
-		t.ProvisionalRule++
 	case outcomeProvisionalLLM:
 		t.ProvisionalLLM++
 	default:
@@ -560,7 +557,7 @@ func (t *assignTally) record(o assignOutcome) {
 }
 
 func (t assignTally) assigned() int {
-	return t.CommittedRule + t.ProvisionalRule + t.ProvisionalLLM
+	return t.CommittedRule + t.ProvisionalLLM
 }
 
 func (t assignTally) meta(considered int) map[string]any {
@@ -568,7 +565,6 @@ func (t assignTally) meta(considered int) map[string]any {
 		"messages_considered": considered,
 		"assigned":            t.assigned(),
 		"committed_rule":      t.CommittedRule,
-		"provisional_rule":    t.ProvisionalRule,
 		"provisional_llm":     t.ProvisionalLLM,
 		"unscored":            t.Unscored,
 		"errors":              t.Errors,
@@ -595,12 +591,11 @@ func (s *AssignService) AssignAfterSync(ctx context.Context, userID, accountID u
 		runID = &id
 		_ = s.JobRuns.InsertJobRun(ctx, id, accountID, "assign_projects", "api", "running", now, time.Time{}, nil, `{}`)
 	}
-	sig := s.buildSignals(ctx, orgID, userID, accountID)
 	tally := assignTally{}
 	var firstErr error
 	var unscored []driven.MessageRow
 	for _, msg := range msgs {
-		outcome, err := s.tryAssignOne(ctx, orgID, userID, accountID, msg, projects, sig, runID, now)
+		outcome, err := s.tryAssignOne(ctx, orgID, userID, accountID, msg, projects, runID, now)
 		if err != nil {
 			// Keep going so one bad message does not strand the rest, but record
 			// the failure: reporting success on a failed pass is what made a
@@ -672,11 +667,10 @@ func (s *AssignService) AssignAccountChunk(ctx context.Context, run driven.RunCo
 		msgs = msgs[:25]
 	}
 	now := time.Now().UTC()
-	sig := s.buildSignals(ctx, orgID, run.UserID, *run.AccountID)
 	tally := assignTally{}
 	var unscored []driven.MessageRow
 	for _, msg := range msgs {
-		outcome, err := s.tryAssignOne(ctx, orgID, run.UserID, *run.AccountID, msg, projects, sig, &run.RunID, now)
+		outcome, err := s.tryAssignOne(ctx, orgID, run.UserID, *run.AccountID, msg, projects, &run.RunID, now)
 		if err != nil {
 			return nil, err
 		}
@@ -710,7 +704,6 @@ type assignOutcome int
 const (
 	outcomeUnscored assignOutcome = iota
 	outcomeCommittedRule
-	outcomeProvisionalRule
 	outcomeProvisionalLLM
 )
 
@@ -719,7 +712,7 @@ const (
 // Order follows Wave 1 §9: a committed sibling in the same thread wins, then a
 // single project code token commits, then the ranked scorer supplies a
 // provisional suggestion. Only a code token may commit without the operator.
-func (s *AssignService) tryAssignOne(ctx context.Context, orgID, userID, accountID uuid.UUID, msg driven.MessageRow, projects []driven.ProjectRow, sig *signals, runID *uuid.UUID, now time.Time) (assignOutcome, error) {
+func (s *AssignService) tryAssignOne(ctx context.Context, orgID, userID, accountID uuid.UUID, msg driven.MessageRow, projects []driven.ProjectRow, runID *uuid.UUID, now time.Time) (assignOutcome, error) {
 	// 1. Sibling committed project.
 	if msg.ConversationID != nil && strings.TrimSpace(*msg.ConversationID) != "" {
 		sib, err := s.Assignments.FindCommittedSiblingProject(ctx, userID, accountID, *msg.ConversationID, msg.ID)
@@ -753,23 +746,9 @@ func (s *AssignService) tryAssignOne(ctx context.Context, orgID, userID, account
 		return outcomeCommittedRule, nil
 	}
 
-	// 3. Ranked candidates. Ambiguity yields the top suggestion rather than
-	//    silence; the operator rejects it in one click if it is wrong.
-	var contactIDs []uuid.UUID
-	if s.Contacts != nil && sig != nil && len(sig.contactProjects) > 0 {
-		contactIDs, _ = s.Contacts.ListContactIDsForMessage(ctx, orgID, msg.ID)
-	}
-	candidates := scoreMessage(msg, projects, sig, contactIDs)
-	if len(candidates) > 0 {
-		top := candidates[0]
-		conf := top.Confidence
-		if err := s.writeAssignment(ctx, orgID, accountID, msg, top.Project.ID,
-			domainprojects.StatusProvisional, top.Reason, domainprojects.SourceRule,
-			&conf, runID, now); err != nil {
-			return outcomeUnscored, err
-		}
-		return outcomeProvisionalRule, nil
-	}
+	// Anything else is the model's to place. Guessing from a sender domain or
+	// a name keyword produced more wrong suggestions than it saved attention,
+	// so a message no certain rule matched is left unscored here.
 	return outcomeUnscored, nil
 }
 
@@ -794,29 +773,6 @@ func (s *AssignService) writeAssignment(ctx context.Context, orgID, accountID uu
 }
 
 func ptrFloat64(v float64) *float64 { return &v }
-
-// buildSignals loads the per-run evidence the scorer reuses across messages.
-// Best effort: scoring degrades to codes and keywords if these fail.
-func (s *AssignService) buildSignals(ctx context.Context, orgID, userID, accountID uuid.UUID) *signals {
-	sig := newSignals()
-	if s.Assignments != nil {
-		rows, err := s.Assignments.ListCommittedAssignmentSignals(ctx, userID, accountID, 500)
-		if err == nil {
-			for _, row := range rows {
-				sig.addAssignmentSignal(row)
-			}
-		}
-	}
-	if s.Projects != nil {
-		rows, err := s.Projects.ListProjectParticipants(ctx, orgID)
-		if err == nil {
-			for _, row := range rows {
-				sig.addParticipant(row)
-			}
-		}
-	}
-	return sig
-}
 
 func (s *AssignService) upsertParticipants(ctx context.Context, orgID, projectID uuid.UUID, msg driven.MessageRow) error {
 	now := time.Now().UTC()
