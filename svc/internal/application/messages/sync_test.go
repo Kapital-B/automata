@@ -348,3 +348,95 @@ func TestSyncInboxDoesNotOverwriteAMessageWithAPartialDeltaRow(t *testing.T) {
 		t.Errorf("received_at = %v, want it left at %v", got.ReceivedAt, received)
 	}
 }
+
+// Graph only resends messages that changed, so an ordinary delta run can never
+// repair a row whose stored content was lost locally. A forced run ignores the
+// stored delta link and refetches full payloads.
+func TestSyncInboxForceIgnoresTheStoredDeltaLink(t *testing.T) {
+	graph := &fakeDeltaGraph{
+		results: []*driven.GraphDeltaResult{
+			{
+				Messages: []driven.GraphMessage{{
+					ID: "provider-1", Subject: "one",
+					ReceivedDateTime: time.Now().UTC().Format(time.RFC3339),
+					FromAddress:      "a@example.com",
+				}},
+				DeltaLink: "delta-1",
+			},
+			{Messages: nil, DeltaLink: "delta-2"},
+			{Messages: nil, DeltaLink: "delta-3"},
+		},
+	}
+	svc, repo, userID, accountID := setupSyncService(t, graph)
+	ctx := context.Background()
+
+	if _, err := svc.SyncInbox(ctx, userID, accountID); err != nil {
+		t.Fatal(err)
+	}
+	// An ordinary run resumes from the stored link.
+	if _, err := svc.SyncInbox(ctx, userID, accountID); err != nil {
+		t.Fatal(err)
+	}
+	if got := graph.calls[1]; got != "delta-1" {
+		t.Fatalf("second call used %q, want the stored delta link", got)
+	}
+
+	if _, err := svc.SyncInboxWithOptions(ctx, userID, accountID, SyncOptions{Force: true}); err != nil {
+		t.Fatal(err)
+	}
+	if got := graph.calls[2]; got != "" {
+		t.Fatalf("forced call used %q, want an empty delta link", got)
+	}
+	// The forced run still stores the link it ends on, so the next ordinary
+	// run resumes rather than refetching everything again.
+	stored, err := repo.GetSyncDeltaLink(ctx, userID, accountID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if stored == nil || *stored != "delta-3" {
+		t.Errorf("stored delta link = %v, want delta-3", stored)
+	}
+}
+
+// The chunked job path is the one that runs in a deployed environment, and it
+// has a second cursor to respect: a forced reset applies to the start of a
+// sync, not to every page, or a multi-page run would restart on each chunk.
+func TestSyncChunkForceResetsOnlyAtTheStart(t *testing.T) {
+	graph := &fakeDeltaGraph{
+		results: []*driven.GraphDeltaResult{
+			{Messages: nil, DeltaLink: "delta-1"},
+			{Messages: nil, DeltaLink: "delta-2"},
+			{Messages: nil, DeltaLink: "delta-3"},
+		},
+	}
+	svc, _, userID, accountID := setupSyncService(t, graph)
+	ctx := context.Background()
+
+	// Seed a stored delta link.
+	if _, err := svc.SyncInbox(ctx, userID, accountID); err != nil {
+		t.Fatal(err)
+	}
+
+	// No cursor yet and Force set: start from scratch.
+	if _, err := svc.SyncChunk(ctx, driven.RunContext{
+		UserID: userID, AccountID: &accountID, JobType: "sync",
+		Payload: driven.JobPayload{Force: true},
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if got := graph.calls[1]; got != "" {
+		t.Fatalf("forced first chunk used %q, want an empty delta link", got)
+	}
+
+	// Mid-pagination the cursor wins, so the run advances instead of looping.
+	if _, err := svc.SyncChunk(ctx, driven.RunContext{
+		UserID: userID, AccountID: &accountID, JobType: "sync",
+		Payload: driven.JobPayload{Force: true},
+		Cursor:  &driven.JobCursor{Value: "page-2"},
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if got := graph.calls[2]; got != "page-2" {
+		t.Fatalf("chunk with a cursor used %q, want page-2", got)
+	}
+}
