@@ -161,8 +161,13 @@ func (s *SyncService) SyncChunk(ctx context.Context, run driven.RunContext) (*Sy
 		} else if gm.BodyPreview != "" {
 			body = gm.BodyPreview
 		}
-		fromObj := map[string]string{"name": gm.FromName, "address": gm.FromAddress}
-		fromJSON, _ := json.Marshal(fromObj)
+		// Leave the sender unset rather than writing an empty one, so the
+		// repository can tell "no sender supplied" from "sender is blank" and
+		// keep what the row already had.
+		fromJSON := []byte("")
+		if gm.FromName != "" || gm.FromAddress != "" {
+			fromJSON, _ = json.Marshal(map[string]string{"name": gm.FromName, "address": gm.FromAddress})
+		}
 		toJSON, _ := json.Marshal(graphRecipientsJSON(gm.ToRecipients))
 		ccJSON, _ := json.Marshal(graphRecipientsJSON(gm.CcRecipients))
 		conv := gm.ConversationID
@@ -326,8 +331,13 @@ func (s *SyncService) SyncInboxWithOptions(ctx context.Context, userID uuid.UUID
 		} else if gm.BodyPreview != "" {
 			body = gm.BodyPreview
 		}
-		fromObj := map[string]string{"name": gm.FromName, "address": gm.FromAddress}
-		fromJSON, _ := json.Marshal(fromObj)
+		// Leave the sender unset rather than writing an empty one, so the
+		// repository can tell "no sender supplied" from "sender is blank" and
+		// keep what the row already had.
+		fromJSON := []byte("")
+		if gm.FromName != "" || gm.FromAddress != "" {
+			fromJSON, _ = json.Marshal(map[string]string{"name": gm.FromName, "address": gm.FromAddress})
+		}
 		toJSON, _ := json.Marshal(graphRecipientsJSON(gm.ToRecipients))
 		ccJSON, _ := json.Marshal(graphRecipientsJSON(gm.CcRecipients))
 		conv := gm.ConversationID

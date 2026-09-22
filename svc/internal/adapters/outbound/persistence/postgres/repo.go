@@ -571,8 +571,12 @@ func (r *Repository) UpsertMessage(ctx context.Context, m driven.MessageRow) err
 		ON CONFLICT(account_id, provider_message_id) DO UPDATE SET
 			conversation_id = excluded.conversation_id,
 			received_at = excluded.received_at,
-			subject = excluded.subject,
-			from_json = excluded.from_json,
+			-- A delta row need not repeat fields that did not change, and a
+			-- tombstone carries none at all, so an incoming empty value means
+			-- "not supplied" rather than "now empty". Overwriting on it blanks
+			-- the sender and subject of a message that still has both.
+			subject = COALESCE(NULLIF(excluded.subject, ''), messages.subject),
+			from_json = CASE WHEN excluded.from_json IN ('', '{}') THEN messages.from_json ELSE excluded.from_json END,
 			to_json = excluded.to_json,
 			cc_json = excluded.cc_json,
 			to_cc_preview = excluded.to_cc_preview,

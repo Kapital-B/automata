@@ -1645,6 +1645,53 @@ func runNotRelevantTests(t *testing.T, factory Factory) {
 		}
 	})
 
+	// A Graph delta row need not repeat fields that did not change, and a
+	// tombstone carries none at all. Upserting one must not blank a message
+	// that already has a sender and a subject.
+	t.Run("a_partial_upsert_does_not_blank_a_populated_message", func(t *testing.T) {
+		h := factory(t)
+		ctx := context.Background()
+		now := time.Now().UTC()
+		userID, _, accountID := seedUserAccount(t, h.Repo, uuid.New(), now)
+		body := "You have a past due balance."
+		received := now.Add(-72 * time.Hour)
+		msgID := uuid.New()
+		if err := h.Repo.UpsertMessage(ctx, driven.MessageRow{
+			ID: msgID, AccountID: accountID, ProviderMessageID: "provider-1",
+			ReceivedAt: received, Subject: "Your online bill",
+			FromJSON: `{"name":"Microsoft","address":"billing@microsoft.com"}`,
+			BodyText: &body, CreatedAt: now, UpdatedAt: now,
+		}); err != nil {
+			t.Fatal(err)
+		}
+
+		// The same message arriving with nothing in it.
+		if err := h.Repo.UpsertMessage(ctx, driven.MessageRow{
+			ID: uuid.New(), AccountID: accountID, ProviderMessageID: "provider-1",
+			ReceivedAt: now, Subject: "", FromJSON: "",
+			CreatedAt: now, UpdatedAt: now,
+		}); err != nil {
+			t.Fatal(err)
+		}
+
+		got, err := h.Repo.GetMessage(ctx, userID, msgID)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if got == nil {
+			t.Fatal("message disappeared")
+		}
+		if got.Subject != "Your online bill" {
+			t.Errorf("subject = %q, want it kept", got.Subject)
+		}
+		if !strings.Contains(got.FromJSON, "billing@microsoft.com") {
+			t.Errorf("from_json = %q, want the sender kept", got.FromJSON)
+		}
+		if got.BodyText == nil || *got.BodyText != body {
+			t.Errorf("body_text = %v, want it kept", got.BodyText)
+		}
+	})
+
 	t.Run("message_scope_marking_leaves_the_rest_of_the_thread", func(t *testing.T) {
 		h := factory(t)
 		ctx := context.Background()
