@@ -165,9 +165,39 @@ What differs is consent and administration, which is where the cost actually sit
 
 **Gmail read scopes are restricted.** `gmail.readonly` and `gmail.modify` are restricted scopes: Google requires app verification, and for restricted scopes a periodic third-party security assessment when serving users outside your own domain. That is a schedulable prerequisite with a lead time and a price, not a code task — and it can gate launch long after the adapter works.
 
-**Decision: internal-use first.** R2 targets a single Workspace domain whose administrator trusts the OAuth client directly, which avoids most of the verification burden and is the shortest path to a working second provider.
+The OAuth consent screen has a **user type**, set per client, and it decides who can connect before any verification happens:
 
-The consequence has to be stated plainly, because it is a product limit and not a technical one: **until verification is done, only mailboxes inside that domain can be connected.** A personal `@gmail.com` address, or a client's mailbox in someone else's domain, will be refused by Google — not by us. If connecting external mailboxes matters sooner than expected, verification becomes the critical path and should start in parallel with R1 rather than after R2.
+| | Internal | External, Testing | External, Production (verified) |
+| --- | --- | --- | --- |
+| Who can connect | Accounts in one Workspace domain | Up to 100 named test users — any Google account, personal Gmail included | Anyone |
+| Verification required | No | No | Yes, plus the security assessment for restricted scopes |
+| Unverified-app warning shown | No | Yes (click-through, same shape as Microsoft's) | No |
+| Refresh token lifetime | Normal | **Expires after 7 days** | Normal |
+
+**Decision: internal-use first.** R2's OAuth client is Internal, scoped to one Workspace domain whose administrator trusts it directly. That avoids the verification burden entirely and gives the stable, long-lived tokens a background sync product needs — the alternative, External-Testing, technically reaches personal Gmail today but re-issues a token every 7 days, which is a maintenance burden dressed up as a feature.
+
+The consequence has to be stated plainly, because it is a product limit and not a technical one: **an Internal client can only connect mailboxes inside its own Workspace domain.** A personal `@gmail.com` address, or a client's mailbox in someone else's domain, cannot use it at all — not "will work with warnings," genuinely cannot. If connecting external mailboxes matters sooner than expected, verification becomes the critical path and should start in parallel with R1 rather than after R2. §5.4.1 below is a narrower stopgap for personal Gmail specifically, ahead of that.
+
+**Verification cost, so it can be budgeted rather than discovered.** The review itself is free; the cost is the mandatory third-party security assessment for restricted scopes, tiered by Google on user count and scope risk:
+
+| Tier | What it is | Rough cost |
+| --- | --- | --- |
+| Tier 1 | Self-assessment via an automated scanner | Often free to a few hundred dollars |
+| Tier 2 | Manual review by an approved third party | Roughly low-to-mid hundreds to a few thousand |
+| Tier 3 | Full penetration test | Tens of thousands |
+
+A product this size requesting Gmail read/modify plausibly lands at Tier 2, not Tier 3, but Google assigns the tier — confirm before this becomes a budget line, and note it recurs (annual reassessment), not a one-time fee. Contrast: Microsoft's equivalent, Publisher Verification, is free and administrative — Microsoft Partner Network enrollment plus domain verification, no paid security review for standard `Mail.Read`/`Mail.Send` scopes. That asymmetry is why Microsoft's unverified-app experience already feels more permissive than Google's; it structurally is.
+
+#### 5.4.1 App Passwords via the IMAP adapter: an immediate stopgap for personal Gmail
+
+Gmail also speaks IMAP/SMTP (`imap.gmail.com:993`, `smtp.gmail.com:465`), which R3 already covers. This looks like a way to sidestep Google's OAuth verification question entirely, and for one specific credential type, it is.
+
+Plain username/password auth is gone; two things can stand in:
+
+- **An app password** — a 16-character, per-app credential generated in the account's security settings once 2FA is on. No OAuth consent screen, no Google review, no 7-day expiry: it is an ordinary IMAP/SMTP credential, indistinguishable to the adapter from Fastmail or Zoho. This is genuinely outside the verification question above.
+- **OAuth2 over IMAP (XOAUTH2)** — Google also accepts an OAuth token as IMAP/SMTP credentials, but the scope it requires, `https://mail.google.com/`, is Google's full-access mail scope — broader than the granular `gmail.readonly`/`gmail.modify` the dedicated adapter would request. This path still hits verification, at the same tier or worse, so it buys nothing.
+
+An app password is a real, if partial, answer: R3's generic adapter can connect a personal Gmail account today, with no dependency on R2's OAuth client or its Internal/domain limit. It is not a substitute for R2. It is a manual step the user performs outside the product (no "Connect with Google" button), and **a Workspace admin can disable app passwords org-wide** — plausibly the same admin whose trust R2's Internal client depends on — so it may not even be available for the deployment R2 targets. Treat it as covering the gap for personal accounts specifically, ahead of verification, not as an alternative sequencing for R2.
 
 **Domain-wide delegation is a different connect flow**, not a variant of the OAuth one: a service account reads many mailboxes without per-user consent. Worth supporting eventually for org-wide deployments; out of scope for R2, which does per-user OAuth only.
 
@@ -241,7 +271,7 @@ IMAP and Gmail need a recorded-fixture or containerised server in CI. The lesson
 | IMAP passwords are a higher-value secret than refresh tokens | Same vault, but they do not expire and cannot be scoped; consider requiring app passwords and refusing plaintext-auth servers |
 | Attachment bytes now transit the worker | Bound the fallback by size and fail loudly above it rather than streaming unbounded data through a Lambda |
 | `ms_account_kind` blocks the migration | R0 answers this before any code is written |
-| Internal-use Google means external mailboxes cannot connect at all | Stated as a product limit in §5.4, not discovered later; if external mailboxes are needed sooner, verification starts in parallel with R1 |
+| Internal-use Google means external mailboxes cannot connect via R2 at all | Stated as a product limit in §5.4, not discovered later; personal Gmail specifically has the app-password stopgap (§5.4.1); if other external mailboxes are needed sooner, verification starts in parallel with R1 |
 | Forwarded mail is larger than the sending server will accept | Bound the fallback by size, fail the rule loudly, and surface it per account (§2) |
 | Per-provider quirks leak upward over time | The capability struct is the pressure valve; anything that cannot be expressed as a capability is a signal the port is wrong |
 
