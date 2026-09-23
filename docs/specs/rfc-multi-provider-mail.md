@@ -59,6 +59,7 @@ Forward rules are an existing, automated feature. Silently giving them worse beh
 ## 3. Non-goals
 
 - **POP3.** No server-side state, no stable ids, no folders, no removal signal, and destructive retrieval by default. Everything downstream — delta sync, thread assignment, removal handling — has no meaning. If someone genuinely needs POP, it should be a one-way importer, not a mailbox.
+- **EWS, and on-premises Exchange as a dedicated adapter.** §5.3 argues this out: the blocker is network reachability rather than protocol, and IMAP already covers most of the population.
 - **Calendar, contacts-as-directory, or files** from any provider. This is about mail.
 - **Outbound-only accounts** (an SMTP relay with no mailbox). Plausible later, but it is not an account in the sense the rest of the system means.
 - **Migrating existing Microsoft accounts** to a different code path than the one they use today. R1 is a refactor that must not change their behaviour.
@@ -128,17 +129,45 @@ IMAP and SMTP are different servers with, usually, the same credentials — but 
 
 Proposal: one `accounts` row, with `provider_config_json` holding both endpoint descriptions, and one credential envelope in `token_ciphertext` that can carry either an OAuth refresh token or a username/password pair. A tagged envelope, so the decoder cannot mistake one for the other.
 
-### 5.3 How much to invest in Exchange
+### 5.3 Exchange: already supported, or out of reach
 
-"Exchange" is three different things:
+"Exchange" is three different things, and separating them dissolves most of the question:
 
-- **Exchange Online** — already covered by Graph. Nothing to do.
-- **Exchange on-premises, modern** — IMAP/SMTP with OAuth or basic auth. Covered by the IMAP adapter, given basic auth support.
-- **Exchange on-premises via EWS** — a distinct SOAP API, and the only way to get server-side forward and reliable change notifications on old deployments.
+- **Exchange Online** — the hosted mail in Microsoft 365. Already supported; it is what Graph talks to. Nothing to build.
+- **Hybrid** — some mailboxes online, some on-premises, one identity. Graph reaches the online ones.
+- **Exchange Server on-premises** — the self-hosted product. This is the only case that is actually missing.
 
-**Recommendation: treat EWS as a separate, later adapter** behind the same `Mailbox` port, and only if a real user needs it. The port is what makes that decision deferrable, which is the main argument for doing R1 before anything else.
+For the on-premises case the access protocols are EWS (SOAP/XML, rich: server-side forward, folders, change notifications), IMAP/SMTP (usually available, sometimes disabled by the administrator), ActiveSync, or MAPI/RPC (proprietary, not realistic).
 
-### 5.4 Whether IMAP idle/push is in scope
+**Recommendation: do not build EWS.** Three reasons, in the order they matter:
+
+1. **Reachability is the blocker, not the protocol.** An on-premises Exchange server is usually not exposed to the public internet. A cloud-hosted Automata cannot open a connection to it at all without a VPN, tunnel or on-premises relay. A correct EWS adapter does not help if the TCP connection never establishes, and that infrastructure is a far larger project than the adapter.
+2. **IMAP subsumes most of it.** Most on-premises deployments can enable IMAP/SMTP, so they arrive through an adapter we want for everyone else anyway.
+3. **EWS is on a deprecation path for the hosted case.** Microsoft has been retiring it for Exchange Online — the date should be confirmed, it is around now — so it is a SOAP API with NTLM/Kerberos and Autodiscover, serving a narrowing population.
+
+If a real customer appears with an on-premises mailbox that IMAP cannot reach, EWS is a later adapter behind the same port and the network question gets answered first. The port is what keeps that deferrable.
+
+### 5.4 Gmail and Google Workspace are the same mailbox
+
+They are not two integrations. A Workspace account's mail **is** Gmail: same API, same endpoints, same scopes. One adapter serves both, and the RFC means both wherever it says Google.
+
+What differs is consent and administration, which is where the cost actually sits:
+
+| | Consumer Gmail | Google Workspace |
+| --- | --- | --- |
+| Connect flow | Per-user OAuth | Per-user OAuth, or domain-wide delegation via a service account |
+| Who can block it | Nobody | The Workspace admin, through API access controls |
+| App verification | Full public verification | An internal-use app in one domain can be trusted by its own admin |
+
+Two consequences worth planning around:
+
+**Gmail read scopes are restricted.** `gmail.readonly` and `gmail.modify` are restricted scopes: Google requires app verification, and for restricted scopes a periodic third-party security assessment when serving users outside your own domain. That is a schedulable prerequisite with a lead time and a price, not a code task — and it can gate launch long after the adapter works. **Verify the current requirement before R2 is scheduled**, the same way R0 verifies DSQL.
+
+**Internal-use is dramatically cheaper.** If the first deployment is a single Workspace domain, its admin can trust the OAuth client directly and the public verification burden largely disappears. That makes "our own Workspace first, other people's later" a genuinely different and much shorter path, and it may be the right first target.
+
+**Domain-wide delegation is a different connect flow**, not a variant of the OAuth one: a service account reads many mailboxes without per-user consent. Worth supporting eventually for org-wide deployments; out of scope for R2, which should do per-user OAuth only.
+
+### 5.5 Whether IMAP idle/push is in scope
 
 No, initially. Polling on the existing scheduler tick is consistent with how Graph is synced today. IMAP IDLE needs a long-lived connection, which does not fit a Lambda worker; it would need a different execution model and should be argued separately.
 
@@ -148,12 +177,15 @@ No, initially. Polling on the existing scheduler tick is consistent with how Gra
 
 | Slice | Name | Delivers |
 | ----- | ---- | -------- |
-| **R0** | DSQL constraint spike | Answers §5.1 against the dev cluster. Blocks everything else. |
+| **R0** | Two spikes, no code | §5.1 against the dev cluster (does DSQL accept `DROP NOT NULL`?) and §5.4's current Google verification requirement. Both have lead times and both can change the shape of what follows. |
 | **R1** | Extract the port | `driven.Mailbox` + registry; Graph becomes one implementation; **no behaviour change**, no new provider |
-| **R2** | Google | Gmail adapter, OAuth scopes, `historyId` cursor; sign-in and mail share a registration but not a code path |
-| **R3** | IMAP/SMTP | Adapter, credential envelope, connection settings UI with a well-known-host table |
+| **R2** | Google | Gmail adapter, OAuth scopes, `historyId` cursor; serves Workspace and consumer Gmail alike, per-user consent only |
+| **R3** | IMAP/SMTP | Adapter, credential envelope, connection settings UI with a well-known-host table. Answers the on-premises Exchange question as a side effect. |
 | **R4** | Capability-aware UI | Features a provider cannot do are visibly unavailable, not silently degraded |
-| **R5** | EWS | Only on demand |
+
+Google leads because it is the largest addressable population after Microsoft 365 and the cleanest second implementation: OAuth we partly have, a real incremental cursor, and a REST API. IMAP follows because one adapter covers everything else — Fastmail, Zoho, hosted cPanel mail, Proton via bridge, and on-premises Exchange with IMAP enabled.
+
+The order also derisks the port deliberately. Gmail stresses *different cursor, no server-side forward*; IMAP stresses *no OAuth, two transports, weak ids*. If `driven.Mailbox` survives both, it will survive EWS should anyone ever need it.
 
 R1 is the whole bet. If the port is right, R2 and R3 are adapters and a settings form. If it is wrong, every slice after it pays for it.
 
@@ -163,7 +195,7 @@ R1 is the whole bet. If the port is right, R2 and R3 are adapters and a settings
 
 **R1.** Microsoft accounts behave exactly as before: same delta cursor, same forward path, same failure messages. `MicrosoftGraph` is gone from every application service. A contract test suite runs against the Graph adapter and a fake, and both pass the same assertions.
 
-**R2.** A Gmail account syncs, categorises, files to projects, and resolves contacts using the same jobs as a Microsoft account, with no Gmail-specific branch above the adapter. Forwarding works via the MIME fallback and says so.
+**R2.** A Google account — Workspace or consumer, the adapter does not distinguish — syncs, categorises, files to projects, and resolves contacts using the same jobs as a Microsoft account, with no Gmail-specific branch above the adapter. Forwarding works via the MIME fallback and says so.
 
 **R3.** An IMAP account can be added with host, port and TLS mode; a wrong password fails at connect time with a message naming the cause, not on the first sync.
 
@@ -195,6 +227,7 @@ IMAP and Gmail need a recorded-fixture or containerised server in CI. The lesson
 | IMAP passwords are a higher-value secret than refresh tokens | Same vault, but they do not expire and cannot be scoped; consider requiring app passwords and refusing plaintext-auth servers |
 | Attachment bytes now transit the worker | Bound the fallback by size and fail loudly above it rather than streaming unbounded data through a Lambda |
 | `ms_account_kind` blocks the migration | R0 answers this before any code is written |
+| Google verification gates R2 long after the code works | R0 establishes the requirement early; an internal-use Workspace deployment may avoid most of it (§5.4) |
 | Per-provider quirks leak upward over time | The capability struct is the pressure valve; anything that cannot be expressed as a capability is a signal the port is wrong |
 
 ---
@@ -202,6 +235,8 @@ IMAP and Gmail need a recorded-fixture or containerised server in CI. The lesson
 ## 10. Open questions
 
 1. Does DSQL accept `ALTER COLUMN ... DROP NOT NULL`? (R0)
-2. Is there a real user waiting on on-premises Exchange, or is it hypothetical? It changes whether EWS is worth designing for at all.
+2. What does Google currently require for restricted Gmail scopes, and does the first deployment qualify as internal-use in a single Workspace domain? (R0 — it may shorten R2 considerably)
 3. Should a Gmail account reuse the existing Google sign-in registration, or a separate OAuth client? Sharing couples consent screens and scope changes to login.
 4. Do forward rules stay enabled by default on providers without server-side forward, or opt-in per account?
+
+Question 2 in the previous draft — whether on-premises Exchange is worth designing for — is answered in §5.3: no, not as a dedicated adapter.
