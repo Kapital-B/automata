@@ -144,6 +144,15 @@ func RunContractTests(t *testing.T, factory Factory) {
 		h := factory(t)
 		old := h.Deliver(t, message(t, "Before", false))
 		_, _, final := drain(t, h.Box, "", 10)
+		if h.Box.Capabilities().IncrementalSync {
+			// Nothing arrived, so nothing comes back: IMAP's "n:*" matches
+			// the newest message even when n is past it.
+			idle, _, again := drain(t, h.Box, final, 10)
+			if len(idle) != 0 {
+				t.Fatalf("resume with no new mail returned %d messages", len(idle))
+			}
+			final = again
+		}
 		fresh := h.Deliver(t, message(t, "After", false))
 		msgs, _, _ := drain(t, h.Box, final, 10)
 		got := byID(msgs)

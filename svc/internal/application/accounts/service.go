@@ -123,32 +123,64 @@ func (s *Service) CompleteOAuth(ctx context.Context, code, state string) (*Compl
 	if err != nil {
 		return nil, err
 	}
+	id, err := s.saveConnected(ctx, *stateUserID, provider, connected, labelHint)
+	if err != nil {
+		return nil, err
+	}
+	return &CompleteOAuthResult{AccountID: id}, nil
+}
+
+// ConnectWithPasswordInput is a typed-in mailbox connection.
+type ConnectWithPasswordInput struct {
+	Provider  string
+	Request   driven.PasswordConnectRequest
+	LabelHint *string
+}
+
+// ConnectWithPassword verifies typed-in credentials against the provider and
+// stores the mailbox. A failure the user can fix wraps
+// driven.ErrConnectRejected and nothing is stored.
+func (s *Service) ConnectWithPassword(ctx context.Context, userID uuid.UUID, in ConnectWithPasswordInput) (uuid.UUID, error) {
+	conn, ok := s.deps.PasswordConnectors[in.Provider]
+	if !ok {
+		return uuid.Nil, fmt.Errorf("%w: %s", driven.ErrUnsupportedProvider, in.Provider)
+	}
+	connected, err := conn.Connect(ctx, in.Request)
+	if err != nil {
+		return uuid.Nil, err
+	}
+	return s.saveConnected(ctx, userID, in.Provider, connected, in.LabelHint)
+}
+
+// saveConnected stores a verified mailbox, or refreshes the credentials of
+// the matching account when this is a reconnect.
+func (s *Service) saveConnected(ctx context.Context, userID uuid.UUID, provider string, connected *driven.ConnectedMailbox, labelHint *string) (uuid.UUID, error) {
 	label := ""
 	if labelHint != nil {
-		label = *labelHint
+		label = strings.TrimSpace(*labelHint)
 	}
 	if label == "" {
 		label = connected.DefaultLabel
 	}
 	cipher, err := s.deps.Vault.Encrypt(connected.Credential)
 	if err != nil {
-		return nil, err
+		return uuid.Nil, err
 	}
 	// Reconnecting a mailbox that is already here — after its credentials
 	// expired, say — refreshes that account rather than adding a duplicate,
 	// which would sync the same mail twice and orphan the original's rules
 	// and history.
-	if existing, err := s.findAccount(ctx, *stateUserID, provider, connected.Email); err != nil {
-		return nil, err
+	if existing, err := s.findAccount(ctx, userID, provider, connected.Email); err != nil {
+		return uuid.Nil, err
 	} else if existing != nil {
 		tenant := connected.TenantID
 		if tenant == nil {
 			tenant = existing.GraphTenantID
 		}
-		if err := s.deps.Accounts.UpdateAccountTokens(ctx, *stateUserID, existing.ID, cipher, connected.Email, tenant, existing.MsalHomeAccountID, "connected", nil); err != nil {
-			return nil, err
+		if err := s.deps.Accounts.UpdateAccountTokens(ctx, userID, existing.ID, cipher, connected.Email, tenant, existing.MsalHomeAccountID, "connected", nil); err != nil {
+			return uuid.Nil, err
 		}
-		return &CompleteOAuthResult{AccountID: existing.ID}, nil
+		return existing.ID, nil
 	}
 	rowKind := connected.MsAccountKind
 	if provider != ProviderM365 {
@@ -157,7 +189,7 @@ func (s *Service) CompleteOAuth(ctx context.Context, code, state string) (*Compl
 	id := uuid.New()
 	now := time.Now().UTC()
 	row := driven.AccountRow{
-		UserID:           *stateUserID,
+		UserID:           userID,
 		ID:               id,
 		Label:            label,
 		Provider:         provider,
@@ -169,9 +201,9 @@ func (s *Service) CompleteOAuth(ctx context.Context, code, state string) (*Compl
 		UpdatedAt:        now,
 	}
 	if err := s.deps.Accounts.InsertAccount(ctx, row, cipher); err != nil {
-		return nil, err
+		return uuid.Nil, err
 	}
-	return &CompleteOAuthResult{AccountID: id}, nil
+	return id, nil
 }
 
 // findAccount returns the user's account for this provider and address.

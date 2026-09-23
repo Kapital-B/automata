@@ -12,10 +12,12 @@ type Deps struct {
 	OAuthState driven.OAuthStateRepository
 	JobRuns    driven.JobRunRepository
 	// Connectors are the OAuth mailbox connect flows, keyed by provider.
-	Connectors  map[string]driven.OAuthMailConnector
-	Vault       driven.TokenVault
-	Dashboard   string
-	SuccessPath string
-	ErrorPath   string
-	StateTTL    time.Duration
+	Connectors map[string]driven.OAuthMailConnector
+	// PasswordConnectors connect mailboxes from typed-in credentials.
+	PasswordConnectors map[string]driven.PasswordMailConnector
+	Vault              driven.TokenVault
+	Dashboard          string
+	SuccessPath        string
+	ErrorPath          string
+	StateTTL           time.Duration
 }

@@ -174,6 +174,7 @@ func (h *Handlers) Routes() http.Handler {
 
 	r.Get("/api/accounts", h.listAccounts)
 	r.Post("/api/accounts", h.startConnect)
+	r.Post("/api/accounts/imap", h.connectIMAP)
 	r.Get("/api/accounts/callback", h.oauthCallback)
 	// Google needs its own registered redirect URI; the state decides which
 	// provider completes, so both land in the same handler.
@@ -299,6 +300,65 @@ func (h *Handlers) startConnect(w http.ResponseWriter, r *http.Request) {
 		"authorization_url": res.AuthorizationURL,
 		"state":             res.State,
 	})
+}
+
+type mailServerBody struct {
+	Host     string `json:"host"`
+	Port     int    `json:"port"`
+	Security string `json:"security"`
+}
+
+type connectIMAPBody struct {
+	Email    string         `json:"email"`
+	Username string         `json:"username"`
+	Password string         `json:"password"`
+	IMAP     mailServerBody `json:"imap"`
+	SMTP     mailServerBody `json:"smtp"`
+	Label    *string        `json:"label"`
+}
+
+// connectIMAP connects a mailbox from typed-in server settings. The servers
+// are contacted before anything is stored, so a wrong password or host comes
+// back here, as a 422 naming the cause, rather than on the first sync.
+func (h *Handlers) connectIMAP(w http.ResponseWriter, r *http.Request) {
+	if h.AccountSvc == nil {
+		writeJSON(w, http.StatusServiceUnavailable, map[string]string{"error": "account service not configured"})
+		return
+	}
+	var body connectIMAPBody
+	if err := json.NewDecoder(http.MaxBytesReader(w, r.Body, 64<<10)).Decode(&body); err != nil {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid json"})
+		return
+	}
+	server := func(b mailServerBody) driven.MailServer {
+		return driven.MailServer{Host: b.Host, Port: b.Port, Security: b.Security}
+	}
+	id, err := h.AccountSvc.ConnectWithPassword(r.Context(), userIDOrEmpty(r), appaccounts.ConnectWithPasswordInput{
+		Provider: appaccounts.ProviderIMAP,
+		Request: driven.PasswordConnectRequest{
+			Email:    body.Email,
+			Username: body.Username,
+			Password: body.Password,
+			IMAP:     server(body.IMAP),
+			SMTP:     server(body.SMTP),
+		},
+		LabelHint: body.Label,
+	})
+	if err != nil {
+		var rejected *driven.ConnectRejectedError
+		if errors.As(err, &rejected) {
+			writeJSON(w, http.StatusUnprocessableEntity, map[string]string{"error": rejected.Reason})
+			return
+		}
+		if errors.Is(err, driven.ErrUnsupportedProvider) {
+			writeJSON(w, http.StatusServiceUnavailable, map[string]string{"error": "IMAP accounts are not enabled"})
+			return
+		}
+		h.Log.Error("connect imap", "err", err)
+		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "internal"})
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]string{"account_id": id.String()})
 }
 
 func (h *Handlers) oauthCallback(w http.ResponseWriter, r *http.Request) {

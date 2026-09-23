@@ -17,6 +17,9 @@ const ProviderM365 = "m365"
 // ProviderGoogle covers Gmail and Google Workspace, which are one mailbox.
 const ProviderGoogle = "google"
 
+// ProviderIMAP is any mailbox reached over IMAP and SMTP with a password.
+const ProviderIMAP = "imap"
+
 // ProviderKey normalises a stored provider value.
 func ProviderKey(provider string) string {
 	p := strings.ToLower(strings.TrimSpace(provider))

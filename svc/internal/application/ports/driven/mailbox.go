@@ -127,3 +127,48 @@ type OAuthMailConnector interface {
 	AuthorizationURL(ctx context.Context, state string, opts ConnectOptions) (string, error)
 	Complete(ctx context.Context, code string, opts ConnectOptions) (*ConnectedMailbox, error)
 }
+
+// MailServer is one transport endpoint of a password-authenticated mailbox.
+// Security is "tls" (implicit, e.g. 993/465) or "starttls" (e.g. 143/587);
+// there is deliberately no plaintext option.
+type MailServer struct {
+	Host     string `json:"host"`
+	Port     int    `json:"port"`
+	Security string `json:"security"`
+}
+
+// PasswordConnectRequest is what a user types to connect an IMAP mailbox.
+type PasswordConnectRequest struct {
+	Email    string
+	Username string
+	Password string
+	IMAP     MailServer
+	SMTP     MailServer
+}
+
+// ErrConnectRejected marks a connect attempt that failed for a reason the
+// user can fix — a wrong password, an unreachable host — as opposed to a
+// failure of ours. Match it with errors.Is; the reason is on
+// ConnectRejectedError.
+var ErrConnectRejected = errors.New("mailbox connect rejected")
+
+// ConnectRejectedError carries a reason that names the cause and is safe to
+// show the user.
+type ConnectRejectedError struct {
+	Reason string
+}
+
+func (e *ConnectRejectedError) Error() string        { return e.Reason }
+func (e *ConnectRejectedError) Is(target error) bool { return target == ErrConnectRejected }
+
+// ConnectRejected builds a ConnectRejectedError.
+func ConnectRejected(format string, args ...any) error {
+	return &ConnectRejectedError{Reason: fmt.Sprintf(format, args...)}
+}
+
+// PasswordMailConnector connects a mailbox from typed-in credentials. It
+// verifies them against the servers before anything is stored, so a wrong
+// password fails at connect rather than on the first sync.
+type PasswordMailConnector interface {
+	Connect(ctx context.Context, req PasswordConnectRequest) (*ConnectedMailbox, error)
+}

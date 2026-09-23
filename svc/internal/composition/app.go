@@ -13,6 +13,7 @@ import (
 	httphandler "github.com/Kapital-B/automata/svc/internal/adapters/inbound/http"
 	dynamodbjobs "github.com/Kapital-B/automata/svc/internal/adapters/outbound/dynamodbjobs"
 	googleoauth "github.com/Kapital-B/automata/svc/internal/adapters/outbound/google"
+	"github.com/Kapital-B/automata/svc/internal/adapters/outbound/imapmail"
 	llmadapter "github.com/Kapital-B/automata/svc/internal/adapters/outbound/llm"
 	"github.com/Kapital-B/automata/svc/internal/adapters/outbound/microsoft"
 	"github.com/Kapital-B/automata/svc/internal/adapters/outbound/persistence/factory"
@@ -271,6 +272,12 @@ func (r *Runtime) buildServices(ctx context.Context) error {
 	mailConnectors := map[string]driven.OAuthMailConnector{
 		appaccounts.ProviderM365: m365,
 	}
+	// IMAP needs no app registration, so it is always available.
+	imapProvider := &imapmail.Provider{}
+	mailboxes.Providers[appaccounts.ProviderIMAP] = imapProvider
+	passwordConnectors := map[string]driven.PasswordMailConnector{
+		appaccounts.ProviderIMAP: imapProvider,
+	}
 	// Google is optional: without a mail client configured, Google accounts
 	// cannot be connected and any that exist report an unsupported provider.
 	if r.Config.GoogleMailClientID != "" {
@@ -284,15 +291,16 @@ func (r *Runtime) buildServices(ctx context.Context) error {
 	}
 
 	accountSvc := appaccounts.NewService(appaccounts.Deps{
-		Accounts:    repo,
-		OAuthState:  repo,
-		JobRuns:     jobRuns,
-		Connectors:  mailConnectors,
-		Vault:       vault,
-		Dashboard:   r.Config.DashboardBaseURL,
-		SuccessPath: r.Config.OAuthSuccessPath,
-		ErrorPath:   r.Config.OAuthErrorPath,
-		StateTTL:    r.Config.OAuthStateTTL,
+		Accounts:           repo,
+		OAuthState:         repo,
+		JobRuns:            jobRuns,
+		Connectors:         mailConnectors,
+		PasswordConnectors: passwordConnectors,
+		Vault:              vault,
+		Dashboard:          r.Config.DashboardBaseURL,
+		SuccessPath:        r.Config.OAuthSuccessPath,
+		ErrorPath:          r.Config.OAuthErrorPath,
+		StateTTL:           r.Config.OAuthStateTTL,
 	})
 	slackClient := &slackadapter.Client{
 		ClientID:     r.Config.SlackClientID,

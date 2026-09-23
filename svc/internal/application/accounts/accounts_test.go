@@ -259,3 +259,76 @@ func TestConnectStateForAnUnconfiguredProviderIsRefused(t *testing.T) {
 		t.Fatalf("err = %v, want ErrInvalidOAuthState", err)
 	}
 }
+
+// stubPasswordConnector verifies typed-in credentials on command.
+type stubPasswordConnector struct {
+	err error
+}
+
+func (c *stubPasswordConnector) Connect(ctx context.Context, req driven.PasswordConnectRequest) (*driven.ConnectedMailbox, error) {
+	if c.err != nil {
+		return nil, c.err
+	}
+	return &driven.ConnectedMailbox{Email: req.Email, DefaultLabel: req.Email, Credential: []byte(req.Password)}, nil
+}
+
+func (f *fixture) passwordService(conn driven.PasswordMailConnector) *appaccounts.Service {
+	return appaccounts.NewService(appaccounts.Deps{
+		Accounts: f.repo, OAuthState: f.repo, Vault: f.vault,
+		PasswordConnectors: map[string]driven.PasswordMailConnector{"imap": conn},
+	})
+}
+
+func imapInput(email, password string) appaccounts.ConnectWithPasswordInput {
+	return appaccounts.ConnectWithPasswordInput{
+		Provider: "imap",
+		Request:  driven.PasswordConnectRequest{Email: email, Password: password},
+	}
+}
+
+// Credentials the servers refuse are never stored.
+func TestPasswordConnectStoresNothingWhenRejected(t *testing.T) {
+	f := setup(t)
+	svc := f.passwordService(&stubPasswordConnector{err: driven.ConnectRejected("wrong password")})
+	if _, err := svc.ConnectWithPassword(context.Background(), f.userID, imapInput("me@fastmail.com", "nope")); !errors.Is(err, driven.ErrConnectRejected) {
+		t.Fatalf("err = %v, want ErrConnectRejected", err)
+	}
+	if rows, _ := f.repo.ListAccounts(context.Background(), f.userID); len(rows) != 0 {
+		t.Fatalf("accounts = %d, want none", len(rows))
+	}
+}
+
+// Re-entering a password for an expired IMAP account restores it, the same
+// as an OAuth reconnect.
+func TestPasswordReconnectRestoresTheExistingAccount(t *testing.T) {
+	f := setup(t)
+	svc := f.passwordService(&stubPasswordConnector{})
+	first, err := svc.ConnectWithPassword(context.Background(), f.userID, imapInput("me@fastmail.com", "old"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	again, err := svc.ConnectWithPassword(context.Background(), f.userID, imapInput("ME@fastmail.com", "new"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if again != first {
+		t.Fatalf("reconnect created %s, want %s restored", again, first)
+	}
+	row, cipher, _ := f.repo.GetAccount(context.Background(), f.userID, first)
+	if row.Provider != "imap" || row.MsAccountKind != domainacc.KindWork {
+		t.Errorf("row = provider %q kind %q", row.Provider, row.MsAccountKind)
+	}
+	if plain, _ := f.vault.Decrypt(cipher); string(plain) != "new" {
+		t.Errorf("credential = %q, want the new password", plain)
+	}
+}
+
+func TestPasswordConnectForAnUnconfiguredProviderIsUnsupported(t *testing.T) {
+	f := setup(t)
+	svc := f.passwordService(&stubPasswordConnector{})
+	in := imapInput("me@fastmail.com", "pw")
+	in.Provider = "pop3"
+	if _, err := svc.ConnectWithPassword(context.Background(), f.userID, in); !errors.Is(err, driven.ErrUnsupportedProvider) {
+		t.Fatalf("err = %v, want ErrUnsupportedProvider", err)
+	}
+}
