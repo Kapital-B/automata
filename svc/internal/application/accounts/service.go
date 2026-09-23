@@ -6,6 +6,7 @@ import (
 	"encoding/base64"
 	"errors"
 	"fmt"
+	"strings"
 	"time"
 
 	"github.com/Kapital-B/automata/svc/internal/application/ports/driven"
@@ -33,15 +34,15 @@ type StartConnectOutput struct {
 	State            string
 }
 
-// mailFlow is the OAuth state flow for connecting a provider's mailbox. Each
-// provider gets its own, so a callback can only complete the connect it
-// started. Microsoft keeps the value it has always used.
-func mailFlow(provider string) string {
-	if provider == ProviderM365 {
-		return "m365_mail"
-	}
-	return provider + "_mail"
-}
+// mailboxConnectFlow is the OAuth state flow for connecting any provider's
+// mailbox. The value predates provider support, which is why it says m365:
+// oauth_states.flow carries an unnamed CHECK over a fixed list, and widening
+// an unnamed CHECK is what broke the DSQL deploys on PR #9. The provider rides
+// in the state's payload instead. That is no weaker — the state is an
+// unguessable key to a row we wrote, so the provider in it is ours, not the
+// client's — and the separation that matters, sign-in versus mailbox connect,
+// is still enforced by the flow.
+const mailboxConnectFlow = "m365_mail"
 
 // placeholderMsAccountKind fills ms_account_kind for non-Microsoft accounts.
 // The column is NOT NULL under an unnamed CHECK over Microsoft's two values,
@@ -78,7 +79,7 @@ func (s *Service) StartConnect(ctx context.Context, userID uuid.UUID, in StartCo
 	if err != nil {
 		return nil, err
 	}
-	if err := s.deps.OAuthState.InsertOAuthState(ctx, st, mailFlow(provider), &userID, payload, time.Now().UTC()); err != nil {
+	if err := s.deps.OAuthState.InsertOAuthState(ctx, st, mailboxConnectFlow, &userID, payload, time.Now().UTC()); err != nil {
 		return nil, err
 	}
 	authURL, err := conn.AuthorizationURL(ctx, st, opts)
@@ -107,11 +108,11 @@ func (s *Service) CompleteOAuth(ctx context.Context, code, state string) (*Compl
 	if err != nil {
 		return nil, err
 	}
-	if !ok || stateUserID == nil {
+	if !ok || stateUserID == nil || flow != mailboxConnectFlow {
 		return nil, ErrInvalidOAuthState
 	}
 	provider, kind, labelHint, err := DecodeMailboxOAuthPayload(payloadJSON)
-	if err != nil || flow != mailFlow(provider) {
+	if err != nil {
 		return nil, ErrInvalidOAuthState
 	}
 	conn, ok := s.deps.Connectors[provider]
@@ -132,6 +133,22 @@ func (s *Service) CompleteOAuth(ctx context.Context, code, state string) (*Compl
 	cipher, err := s.deps.Vault.Encrypt(connected.Credential)
 	if err != nil {
 		return nil, err
+	}
+	// Reconnecting a mailbox that is already here — after its credentials
+	// expired, say — refreshes that account rather than adding a duplicate,
+	// which would sync the same mail twice and orphan the original's rules
+	// and history.
+	if existing, err := s.findAccount(ctx, *stateUserID, provider, connected.Email); err != nil {
+		return nil, err
+	} else if existing != nil {
+		tenant := connected.TenantID
+		if tenant == nil {
+			tenant = existing.GraphTenantID
+		}
+		if err := s.deps.Accounts.UpdateAccountTokens(ctx, *stateUserID, existing.ID, cipher, connected.Email, tenant, existing.MsalHomeAccountID, "connected", nil); err != nil {
+			return nil, err
+		}
+		return &CompleteOAuthResult{AccountID: existing.ID}, nil
 	}
 	rowKind := connected.MsAccountKind
 	if provider != ProviderM365 {
@@ -155,6 +172,23 @@ func (s *Service) CompleteOAuth(ctx context.Context, code, state string) (*Compl
 		return nil, err
 	}
 	return &CompleteOAuthResult{AccountID: id}, nil
+}
+
+// findAccount returns the user's account for this provider and address.
+func (s *Service) findAccount(ctx context.Context, userID uuid.UUID, provider, email string) (*driven.AccountRow, error) {
+	if strings.TrimSpace(email) == "" {
+		return nil, nil
+	}
+	rows, err := s.deps.Accounts.ListAccounts(ctx, userID)
+	if err != nil {
+		return nil, err
+	}
+	for i := range rows {
+		if ProviderKey(rows[i].Provider) == provider && strings.EqualFold(rows[i].PrimaryEmail, email) {
+			return &rows[i], nil
+		}
+	}
+	return nil, nil
 }
 
 func (s *Service) Disconnect(ctx context.Context, userID uuid.UUID, id uuid.UUID) error {

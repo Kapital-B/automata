@@ -271,6 +271,17 @@ func (r *Runtime) buildServices(ctx context.Context) error {
 	mailConnectors := map[string]driven.OAuthMailConnector{
 		appaccounts.ProviderM365: m365,
 	}
+	// Google is optional: without a mail client configured, Google accounts
+	// cannot be connected and any that exist report an unsupported provider.
+	if r.Config.GoogleMailClientID != "" {
+		gmail := &googleoauth.MailProvider{
+			ClientID:     r.Config.GoogleMailClientID,
+			ClientSecret: r.Config.GoogleMailClientSecret,
+			RedirectURI:  r.Config.GoogleMailRedirectURI,
+		}
+		mailboxes.Providers[appaccounts.ProviderGoogle] = gmail
+		mailConnectors[appaccounts.ProviderGoogle] = gmail
+	}
 
 	accountSvc := appaccounts.NewService(appaccounts.Deps{
 		Accounts:    repo,

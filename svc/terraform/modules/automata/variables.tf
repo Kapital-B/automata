@@ -117,6 +117,19 @@ variable "google_client_secret" {
   sensitive   = true
 }
 
+variable "google_mail_client_id" {
+  description = "Google OAuth client ID for connecting Gmail mailboxes. Separate from google_client_id, which is sign-in only. Empty disables Google mailboxes."
+  type        = string
+  default     = ""
+}
+
+variable "google_mail_client_secret" {
+  description = "Google mail OAuth client secret for local/Floci only. Hosted envs use Secrets Manager."
+  type        = string
+  default     = ""
+  sensitive   = true
+}
+
 variable "google_redirect_uri" {
   description = "Google OAuth redirect URI."
   type        = string

@@ -83,6 +83,7 @@ locals {
       MS_AUTH_REDIRECT_URI           = var.ms_auth_redirect_uri
       GOOGLE_CLIENT_ID               = var.google_client_id
       GOOGLE_REDIRECT_URI            = var.google_redirect_uri
+      GOOGLE_MAIL_CLIENT_ID          = var.google_mail_client_id
       SLACK_MODE                     = var.slack_mode
       SLACK_CLIENT_ID                = var.slack_client_id
       SLACK_REDIRECT_URI             = var.slack_redirect_uri

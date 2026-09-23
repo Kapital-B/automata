@@ -175,6 +175,9 @@ func (h *Handlers) Routes() http.Handler {
 	r.Get("/api/accounts", h.listAccounts)
 	r.Post("/api/accounts", h.startConnect)
 	r.Get("/api/accounts/callback", h.oauthCallback)
+	// Google needs its own registered redirect URI; the state decides which
+	// provider completes, so both land in the same handler.
+	r.Get("/api/accounts/google/callback", h.oauthCallback)
 	r.Get("/api/accounts/{id}", h.getAccount)
 	r.Delete("/api/accounts/{id}", h.deleteAccount)
 	r.Post("/api/accounts/{id}/sync", h.syncAccount)

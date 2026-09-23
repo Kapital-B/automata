@@ -43,6 +43,17 @@ variable "google_client_id" {
   default = ""
 }
 
+variable "google_mail_client_id" {
+  type    = string
+  default = ""
+}
+
+variable "google_mail_client_secret" {
+  type      = string
+  default   = ""
+  sensitive = true
+}
+
 variable "google_client_secret" {
   type    = string
   default = ""

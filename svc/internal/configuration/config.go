@@ -12,25 +12,31 @@ import (
 
 // Config holds environment-backed settings (spec §9).
 type Config struct {
-	ListenAddr                 string
-	DatabaseEngine             string
-	DatabaseURL                string
-	CORSOrigins                []string
-	DashboardBaseURL           string
-	OAuthSuccessPath           string
-	OAuthErrorPath             string
-	MSClientID                 string
-	MSClientSecret             string
-	MSRedirectURI              string
-	EncryptionKey              []byte
-	OAuthStateTTL              time.Duration
-	JWTSecret                  []byte
-	JWTTTL                     time.Duration
-	RefreshTTL                 time.Duration
-	MSAuthRedirectURI          string
-	GoogleClientID             string
-	GoogleClientSecret         string
-	GoogleRedirectURI          string
+	ListenAddr         string
+	DatabaseEngine     string
+	DatabaseURL        string
+	CORSOrigins        []string
+	DashboardBaseURL   string
+	OAuthSuccessPath   string
+	OAuthErrorPath     string
+	MSClientID         string
+	MSClientSecret     string
+	MSRedirectURI      string
+	EncryptionKey      []byte
+	OAuthStateTTL      time.Duration
+	JWTSecret          []byte
+	JWTTTL             time.Duration
+	RefreshTTL         time.Duration
+	MSAuthRedirectURI  string
+	GoogleClientID     string
+	GoogleClientSecret string
+	GoogleRedirectURI  string
+	// GoogleMail* is the OAuth client for connecting Gmail mailboxes. It is
+	// deliberately separate from the sign-in client above: signing in must
+	// never ask for mailbox access, and one user may connect several.
+	GoogleMailClientID         string
+	GoogleMailClientSecret     string
+	GoogleMailRedirectURI      string
 	SlackClientID              string
 	SlackClientSecret          string
 	SlackRedirectURI           string
@@ -222,6 +228,10 @@ func Load() (Config, error) {
 	if err != nil {
 		return Config{}, fmt.Errorf("GOOGLE_CLIENT_SECRET: %w", err)
 	}
+	googleMailClientSecret, err := resolveOptionalSecret("GOOGLE_MAIL_CLIENT_SECRET", "GOOGLE_MAIL_CLIENT_SECRET_SECRET_ID")
+	if err != nil {
+		return Config{}, fmt.Errorf("GOOGLE_MAIL_CLIENT_SECRET: %w", err)
+	}
 	slackClientSecret, err := resolveOptionalSecret("SLACK_CLIENT_SECRET", "SLACK_CLIENT_SECRET_SECRET_ID")
 	if err != nil {
 		return Config{}, fmt.Errorf("SLACK_CLIENT_SECRET: %w", err)
@@ -247,6 +257,9 @@ func Load() (Config, error) {
 		GoogleClientID:             os.Getenv("GOOGLE_CLIENT_ID"),
 		GoogleClientSecret:         googleClientSecret,
 		GoogleRedirectURI:          getenv("GOOGLE_REDIRECT_URI", publicAPI+"/api/auth/google/callback"),
+		GoogleMailClientID:         os.Getenv("GOOGLE_MAIL_CLIENT_ID"),
+		GoogleMailClientSecret:     googleMailClientSecret,
+		GoogleMailRedirectURI:      getenv("GOOGLE_MAIL_REDIRECT_URI", publicAPI+"/api/accounts/google/callback"),
 		SlackClientID:              os.Getenv("SLACK_CLIENT_ID"),
 		SlackClientSecret:          slackClientSecret,
 		SlackRedirectURI:           getenv("SLACK_REDIRECT_URI", publicAPI+"/api/connectors/callback"),
@@ -282,6 +295,11 @@ func Load() (Config, error) {
 	}
 	if cfg.MSClientID == "" || cfg.MSClientSecret == "" || cfg.MSRedirectURI == "" {
 		return Config{}, fmt.Errorf("MS_CLIENT_ID, MS_CLIENT_SECRET, and MS_REDIRECT_URI are required for mail connect")
+	}
+	if cfg.GoogleMailClientID != "" && (cfg.GoogleMailClientSecret == "" || cfg.GoogleMailRedirectURI == "") {
+		slog.Warn("GOOGLE_MAIL_CLIENT_ID set without secret/redirect; disabling Google mailbox connect")
+		cfg.GoogleMailClientID = ""
+		cfg.GoogleMailClientSecret = ""
 	}
 	if cfg.GoogleClientID != "" && (cfg.GoogleClientSecret == "" || cfg.GoogleRedirectURI == "") {
 		slog.Warn("GOOGLE_CLIENT_ID set without secret/redirect; disabling Google auth")

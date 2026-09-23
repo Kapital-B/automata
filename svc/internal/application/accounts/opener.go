@@ -2,6 +2,7 @@ package accounts
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"strings"
 
@@ -12,6 +13,9 @@ import (
 // ProviderM365 is the provider value for Microsoft 365 mailboxes, and what
 // every row written before provider support means.
 const ProviderM365 = "m365"
+
+// ProviderGoogle covers Gmail and Google Workspace, which are one mailbox.
+const ProviderGoogle = "google"
 
 // ProviderKey normalises a stored provider value.
 func ProviderKey(provider string) string {
@@ -56,6 +60,14 @@ func (o *MailboxOpener) Open(ctx context.Context, userID, accountID uuid.UUID) (
 		return nil, row, err
 	}
 	box, rotated, err := provider.Open(ctx, *row, raw)
+	if errors.Is(err, driven.ErrCredentialsRejected) {
+		// Say so on the account rather than let every sync fail the same
+		// way: expired is what the UI turns into a Reconnect prompt. The
+		// stored credential is kept; a reconnect replaces it.
+		msg := err.Error()
+		_ = o.Accounts.UpdateAccountTokens(ctx, userID, accountID, cipher, row.PrimaryEmail, row.GraphTenantID, row.MsalHomeAccountID, "expired", &msg)
+		return nil, row, err
+	}
 	if err != nil {
 		return nil, row, err
 	}
