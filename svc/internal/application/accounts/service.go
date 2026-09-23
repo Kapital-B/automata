@@ -6,7 +6,6 @@ import (
 	"encoding/base64"
 	"errors"
 	"fmt"
-	"strings"
 	"time"
 
 	"github.com/Kapital-B/automata/svc/internal/application/ports/driven"
@@ -34,27 +33,55 @@ type StartConnectOutput struct {
 	State            string
 }
 
-const oauthFlowM365Mail = "m365_mail"
+// mailFlow is the OAuth state flow for connecting a provider's mailbox. Each
+// provider gets its own, so a callback can only complete the connect it
+// started. Microsoft keeps the value it has always used.
+func mailFlow(provider string) string {
+	if provider == ProviderM365 {
+		return "m365_mail"
+	}
+	return provider + "_mail"
+}
+
+// placeholderMsAccountKind fills ms_account_kind for non-Microsoft accounts.
+// The column is NOT NULL under an unnamed CHECK over Microsoft's two values,
+// and widening an unnamed CHECK is what broke the DSQL deploys on PR #9, so
+// rather than migrate it the value is written and never read: nothing outside
+// the Microsoft provider consults it (RFC multi-provider mail §5.1, option A).
+const placeholderMsAccountKind = domainacc.KindWork
+
+func connectOptions(provider string, kind domainacc.MsAccountKind) (driven.ConnectOptions, error) {
+	if provider != ProviderM365 {
+		return driven.ConnectOptions{}, nil
+	}
+	if !kind.Valid() || kind == domainacc.KindCommon {
+		return driven.ConnectOptions{}, fmt.Errorf("invalid ms_account_kind")
+	}
+	return driven.ConnectOptions{MsAccountKind: kind}, nil
+}
 
 func (s *Service) StartConnect(ctx context.Context, userID uuid.UUID, in StartConnectInput) (*StartConnectOutput, error) {
-	if in.Provider != "" && strings.ToLower(in.Provider) != "m365" {
+	provider := ProviderKey(in.Provider)
+	conn, ok := s.deps.Connectors[provider]
+	if !ok {
 		return nil, fmt.Errorf("unsupported provider")
 	}
-	if !in.MsAccountKind.Valid() || in.MsAccountKind == domainacc.KindCommon {
-		return nil, fmt.Errorf("invalid ms_account_kind")
+	opts, err := connectOptions(provider, in.MsAccountKind)
+	if err != nil {
+		return nil, err
 	}
 	st, err := randomState()
 	if err != nil {
 		return nil, err
 	}
-	payload, err := EncodeMailboxOAuthPayload(in.MsAccountKind, in.LabelHint)
+	payload, err := EncodeMailboxOAuthPayload(provider, opts.MsAccountKind, in.LabelHint)
 	if err != nil {
 		return nil, err
 	}
-	if err := s.deps.OAuthState.InsertOAuthState(ctx, st, oauthFlowM365Mail, &userID, payload, time.Now().UTC()); err != nil {
+	if err := s.deps.OAuthState.InsertOAuthState(ctx, st, mailFlow(provider), &userID, payload, time.Now().UTC()); err != nil {
 		return nil, err
 	}
-	authURL, err := s.deps.OAuth.AuthorizationURL(ctx, in.MsAccountKind, st)
+	authURL, err := conn.AuthorizationURL(ctx, st, opts)
 	if err != nil {
 		return nil, err
 	}
@@ -80,62 +107,49 @@ func (s *Service) CompleteOAuth(ctx context.Context, code, state string) (*Compl
 	if err != nil {
 		return nil, err
 	}
-	if !ok || flow != oauthFlowM365Mail || stateUserID == nil {
+	if !ok || stateUserID == nil {
 		return nil, ErrInvalidOAuthState
 	}
-	kind, labelHint, err := DecodeMailboxOAuthPayload(payloadJSON)
-	if err != nil {
+	provider, kind, labelHint, err := DecodeMailboxOAuthPayload(payloadJSON)
+	if err != nil || flow != mailFlow(provider) {
 		return nil, ErrInvalidOAuthState
 	}
-	tok, err := s.deps.OAuth.ExchangeCode(ctx, kind, code)
+	conn, ok := s.deps.Connectors[provider]
+	if !ok {
+		return nil, ErrInvalidOAuthState
+	}
+	connected, err := conn.Complete(ctx, code, driven.ConnectOptions{MsAccountKind: kind})
 	if err != nil {
-		return nil, fmt.Errorf("exchange: %w", err)
+		return nil, err
 	}
-	if tok.RefreshToken == "" {
-		return nil, fmt.Errorf("missing refresh_token")
-	}
-	prof, err := s.deps.Graph.GetMe(ctx, tok.AccessToken)
-	if err != nil {
-		return nil, fmt.Errorf("graph me: %w", err)
-	}
-	id := uuid.New()
 	label := ""
 	if labelHint != nil {
 		label = *labelHint
 	}
 	if label == "" {
-		label = prof.Mail
-		if label == "" {
-			label = prof.UserPrincipalName
-		}
-		if label == "" {
-			label = "Microsoft"
-		}
+		label = connected.DefaultLabel
 	}
-	tenant := prof.TenantID
-	payload, err := encodeRefreshPayload(kind, tok.RefreshToken)
+	cipher, err := s.deps.Vault.Encrypt(connected.Credential)
 	if err != nil {
 		return nil, err
 	}
-	cipher, err := s.deps.Vault.Encrypt(payload)
-	if err != nil {
-		return nil, err
+	rowKind := connected.MsAccountKind
+	if provider != ProviderM365 {
+		rowKind = placeholderMsAccountKind
 	}
+	id := uuid.New()
 	now := time.Now().UTC()
 	row := driven.AccountRow{
 		UserID:           *stateUserID,
 		ID:               id,
 		Label:            label,
-		Provider:         "m365",
-		MsAccountKind:    kind,
-		GraphTenantID:    &tenant,
-		PrimaryEmail:     prof.Mail,
+		Provider:         provider,
+		MsAccountKind:    rowKind,
+		GraphTenantID:    connected.TenantID,
+		PrimaryEmail:     connected.Email,
 		ConnectionStatus: "connected",
 		CreatedAt:        now,
 		UpdatedAt:        now,
-	}
-	if row.PrimaryEmail == "" {
-		row.PrimaryEmail = prof.UserPrincipalName
 	}
 	if err := s.deps.Accounts.InsertAccount(ctx, row, cipher); err != nil {
 		return nil, err

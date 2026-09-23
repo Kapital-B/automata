@@ -5,6 +5,7 @@ import (
 	"database/sql"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"strings"
 	"testing"
 	"time"
@@ -17,38 +18,30 @@ import (
 	_ "modernc.org/sqlite"
 )
 
-type fakeSyncOAuth struct{}
-
-func (f *fakeSyncOAuth) AuthorizationURL(ctx context.Context, kind domainacc.MsAccountKind, state string) (string, error) {
-	return "", errors.New("not implemented")
-}
-func (f *fakeSyncOAuth) ExchangeCode(ctx context.Context, kind domainacc.MsAccountKind, code string) (driven.TokenPair, error) {
-	return driven.TokenPair{}, errors.New("not implemented")
-}
-func (f *fakeSyncOAuth) RefreshAccessToken(ctx context.Context, kind domainacc.MsAccountKind, refreshToken string) (driven.TokenPair, error) {
-	return driven.TokenPair{AccessToken: "access-token", RefreshToken: "refresh-next", ExpiresIn: 3600}, nil
-}
-
 type passthroughVault struct{}
 
 func (v *passthroughVault) Encrypt(plaintext []byte) ([]byte, error)  { return plaintext, nil }
 func (v *passthroughVault) Decrypt(ciphertext []byte) ([]byte, error) { return ciphertext, nil }
 
-type fakeDeltaGraph struct {
+// fakeMailbox scripts ListChanges pages and records outbound calls. It stands
+// in for any provider: services only ever see the port.
+type fakeMailbox struct {
+	caps      driven.MailboxCapabilities
 	calls     []string
-	results   []*driven.GraphDeltaResult
+	results   []*driven.MailChangePage
 	errByCall map[int]error
 	resultIdx int
+
+	forwardCalls int
+	forwardErr   error
+	replyCalls   int
+	replyErr     error
 }
 
-func (f *fakeDeltaGraph) GetMe(ctx context.Context, accessToken string) (*driven.GraphProfile, error) {
-	return nil, errors.New("not implemented")
-}
-func (f *fakeDeltaGraph) ListInboxMessages(ctx context.Context, accessToken string, top int) ([]driven.GraphMessage, error) {
-	return nil, errors.New("not implemented")
-}
-func (f *fakeDeltaGraph) ListInboxDelta(ctx context.Context, accessToken string, deltaLink string, pageSize int) (*driven.GraphDeltaResult, error) {
-	f.calls = append(f.calls, deltaLink)
+func (f *fakeMailbox) Capabilities() driven.MailboxCapabilities { return f.caps }
+
+func (f *fakeMailbox) ListChanges(ctx context.Context, cursor string, pageSize int) (*driven.MailChangePage, error) {
+	f.calls = append(f.calls, cursor)
 	call := len(f.calls) - 1
 	if f.errByCall != nil {
 		if err, ok := f.errByCall[call]; ok {
@@ -56,29 +49,51 @@ func (f *fakeDeltaGraph) ListInboxDelta(ctx context.Context, accessToken string,
 		}
 	}
 	if f.resultIdx >= len(f.results) {
-		return &driven.GraphDeltaResult{Messages: nil, DeltaLink: "delta-empty"}, nil
+		return &driven.MailChangePage{FinalCursor: "delta-empty"}, nil
 	}
 	out := f.results[f.resultIdx]
 	f.resultIdx++
 	return out, nil
 }
-func (f *fakeDeltaGraph) GetMessageBody(ctx context.Context, accessToken string, providerMessageID string) (*driven.GraphMessage, error) {
+
+func (f *fakeMailbox) GetRawMessage(ctx context.Context, providerMessageID string) ([]byte, error) {
 	return nil, errors.New("not implemented")
 }
-func (f *fakeDeltaGraph) ResolveGraphMessageID(ctx context.Context, accessToken string, providerMessageID string) (string, error) {
-	return strings.TrimSpace(providerMessageID), nil
-}
-func (f *fakeDeltaGraph) SendMail(ctx context.Context, accessToken string, toEmail, subject, body string) error {
-	return errors.New("not implemented")
-}
-func (f *fakeDeltaGraph) ReplyToMessage(ctx context.Context, accessToken string, providerMessageID string, body string) error {
-	return errors.New("not implemented")
-}
-func (f *fakeDeltaGraph) ForwardMessage(ctx context.Context, accessToken string, providerMessageID string, toEmail string, comment string) error {
-	return errors.New("not implemented")
+
+func (f *fakeMailbox) Reply(ctx context.Context, providerMessageID, body string) error {
+	f.replyCalls++
+	return f.replyErr
 }
 
-func setupSyncService(t *testing.T, graph *fakeDeltaGraph) (*SyncService, *sqlite.Repository, uuid.UUID, uuid.UUID) {
+func (f *fakeMailbox) Forward(ctx context.Context, providerMessageID, to, comment string) error {
+	f.forwardCalls++
+	return f.forwardErr
+}
+
+// fakeProvider hands out one mailbox, so tests drive the real opener.
+type fakeProvider struct {
+	box     *fakeMailbox
+	openErr error
+	opens   int
+}
+
+func (p *fakeProvider) Open(ctx context.Context, account driven.AccountRow, credential []byte) (driven.Mailbox, []byte, error) {
+	p.opens++
+	if p.openErr != nil {
+		return nil, nil, p.openErr
+	}
+	return p.box, nil, nil
+}
+
+func testOpener(accounts driven.AccountRepository, box *fakeMailbox) *appaccounts.MailboxOpener {
+	return &appaccounts.MailboxOpener{
+		Accounts:  accounts,
+		Vault:     &passthroughVault{},
+		Providers: map[string]driven.MailProvider{appaccounts.ProviderM365: &fakeProvider{box: box}},
+	}
+}
+
+func setupSyncService(t *testing.T, graph *fakeMailbox) (*SyncService, *sqlite.Repository, uuid.UUID, uuid.UUID) {
 	t.Helper()
 	db, err := sql.Open("sqlite", "file::memory:?cache=shared")
 	if err != nil {
@@ -91,10 +106,7 @@ func setupSyncService(t *testing.T, graph *fakeDeltaGraph) (*SyncService, *sqlit
 	repo := sqlite.NewRepository(db, 15*time.Minute)
 	userID := uuid.MustParse("a0000001-0000-4000-8000-000000000001")
 	accountID := uuid.New()
-	payload, err := appaccounts.EncodeRefreshPayloadForStorage(domainacc.KindWork, "refresh-initial")
-	if err != nil {
-		t.Fatal(err)
-	}
+	payload := []byte("credential")
 	if err := repo.InsertAccount(context.Background(), driven.AccountRow{
 		UserID:           userID,
 		ID:               accountID,
@@ -107,30 +119,28 @@ func setupSyncService(t *testing.T, graph *fakeDeltaGraph) (*SyncService, *sqlit
 		t.Fatal(err)
 	}
 	svc := &SyncService{
-		Accounts: repo,
-		Messages: repo,
-		OAuth:    &fakeSyncOAuth{},
-		Graph:    graph,
-		Vault:    &passthroughVault{},
-		JobRuns:  repo,
+		Accounts:  repo,
+		Messages:  repo,
+		Mailboxes: testOpener(repo, graph),
+		JobRuns:   repo,
 	}
 	return svc, repo, userID, accountID
 }
 
 func TestSyncInboxUsesDeltaLinkAcrossRuns(t *testing.T) {
-	graph := &fakeDeltaGraph{
-		results: []*driven.GraphDeltaResult{
+	graph := &fakeMailbox{
+		results: []*driven.MailChangePage{
 			{
-				Messages: []driven.GraphMessage{
+				Messages: []driven.MailMessage{
 					{ID: "provider-1", Subject: "one", ReceivedDateTime: time.Now().UTC().Format(time.RFC3339), FromAddress: "a@example.com"},
 				},
-				DeltaLink: "delta-1",
+				FinalCursor: "delta-1",
 			},
 			{
-				Messages: []driven.GraphMessage{
+				Messages: []driven.MailMessage{
 					{ID: "provider-2", Subject: "two", ReceivedDateTime: time.Now().UTC().Format(time.RFC3339), FromAddress: "b@example.com"},
 				},
-				DeltaLink: "delta-2",
+				FinalCursor: "delta-2",
 			},
 		},
 	}
@@ -166,13 +176,13 @@ func TestSyncInboxUsesDeltaLinkAcrossRuns(t *testing.T) {
 }
 
 func TestSyncInboxFailsAndDoesNotOverwriteDeltaLink(t *testing.T) {
-	graph := &fakeDeltaGraph{
-		results: []*driven.GraphDeltaResult{
+	graph := &fakeMailbox{
+		results: []*driven.MailChangePage{
 			{
-				Messages: []driven.GraphMessage{
+				Messages: []driven.MailMessage{
 					{ID: "provider-1", Subject: "one", ReceivedDateTime: time.Now().UTC().Format(time.RFC3339), FromAddress: "a@example.com"},
 				},
-				DeltaLink: "delta-1",
+				FinalCursor: "delta-1",
 			},
 		},
 	}
@@ -195,15 +205,15 @@ func TestSyncInboxFailsAndDoesNotOverwriteDeltaLink(t *testing.T) {
 }
 
 func TestSyncInboxResetsInvalidDeltaAndContinues(t *testing.T) {
-	graph := &fakeDeltaGraph{
-		results: []*driven.GraphDeltaResult{
+	graph := &fakeMailbox{
+		results: []*driven.MailChangePage{
 			{
-				Messages:  []driven.GraphMessage{{ID: "provider-1", Subject: "one", ReceivedDateTime: time.Now().UTC().Format(time.RFC3339), FromAddress: "a@example.com"}},
-				DeltaLink: "delta-1",
+				Messages:    []driven.MailMessage{{ID: "provider-1", Subject: "one", ReceivedDateTime: time.Now().UTC().Format(time.RFC3339), FromAddress: "a@example.com"}},
+				FinalCursor: "delta-1",
 			},
 			{
-				Messages:  []driven.GraphMessage{{ID: "provider-2", Subject: "two", ReceivedDateTime: time.Now().UTC().Format(time.RFC3339), FromAddress: "b@example.com"}},
-				DeltaLink: "delta-2",
+				Messages:    []driven.MailMessage{{ID: "provider-2", Subject: "two", ReceivedDateTime: time.Now().UTC().Format(time.RFC3339), FromAddress: "b@example.com"}},
+				FinalCursor: "delta-2",
 			},
 		},
 	}
@@ -211,7 +221,7 @@ func TestSyncInboxResetsInvalidDeltaAndContinues(t *testing.T) {
 	if _, err := svc.SyncInbox(context.Background(), userID, accountID); err != nil {
 		t.Fatal(err)
 	}
-	graph.errByCall = map[int]error{1: errors.New("graph 410 Gone: SyncStateNotFound")}
+	graph.errByCall = map[int]error{1: fmt.Errorf("%w: graph 410 Gone: SyncStateNotFound", driven.ErrCursorExpired)}
 
 	res, err := svc.SyncInbox(context.Background(), userID, accountID)
 	if err != nil {
@@ -250,14 +260,14 @@ func TestSyncInboxResetsInvalidDeltaAndContinues(t *testing.T) {
 }
 
 func TestSyncInboxWritesObservabilityMeta(t *testing.T) {
-	graph := &fakeDeltaGraph{
-		results: []*driven.GraphDeltaResult{
+	graph := &fakeMailbox{
+		results: []*driven.MailChangePage{
 			{
-				Messages: []driven.GraphMessage{
+				Messages: []driven.MailMessage{
 					{ID: "provider-1", Subject: "one", ReceivedDateTime: time.Now().UTC().Format(time.RFC3339), FromAddress: "a@example.com"},
 					{ID: "provider-2", Subject: "two", ReceivedDateTime: time.Now().UTC().Format(time.RFC3339), FromAddress: "b@example.com"},
 				},
-				DeltaLink: "delta-1",
+				FinalCursor: "delta-1",
 			},
 		},
 	}
@@ -295,26 +305,26 @@ func TestSyncInboxWritesObservabilityMeta(t *testing.T) {
 // inbox looking like a freshly arrived message from "Unknown sender".
 func TestSyncInboxDoesNotOverwriteAMessageWithAPartialDeltaRow(t *testing.T) {
 	received := time.Now().UTC().Add(-72 * time.Hour)
-	graph := &fakeDeltaGraph{
-		results: []*driven.GraphDeltaResult{
+	graph := &fakeMailbox{
+		results: []*driven.MailChangePage{
 			{
-				Messages: []driven.GraphMessage{{
+				Messages: []driven.MailMessage{{
 					ID:               "provider-1",
 					Subject:          "Your online bill",
 					ReceivedDateTime: received.Format(time.RFC3339),
 					FromName:         "Microsoft",
 					FromAddress:      "billing@microsoft.com",
 				}},
-				DeltaLink: "delta-1",
+				FinalCursor: "delta-1",
 			},
 			{
-				Messages: []driven.GraphMessage{
-					// A tombstone: id and nothing else.
-					{ID: "provider-1", Removed: true},
+				// A tombstone for the message synced above.
+				Removed: []string{"provider-1"},
+				Messages: []driven.MailMessage{
 					// A changed-properties-only row: no timestamp.
 					{ID: "provider-2"},
 				},
-				DeltaLink: "delta-2",
+				FinalCursor: "delta-2",
 			},
 		},
 	}
@@ -353,18 +363,18 @@ func TestSyncInboxDoesNotOverwriteAMessageWithAPartialDeltaRow(t *testing.T) {
 // repair a row whose stored content was lost locally. A forced run ignores the
 // stored delta link and refetches full payloads.
 func TestSyncInboxForceIgnoresTheStoredDeltaLink(t *testing.T) {
-	graph := &fakeDeltaGraph{
-		results: []*driven.GraphDeltaResult{
+	graph := &fakeMailbox{
+		results: []*driven.MailChangePage{
 			{
-				Messages: []driven.GraphMessage{{
+				Messages: []driven.MailMessage{{
 					ID: "provider-1", Subject: "one",
 					ReceivedDateTime: time.Now().UTC().Format(time.RFC3339),
 					FromAddress:      "a@example.com",
 				}},
-				DeltaLink: "delta-1",
+				FinalCursor: "delta-1",
 			},
-			{Messages: nil, DeltaLink: "delta-2"},
-			{Messages: nil, DeltaLink: "delta-3"},
+			{Messages: nil, FinalCursor: "delta-2"},
+			{Messages: nil, FinalCursor: "delta-3"},
 		},
 	}
 	svc, repo, userID, accountID := setupSyncService(t, graph)
@@ -402,11 +412,11 @@ func TestSyncInboxForceIgnoresTheStoredDeltaLink(t *testing.T) {
 // has a second cursor to respect: a forced reset applies to the start of a
 // sync, not to every page, or a multi-page run would restart on each chunk.
 func TestSyncChunkForceResetsOnlyAtTheStart(t *testing.T) {
-	graph := &fakeDeltaGraph{
-		results: []*driven.GraphDeltaResult{
-			{Messages: nil, DeltaLink: "delta-1"},
-			{Messages: nil, DeltaLink: "delta-2"},
-			{Messages: nil, DeltaLink: "delta-3"},
+	graph := &fakeMailbox{
+		results: []*driven.MailChangePage{
+			{Messages: nil, FinalCursor: "delta-1"},
+			{Messages: nil, FinalCursor: "delta-2"},
+			{Messages: nil, FinalCursor: "delta-3"},
 		},
 	}
 	svc, _, userID, accountID := setupSyncService(t, graph)
@@ -486,17 +496,17 @@ func (r *recordingEnqueuer) countOf(jobType string) int {
 // the chunked path — the only one a deployed worker runs — did not resolve
 // inline either, so contacts were never extracted at all.
 func TestSyncChunkQueuesContactResolutionOnceTheMailboxIsCurrent(t *testing.T) {
-	graph := &fakeDeltaGraph{
-		results: []*driven.GraphDeltaResult{
+	graph := &fakeMailbox{
+		results: []*driven.MailChangePage{
 			{
-				Messages: []driven.GraphMessage{{
+				Messages: []driven.MailMessage{{
 					ID: "provider-1", Subject: "one",
 					ReceivedDateTime: time.Now().UTC().Format(time.RFC3339),
 					FromAddress:      "a@example.com",
 				}},
-				NextLink: "page-2",
+				NextCursor: "page-2",
 			},
-			{Messages: nil, DeltaLink: "delta-final"},
+			{Messages: nil, FinalCursor: "delta-final"},
 		},
 	}
 	svc, _, userID, accountID := setupSyncService(t, graph)

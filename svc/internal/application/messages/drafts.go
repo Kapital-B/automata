@@ -14,10 +14,7 @@ import (
 type DraftLifecycleService struct {
 	Summaries driven.SummaryRepository
 	Messages  driven.MessageRepository
-	Accounts  driven.AccountRepository
-	OAuth     driven.MicrosoftOAuth
-	Graph     driven.MicrosoftGraph
-	Vault     driven.TokenVault
+	Mailboxes *appaccounts.MailboxOpener
 }
 
 func (s *DraftLifecycleService) SaveDraft(ctx context.Context, userID, draftID uuid.UUID, subject, body string) error {
@@ -35,7 +32,7 @@ func (s *DraftLifecycleService) DiscardDraft(ctx context.Context, userID, draftI
 }
 
 func (s *DraftLifecycleService) SendDraft(ctx context.Context, userID, draftID uuid.UUID) error {
-	if s == nil || s.Summaries == nil || s.Messages == nil || s.Accounts == nil || s.OAuth == nil || s.Graph == nil || s.Vault == nil {
+	if s == nil || s.Summaries == nil || s.Messages == nil || s.Mailboxes == nil {
 		return fmt.Errorf("draft send service not configured")
 	}
 	draft, err := s.Summaries.GetDraftSuggestion(ctx, userID, draftID)
@@ -48,38 +45,8 @@ func (s *DraftLifecycleService) SendDraft(ctx context.Context, userID, draftID u
 	if draft.Status != "ready" {
 		return fmt.Errorf("draft is not in ready state")
 	}
-	account, cipher, err := s.Accounts.GetAccount(ctx, userID, draft.AccountID)
+	box, _, err := s.Mailboxes.Open(ctx, userID, draft.AccountID)
 	if err != nil {
-		return err
-	}
-	if account == nil || len(cipher) == 0 {
-		return fmt.Errorf("account not found")
-	}
-	raw, err := s.Vault.Decrypt(cipher)
-	if err != nil {
-		return err
-	}
-	kind, refresh, err := appaccounts.DecodeRefreshPayload(raw)
-	if err != nil {
-		return err
-	}
-	tok, err := s.OAuth.RefreshAccessToken(ctx, kind, refresh)
-	if err != nil {
-		return fmt.Errorf("refresh token: %w", err)
-	}
-	newRefresh := refresh
-	if tok.RefreshToken != "" {
-		newRefresh = tok.RefreshToken
-	}
-	payload, err := appaccounts.EncodeRefreshPayloadForStorage(kind, newRefresh)
-	if err != nil {
-		return err
-	}
-	newCipher, err := s.Vault.Encrypt(payload)
-	if err != nil {
-		return err
-	}
-	if err := s.Accounts.UpdateAccountTokens(ctx, userID, draft.AccountID, newCipher, account.PrimaryEmail, account.GraphTenantID, account.MsalHomeAccountID, "connected", nil); err != nil {
 		return err
 	}
 	msg, err := s.Messages.GetMessage(ctx, userID, draft.MessageID)
@@ -99,7 +66,7 @@ func (s *DraftLifecycleService) SendDraft(ctx context.Context, userID, draftID u
 		Status:    "failed",
 		CreatedAt: now,
 	}
-	if err := s.Graph.ReplyToMessage(ctx, tok.AccessToken, msg.ProviderMessageID, draft.Body); err != nil {
+	if err := box.Reply(ctx, msg.ProviderMessageID, draft.Body); err != nil {
 		msg := err.Error()
 		attempt.ErrorMessage = &msg
 		_ = s.Summaries.InsertSendAttempt(ctx, attempt)

@@ -8,11 +8,11 @@ import (
 
 // Deps groups dependencies for account application services.
 type Deps struct {
-	Accounts    driven.AccountRepository
-	OAuthState  driven.OAuthStateRepository
-	JobRuns     driven.JobRunRepository
-	OAuth       driven.MicrosoftOAuth
-	Graph       driven.MicrosoftGraph
+	Accounts   driven.AccountRepository
+	OAuthState driven.OAuthStateRepository
+	JobRuns    driven.JobRunRepository
+	// Connectors are the OAuth mailbox connect flows, keyed by provider.
+	Connectors  map[string]driven.OAuthMailConnector
 	Vault       driven.TokenVault
 	Dashboard   string
 	SuccessPath string

@@ -3,6 +3,7 @@ package messages
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"html"
 	"strconv"
@@ -16,13 +17,11 @@ import (
 
 // SyncService pulls inbox messages into the store for one account.
 type SyncService struct {
-	Accounts driven.AccountRepository
-	Messages driven.MessageRepository
-	OAuth    driven.MicrosoftOAuth
-	Graph    driven.MicrosoftGraph
-	Vault    driven.TokenVault
-	JobRuns  driven.JobRunRepository
-	Resolve  interface {
+	Accounts  driven.AccountRepository
+	Messages  driven.MessageRepository
+	Mailboxes *appaccounts.MailboxOpener
+	JobRuns   driven.JobRunRepository
+	Resolve   interface {
 		BackfillAccount(ctx context.Context, userID, accountID uuid.UUID) error
 	}
 	Assign interface {
@@ -68,48 +67,15 @@ func (s *SyncService) SyncInbox(ctx context.Context, userID uuid.UUID, accountID
 }
 
 func (s *SyncService) SyncChunk(ctx context.Context, run driven.RunContext) (*SyncChunkResult, error) {
-	if s == nil || s.Accounts == nil || s.Messages == nil || s.OAuth == nil || s.Graph == nil || s.Vault == nil {
+	if s == nil || s.Accounts == nil || s.Messages == nil || s.Mailboxes == nil {
 		return nil, fmt.Errorf("sync service not configured")
 	}
 	if run.AccountID == nil || *run.AccountID == uuid.Nil {
 		return nil, fmt.Errorf("account_id is required")
 	}
 	accountID := *run.AccountID
-	row, cipher, err := s.Accounts.GetAccount(ctx, run.UserID, accountID)
+	box, _, err := s.Mailboxes.Open(ctx, run.UserID, accountID)
 	if err != nil {
-		return nil, err
-	}
-	if row == nil {
-		return nil, fmt.Errorf("account not found")
-	}
-	if len(cipher) == 0 {
-		return nil, fmt.Errorf("no tokens for account")
-	}
-	raw, err := s.Vault.Decrypt(cipher)
-	if err != nil {
-		return nil, err
-	}
-	kind, refresh, err := appaccounts.DecodeRefreshPayload(raw)
-	if err != nil {
-		return nil, err
-	}
-	tok, err := s.OAuth.RefreshAccessToken(ctx, kind, refresh)
-	if err != nil {
-		return nil, fmt.Errorf("refresh token: %w", err)
-	}
-	newRefresh := refresh
-	if tok.RefreshToken != "" {
-		newRefresh = tok.RefreshToken
-	}
-	payload, err := appaccounts.EncodeRefreshPayloadForStorage(kind, newRefresh)
-	if err != nil {
-		return nil, err
-	}
-	newCipher, err := s.Vault.Encrypt(payload)
-	if err != nil {
-		return nil, err
-	}
-	if err := s.Accounts.UpdateAccountTokens(ctx, run.UserID, accountID, newCipher, row.PrimaryEmail, row.GraphTenantID, row.MsalHomeAccountID, "connected", nil); err != nil {
 		return nil, err
 	}
 
@@ -132,10 +98,10 @@ func (s *SyncService) SyncChunk(ctx context.Context, run driven.RunContext) (*Sy
 		cursor = strings.TrimSpace(strOrEmpty(prevDeltaLink))
 		deltaUsed = cursor != ""
 	}
-	deltaRes, err := s.Graph.ListInboxDelta(ctx, tok.AccessToken, cursor, 100)
-	if err != nil && deltaUsed && isInvalidDeltaError(err) {
+	deltaRes, err := box.ListChanges(ctx, cursor, 100)
+	if err != nil && deltaUsed && errors.Is(err, driven.ErrCursorExpired) {
 		deltaResetReason = "invalid_delta_link"
-		deltaRes, err = s.Graph.ListInboxDelta(ctx, tok.AccessToken, "", 100)
+		deltaRes, err = box.ListChanges(ctx, "", 100)
 		deltaUsed = false
 	}
 	if err != nil {
@@ -144,9 +110,6 @@ func (s *SyncService) SyncChunk(ctx context.Context, run driven.RunContext) (*Sy
 	list := deltaRes.Messages
 	n := 0
 	for _, gm := range list {
-		if gm.Removed {
-			continue
-		}
 		rt, err := parseGraphTime(gm.ReceivedDateTime)
 		if err != nil {
 			// A delta row without a timestamp is not a full message payload.
@@ -213,14 +176,14 @@ func (s *SyncService) SyncChunk(ctx context.Context, run driven.RunContext) (*Sy
 		DeltaReused:      deltaUsed && !run.Payload.Force,
 		DeltaResetReason: reportedReset,
 	}
-	if strings.TrimSpace(deltaRes.NextLink) != "" {
-		out.NextCursor = &driven.JobCursor{Kind: "graph_next_link", Value: strings.TrimSpace(deltaRes.NextLink)}
+	if strings.TrimSpace(deltaRes.NextCursor) != "" {
+		out.NextCursor = &driven.JobCursor{Kind: "graph_next_link", Value: strings.TrimSpace(deltaRes.NextCursor)}
 		return out, nil
 	}
-	if strings.TrimSpace(deltaRes.DeltaLink) == "" {
+	if strings.TrimSpace(deltaRes.FinalCursor) == "" {
 		return nil, fmt.Errorf("graph delta response missing cursor")
 	}
-	if err := s.Accounts.UpsertSyncState(ctx, run.UserID, accountID, &deltaRes.DeltaLink, time.Now().UTC()); err != nil {
+	if err := s.Accounts.UpsertSyncState(ctx, run.UserID, accountID, &deltaRes.FinalCursor, time.Now().UTC()); err != nil {
 		return nil, err
 	}
 	out.Done = true
@@ -232,41 +195,11 @@ func (s *SyncService) SyncChunk(ctx context.Context, run driven.RunContext) (*Sy
 }
 
 func (s *SyncService) SyncInboxWithOptions(ctx context.Context, userID uuid.UUID, accountID uuid.UUID, opts SyncOptions) (*SyncResult, error) {
-	row, cipher, err := s.Accounts.GetAccount(ctx, userID, accountID)
+	if s == nil || s.Accounts == nil || s.Messages == nil || s.Mailboxes == nil {
+		return nil, fmt.Errorf("sync service not configured")
+	}
+	box, _, err := s.Mailboxes.Open(ctx, userID, accountID)
 	if err != nil {
-		return nil, err
-	}
-	if row == nil {
-		return nil, fmt.Errorf("account not found")
-	}
-	if len(cipher) == 0 {
-		return nil, fmt.Errorf("no tokens for account")
-	}
-	raw, err := s.Vault.Decrypt(cipher)
-	if err != nil {
-		return nil, err
-	}
-	kind, refresh, err := appaccounts.DecodeRefreshPayload(raw)
-	if err != nil {
-		return nil, err
-	}
-	tok, err := s.OAuth.RefreshAccessToken(ctx, kind, refresh)
-	if err != nil {
-		return nil, fmt.Errorf("refresh token: %w", err)
-	}
-	newRefresh := refresh
-	if tok.RefreshToken != "" {
-		newRefresh = tok.RefreshToken
-	}
-	payload, err := appaccounts.EncodeRefreshPayloadForStorage(kind, newRefresh)
-	if err != nil {
-		return nil, err
-	}
-	newCipher, err := s.Vault.Encrypt(payload)
-	if err != nil {
-		return nil, err
-	}
-	if err := s.Accounts.UpdateAccountTokens(ctx, userID, accountID, newCipher, row.PrimaryEmail, row.GraphTenantID, row.MsalHomeAccountID, "connected", nil); err != nil {
 		return nil, err
 	}
 
@@ -305,10 +238,10 @@ func (s *SyncService) SyncInboxWithOptions(ctx context.Context, userID uuid.UUID
 	if opts.Force {
 		deltaResetReason = "forced"
 	}
-	deltaRes, err := s.Graph.ListInboxDelta(ctx, tok.AccessToken, strOrEmpty(prevDeltaLink), 50)
-	if err != nil && deltaUsed && isInvalidDeltaError(err) {
+	deltaRes, err := box.ListChanges(ctx, strOrEmpty(prevDeltaLink), 50)
+	if err != nil && deltaUsed && errors.Is(err, driven.ErrCursorExpired) {
 		deltaResetReason = "invalid_delta_link"
-		deltaRes, err = s.Graph.ListInboxDelta(ctx, tok.AccessToken, "", 50)
+		deltaRes, err = box.ListChanges(ctx, "", 50)
 		deltaUsed = false
 	}
 	if err != nil {
@@ -325,9 +258,6 @@ func (s *SyncService) SyncInboxWithOptions(ctx context.Context, userID uuid.UUID
 
 	n := 0
 	for _, gm := range list {
-		if gm.Removed {
-			continue
-		}
 		rt, err := parseGraphTime(gm.ReceivedDateTime)
 		if err != nil {
 			// A delta row without a timestamp is not a full message payload.
@@ -388,7 +318,7 @@ func (s *SyncService) SyncInboxWithOptions(ctx context.Context, userID uuid.UUID
 	}
 	s.scheduleContactResolution(ctx, userID, accountID)
 	s.scheduleAssignment(ctx, userID, accountID)
-	if err := s.Accounts.UpsertSyncState(ctx, userID, accountID, &deltaRes.DeltaLink, time.Now().UTC()); err != nil {
+	if err := s.Accounts.UpsertSyncState(ctx, userID, accountID, &deltaRes.FinalCursor, time.Now().UTC()); err != nil {
 		return nil, err
 	}
 	finished := time.Now().UTC()
@@ -409,7 +339,7 @@ func parseGraphTime(s string) (time.Time, error) {
 	return time.Parse(time.RFC3339, s)
 }
 
-func graphRecipientsJSON(recs []driven.GraphRecipient) []map[string]string {
+func graphRecipientsJSON(recs []driven.MailRecipient) []map[string]string {
 	out := make([]map[string]string, 0, len(recs))
 	for _, r := range recs {
 		out = append(out, map[string]string{"name": r.Name, "address": r.Address})
@@ -475,18 +405,6 @@ func strOrEmpty(v *string) string {
 		return ""
 	}
 	return *v
-}
-
-func isInvalidDeltaError(err error) bool {
-	if err == nil {
-		return false
-	}
-	msg := strings.ToLower(err.Error())
-	return strings.Contains(msg, "syncstatenotfound") ||
-		strings.Contains(msg, "invaliddeltatoken") ||
-		strings.Contains(msg, "invalid delta token") ||
-		strings.Contains(msg, "resyncrequired") ||
-		strings.Contains(msg, "410 gone")
 }
 
 func syncProgressMetaJSON(total, processed, upserted int, deltaReused bool, deltaResetReason string) string {

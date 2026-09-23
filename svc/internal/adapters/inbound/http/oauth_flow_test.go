@@ -110,13 +110,14 @@ func TestOAuthStartConnectAndCallbackCreatesAccount(t *testing.T) {
 		HTTPClient: graphSrv.Client(),
 	}
 
+	connectors, mailboxes := m365Wiring(repo, vault, oauth, graphCl)
 	accountSvc := appaccounts.NewService(appaccounts.Deps{
 		Accounts: repo, OAuthState: repo, JobRuns: repo,
-		OAuth: oauth, Graph: graphCl, Vault: vault,
+		Vault: vault, Connectors: connectors,
 		Dashboard: "http://dashboard.test", SuccessPath: "/connected", ErrorPath: "/error", StateTTL: 15 * time.Minute,
 	})
 	syncSvc := &appmessages.SyncService{
-		Accounts: repo, Messages: repo, OAuth: oauth, Graph: graphCl, Vault: vault, JobRuns: repo,
+		Accounts: repo, Messages: repo, Mailboxes: mailboxes, JobRuns: repo,
 	}
 	devUser := uuid.MustParse("a0000001-0000-4000-8000-000000000001")
 	jwtSecret := []byte("abcdefghijklmnopqrstuvwxyz123456")
@@ -218,12 +219,13 @@ func TestOAuthCallbackInvalidStateRedirectsError(t *testing.T) {
 		ClientID: "c", ClientSecret: "s", BaseAuthority: idp.URL, HTTPClient: idp.Client(),
 	}
 	graphCl := &microsoft.GraphClient{APIRoot: graphSrv.URL + "/v1.0", HTTPClient: graphSrv.Client()}
+	connectors, mailboxes := m365Wiring(repo, vault, oauth, graphCl)
 	accountSvc := appaccounts.NewService(appaccounts.Deps{
 		Accounts: repo, OAuthState: repo, JobRuns: repo,
-		OAuth: oauth, Graph: graphCl, Vault: vault,
+		Vault: vault, Connectors: connectors,
 		Dashboard: "http://dashboard.test", SuccessPath: "/ok", ErrorPath: "/err", StateTTL: 15 * time.Minute,
 	})
-	syncSvc := &appmessages.SyncService{Accounts: repo, Messages: repo, OAuth: oauth, Graph: graphCl, Vault: vault, JobRuns: repo}
+	syncSvc := &appmessages.SyncService{Accounts: repo, Messages: repo, Mailboxes: mailboxes, JobRuns: repo}
 	devUser := uuid.MustParse("a0000001-0000-4000-8000-000000000001")
 	jwtSecret := []byte("abcdefghijklmnopqrstuvwxyz123456")
 	authSvc := auth.NewService(repo, repo, repo, nil, nil, jwtSecret, time.Hour, 30*24*time.Hour)

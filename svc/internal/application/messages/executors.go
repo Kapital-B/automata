@@ -3,6 +3,7 @@ package messages
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"strconv"
 	"strings"
@@ -387,23 +388,16 @@ func (e *ForwardRulesExecutor) ExecuteChunk(ctx context.Context, run driven.RunC
 	if err != nil {
 		return driven.ChunkResult{}, err
 	}
-	var accessToken string
-	needToken := false
+	var box driven.Mailbox
+	needMailbox := false
 	for _, row := range rows {
 		if row.ForwardSeenAt == nil {
-			needToken = true
+			needMailbox = true
 			break
 		}
 	}
-	if needToken {
-		account, cipher, err := e.Service.Accounts.GetAccount(ctx, run.UserID, *run.AccountID)
-		if err != nil || account == nil {
-			if err == nil {
-				err = fmt.Errorf("account not found")
-			}
-			return driven.ChunkResult{}, err
-		}
-		accessToken, err = e.Service.refreshToken(ctx, run.UserID, *run.AccountID, account, cipher)
+	if needMailbox {
+		box, _, err = e.Service.Mailboxes.Open(ctx, run.UserID, *run.AccountID)
 		if err != nil {
 			return driven.ChunkResult{}, err
 		}
@@ -416,7 +410,6 @@ func (e *ForwardRulesExecutor) ExecuteChunk(ctx context.Context, run driven.RunC
 		}
 		messageForwarded := false
 		messageHadFailure := false
-		var graphMsgID string
 		for _, rule := range rules {
 			if !rule.Enabled {
 				continue
@@ -459,15 +452,25 @@ func (e *ForwardRulesExecutor) ExecuteChunk(ctx context.Context, run driven.RunC
 				}
 				return driven.ChunkResult{}, err
 			}
-			if graphMsgID == "" {
-				graphMsgID, err = e.Service.Graph.ResolveGraphMessageID(ctx, accessToken, msg.ProviderMessageID)
-				if err != nil {
+			if err := box.Forward(ctx, msg.ProviderMessageID, rule.ForwardTo, ""); err != nil {
+				// The effect ledger is what stops a forward being sent twice,
+				// so the state recorded here has to say what we know.
+				if errors.Is(err, driven.ErrMailTooLarge) {
+					// Permanent and nothing sent: rejected, recorded, and not
+					// retried — the message is marked seen below.
+					raw, _ := json.Marshal(map[string]any{"status": "too_large", "error": err.Error()})
+					_, _ = e.Store.UpdateEffect(ctx, *run.AccountID, effectKey, effect.Revision, driven.EffectRejected, string(raw), time.Now().UTC())
+					msgErr := err.Error()
+					_ = e.insertAudit(ctx, run, msg.ID, rule.ID, "failed", &msgErr)
+					failed++
+					continue
+				}
+				if errors.Is(err, driven.ErrMailNotSent) {
+					// Nothing reached the provider, so a retry cannot duplicate.
 					raw, _ := json.Marshal(map[string]any{"status": "resolve_failed", "error": err.Error()})
 					_, _ = e.Store.UpdateEffect(ctx, *run.AccountID, effectKey, effect.Revision, driven.EffectRetryable, string(raw), time.Now().UTC())
 					return driven.ChunkResult{Retryable: true, ErrorMessage: err.Error()}, err
 				}
-			}
-			if err := e.Service.Graph.ForwardMessage(ctx, accessToken, graphMsgID, rule.ForwardTo, ""); err != nil {
 				raw, _ := json.Marshal(map[string]any{"status": "unknown", "error": err.Error()})
 				_, _ = e.Store.UpdateEffect(ctx, *run.AccountID, effectKey, effect.Revision, driven.EffectUnknown, string(raw), time.Now().UTC())
 				msgErr := err.Error()
