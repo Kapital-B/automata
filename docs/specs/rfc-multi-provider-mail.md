@@ -52,7 +52,11 @@ That is not a smaller version of the same feature. It changes:
 - **Data exposure** — attachment bytes pass through the worker, which they currently never do.
 - **Size limits** — SMTP servers reject what Graph would have forwarded happily.
 
-Forward rules are an existing, automated feature. Silently giving them worse behaviour on a new provider is exactly the failure mode this codebase keeps getting bitten by: something that looks like it ran, did not do what the operator assumed, and said nothing. §4 proposes capability declaration for this reason.
+Forward rules are an existing, automated feature. Silently giving them worse behaviour on a new provider is exactly the failure mode this codebase keeps getting bitten by: something that looks like it ran, did not do what the operator assumed, and said nothing.
+
+**Decision: forward rules are supported on every provider.** Dropping them where the server cannot do the work would make a rule mean different things on different accounts, which is worse than the fallback. A provider without server-side forward implements it by fetching the original MIME and re-sending — so the feature is portable and the *implementation* is what varies, not the contract.
+
+Capability declaration (§4) is therefore not a way to disable the feature. It exists so the difference is visible: the operator can see which accounts re-send rather than forward server-side, and the fallback can be bounded by size and fail loudly instead of streaming an unbounded attachment through a worker.
 
 ---
 
@@ -159,15 +163,25 @@ What differs is consent and administration, which is where the cost actually sit
 | Who can block it | Nobody | The Workspace admin, through API access controls |
 | App verification | Full public verification | An internal-use app in one domain can be trusted by its own admin |
 
-Two consequences worth planning around:
+**Gmail read scopes are restricted.** `gmail.readonly` and `gmail.modify` are restricted scopes: Google requires app verification, and for restricted scopes a periodic third-party security assessment when serving users outside your own domain. That is a schedulable prerequisite with a lead time and a price, not a code task — and it can gate launch long after the adapter works.
 
-**Gmail read scopes are restricted.** `gmail.readonly` and `gmail.modify` are restricted scopes: Google requires app verification, and for restricted scopes a periodic third-party security assessment when serving users outside your own domain. That is a schedulable prerequisite with a lead time and a price, not a code task — and it can gate launch long after the adapter works. **Verify the current requirement before R2 is scheduled**, the same way R0 verifies DSQL.
+**Decision: internal-use first.** R2 targets a single Workspace domain whose administrator trusts the OAuth client directly, which avoids most of the verification burden and is the shortest path to a working second provider.
 
-**Internal-use is dramatically cheaper.** If the first deployment is a single Workspace domain, its admin can trust the OAuth client directly and the public verification burden largely disappears. That makes "our own Workspace first, other people's later" a genuinely different and much shorter path, and it may be the right first target.
+The consequence has to be stated plainly, because it is a product limit and not a technical one: **until verification is done, only mailboxes inside that domain can be connected.** A personal `@gmail.com` address, or a client's mailbox in someone else's domain, will be refused by Google — not by us. If connecting external mailboxes matters sooner than expected, verification becomes the critical path and should start in parallel with R1 rather than after R2.
 
-**Domain-wide delegation is a different connect flow**, not a variant of the OAuth one: a service account reads many mailboxes without per-user consent. Worth supporting eventually for org-wide deployments; out of scope for R2, which should do per-user OAuth only.
+**Domain-wide delegation is a different connect flow**, not a variant of the OAuth one: a service account reads many mailboxes without per-user consent. Worth supporting eventually for org-wide deployments; out of scope for R2, which does per-user OAuth only.
 
-### 5.5 Whether IMAP idle/push is in scope
+### 5.5 Google mail connect is a separate flow from Google sign-in
+
+They already are for Microsoft, and the reason is structural rather than cosmetic. Sign-in inserts OAuth state with **no user** (`flowAuthMicrosoft`, `flowAuthGoogle`, `userID = nil`) because nobody is logged in yet; it identifies exactly one person. Mailbox connect inserts state **bound to a user** (`oauthFlowM365Mail`, `&userID`) because someone already logged in is attaching a mailbox, and may attach several.
+
+Google mail follows the same shape: its own flow constant (`google_mail`), its own OAuth client, its own scopes.
+
+`driven.GoogleOAuth` stays as it is — it serves sign-in, returns a subject and an email, and has no mail scopes. The mail client is a new adapter that happens to talk to the same vendor. Sharing one registration would couple the consent screen and every future scope change to the login path, and would make "sign in with Google" ask for mailbox access, which is both worse for the user and harder to get verified.
+
+**Decision: separate OAuth client, separate flow, multiple Google mailboxes per user** — the same arrangement Microsoft already has.
+
+### 5.6 Whether IMAP idle/push is in scope
 
 No, initially. Polling on the existing scheduler tick is consistent with how Graph is synced today. IMAP IDLE needs a long-lived connection, which does not fit a Lambda worker; it would need a different execution model and should be argued separately.
 
@@ -179,7 +193,7 @@ No, initially. Polling on the existing scheduler tick is consistent with how Gra
 | ----- | ---- | -------- |
 | **R0** | Two spikes, no code | §5.1 against the dev cluster (does DSQL accept `DROP NOT NULL`?) and §5.4's current Google verification requirement. Both have lead times and both can change the shape of what follows. |
 | **R1** | Extract the port | `driven.Mailbox` + registry; Graph becomes one implementation; **no behaviour change**, no new provider |
-| **R2** | Google | Gmail adapter, OAuth scopes, `historyId` cursor; serves Workspace and consumer Gmail alike, per-user consent only |
+| **R2** | Google | Gmail adapter, own OAuth client and `google_mail` flow, `historyId` cursor, forward via the MIME fallback. Internal-use in one Workspace domain; several Google mailboxes per user, as Microsoft already allows. |
 | **R3** | IMAP/SMTP | Adapter, credential envelope, connection settings UI with a well-known-host table. Answers the on-premises Exchange question as a side effect. |
 | **R4** | Capability-aware UI | Features a provider cannot do are visibly unavailable, not silently degraded |
 
@@ -195,7 +209,7 @@ R1 is the whole bet. If the port is right, R2 and R3 are adapters and a settings
 
 **R1.** Microsoft accounts behave exactly as before: same delta cursor, same forward path, same failure messages. `MicrosoftGraph` is gone from every application service. A contract test suite runs against the Graph adapter and a fake, and both pass the same assertions.
 
-**R2.** A Google account — Workspace or consumer, the adapter does not distinguish — syncs, categorises, files to projects, and resolves contacts using the same jobs as a Microsoft account, with no Gmail-specific branch above the adapter. Forwarding works via the MIME fallback and says so.
+**R2.** A Google account syncs, categorises, files to projects, and resolves contacts using the same jobs as a Microsoft account, with no Gmail-specific branch above the adapter. Two Google mailboxes can be connected to one user alongside a Microsoft one, and signing in with Google does not connect a mailbox. A forward rule on a Google account delivers, with the re-send path visible to the operator.
 
 **R3.** An IMAP account can be added with host, port and TLS mode; a wrong password fails at connect time with a message naming the cause, not on the first sync.
 
@@ -227,7 +241,8 @@ IMAP and Gmail need a recorded-fixture or containerised server in CI. The lesson
 | IMAP passwords are a higher-value secret than refresh tokens | Same vault, but they do not expire and cannot be scoped; consider requiring app passwords and refusing plaintext-auth servers |
 | Attachment bytes now transit the worker | Bound the fallback by size and fail loudly above it rather than streaming unbounded data through a Lambda |
 | `ms_account_kind` blocks the migration | R0 answers this before any code is written |
-| Google verification gates R2 long after the code works | R0 establishes the requirement early; an internal-use Workspace deployment may avoid most of it (§5.4) |
+| Internal-use Google means external mailboxes cannot connect at all | Stated as a product limit in §5.4, not discovered later; if external mailboxes are needed sooner, verification starts in parallel with R1 |
+| Forwarded mail is larger than the sending server will accept | Bound the fallback by size, fail the rule loudly, and surface it per account (§2) |
 | Per-provider quirks leak upward over time | The capability struct is the pressure valve; anything that cannot be expressed as a capability is a signal the port is wrong |
 
 ---
@@ -236,7 +251,10 @@ IMAP and Gmail need a recorded-fixture or containerised server in CI. The lesson
 
 1. Does DSQL accept `ALTER COLUMN ... DROP NOT NULL`? (R0)
 2. What does Google currently require for restricted Gmail scopes, and does the first deployment qualify as internal-use in a single Workspace domain? (R0 — it may shorten R2 considerably)
-3. Should a Gmail account reuse the existing Google sign-in registration, or a separate OAuth client? Sharing couples consent screens and scope changes to login.
-4. Do forward rules stay enabled by default on providers without server-side forward, or opt-in per account?
+3. What is the size ceiling for the MIME forward fallback, above which a rule should fail loudly rather than stream the attachment through a worker?
 
-Question 2 in the previous draft — whether on-premises Exchange is worth designing for — is answered in §5.3: no, not as a dedicated adapter.
+Answered since the first draft, and left here so the reasoning is traceable:
+
+- **On-premises Exchange** — not worth a dedicated adapter (§5.3).
+- **Gmail OAuth registration** — separate client and flow from sign-in, so a user can attach several Google mailboxes (§5.5).
+- **Forward rules without server-side forward** — supported everywhere via the MIME fallback, with the difference surfaced rather than the feature withdrawn (§2).
