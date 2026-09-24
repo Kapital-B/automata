@@ -130,6 +130,8 @@ func TestDraftSuggestExecutorReplayKeepsSingleDraft(t *testing.T) {
 	}
 }
 
+// The effect ledger, not the audit, is what stops a second send: even with
+// the verdict lost, a replayed chunk must not send the message again.
 func TestForwardRulesExecutorEffectClaimPreventsDuplicateSend(t *testing.T) {
 	db, svc, repo, userID, accountID, messageID := setupForwardRulesService(t, &fakeMailbox{})
 	graph := &fakeMailbox{}
@@ -145,7 +147,7 @@ func TestForwardRulesExecutorEffectClaimPreventsDuplicateSend(t *testing.T) {
 	if _, err := exec.ExecuteChunk(context.Background(), run); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := db.Exec(`UPDATE messages SET forward_seen_at = NULL WHERE id = ?`, messageID.String()); err != nil {
+	if _, err := db.Exec(`DELETE FROM forward_audit WHERE message_id = ?`, messageID.String()); err != nil {
 		t.Fatal(err)
 	}
 	if _, err := exec.ExecuteChunk(context.Background(), run); err != nil {
@@ -155,18 +157,15 @@ func TestForwardRulesExecutorEffectClaimPreventsDuplicateSend(t *testing.T) {
 		t.Fatalf("expected effect claim to suppress duplicate send, got %d calls", graph.forwardCalls)
 	}
 	rules, err := repo.ListForwardRules(context.Background(), userID, accountID)
-	if err != nil {
-		t.Fatal(err)
+	if err != nil || len(rules) == 0 {
+		t.Fatalf("rules: %v", err)
 	}
-	if len(rules) == 0 {
-		t.Fatal("expected forward rule")
-	}
-	effectKey := fmt.Sprintf("forward:%s:%s:%s", messageID.String(), rules[0].ID.String(), rules[0].ForwardTo)
+	effectKey := fmt.Sprintf("forward-to:%s:%s", messageID.String(), rules[0].ForwardTo)
 	effect, err := store.GetEffect(context.Background(), accountID, effectKey)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if effect == nil {
-		t.Fatal("expected stored effect claim")
+	if effect == nil || effect.State != driven.EffectSucceededPendingAudit {
+		t.Fatalf("effect = %+v, want a recorded send", effect)
 	}
 }

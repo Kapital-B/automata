@@ -117,7 +117,10 @@ func ignoreRepeatedMigrationError(err error) bool {
 		strings.Contains(msg, "duplicate column name: home_organisation_id") ||
 		strings.Contains(msg, "duplicate column name: to_json") ||
 		strings.Contains(msg, "duplicate column name: cc_json") ||
-		strings.Contains(msg, "duplicate column name: contacts_resolved_at")
+		strings.Contains(msg, "duplicate column name: contacts_resolved_at") ||
+		strings.Contains(msg, "duplicate column name: apply_from") ||
+		strings.Contains(msg, "duplicate column name: pending") ||
+		strings.Contains(msg, "duplicate column name: attempts")
 }
 
 func migrateUserCategoryDefinitions(db *sql.DB) error {
@@ -460,6 +463,9 @@ func migrateOrganisationsContacts(db *sql.DB) error {
 		if _, err := db.Exec(`ALTER TABLE messages ADD COLUMN contacts_resolved_at TEXT`); err != nil {
 			return err
 		}
+	}
+	if err := migrateForwardRuleScope(db); err != nil {
+		return err
 	}
 
 	return backfillHomeOrganisations(db)
@@ -1200,4 +1206,34 @@ func extendInterpretationSourcesForConnectors(db *sql.DB) error {
 		return err
 	}
 	return tx.Commit()
+}
+
+// migrateForwardRuleScope mirrors common/007_forward_rule_scope.sql: a start
+// time per rule, and per-verdict pending/attempts. Existing rules carry on
+// just after the newest message forwarding had checked on their account.
+func migrateForwardRuleScope(db *sql.DB) error {
+	for _, col := range []struct{ table, name, ddl string }{
+		{"forward_rules", "apply_from", `ALTER TABLE forward_rules ADD COLUMN apply_from TEXT`},
+		{"forward_audit", "pending", `ALTER TABLE forward_audit ADD COLUMN pending INTEGER`},
+		{"forward_audit", "attempts", `ALTER TABLE forward_audit ADD COLUMN attempts INTEGER`},
+	} {
+		has, err := tableHasColumn(db, col.table, col.name)
+		if err != nil {
+			return err
+		}
+		if !has {
+			if _, err := db.Exec(col.ddl); err != nil {
+				return err
+			}
+		}
+	}
+	_, err := db.Exec(`
+		UPDATE forward_rules
+		SET apply_from = COALESCE(
+			(SELECT strftime('%Y-%m-%dT%H:%M:%fZ', MAX(julianday(m.received_at)) + 0.001 / 86400.0)
+			 FROM messages m
+			 WHERE m.account_id = forward_rules.account_id AND m.forward_seen_at IS NOT NULL),
+			forward_rules.created_at)
+		WHERE apply_from IS NULL`)
+	return err
 }

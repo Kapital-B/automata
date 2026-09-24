@@ -15,6 +15,7 @@ import (
 	googleoauth "github.com/Kapital-B/automata/svc/internal/adapters/outbound/google"
 	"github.com/Kapital-B/automata/svc/internal/adapters/outbound/imapmail"
 	llmadapter "github.com/Kapital-B/automata/svc/internal/adapters/outbound/llm"
+	"github.com/Kapital-B/automata/svc/internal/adapters/outbound/memoryjobs"
 	"github.com/Kapital-B/automata/svc/internal/adapters/outbound/microsoft"
 	"github.com/Kapital-B/automata/svc/internal/adapters/outbound/persistence/factory"
 	pgmigrate "github.com/Kapital-B/automata/svc/internal/adapters/outbound/persistence/migrate"
@@ -459,6 +460,13 @@ func (r *Runtime) buildServices(ctx context.Context) error {
 	var summarizeSvc *appmessages.SummarizeService
 	var autoDraftSvc *appmessages.AutoDraftService
 	var forwardRulesSvc *appmessages.ForwardRulesService
+	// Forwards go through a send ledger so nothing is sent twice. Deployed,
+	// that is the job store; running inline there is none, so the ledger
+	// lives in memory and guards the one process.
+	var forwardEffects driven.JobStore = r.JobStore
+	if forwardEffects == nil {
+		forwardEffects = memoryjobs.NewStore()
+	}
 
 	llmClient, llmLabel, err := buildLLMClient(ctx, r.Config)
 	if err != nil {
@@ -495,6 +503,7 @@ func (r *Runtime) buildServices(ctx context.Context) error {
 			LLM:       llmClient,
 			JobRuns:   jobRuns,
 			ModelName: llmLabel,
+			Effects:   forwardEffects,
 		}
 	} else {
 		forwardRulesSvc = &appmessages.ForwardRulesService{
@@ -502,6 +511,7 @@ func (r *Runtime) buildServices(ctx context.Context) error {
 			Forwards:  repo,
 			Mailboxes: mailboxes,
 			JobRuns:   jobRuns,
+			Effects:   forwardEffects,
 		}
 	}
 

@@ -674,9 +674,6 @@ func (r *Repository) ListMessages(ctx context.Context, userID uuid.UUID, filter 
 	if filter.OnlySummaryUnseen {
 		b.WriteString(` AND m.summary_seen_at IS NULL`)
 	}
-	if filter.OnlyForwardUnseen {
-		b.WriteString(` AND m.forward_seen_at IS NULL`)
-	}
 	if filter.ProjectID != nil {
 		b.WriteString(`
 		AND EXISTS (
@@ -712,10 +709,6 @@ func (r *Repository) ListMessages(ctx context.Context, userID uuid.UUID, filter 
 
 func (r *Repository) MarkMessagesSummarySeen(ctx context.Context, userID uuid.UUID, messageIDs []uuid.UUID, at time.Time) error {
 	return r.markMessagesSeen(ctx, "summary_seen_at", userID, messageIDs, at)
-}
-
-func (r *Repository) MarkMessagesForwardSeen(ctx context.Context, userID uuid.UUID, messageIDs []uuid.UUID, at time.Time) error {
-	return r.markMessagesSeen(ctx, "forward_seen_at", userID, messageIDs, at)
 }
 
 func (r *Repository) markMessagesSeen(ctx context.Context, column string, userID uuid.UUID, messageIDs []uuid.UUID, at time.Time) error {
@@ -1579,7 +1572,7 @@ func (r *Repository) ReplaceForwardAllowlist(ctx context.Context, userID uuid.UU
 
 func (r *Repository) ListForwardRules(ctx context.Context, userID, accountID uuid.UUID) ([]driven.ForwardRuleRow, error) {
 	rows, err := r.queryContext(ctx, `
-		SELECT id, user_id, account_id, name, mode, condition_json, forward_to, enabled, created_at, updated_at
+		SELECT id, user_id, account_id, name, mode, condition_json, forward_to, enabled, apply_from, created_at, updated_at
 		FROM forward_rules
 		WHERE user_id = ? AND account_id = ?
 		ORDER BY created_at DESC
@@ -1592,8 +1585,9 @@ func (r *Repository) ListForwardRules(ctx context.Context, userID, accountID uui
 	for rows.Next() {
 		var idStr, userStr, accountStr, name, mode, conditionJSON, forwardTo string
 		var enabled bool
+		var applyFrom sql.NullTime
 		var createdAt, updatedAt time.Time
-		if err := rows.Scan(&idStr, &userStr, &accountStr, &name, &mode, &conditionJSON, &forwardTo, &enabled, &createdAt, &updatedAt); err != nil {
+		if err := rows.Scan(&idStr, &userStr, &accountStr, &name, &mode, &conditionJSON, &forwardTo, &enabled, &applyFrom, &createdAt, &updatedAt); err != nil {
 			return nil, err
 		}
 		id, _ := uuid.Parse(idStr)
@@ -1601,7 +1595,8 @@ func (r *Repository) ListForwardRules(ctx context.Context, userID, accountID uui
 		accountID, _ := uuid.Parse(accountStr)
 		out = append(out, driven.ForwardRuleRow{
 			ID: id, UserID: userID, AccountID: accountID, Name: name, Mode: mode, ConditionJSON: conditionJSON,
-			ForwardTo: forwardTo, Enabled: enabled, CreatedAt: createdAt.UTC(), UpdatedAt: updatedAt.UTC(),
+			ForwardTo: forwardTo, Enabled: enabled, ApplyFrom: nullTimePtr(applyFrom),
+			CreatedAt: createdAt.UTC(), UpdatedAt: updatedAt.UTC(),
 		})
 	}
 	return out, rows.Err()
@@ -1609,18 +1604,18 @@ func (r *Repository) ListForwardRules(ctx context.Context, userID, accountID uui
 
 func (r *Repository) CreateForwardRule(ctx context.Context, row driven.ForwardRuleRow) error {
 	_, err := r.execContext(ctx, `
-		INSERT INTO forward_rules (id, user_id, account_id, name, mode, condition_json, forward_to, enabled, created_at, updated_at)
-		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-	`, row.ID.String(), row.UserID.String(), row.AccountID.String(), row.Name, row.Mode, row.ConditionJSON, row.ForwardTo, row.Enabled, row.CreatedAt.UTC(), row.UpdatedAt.UTC())
+		INSERT INTO forward_rules (id, user_id, account_id, name, mode, condition_json, forward_to, enabled, apply_from, created_at, updated_at)
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+	`, row.ID.String(), row.UserID.String(), row.AccountID.String(), row.Name, row.Mode, row.ConditionJSON, row.ForwardTo, row.Enabled, nullTime(row.ApplyFrom), row.CreatedAt.UTC(), row.UpdatedAt.UTC())
 	return err
 }
 
 func (r *Repository) UpdateForwardRule(ctx context.Context, row driven.ForwardRuleRow) error {
 	_, err := r.execContext(ctx, `
 		UPDATE forward_rules
-		SET name = ?, mode = ?, condition_json = ?, forward_to = ?, enabled = ?, updated_at = ?
+		SET name = ?, mode = ?, condition_json = ?, forward_to = ?, enabled = ?, apply_from = COALESCE(?, apply_from), updated_at = ?
 		WHERE id = ? AND user_id = ?
-	`, row.Name, row.Mode, row.ConditionJSON, row.ForwardTo, row.Enabled, row.UpdatedAt.UTC(), row.ID.String(), row.UserID.String())
+	`, row.Name, row.Mode, row.ConditionJSON, row.ForwardTo, row.Enabled, nullTime(row.ApplyFrom), row.UpdatedAt.UTC(), row.ID.String(), row.UserID.String())
 	return err
 }
 
@@ -1664,15 +1659,188 @@ func (r *Repository) ListForwardAuditByRun(ctx context.Context, userID, runID uu
 
 func (r *Repository) InsertForwardAudit(ctx context.Context, row driven.ForwardAuditRow) error {
 	_, err := r.execContext(ctx, `
-		INSERT INTO forward_audit (id, user_id, account_id, message_id, rule_id, run_id, status, reason, created_at)
-		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+		INSERT INTO forward_audit (id, user_id, account_id, message_id, rule_id, run_id, status, reason, pending, attempts, created_at)
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 		ON CONFLICT (message_id, rule_id) DO UPDATE SET
 			run_id = excluded.run_id,
 			status = excluded.status,
 			reason = excluded.reason,
+			pending = excluded.pending,
+			attempts = excluded.attempts,
 			created_at = excluded.created_at
-	`, row.ID.String(), row.UserID.String(), row.AccountID.String(), row.MessageID.String(), row.RuleID.String(), row.RunID.String(), row.Status, nullStr(row.Reason), row.CreatedAt.UTC())
+	`, row.ID.String(), row.UserID.String(), row.AccountID.String(), row.MessageID.String(), row.RuleID.String(), row.RunID.String(), row.Status, nullStr(row.Reason), row.Pending, row.Attempts, row.CreatedAt.UTC())
 	return err
+}
+
+// placeholders returns "?, ?, ..." for n values.
+func forwardPlaceholders(n int) string {
+	return strings.TrimSuffix(strings.Repeat("?, ", n), ", ")
+}
+
+func (r *Repository) ListForwardCandidates(ctx context.Context, userID, accountID uuid.UUID, ruleIDs []uuid.UUID, after *driven.ForwardCandidateCursor, limit int) ([]driven.MessageRow, error) {
+	if len(ruleIDs) == 0 {
+		return nil, nil
+	}
+	if limit <= 0 {
+		limit = 50
+	}
+	args := []any{userID.String(), accountID.String(), userID.String()}
+	for _, id := range ruleIDs {
+		args = append(args, id.String())
+	}
+	keyset := ""
+	if after != nil {
+		keyset = `
+		  AND (m.received_at, m.id) > (?, ?)`
+		args = append(args, after.ReceivedAt.UTC(), after.MessageID.String())
+	}
+	args = append(args, limit)
+	rows, err := r.queryContext(ctx, `
+		SELECT m.id, m.account_id, m.provider_message_id, m.conversation_id, m.received_at, m.subject, m.from_json,
+			m.to_json, m.cc_json, m.to_cc_preview, m.body_text, m.body_fetched_at, m.has_attachments, m.raw_etag,
+			cd.slug, mc.confidence, m.created_at, m.updated_at, m.summary_seen_at, m.forward_seen_at
+		FROM messages m
+		INNER JOIN accounts a ON a.id = m.account_id AND a.user_id = ?
+		LEFT JOIN message_categories mc ON mc.message_id = m.id AND mc.source = 'llm'
+		LEFT JOIN category_definitions cd ON cd.id = mc.category_id
+		WHERE m.account_id = ?
+		  AND EXISTS (
+			SELECT 1 FROM forward_rules r
+			WHERE r.account_id = m.account_id AND r.user_id = ? AND r.enabled
+			  AND r.id IN (`+forwardPlaceholders(len(ruleIDs))+`)
+			  AND m.received_at >= COALESCE(r.apply_from, r.created_at)
+			  AND NOT EXISTS (
+				SELECT 1 FROM forward_audit fa
+				WHERE fa.message_id = m.id AND fa.rule_id = r.id
+				  AND (fa.pending IS NULL OR fa.pending = FALSE)
+			  )
+		  )`+keyset+`
+		ORDER BY m.received_at ASC, m.id ASC
+		LIMIT ?
+	`, args...)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	return scanMessageRows(rows)
+}
+
+func scanForwardAudit(s rowScanner, extra ...any) (driven.ForwardAuditRow, error) {
+	var idStr, userStr, accountStr, messageStr, ruleStr, runStr, status string
+	var reason sql.NullString
+	var pending sql.NullBool
+	var attempts sql.NullInt64
+	var createdAt time.Time
+	dest := append([]any{&idStr, &userStr, &accountStr, &messageStr, &ruleStr, &runStr, &status, &reason, &pending, &attempts, &createdAt}, extra...)
+	if err := s.Scan(dest...); err != nil {
+		return driven.ForwardAuditRow{}, err
+	}
+	row := driven.ForwardAuditRow{
+		Status: status, Reason: nullStringPtr(reason), Pending: pending.Valid && pending.Bool,
+		Attempts: int(attempts.Int64), CreatedAt: createdAt.UTC(),
+	}
+	row.ID, _ = uuid.Parse(idStr)
+	row.UserID, _ = uuid.Parse(userStr)
+	row.AccountID, _ = uuid.Parse(accountStr)
+	row.MessageID, _ = uuid.Parse(messageStr)
+	row.RuleID, _ = uuid.Parse(ruleStr)
+	row.RunID, _ = uuid.Parse(runStr)
+	return row, nil
+}
+
+const forwardAuditColumns = `fa.id, fa.user_id, fa.account_id, fa.message_id, fa.rule_id, fa.run_id, fa.status, fa.reason, fa.pending, fa.attempts, fa.created_at`
+
+func (r *Repository) ListForwardAuditForMessages(ctx context.Context, userID uuid.UUID, messageIDs []uuid.UUID) ([]driven.ForwardAuditRow, error) {
+	if len(messageIDs) == 0 {
+		return nil, nil
+	}
+	args := []any{userID.String()}
+	for _, id := range messageIDs {
+		args = append(args, id.String())
+	}
+	rows, err := r.queryContext(ctx, `
+		SELECT `+forwardAuditColumns+`
+		FROM forward_audit fa
+		WHERE fa.user_id = ? AND fa.message_id IN (`+forwardPlaceholders(len(messageIDs))+`)
+	`, args...)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	out := []driven.ForwardAuditRow{}
+	for rows.Next() {
+		row, err := scanForwardAudit(rows)
+		if err != nil {
+			return nil, err
+		}
+		out = append(out, row)
+	}
+	return out, rows.Err()
+}
+
+func (r *Repository) ForwardRuleStats(ctx context.Context, userID, accountID uuid.UUID) ([]driven.ForwardRuleStats, error) {
+	rows, err := r.queryContext(ctx, `
+		SELECT fa.rule_id,
+			SUM(CASE WHEN fa.status = 'forwarded' THEN 1 ELSE 0 END),
+			SUM(CASE WHEN fa.status = 'failed' AND (fa.pending IS NULL OR fa.pending = FALSE) THEN 1 ELSE 0 END),
+			SUM(CASE WHEN fa.pending = TRUE THEN 1 ELSE 0 END),
+			MAX(CASE WHEN fa.status = 'forwarded' THEN fa.created_at END),
+			MAX(fa.created_at)
+		FROM forward_audit fa
+		WHERE fa.user_id = ? AND fa.account_id = ?
+		GROUP BY fa.rule_id
+	`, userID.String(), accountID.String())
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	out := []driven.ForwardRuleStats{}
+	for rows.Next() {
+		var ruleStr string
+		var forwarded, failed, pending int64
+		var lastForwarded, lastActivity sql.NullTime
+		if err := rows.Scan(&ruleStr, &forwarded, &failed, &pending, &lastForwarded, &lastActivity); err != nil {
+			return nil, err
+		}
+		id, _ := uuid.Parse(ruleStr)
+		out = append(out, driven.ForwardRuleStats{
+			RuleID: id, Forwarded: int(forwarded), Failed: int(failed), Pending: int(pending),
+			LastForwardedAt: nullTimePtr(lastForwarded), LastActivityAt: nullTimePtr(lastActivity),
+		})
+	}
+	return out, rows.Err()
+}
+
+func (r *Repository) ListForwardActivity(ctx context.Context, userID, ruleID uuid.UUID, limit int) ([]driven.ForwardActivityRow, error) {
+	if limit <= 0 || limit > 200 {
+		limit = 50
+	}
+	// Plain non-matches are most of any rule's verdicts and say nothing; what
+	// was sent, what failed and what is still waiting is the activity.
+	rows, err := r.queryContext(ctx, `
+		SELECT `+forwardAuditColumns+`, m.subject, m.from_json, m.received_at
+		FROM forward_audit fa
+		INNER JOIN messages m ON m.id = fa.message_id
+		WHERE fa.user_id = ? AND fa.rule_id = ?
+		  AND (fa.status <> 'skipped' OR fa.pending = TRUE)
+		ORDER BY fa.created_at DESC
+		LIMIT ?
+	`, userID.String(), ruleID.String(), limit)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	out := []driven.ForwardActivityRow{}
+	for rows.Next() {
+		var subject, fromJSON string
+		var received time.Time
+		row, err := scanForwardAudit(rows, &subject, &fromJSON, &received)
+		if err != nil {
+			return nil, err
+		}
+		out = append(out, driven.ForwardActivityRow{ForwardAuditRow: row, Subject: subject, FromJSON: fromJSON, ReceivedAt: received.UTC()})
+	}
+	return out, rows.Err()
 }
 
 func (r *Repository) InsertManualForwardAudit(ctx context.Context, row driven.ManualForwardAuditRow) error {
