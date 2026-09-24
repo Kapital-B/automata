@@ -24,6 +24,7 @@ import (
 	appfacts "github.com/Kapital-B/automata/svc/internal/application/facts"
 	appinterpret "github.com/Kapital-B/automata/svc/internal/application/interpret"
 	appissues "github.com/Kapital-B/automata/svc/internal/application/issues"
+	appjobs "github.com/Kapital-B/automata/svc/internal/application/jobs"
 	appmessages "github.com/Kapital-B/automata/svc/internal/application/messages"
 	appoverview "github.com/Kapital-B/automata/svc/internal/application/overview"
 	"github.com/Kapital-B/automata/svc/internal/application/ports/driven"
@@ -1021,7 +1022,9 @@ type categoryUpsertBody struct {
 	SortOrder   int    `json:"sort_order"`
 }
 
-var slugPattern = regexp.MustCompile(`^[a-z0-9][a-z0-9_-]{1,62}[a-z0-9]$|^[a-z0-9]$`)
+// slugPattern allows 1 to 64 characters. It used to demand either exactly one
+// or at least three, so a category called "HR" or "IT" could not be created.
+var slugPattern = regexp.MustCompile(`^[a-z0-9](?:[a-z0-9_-]{0,62}[a-z0-9])?$`)
 
 func normalizeCategoryInput(body categoryUpsertBody) (categoryUpsertBody, error) {
 	body.Slug = strings.ToLower(strings.TrimSpace(body.Slug))
@@ -1625,16 +1628,23 @@ func (h *Handlers) getSchedules(w http.ResponseWriter, r *http.Request) {
 			s := row.AccountID.String()
 			accountID = &s
 		}
-		out = append(out, map[string]any{
+		item := map[string]any{
 			"id":               row.ID.String(),
 			"name":             row.Name,
 			"account_id":       accountID,
 			"jobs":             row.Jobs,
 			"interval_minutes": row.IntervalMinutes,
 			"enabled":          row.Enabled,
-		})
+			"next_run_at":      row.NextRunAt.UTC().Format(time.RFC3339),
+		}
+		if row.LastRunAt != nil {
+			item["last_run_at"] = row.LastRunAt.UTC().Format(time.RFC3339)
+		}
+		out = append(out, item)
 	}
-	writeJSON(w, http.StatusOK, map[string]any{"chains": out})
+	// The page offers exactly the jobs a schedule can run, in pipeline order,
+	// rather than a free-text field where a typo schedules nothing.
+	writeJSON(w, http.StatusOK, map[string]any{"chains": out, "available_jobs": appjobs.SchedulableJobs})
 }
 
 func (h *Handlers) updateSchedules(w http.ResponseWriter, r *http.Request) {
@@ -1681,20 +1691,18 @@ func (h *Handlers) updateSchedules(w http.ResponseWriter, r *http.Request) {
 		if in.IntervalMinutes > 1440 {
 			in.IntervalMinutes = 1440
 		}
-		jobs := make([]string, 0, len(in.Jobs))
-		for _, j := range in.Jobs {
-			j = strings.TrimSpace(strings.ToLower(j))
-			if j != "" {
-				jobs = append(jobs, j)
-			}
-		}
-		if len(jobs) == 0 {
-			writeJSON(w, http.StatusBadRequest, map[string]string{"error": "schedule chains require at least one job"})
-			return
-		}
 		name := strings.TrimSpace(in.Name)
 		if name == "" {
 			name = "Scheduled chain"
+		}
+		if len(in.Jobs) == 0 {
+			writeJSON(w, http.StatusUnprocessableEntity, map[string]string{"error": fmt.Sprintf("%q needs at least one step", name)})
+			return
+		}
+		jobs, err := appjobs.DefaultRegistry().NormalizeScheduleChain(in.Jobs)
+		if err != nil {
+			writeJSON(w, http.StatusUnprocessableEntity, map[string]string{"error": fmt.Sprintf("%q cannot run: %v", name, err)})
+			return
 		}
 		rows = append(rows, driven.ScheduleChainRow{
 			ID:              id,

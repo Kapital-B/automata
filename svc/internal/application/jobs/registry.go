@@ -219,6 +219,41 @@ func (r *Registry) ValidateChain(steps []string) ([]string, error) {
 	return out, nil
 }
 
+// SchedulableJobs are the jobs a recurring schedule may run, in pipeline
+// order. Each works on one mailbox with no other input; the rest need a
+// specific message or project, or are not mailbox jobs at all.
+var SchedulableJobs = DefaultMailboxChain
+
+// ErrNotSchedulable is a known job that a schedule cannot run.
+var ErrNotSchedulable = errors.New("job cannot be scheduled")
+
+// NormalizeScheduleChain resolves aliases and checks every step is a job a
+// schedule can run, returning canonical names.
+func (r *Registry) NormalizeScheduleChain(steps []string) ([]string, error) {
+	if len(steps) == 0 {
+		return nil, fmt.Errorf("empty job chain")
+	}
+	allowed := map[string]bool{}
+	for _, j := range SchedulableJobs {
+		allowed[j] = true
+	}
+	out := make([]string, 0, len(steps))
+	for _, raw := range steps {
+		name, err := normalizeEnqueueType(raw)
+		if err != nil {
+			return nil, err
+		}
+		if _, ok := r.Get(name); !ok {
+			return nil, fmt.Errorf("%w: %q", ErrUnknownJobType, strings.TrimSpace(raw))
+		}
+		if !allowed[name] {
+			return nil, fmt.Errorf("%w: %q", ErrNotSchedulable, name)
+		}
+		out = append(out, name)
+	}
+	return r.ValidateChain(out)
+}
+
 func ValidateType(raw string) (string, error) {
 	return DefaultRegistry().ValidateType(raw)
 }

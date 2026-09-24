@@ -52,7 +52,7 @@ func newForwardAPI(t *testing.T) *forwardAPI {
 		t.Fatal(err)
 	}
 	h := &Handlers{
-		Log: slog.New(slog.NewTextHandler(io.Discard, nil)), Accounts: repo, Forwards: repo, Messages: repo,
+		Log: slog.New(slog.NewTextHandler(io.Discard, nil)), Accounts: repo, Forwards: repo, Messages: repo, Schedules: repo,
 		ForwardRulesSvc: &appmessages.ForwardRulesService{Messages: repo, Forwards: repo, JobRuns: repo, Effects: memoryjobs.NewStore()},
 		JWTSecret:       []byte("abcdefghijklmnopqrstuvwxyz123456"), DefaultUserID: a.userID,
 	}

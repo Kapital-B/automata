@@ -165,6 +165,9 @@ export type ScheduleChain = {
   jobs: string[];
   interval_minutes: number;
   enabled: boolean;
+  /** Server-set; absent on a chain not saved yet. */
+  next_run_at?: string;
+  last_run_at?: string;
 };
 
 export type MessageItem = {
@@ -1596,7 +1599,7 @@ export async function updateSummarySettings(accessToken: string, payload: Summar
 }
 
 export async function getScheduleSettings(accessToken: string) {
-  return apiRequest<{ chains: ScheduleChain[] }>("/api/settings/schedules", {
+  return apiRequest<{ chains: ScheduleChain[]; available_jobs?: string[] }>("/api/settings/schedules", {
     headers: toAuthHeader(accessToken),
   });
 }

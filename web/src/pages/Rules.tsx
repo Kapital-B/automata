@@ -166,8 +166,8 @@ export default function RulesPage({ accountFilter }: Props) {
         <Info aria-hidden="true" className="mt-0.5 h-4 w-4 shrink-0" />
         <span>
           Rules that are on forward when rules run: when you press <strong className="text-foreground">Run now</strong>, or
-          on a schedule that includes <code className="rounded bg-muted px-1 text-xs">forward_rules</code> in{" "}
-          <Link to="/settings" className="font-medium text-primary underline-offset-4 hover:underline">
+          on a schedule with the <strong className="text-foreground">Run forwarding rules</strong> step in{" "}
+          <Link to="/settings?tab=schedules" className="font-medium text-primary underline-offset-4 hover:underline">
             Settings
           </Link>
           . Switching a rule on does not send anything by itself.

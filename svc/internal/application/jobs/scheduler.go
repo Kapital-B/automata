@@ -154,6 +154,13 @@ func (s *SchedulerService) deleteExpiredOAuthStates(ctx context.Context, now tim
 	return s.OAuthStates.DeleteExpiredStates(ctx, now.Add(-ttl))
 }
 
+func (s *SchedulerService) registry() *Registry {
+	if s.Registry != nil {
+		return s.Registry
+	}
+	return DefaultRegistry()
+}
+
 func (s *SchedulerService) enqueueDueSchedules(ctx context.Context, now time.Time) error {
 	if s.Schedules == nil || s.Accounts == nil || s.Store == nil {
 		s.log().Info("scheduler enqueue skipped", "reason", "schedules/accounts/store not configured")
@@ -168,19 +175,31 @@ func (s *SchedulerService) enqueueDueSchedules(ctx context.Context, now time.Tim
 	if enq == nil {
 		enq = &Enqueuer{Store: s.Store, Registry: s.Registry}
 	}
-	enqueued, skippedLock, skippedEmpty := 0, 0, 0
+	enqueued, skippedLock, skippedEmpty, skippedInvalid := 0, 0, 0, 0
 	for _, chain := range due {
 		if len(chain.Jobs) == 0 || chain.IntervalMinutes <= 0 || !chain.Enabled {
 			skippedEmpty++
+			continue
+		}
+		scheduledFor := chain.NextRunAt.UTC()
+		jobs, err := s.registry().NormalizeScheduleChain(chain.Jobs)
+		if err != nil {
+			// A chain nothing can run is skipped and moved on, not returned:
+			// returning stopped every schedule behind it, and the chain,
+			// never marked run, stayed due and failed the same way each tick.
+			skippedInvalid++
+			s.log().Error("scheduler skipped invalid chain", "schedule_id", chain.ID, "user_id", chain.UserID, "jobs", chain.Jobs, "err", err)
+			if err := s.markScheduleExecuted(ctx, chain.ID, scheduledFor, now, scheduledFor.Add(time.Duration(chain.IntervalMinutes)*time.Minute)); err != nil {
+				return err
+			}
 			continue
 		}
 		accountIDs, err := s.targetAccounts(ctx, chain)
 		if err != nil {
 			return err
 		}
-		scheduledFor := chain.NextRunAt.UTC()
 		for _, accountID := range accountIDs {
-			if _, err := enq.EnqueueChain(ctx, chain.UserID, &accountID, driven.JobTriggerSchedule, chain.Jobs, driven.JobPayload{}, &chain.ID, &scheduledFor); err != nil {
+			if _, err := enq.EnqueueChain(ctx, chain.UserID, &accountID, driven.JobTriggerSchedule, jobs, driven.JobPayload{}, &chain.ID, &scheduledFor); err != nil {
 				if errors.Is(err, driven.ErrJobLockHeld) {
 					// Another active/pending job owns the mailbox lock — skip this
 					// account and keep ticking so pending rewake/lease recovery run.
@@ -215,6 +234,7 @@ func (s *SchedulerService) enqueueDueSchedules(ctx context.Context, now time.Tim
 		"enqueued", enqueued,
 		"skipped_lock", skippedLock,
 		"skipped_empty", skippedEmpty,
+		"skipped_invalid", skippedInvalid,
 	)
 	return nil
 }
