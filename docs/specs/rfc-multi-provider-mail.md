@@ -1,8 +1,8 @@
 # RFC: Multi-Provider Mail
 
-**Status:** Draft — for discussion, not yet scheduled
+**Status:** Implemented (R1–R4) on `feat/project-renovation` — see §11 for where the build differs from the plan
 **Related spec:** [Aurora DSQL](addendum-aurora-dsql.md) §3 (limits), [Redis/Asynq jobs](addendum-redis-asynq-jobs.md), [Project correspondence Wave 1](addendum-project-correspondence-wave1.md) §7 (assignment)
-**Last updated:** 2026-09-23
+**Last updated:** 2026-09-24
 
 Automata reads exactly one kind of mailbox: a Microsoft 365 account, through Graph. Every layer above the adapter assumes it. This RFC proposes what has to change to add Google, IMAP/SMTP, and on-premises Exchange, and argues for where the seam belongs.
 
@@ -279,12 +279,35 @@ IMAP and Gmail need a recorded-fixture or containerised server in CI. The lesson
 
 ## 10. Open questions
 
-1. Does DSQL accept `ALTER COLUMN ... DROP NOT NULL`? (R0)
-2. What does Google currently require for restricted Gmail scopes, and does the first deployment qualify as internal-use in a single Workspace domain? (R0 — it may shorten R2 considerably)
-3. What is the size ceiling for the MIME forward fallback, above which a rule should fail loudly rather than stream the attachment through a worker?
+1. Does DSQL accept `ALTER COLUMN ... DROP NOT NULL`? (R0) — no longer blocking: the build took option A (§11), so this only matters if the placeholder is ever removed.
+2. What does Google currently require for restricted Gmail scopes? Still open for the day R2 goes beyond internal use; internal-first (§5.4) does not need it.
 
 Answered since the first draft, and left here so the reasoning is traceable:
 
 - **On-premises Exchange** — not worth a dedicated adapter (§5.3).
 - **Gmail OAuth registration** — separate client and flow from sign-in, so a user can attach several Google mailboxes (§5.5).
 - **Forward rules without server-side forward** — supported everywhere via the MIME fallback, with the difference surfaced rather than the feature withdrawn (§2).
+- **Size ceiling for the MIME fallback** — 25 MB of raw message, the same for every provider and just under Gmail's own send limit. Above it a forward is a permanent failure (`ErrMailTooLarge`): the rule's effect is recorded as rejected and not retried. An SMTP server's advertised `SIZE`, or a 552 at end of data, is treated the same way.
+
+---
+
+## 11. As built
+
+What shipped, slice by slice, and where it departs from the sections above.
+
+**R0 was not needed.** Both spikes existed to decide migrations; the build needed none.
+
+- **`ms_account_kind`: option A.** Non-Microsoft rows carry `work` as a placeholder that nothing outside the Microsoft adapter reads (`placeholderMsAccountKind` in the accounts service). The API still returns the column; the UI shows it only for `m365` accounts.
+- **No `google_mail` flow.** `oauth_states.flow` is also an unnamed CHECK over a fixed list — the same trap as PR #9 — so every mailbox connect reuses flow `m365_mail`, with the provider carried in the server-side state payload. The separation §5.5 cares about, sign-in versus mailbox connect, is still enforced by the flow; the provider in the payload was written by us, not supplied by the client.
+- **No `provider_config_json` (§5.2).** The accounts table has no such column. IMAP server settings ride in the encrypted credential next to the password, which is the only place they are read. Credentials are disambiguated by the `provider` column (which has no CHECK) and, for Google and IMAP, a `type` tag inside the blob; the Microsoft blob keeps its original untagged shape so existing rows decode unchanged.
+
+**R1.** `driven.Mailbox` with declared capabilities, `driven.MailProvider` to open one from a stored credential, and `appaccounts.MailboxOpener` as the single place that decrypts, picks the adapter, persists rotated credentials, and marks an account `expired` when the provider rejects its credentials outright (`ErrCredentialsRejected`). Services never see a token. The shared contract suite (`mailboxtest`) runs against every adapter; since R3 it also checks that resuming with no new mail returns nothing.
+
+**R2.** Gmail over the REST API: `format=full` to sync, `format=raw` only to reply or forward, history replay for increments with a 404 reported as an expired cursor, forward as the original attached `message/rfc822`. Enabled only when `GOOGLE_MAIL_CLIENT_ID` and its secret are configured; otherwise Google is simply not offered.
+
+**R3.** One IMAP/SMTP adapter, always available. Implicit TLS or STARTTLS only. Both servers are logged into before anything is stored, and failures come back as a 422 naming the cause (`driven.ConnectRejectedError`). Sync walks INBOX by UID under a `UIDVALIDITY`-scoped cursor; a changed `UIDVALIDITY` is an expired cursor. Message ids are the `Message-ID` header, which survives renumbering, with a UID fallback for mail that has none. Removals are not reported (`ReportsRemovals: false`). Every operation dials, works and logs out; nothing is held open across a worker chunk. Tests run the contract against real go-imap and go-smtp servers over TLS in-process, so this provider has CI coverage without a container.
+
+**R4.** Providers declare capabilities without opening a mailbox. `GET /api/accounts/providers` tells the UI what this deployment can connect; the account list carries each account's capabilities. The connect dialog starts from a provider choice, the IMAP form fills servers from well-known presets, expired accounts reconnect through their own provider's flow (the server restores the existing account rather than adding one), and a forward rule on an account without server-side forward warns and asks before it is saved.
+
+**Not built, as planned:** EWS (§5.3), POP3, IMAP IDLE (§5.6), outbound-only accounts. Sent-folder copies for IMAP are also not made: a forward or reply submitted over SMTP appears in the provider's Sent folder only where the provider does that itself (Gmail does; most others do not).
+
