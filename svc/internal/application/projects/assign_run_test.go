@@ -39,7 +39,7 @@ type failingAssignments struct {
 	msgs []driven.MessageRow
 }
 
-func (f *failingAssignments) ListMessagesNeedingAssign(ctx context.Context, userID, accountID uuid.UUID, limit int) ([]driven.MessageRow, error) {
+func (f *failingAssignments) ListMessagesNeedingAssign(ctx context.Context, userID, accountID uuid.UUID, filter driven.AssignCandidateFilter) ([]driven.MessageRow, error) {
 	return f.msgs, nil
 }
 
