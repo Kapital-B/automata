@@ -1,26 +1,30 @@
+import { useMemo, useState } from "react";
+import { Link } from "react-router-dom";
+import { useMutation, useQueries, useQuery, useQueryClient } from "@tanstack/react-query";
+import { Info, Loader2, Play, Plus, Workflow } from "lucide-react";
 import { PageHeader } from "@/components/PageHeader";
 import { AccountBadge } from "@/components/AccountBadge";
 import { Button } from "@/components/ui/button";
-import { Input } from "@/components/ui/input";
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
-import { Switch } from "@/components/ui/switch";
-import {
-  createForwardRule,
-  deleteForwardRule,
-  getForwardAllowlist,
-  listForwardRules,
-  putForwardAllowlist,
-  runForwardRules,
-  type ForwardRule,
-  updateForwardRule,
-} from "@/lib/auth";
-import { AlertTriangle, Plus, ShieldCheck, X } from "lucide-react";
+import { Skeleton } from "@/components/ui/skeleton";
 import type { AccountFilter } from "@/components/AppShell";
 import { useAuth } from "@/components/auth/AuthProvider";
 import { useAccountsData } from "@/hooks/useAccountsData";
-import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { toast } from "@/hooks/use-toast";
-import { useMemo, useState } from "react";
+import {
+  ApiError,
+  deleteForwardRule,
+  getApiHealth,
+  getForwardAllowlist,
+  listCategories,
+  listForwardRules,
+  runForwardRules,
+  updateForwardRule,
+  type ForwardRule,
+} from "@/lib/auth";
+import { RuleCard } from "@/components/rules/RuleCard";
+import { RuleEditorDialog } from "@/components/rules/RuleEditorDialog";
+import { StartRuleDialog } from "@/components/rules/StartRuleDialog";
+import { AllowlistSection } from "@/components/rules/AllowlistSection";
 
 interface Props {
   accountFilter: AccountFilter;
@@ -28,74 +32,57 @@ interface Props {
 
 export default function RulesPage({ accountFilter }: Props) {
   const { accessToken } = useAuth();
-  const { accounts } = useAccountsData();
   const queryClient = useQueryClient();
-  const accountID = accountFilter === "all" ? accounts[0]?.id : accountFilter;
-  const [newAllow, setNewAllow] = useState("");
-  const [newRuleName, setNewRuleName] = useState("Invoice forward");
-  const [newRuleMode, setNewRuleMode] = useState<"logic" | "llm">("logic");
-  const [newForwardTo, setNewForwardTo] = useState("");
-  const [newConditionJSON, setNewConditionJSON] = useState(
-    JSON.stringify({ all: [{ field: "has_attachments", op: "equals", value: true }, { field: "category_slug", op: "equals", value: "invoice" }] }),
+  const { accounts, isLoading: accountsLoading } = useAccountsData();
+  // "All accounts" means all of them: every mailbox's rules are shown and
+  // run, not silently just the first one's.
+  const scope = useMemo(
+    () => (accountFilter === "all" ? accounts : accounts.filter((a) => a.id === accountFilter)),
+    [accountFilter, accounts],
   );
+  const [editor, setEditor] = useState<{ open: boolean; rule?: ForwardRule }>({ open: false });
+  const [starting, setStarting] = useState<ForwardRule | null>(null);
 
   const allowlistQuery = useQuery({
     queryKey: ["forward-allowlist", accessToken],
     queryFn: () => getForwardAllowlist(accessToken!),
     enabled: Boolean(accessToken),
   });
-  const rulesQuery = useQuery({
-    queryKey: ["forward-rules", accessToken, accountID],
-    queryFn: () => listForwardRules(accessToken!, accountID!),
-    enabled: Boolean(accessToken && accountID),
+  const categoriesQuery = useQuery({
+    queryKey: ["categories", accessToken],
+    queryFn: () => listCategories(accessToken!),
+    enabled: Boolean(accessToken),
   });
-  const allowlist = useMemo(() => allowlistQuery.data?.emails ?? [], [allowlistQuery.data?.emails]);
-  const visible = useMemo(() => rulesQuery.data ?? [], [rulesQuery.data]);
-  const getAccount = (id: string) => accounts.find((a) => a.id === id);
-  const selectedAccount = accountID ? getAccount(accountID) : undefined;
-  // Without a server-side forward the rule re-sends a copy from the mailbox:
-  // a new message, with the original attached, that the recipient's spam
-  // filtering judges afresh. Say so before the rule exists.
-  const resendsCopies = Boolean(selectedAccount?.capabilities && !selectedAccount.capabilities.server_side_forward);
-  const resendWarning = selectedAccount
-    ? `${selectedAccount.label} cannot forward server-side, so this rule will send a new message from ${selectedAccount.primaryEmail} with the original attached. It may look different to the recipient, and very large messages cannot be forwarded.`
-    : "";
+  const healthQuery = useQuery({ queryKey: ["api-health"], queryFn: getApiHealth, staleTime: 5 * 60_000 });
+  const rulesQueries = useQueries({
+    queries: scope.map((a) => ({
+      queryKey: ["forward-rules", accessToken, a.id],
+      queryFn: () => listForwardRules(accessToken!, a.id),
+      enabled: Boolean(accessToken),
+    })),
+  });
 
-  const saveAllowlist = useMutation({
-    mutationFn: async (emails: string[]) => {
-      if (!accessToken) throw new Error("Not authenticated");
-      await putForwardAllowlist(accessToken, emails);
-    },
-    onSuccess: () => {
-      void queryClient.invalidateQueries({ queryKey: ["forward-allowlist"] });
-      toast({ title: "Allowlist updated" });
-    },
-    onError: (e) => {
-      toast({
-        title: "Could not update allowlist",
-        description: e instanceof Error ? e.message : "Unknown error",
-        variant: "destructive",
-      });
-    },
-  });
-  const createRule = useMutation({
-    mutationFn: async () => {
-      if (!accessToken || !accountID) throw new Error("No account selected");
-      await createForwardRule(accessToken, accountID, {
-        name: newRuleName,
-        mode: newRuleMode,
-        condition_json: JSON.parse(newConditionJSON),
-        forward_to: newForwardTo,
-        enabled: false,
-      });
-    },
-    onSuccess: () => {
-      toast({ title: "Rule created (paused)", description: "Enable the rule when you are ready to allow auto-forwarding." });
-      void queryClient.invalidateQueries({ queryKey: ["forward-rules"] });
-    },
-    onError: (e) => toast({ title: "Could not create rule", description: e instanceof Error ? e.message : "Unknown error", variant: "destructive" }),
-  });
-  const toggleRule = useMutation({
+  const allowlist = useMemo(() => allowlistQuery.data?.emails ?? [], [allowlistQuery.data?.emails]);
+  const categories = useMemo(
+    () => [...(categoriesQuery.data ?? [])].sort((a, b) => a.sort_order - b.sort_order),
+    [categoriesQuery.data],
+  );
+  const groups = scope.map((account, i) => ({ account, rules: rulesQueries[i]?.data ?? [] }));
+  const allRules = groups.flatMap((g) => g.rules);
+  const rulesLoading = accountsLoading || rulesQueries.some((q) => q.isLoading);
+  const rulesError = rulesQueries.find((q) => q.isError)?.error;
+  const runnable = groups.filter((g) => g.rules.some((r) => r.enabled && !r.blocked_reason));
+  const rulesByAddress = useMemo(() => {
+    const out: Record<string, string[]> = {};
+    for (const r of allRules) (out[r.forward_to] ??= []).push(r.name);
+    return out;
+  }, [allRules]);
+
+  const invalidateRules = () => void queryClient.invalidateQueries({ queryKey: ["forward-rules"] });
+  const fail = (title: string) => (e: unknown) =>
+    toast({ title, description: e instanceof ApiError ? e.message : "Please try again.", variant: "destructive" });
+
+  const switchOff = useMutation({
     mutationFn: async (r: ForwardRule) => {
       if (!accessToken) throw new Error("Not authenticated");
       await updateForwardRule(accessToken, r.id, {
@@ -103,177 +90,170 @@ export default function RulesPage({ accountFilter }: Props) {
         mode: r.mode,
         condition_json: r.condition_json,
         forward_to: r.forward_to,
-        enabled: !r.enabled,
+        enabled: false,
       });
     },
-    onSuccess: () => void queryClient.invalidateQueries({ queryKey: ["forward-rules"] }),
+    onSuccess: (_d, r) => {
+      invalidateRules();
+      toast({ title: `“${r.name}” switched off` });
+    },
+    onError: fail("Could not switch the rule off"),
   });
-  const removeRule = useMutation({
+  const remove = useMutation({
     mutationFn: async (id: string) => {
       if (!accessToken) throw new Error("Not authenticated");
       await deleteForwardRule(accessToken, id);
     },
-    onSuccess: () => void queryClient.invalidateQueries({ queryKey: ["forward-rules"] }),
-  });
-  const runRulesMutation = useMutation({
-    mutationFn: async () => {
-      if (!accessToken || !accountID) throw new Error("No account selected");
-      return runForwardRules(accessToken, accountID);
-    },
     onSuccess: () => {
-      toast({ title: "Forward rules queued" });
-      void queryClient.invalidateQueries({ queryKey: ["runs"] });
+      invalidateRules();
+      toast({ title: "Rule deleted" });
     },
+    onError: fail("Could not delete the rule"),
+  });
+  const runNow = useMutation({
+    mutationFn: async () => {
+      if (!accessToken) throw new Error("Not authenticated");
+      return Promise.all(runnable.map((g) => runForwardRules(accessToken, g.account.id)));
+    },
+    onSuccess: (runs) => {
+      void queryClient.invalidateQueries({ queryKey: ["runs"] });
+      toast({
+        title: runs.length === 1 ? "Forwarding run started" : `${runs.length} forwarding runs started`,
+        description: "Results appear on each rule, and on the Runs page.",
+      });
+    },
+    onError: fail("Could not start forwarding"),
   });
 
+  const busy = switchOff.isPending || remove.isPending;
+  const defaultAccountID = accountFilter === "all" ? scope[0]?.id : accountFilter;
+
   return (
-    <div className="space-y-8">
+    <div className="space-y-10">
       <PageHeader
         eyebrow="Automation"
         title="Forwarding rules"
-        description="New rules stay paused until you enable them — nothing auto-forwards by mistake. Destinations must be on your allowlist; each run is audited per account."
+        description="Forward matching mail to an approved address. Every rule starts paused, and each decision it makes is recorded on the rule."
         actions={
-          <Button
-            size="sm"
-            className="bg-foreground text-background hover:bg-foreground/90"
-            onClick={() => runRulesMutation.mutate()}
-            disabled={!accountID || runRulesMutation.isPending}
-          >
-            Run now
-          </Button>
+          <>
+            <Button
+              size="sm"
+              variant="outline"
+              onClick={() => runNow.mutate()}
+              disabled={runnable.length === 0 || runNow.isPending}
+              title={runnable.length === 0 ? "No rule is switched on" : undefined}
+            >
+              {runNow.isPending ? (
+                <Loader2 aria-hidden="true" className="mr-1.5 h-3.5 w-3.5 animate-spin" />
+              ) : (
+                <Play aria-hidden="true" className="mr-1.5 h-3.5 w-3.5" />
+              )}
+              Run now
+            </Button>
+            <Button
+              size="sm"
+              className="bg-foreground text-background hover:bg-foreground/90"
+              onClick={() => setEditor({ open: true })}
+              disabled={accounts.length === 0}
+            >
+              <Plus aria-hidden="true" className="mr-1.5 h-3.5 w-3.5" /> New rule
+            </Button>
+          </>
         }
       />
-      <div className="surface-card p-4 space-y-3">
-        <h3 className="font-display text-lg">Create rule</h3>
-        <p className="text-xs text-muted-foreground">
-          Rules are created <span className="font-medium text-foreground">paused</span>. Use the toggle on a rule to turn forwarding on after you have reviewed conditions and the allowlist destination.
-        </p>
-        <div className="grid gap-3 md:grid-cols-4">
-          <Input value={newRuleName} onChange={(e) => setNewRuleName(e.target.value)} placeholder="Rule name" />
-          <Select value={newRuleMode} onValueChange={(v) => setNewRuleMode(v as "logic" | "llm")}>
-            <SelectTrigger><SelectValue /></SelectTrigger>
-            <SelectContent>
-              <SelectItem value="logic">logic</SelectItem>
-              <SelectItem value="llm">llm</SelectItem>
-            </SelectContent>
-          </Select>
-          <Input value={newForwardTo} onChange={(e) => setNewForwardTo(e.target.value)} placeholder="forward_to@email.com" />
-          <Button
-            onClick={() => {
-              if (resendsCopies && !window.confirm(`${resendWarning}\n\nCreate the rule anyway?`)) return;
-              createRule.mutate();
-            }}
-            disabled={!accountID || createRule.isPending}
-          >
-            <Plus className="mr-1.5 h-3.5 w-3.5" /> New rule
-          </Button>
-        </div>
-        <Input
-          value={newConditionJSON}
-          onChange={(e) => setNewConditionJSON(e.target.value)}
-          placeholder='{"all":[{"field":"has_attachments","op":"equals","value":true}]} or {"prompt":"looks like invoice"}'
-        />
-        {resendsCopies && (
-          <p role="note" className="flex items-start gap-1.5 rounded-md border border-warning/30 bg-warning/5 px-3 py-2 text-xs text-foreground/80">
-            <AlertTriangle className="mt-0.5 h-3.5 w-3.5 shrink-0" /> {resendWarning}
-          </p>
-        )}
-      </div>
 
-      <ul className="space-y-3">
-        {visible.map((r) => (
-          <li key={r.id} className="surface-card p-5">
-            <div className="flex items-start justify-between gap-4">
-              <div className="min-w-0 flex-1">
-                <div className="flex items-center gap-3">
-                  <h3 className="font-display text-lg font-medium">{r.name}</h3>
-                  {!r.enabled && (
-                    <span className="rounded-full bg-muted px-2 py-0.5 text-[10px] font-medium uppercase tracking-wider text-muted-foreground">
-                      paused
-                    </span>
-                  )}
-                </div>
-                <div className="mt-2 flex flex-wrap items-center gap-3 text-xs text-muted-foreground">
-                  <AccountBadge account={getAccount(r.account_id)} />
-                  <span>·</span>
-                  <span>
-                    Forwards to{" "}
-                    <span className="font-mono text-foreground/80">{r.forward_to}</span>
-                  </span>
-                </div>
-                <div className="mt-3 rounded-md bg-secondary/60 px-3 py-2 font-mono text-xs text-foreground/80">
-                  {JSON.stringify(r.condition_json)}
-                </div>
-                <p className="mt-3 text-xs text-muted-foreground">Mode: {r.mode}</p>
-              </div>
-              <div className="flex items-center gap-2">
-                <Switch checked={r.enabled} onCheckedChange={() => toggleRule.mutate(r)} />
-                <Button size="sm" variant="ghost" onClick={() => removeRule.mutate(r.id)}>Delete</Button>
-              </div>
-            </div>
-          </li>
-        ))}
-      </ul>
+      <p className="flex items-start gap-2 rounded-md border border-border bg-muted/30 px-4 py-3 text-sm text-muted-foreground">
+        <Info aria-hidden="true" className="mt-0.5 h-4 w-4 shrink-0" />
+        <span>
+          Rules that are on forward when rules run: when you press <strong className="text-foreground">Run now</strong>, or
+          on a schedule that includes <code className="rounded bg-muted px-1 text-xs">forward_rules</code> in{" "}
+          <Link to="/settings" className="font-medium text-primary underline-offset-4 hover:underline">
+            Settings
+          </Link>
+          . Switching a rule on does not send anything by itself.
+        </span>
+      </p>
 
-      <section className="space-y-4">
-        <div>
-          <h2 className="font-display text-2xl">Allowlist</h2>
-          <p className="text-sm text-muted-foreground">
-            Forwarding destinations are restricted to these addresses.
-          </p>
-        </div>
-        <div className="flex flex-wrap items-end gap-2">
-          <div className="min-w-[220px] flex-1 space-y-1">
-            <label htmlFor="allowlist-email" className="text-xs text-muted-foreground">
-              Email address
-            </label>
-            <Input
-              id="allowlist-email"
-              value={newAllow}
-              onChange={(e) => setNewAllow(e.target.value)}
-              placeholder="accounting@example.com"
-              onKeyDown={(e) => {
-                if (e.key === "Enter") {
-                  e.preventDefault();
-                  const trimmed = newAllow.trim().toLowerCase();
-                  if (!trimmed || saveAllowlist.isPending) return;
-                  const next = Array.from(new Set([...allowlist, trimmed]));
-                  saveAllowlist.mutate(next);
-                  setNewAllow("");
-                }
-              }}
-            />
+      <section aria-labelledby="rules-heading" className="space-y-4">
+        <h2 id="rules-heading" className="sr-only">
+          Rules
+        </h2>
+        {rulesLoading ? (
+          <div aria-label="Loading rules" className="surface-card space-y-2 p-5">
+            <Skeleton className="h-5 w-48" />
+            <Skeleton className="h-4 w-72" />
           </div>
-          <Button
-            type="button"
-            size="sm"
-            variant="outline"
-            disabled={saveAllowlist.isPending || !newAllow.trim()}
-            onClick={() => {
-              const trimmed = newAllow.trim().toLowerCase();
-              if (!trimmed) return;
-              const next = Array.from(new Set([...allowlist, trimmed]));
-              saveAllowlist.mutate(next);
-              setNewAllow("");
-            }}
-          >
-            <ShieldCheck className="mr-1.5 h-3.5 w-3.5" /> Add address
-          </Button>
-        </div>
-        <ul className="surface-card divide-y divide-border/70 overflow-hidden">
-          {allowlist.map((email) => (
-            <li key={email} className="flex items-center justify-between px-4 py-3">
-              <span className="font-mono text-sm">{email}</span>
-              <button
-                className="text-muted-foreground transition hover:text-destructive"
-                onClick={() => saveAllowlist.mutate(allowlist.filter((v) => v !== email))}
+        ) : rulesError ? (
+          <div role="alert" className="surface-card p-5 text-sm text-destructive">
+            Could not load rules: {rulesError instanceof Error ? rulesError.message : "unknown error"}
+          </div>
+        ) : scope.length === 0 ? (
+          <div className="surface-card p-5 text-sm text-muted-foreground">
+            Connect a mailbox on the{" "}
+            <Link to="/accounts" className="font-medium text-primary underline-offset-4 hover:underline">
+              Accounts
+            </Link>{" "}
+            page first.
+          </div>
+        ) : allRules.length === 0 ? (
+          <div className="surface-card flex flex-col items-start gap-4 p-5 sm:flex-row sm:items-center sm:justify-between">
+            <div className="flex items-center gap-3">
+              <span
+                aria-hidden="true"
+                className="flex h-10 w-10 items-center justify-center rounded-md border border-border bg-secondary"
               >
-                <X className="h-4 w-4" />
-              </button>
-            </li>
-          ))}
-        </ul>
+                <Workflow className="h-5 w-5" />
+              </span>
+              <p className="text-sm text-muted-foreground">No rules yet.</p>
+            </div>
+            <Button size="sm" onClick={() => setEditor({ open: true })}>
+              <Plus aria-hidden="true" className="mr-1.5 h-3.5 w-3.5" /> New rule
+            </Button>
+          </div>
+        ) : (
+          groups
+            .filter((g) => g.rules.length > 0)
+            .map((g) => (
+              <div key={g.account.id} className="space-y-3">
+                {scope.length > 1 && (
+                  <h3 className="text-sm">
+                    <AccountBadge account={g.account} showEmail size="md" />
+                  </h3>
+                )}
+                <ul className="space-y-3">
+                  {g.rules.map((r) => (
+                    <RuleCard
+                      key={r.id}
+                      rule={r}
+                      account={g.account}
+                      categories={categories}
+                      showAccount={false}
+                      busy={busy}
+                      onSwitchOn={() => setStarting(r)}
+                      onSwitchOff={() => switchOff.mutate(r)}
+                      onEdit={() => setEditor({ open: true, rule: r })}
+                      onDelete={() => remove.mutate(r.id)}
+                    />
+                  ))}
+                </ul>
+              </div>
+            ))
+        )}
       </section>
+
+      <AllowlistSection allowlist={allowlist} rulesByAddress={rulesByAddress} />
+
+      <RuleEditorDialog
+        open={editor.open}
+        onOpenChange={(open) => setEditor((e) => ({ ...e, open }))}
+        rule={editor.rule}
+        accounts={editor.rule ? accounts : scope}
+        defaultAccountID={defaultAccountID}
+        allowlist={allowlist}
+        categories={categories}
+        aiAvailable={healthQuery.data?.llm !== false}
+      />
+      <StartRuleDialog rule={starting} onOpenChange={(open) => !open && setStarting(null)} />
     </div>
   );
 }

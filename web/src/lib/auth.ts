@@ -209,14 +209,73 @@ export type DraftSendAttempt = {
   created_at: string;
 };
 
+export type ForwardField = "category_slug" | "has_attachments" | "from" | "subject";
+export type ForwardOp = "equals" | "contains" | "domain";
+
+export type ForwardPredicate = {
+  field: ForwardField;
+  op: ForwardOp;
+  value: string | boolean;
+};
+
+export type ForwardCondition = { all: ForwardPredicate[] } | { prompt: string };
+
+export type ForwardRuleStats = {
+  forwarded: number;
+  failed: number;
+  pending: number;
+  last_forwarded_at?: string | null;
+  last_activity_at?: string | null;
+};
+
 export type ForwardRule = {
   id: string;
   account_id: string;
   name: string;
   mode: "logic" | "llm";
-  condition_json: Record<string, unknown>;
+  condition_json: ForwardCondition;
   forward_to: string;
   enabled: boolean;
+  /** Mail received from this time on is in the rule's scope. */
+  applies_from: string;
+  created_at: string;
+  /** Why an enabled rule is not running, if it is not. */
+  blocked_reason?: string;
+  stats: ForwardRuleStats;
+};
+
+/** Where a rule being switched on begins: new mail only, or existing mail too. */
+export type ForwardStart = "new" | "existing";
+
+export type ForwardRuleInput = {
+  name: string;
+  mode: "logic" | "llm";
+  condition_json: ForwardCondition;
+  forward_to: string;
+  enabled: boolean;
+  start?: ForwardStart;
+};
+
+export type ForwardActivity = {
+  message_id: string;
+  account_id: string;
+  subject: string;
+  from_name: string;
+  from_address: string;
+  received_at: string;
+  status: "forwarded" | "skipped" | "failed";
+  pending: boolean;
+  attempts: number;
+  reason: string;
+  at: string;
+};
+
+export type ForwardPreview = {
+  in_scope: number;
+  /** Absent for an AI rule, which cannot be counted without the model. */
+  matched?: number;
+  capped: boolean;
+  samples: { subject: string; from_name: string; from_address: string; received_at: string }[];
 };
 
 export type ListMessagesFilter = {
@@ -1699,11 +1758,7 @@ export async function listForwardRules(accessToken: string, accountID: string) {
   });
 }
 
-export async function createForwardRule(
-  accessToken: string,
-  accountID: string,
-  payload: Omit<ForwardRule, "id" | "account_id">,
-) {
+export async function createForwardRule(accessToken: string, accountID: string, payload: ForwardRuleInput) {
   return apiRequest<{ id: string }>(`/api/accounts/${accountID}/forward-rules`, {
     method: "POST",
     headers: toAuthHeader(accessToken),
@@ -1711,11 +1766,8 @@ export async function createForwardRule(
   });
 }
 
-export async function updateForwardRule(
-  accessToken: string,
-  ruleID: string,
-  payload: Omit<ForwardRule, "id" | "account_id">,
-) {
+/** Replaces a rule's settings. Pass start only when switching it on. */
+export async function updateForwardRule(accessToken: string, ruleID: string, payload: ForwardRuleInput) {
   return apiRequest<{ status: string }>(`/api/forward-rules/${ruleID}`, {
     method: "PATCH",
     headers: toAuthHeader(accessToken),
@@ -1731,6 +1783,25 @@ export async function deleteForwardRule(accessToken: string, ruleID: string) {
   if (!response.ok) {
     await parseApiError(response);
   }
+}
+
+export async function listForwardRuleActivity(accessToken: string, ruleID: string) {
+  return apiRequest<ForwardActivity[]>(`/api/forward-rules/${ruleID}/activity`, {
+    headers: toAuthHeader(accessToken),
+  });
+}
+
+/** Counts what a rule would reach in existing mail, before switching it on. */
+export async function previewForwardRule(
+  accessToken: string,
+  accountID: string,
+  payload: Pick<ForwardRuleInput, "mode" | "condition_json">,
+) {
+  return apiRequest<ForwardPreview>(`/api/accounts/${accountID}/forward-rules/preview`, {
+    method: "POST",
+    headers: toAuthHeader(accessToken),
+    body: JSON.stringify(payload),
+  });
 }
 
 export async function runForwardRules(accessToken: string, accountID: string) {
