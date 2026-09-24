@@ -1657,6 +1657,148 @@ func runNotRelevantTests(t *testing.T, factory Factory) {
 		}
 	})
 
+	// Forward rules keep one verdict per (message, rule), and a run reads only
+	// messages some rule has not finished with, within that rule's scope.
+	t.Run("forward_candidates_follow_scope_and_verdicts", func(t *testing.T) {
+		h := factory(t)
+		ctx := context.Background()
+		now := time.Now().UTC().Truncate(time.Millisecond)
+		userID, _, accountID := seedUserAccount(t, h.Repo, uuid.New(), now)
+		if err := h.Repo.ReplaceForwardAllowlist(ctx, userID, []string{"dest@example.com"}); err != nil {
+			t.Fatal(err)
+		}
+		at := func(d time.Duration) time.Time { return now.Add(-d) }
+		old := insertMsg(t, h.Repo, accountID, "old", "c1", "b", at(72*time.Hour))
+		mid := insertMsg(t, h.Repo, accountID, "mid", "c2", "b", at(48*time.Hour))
+		recent := insertMsg(t, h.Repo, accountID, "recent", "c3", "b", at(time.Hour))
+
+		epoch := time.Unix(0, 0).UTC()
+		since := at(50 * time.Hour)
+		rule := func(applyFrom *time.Time, enabled bool) uuid.UUID {
+			id := uuid.New()
+			if err := h.Repo.CreateForwardRule(ctx, driven.ForwardRuleRow{
+				ID: id, UserID: userID, AccountID: accountID, Name: "r", Mode: "logic",
+				ConditionJSON: `{"all":[{"field":"subject","op":"contains","value":"x"}]}`, ForwardTo: "dest@example.com",
+				Enabled: enabled, ApplyFrom: applyFrom, CreatedAt: now, UpdatedAt: now,
+			}); err != nil {
+				t.Fatal(err)
+			}
+			return id
+		}
+		everything := rule(&epoch, true)
+		scoped := rule(&since, true)
+
+		ids := func(msgs []driven.MessageRow) []uuid.UUID {
+			out := []uuid.UUID{}
+			for _, m := range msgs {
+				out = append(out, m.ID)
+			}
+			return out
+		}
+		list := func(ruleIDs []uuid.UUID, after *driven.ForwardCandidateCursor, limit int) []driven.MessageRow {
+			msgs, err := h.Repo.ListForwardCandidates(ctx, userID, accountID, ruleIDs, after, limit)
+			if err != nil {
+				t.Fatal(err)
+			}
+			return msgs
+		}
+		// Scope: the scoped rule alone does not reach the old message.
+		if got := ids(list([]uuid.UUID{scoped}, nil, 10)); fmt.Sprint(got) != fmt.Sprint([]uuid.UUID{mid, recent}) {
+			t.Fatalf("scoped candidates = %v, want mid, recent", got)
+		}
+		// Oldest first, and the keyset continues after the cursor.
+		first := list([]uuid.UUID{everything, scoped}, nil, 1)
+		if len(first) != 1 || first[0].ID != old {
+			t.Fatalf("first page = %v, want old", ids(first))
+		}
+		rest := list([]uuid.UUID{everything, scoped}, &driven.ForwardCandidateCursor{ReceivedAt: first[0].ReceivedAt, MessageID: first[0].ID}, 10)
+		if fmt.Sprint(ids(rest)) != fmt.Sprint([]uuid.UUID{mid, recent}) {
+			t.Fatalf("after cursor = %v, want mid, recent", ids(rest))
+		}
+
+		// A final verdict takes a (message, rule) out; a pending one does not.
+		// SQLite ties a verdict to a recorded run.
+		runID := uuid.New()
+		ensureLegacyJobRunIfPresent(t, h.DB, runID, accountID, now)
+		verdict := func(msg, rule uuid.UUID, status string, pending bool, attempts int) {
+			reason := status
+			if err := h.Repo.InsertForwardAudit(ctx, driven.ForwardAuditRow{
+				ID: uuid.New(), UserID: userID, AccountID: accountID, MessageID: msg, RuleID: rule, RunID: runID,
+				Status: status, Reason: &reason, Pending: pending, Attempts: attempts, CreatedAt: now,
+			}); err != nil {
+				t.Fatal(err)
+			}
+		}
+		verdict(old, everything, "skipped", false, 0)
+		verdict(recent, everything, "forwarded", false, 0)
+		verdict(recent, scoped, "failed", true, 1)
+		verdict(mid, everything, "skipped", false, 0)
+		verdict(mid, scoped, "skipped", false, 0)
+		if got := ids(list([]uuid.UUID{everything, scoped}, nil, 10)); fmt.Sprint(got) != fmt.Sprint([]uuid.UUID{recent}) {
+			t.Fatalf("candidates = %v, want only recent (pending for scoped)", got)
+		}
+		// Upsert: the same pair updates in place.
+		verdict(recent, scoped, "forwarded", false, 1)
+		if got := list([]uuid.UUID{everything, scoped}, nil, 10); len(got) != 0 {
+			t.Fatalf("candidates = %v, want none once every verdict is final", ids(got))
+		}
+		// A disabled rule contributes nothing, even if named.
+		disabled := rule(&epoch, false)
+		if got := list([]uuid.UUID{disabled}, nil, 10); len(got) != 0 {
+			t.Fatalf("a disabled rule produced candidates: %v", ids(got))
+		}
+
+		rows, err := h.Repo.ListForwardAuditForMessages(ctx, userID, []uuid.UUID{recent})
+		if err != nil || len(rows) != 2 {
+			t.Fatalf("verdicts for recent = %+v, %v", rows, err)
+		}
+		for _, r := range rows {
+			if r.RuleID == scoped && (r.Status != "forwarded" || r.Pending || r.Attempts != 1) {
+				t.Fatalf("scoped verdict = %+v", r)
+			}
+		}
+		stats, err := h.Repo.ForwardRuleStats(ctx, userID, accountID)
+		if err != nil {
+			t.Fatal(err)
+		}
+		byRule := map[uuid.UUID]driven.ForwardRuleStats{}
+		for _, s := range stats {
+			byRule[s.RuleID] = s
+		}
+		if s := byRule[everything]; s.Forwarded != 1 || s.Failed != 0 || s.LastForwardedAt == nil {
+			t.Fatalf("stats(everything) = %+v", s)
+		}
+		activity, err := h.Repo.ListForwardActivity(ctx, userID, everything, 10)
+		if err != nil || len(activity) != 1 || activity[0].Subject != "recent" {
+			t.Fatalf("activity = %+v, %v; want only the forward, not the skips", activity, err)
+		}
+		rules, err := h.Repo.ListForwardRules(ctx, userID, accountID)
+		if err != nil {
+			t.Fatal(err)
+		}
+		for _, r := range rules {
+			if r.ID == scoped && (r.ApplyFrom == nil || !r.ApplyFrom.Equal(since)) {
+				t.Fatalf("apply_from round trip = %v, want %v", r.ApplyFrom, since)
+			}
+		}
+		// Updating without a start keeps it.
+		for _, r := range rules {
+			if r.ID == scoped {
+				r.ApplyFrom = nil
+				r.Name = "renamed"
+				if err := h.Repo.UpdateForwardRule(ctx, r); err != nil {
+					t.Fatal(err)
+				}
+			}
+		}
+		rules, _ = h.Repo.ListForwardRules(ctx, userID, accountID)
+		for _, r := range rules {
+			if r.ID == scoped && (r.ApplyFrom == nil || !r.ApplyFrom.Equal(since) || r.Name != "renamed") {
+				t.Fatalf("after update = %+v", r)
+			}
+		}
+	})
+
 	// Automatic assignment may place what nobody decided and refresh its own
 	// provisional guesses, but a user's decision is final: it re-scored
 	// dismissed and filed threads and put them back in triage.

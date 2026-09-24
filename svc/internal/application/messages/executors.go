@@ -3,7 +3,6 @@ package messages
 import (
 	"context"
 	"encoding/json"
-	"errors"
 	"fmt"
 	"strconv"
 	"strings"
@@ -356,173 +355,39 @@ type ForwardRulesExecutor struct {
 
 func (e *ForwardRulesExecutor) JobType() string { return "forward_rules" }
 
+// forwardChunkJob is how many candidates one job chunk handles.
+const forwardChunkJob = 10
+
 func (e *ForwardRulesExecutor) ExecuteChunk(ctx context.Context, run driven.RunContext) (driven.ChunkResult, error) {
 	if e == nil || e.Service == nil || e.Store == nil {
 		return driven.ChunkResult{}, fmt.Errorf("forward rules executor not configured")
 	}
-	if run.AccountID == nil || *run.AccountID == uuid.Nil {
-		return driven.ChunkResult{}, fmt.Errorf("account_id is required")
+	var after *driven.ForwardCandidateCursor
+	// A cursor from before the keyset (an offset) does not decode; starting
+	// over is safe because finished verdicts are skipped.
+	if at, id, ok := jobkit.DecodeKeysetCursor(run.Cursor); ok {
+		after = &driven.ForwardCandidateCursor{ReceivedAt: at, MessageID: id}
 	}
-	offset := jobkit.DecodeOffsetCursor(run.Cursor)
-	rows, err := e.Service.Messages.ListMessages(ctx, run.UserID, driven.MessageListFilter{
-		AccountID: run.AccountID,
-		Limit:     11,
-		Offset:    offset,
-	})
+	res, err := e.Service.RunChunk(ctx, run, e.Store, after, forwardChunkJob)
 	if err != nil {
-		return driven.ChunkResult{}, err
-	}
-	done := len(rows) <= 10
-	if len(rows) > 10 {
-		rows = rows[:10]
-	}
-	allowlistRows, err := e.Service.Forwards.ListForwardAllowlist(ctx, run.UserID)
-	if err != nil {
-		return driven.ChunkResult{}, err
-	}
-	allowed := map[string]struct{}{}
-	for _, row := range allowlistRows {
-		allowed[strings.ToLower(strings.TrimSpace(row.Email))] = struct{}{}
-	}
-	rules, err := e.Service.Forwards.ListForwardRules(ctx, run.UserID, *run.AccountID)
-	if err != nil {
-		return driven.ChunkResult{}, err
-	}
-	var box driven.Mailbox
-	needMailbox := false
-	for _, row := range rows {
-		if row.ForwardSeenAt == nil {
-			needMailbox = true
-			break
-		}
-	}
-	if needMailbox {
-		box, _, err = e.Service.Mailboxes.Open(ctx, run.UserID, *run.AccountID)
-		if err != nil {
-			return driven.ChunkResult{}, err
-		}
-	}
-	forwarded, skipped, failed := 0, 0, 0
-	seenMessageIDs := make([]uuid.UUID, 0, len(rows))
-	for _, msg := range rows {
-		if msg.ForwardSeenAt != nil {
-			continue
-		}
-		messageForwarded := false
-		messageHadFailure := false
-		for _, rule := range rules {
-			if !rule.Enabled {
-				continue
-			}
-			if _, ok := allowed[strings.ToLower(strings.TrimSpace(rule.ForwardTo))]; !ok {
-				reason := "forward_to not in allowlist"
-				_ = e.insertAudit(ctx, run, msg.ID, rule.ID, "failed", &reason)
-				failed++
-				messageHadFailure = true
-				continue
-			}
-			match, reason, err := e.Service.ruleMatches(ctx, rule, msg)
-			if err != nil {
-				msgErr := err.Error()
-				_ = e.insertAudit(ctx, run, msg.ID, rule.ID, "failed", &msgErr)
-				failed++
-				messageHadFailure = true
-				continue
-			}
-			if !match {
-				_ = e.insertAudit(ctx, run, msg.ID, rule.ID, "skipped", &reason)
-				skipped++
-				continue
-			}
-			effectKey := fmt.Sprintf("forward:%s:%s:%s", msg.ID.String(), rule.ID.String(), strings.ToLower(strings.TrimSpace(rule.ForwardTo)))
-			effect, err := e.Store.ClaimEffect(ctx, driven.ClaimEffectInput{
-				AccountID: *run.AccountID,
-				EffectKey: effectKey,
-				JobID:     run.RunID,
-				AttemptID: run.AttemptID,
-				Now:       time.Now().UTC(),
-			})
-			if err != nil {
-				if err == driven.ErrEffectAlreadyClaimed {
-					existing, getErr := e.Store.GetEffect(ctx, *run.AccountID, effectKey)
-					if getErr == nil && existing != nil && existing.State != driven.EffectUnknown {
-						messageForwarded = true
-					}
-					continue
-				}
-				return driven.ChunkResult{}, err
-			}
-			if err := box.Forward(ctx, msg.ProviderMessageID, rule.ForwardTo, ""); err != nil {
-				// The effect ledger is what stops a forward being sent twice,
-				// so the state recorded here has to say what we know.
-				if errors.Is(err, driven.ErrMailTooLarge) {
-					// Permanent and nothing sent: rejected, recorded, and not
-					// retried — the message is marked seen below.
-					raw, _ := json.Marshal(map[string]any{"status": "too_large", "error": err.Error()})
-					_, _ = e.Store.UpdateEffect(ctx, *run.AccountID, effectKey, effect.Revision, driven.EffectRejected, string(raw), time.Now().UTC())
-					msgErr := err.Error()
-					_ = e.insertAudit(ctx, run, msg.ID, rule.ID, "failed", &msgErr)
-					failed++
-					continue
-				}
-				if errors.Is(err, driven.ErrMailNotSent) {
-					// Nothing reached the provider, so a retry cannot duplicate.
-					raw, _ := json.Marshal(map[string]any{"status": "resolve_failed", "error": err.Error()})
-					_, _ = e.Store.UpdateEffect(ctx, *run.AccountID, effectKey, effect.Revision, driven.EffectRetryable, string(raw), time.Now().UTC())
-					return driven.ChunkResult{Retryable: true, ErrorMessage: err.Error()}, err
-				}
-				raw, _ := json.Marshal(map[string]any{"status": "unknown", "error": err.Error()})
-				_, _ = e.Store.UpdateEffect(ctx, *run.AccountID, effectKey, effect.Revision, driven.EffectUnknown, string(raw), time.Now().UTC())
-				msgErr := err.Error()
-				_ = e.insertAudit(ctx, run, msg.ID, rule.ID, "failed", &msgErr)
-				failed++
-				messageHadFailure = true
-				continue
-			}
-			raw, _ := json.Marshal(map[string]any{"status": "forwarded", "forward_to": rule.ForwardTo})
-			_, _ = e.Store.UpdateEffect(ctx, *run.AccountID, effectKey, effect.Revision, driven.EffectSucceededPendingAudit, string(raw), time.Now().UTC())
-			okReason := "rule matched and message forwarded"
-			_ = e.insertAudit(ctx, run, msg.ID, rule.ID, "forwarded", &okReason)
-			forwarded++
-			messageForwarded = true
-		}
-		if messageForwarded || !messageHadFailure {
-			seenMessageIDs = append(seenMessageIDs, msg.ID)
-		}
-	}
-	if err := e.Service.Messages.MarkMessagesForwardSeen(ctx, run.UserID, seenMessageIDs, time.Now().UTC()); err != nil {
 		return driven.ChunkResult{}, err
 	}
 	result := driven.ChunkResult{
 		ProgressDelta: driven.JobProgress{
-			Processed: len(rows),
-			Failed:    failed,
+			Processed: res.Processed,
+			Failed:    res.Failed,
 			Detail: map[string]interface{}{
-				"forwarded":   forwarded,
-				"skipped":     skipped,
-				"marked_seen": len(seenMessageIDs),
+				"forwarded": res.Forwarded,
+				"skipped":   res.Skipped,
+				"pending":   res.Pending,
 			},
 		},
-		Done: done,
+		Done: res.Done,
 	}
-	if !done {
-		result.NextCursor = jobkit.EncodeOffsetCursor(offset + len(rows))
+	if !res.Done && res.Next != nil {
+		result.NextCursor = jobkit.EncodeKeysetCursor(res.Next.ReceivedAt, res.Next.MessageID)
 	}
 	return result, nil
-}
-
-func (e *ForwardRulesExecutor) insertAudit(ctx context.Context, run driven.RunContext, messageID, ruleID uuid.UUID, status string, reason *string) error {
-	return e.Service.Forwards.InsertForwardAudit(ctx, driven.ForwardAuditRow{
-		ID:        jobkit.DeterministicID(run.RunID, "forward_audit", messageID.String(), ruleID.String()),
-		UserID:    run.UserID,
-		AccountID: *run.AccountID,
-		MessageID: messageID,
-		RuleID:    ruleID,
-		RunID:     run.RunID,
-		Status:    status,
-		Reason:    reason,
-		CreatedAt: time.Now().UTC(),
-	})
 }
 
 func firstNonEmpty(values ...string) string {

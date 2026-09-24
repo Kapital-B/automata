@@ -123,7 +123,6 @@ type MessageListFilter struct {
 	Category          string
 	Since             *time.Time
 	OnlySummaryUnseen bool
-	OnlyForwardUnseen bool
 	OmitBody          bool
 	Limit             int
 	Offset            int
@@ -274,10 +273,18 @@ type ForwardRuleRow struct {
 	ConditionJSON string
 	ForwardTo     string
 	Enabled       bool
-	CreatedAt     time.Time
-	UpdatedAt     time.Time
+	// ApplyFrom is the earliest received time a rule considers. It is set
+	// when the rule is switched on — to that moment for "new mail only", or
+	// to the epoch to include existing mail — so switching a rule on never
+	// quietly reaches back through the whole mailbox. Nil is treated as the
+	// rule's creation time.
+	ApplyFrom *time.Time
+	CreatedAt time.Time
+	UpdatedAt time.Time
 }
 
+// ForwardAuditRow is a rule's verdict on one message. One row per (message,
+// rule): it is how the engine knows a rule has finished with a message.
 type ForwardAuditRow struct {
 	ID        uuid.UUID
 	UserID    uuid.UUID
@@ -285,9 +292,42 @@ type ForwardAuditRow struct {
 	MessageID uuid.UUID
 	RuleID    uuid.UUID
 	RunID     uuid.UUID
-	Status    string
+	Status    string // forwarded | skipped | failed
 	Reason    *string
+	// Pending marks a verdict that is not final: a send that did not go out
+	// and will be retried, or a category rule waiting for the message to be
+	// categorised. A later run looks at the message again.
+	Pending bool
+	// Attempts counts sends that failed without going out, so a message that
+	// can never be sent is given up on rather than retried forever.
+	Attempts  int
 	CreatedAt time.Time
+}
+
+// ForwardCandidateCursor is the keyset forward runs page by: oldest first,
+// so mail that arrives mid-run lands after the cursor rather than shifting it.
+type ForwardCandidateCursor struct {
+	ReceivedAt time.Time
+	MessageID  uuid.UUID
+}
+
+// ForwardRuleStats summarises what a rule has done.
+type ForwardRuleStats struct {
+	RuleID          uuid.UUID
+	Forwarded       int
+	Failed          int
+	Pending         int
+	LastForwardedAt *time.Time
+	LastActivityAt  *time.Time
+}
+
+// ForwardActivityRow is one audit verdict with enough of the message to
+// recognise it.
+type ForwardActivityRow struct {
+	ForwardAuditRow
+	Subject    string
+	FromJSON   string
+	ReceivedAt time.Time
 }
 
 type ManualForwardAuditRow struct {
@@ -340,7 +380,6 @@ type MessageRepository interface {
 	ListMessages(ctx context.Context, userID uuid.UUID, filter MessageListFilter) ([]MessageRow, error)
 	GetMessage(ctx context.Context, userID uuid.UUID, id uuid.UUID) (*MessageRow, error)
 	MarkMessagesSummarySeen(ctx context.Context, userID uuid.UUID, messageIDs []uuid.UUID, at time.Time) error
-	MarkMessagesForwardSeen(ctx context.Context, userID uuid.UUID, messageIDs []uuid.UUID, at time.Time) error
 	// ListMessagesNeedingContactResolution returns messages on an account
 	// whose From/To/Cc have not been turned into contacts yet, oldest first so
 	// a backlog drains in the order it arrived.
@@ -1028,9 +1067,22 @@ type ForwardRepository interface {
 	ReplaceForwardAllowlist(ctx context.Context, userID uuid.UUID, emails []string) error
 	ListForwardRules(ctx context.Context, userID, accountID uuid.UUID) ([]ForwardRuleRow, error)
 	CreateForwardRule(ctx context.Context, row ForwardRuleRow) error
+	// UpdateForwardRule replaces a rule's settings. A nil ApplyFrom keeps the
+	// rule's current start.
 	UpdateForwardRule(ctx context.Context, row ForwardRuleRow) error
 	DeleteForwardRule(ctx context.Context, userID, ruleID uuid.UUID) error
 	ListForwardAuditByRun(ctx context.Context, userID, runID uuid.UUID) ([]ForwardAuditRow, error)
+	// InsertForwardAudit upserts the verdict for (message, rule).
 	InsertForwardAudit(ctx context.Context, row ForwardAuditRow) error
+	// ListForwardCandidates returns messages at least one of ruleIDs has not
+	// finished with: in the rule's scope (received at or after its
+	// ApplyFrom) and without a final verdict. Oldest first, after cursor.
+	ListForwardCandidates(ctx context.Context, userID, accountID uuid.UUID, ruleIDs []uuid.UUID, after *ForwardCandidateCursor, limit int) ([]MessageRow, error)
+	// ListForwardAuditForMessages returns every verdict on these messages.
+	ListForwardAuditForMessages(ctx context.Context, userID uuid.UUID, messageIDs []uuid.UUID) ([]ForwardAuditRow, error)
+	// ForwardRuleStats summarises each rule on the account.
+	ForwardRuleStats(ctx context.Context, userID, accountID uuid.UUID) ([]ForwardRuleStats, error)
+	// ListForwardActivity returns a rule's most recent verdicts, newest first.
+	ListForwardActivity(ctx context.Context, userID, ruleID uuid.UUID, limit int) ([]ForwardActivityRow, error)
 	InsertManualForwardAudit(ctx context.Context, row ManualForwardAuditRow) error
 }

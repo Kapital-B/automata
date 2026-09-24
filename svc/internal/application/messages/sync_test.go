@@ -34,6 +34,7 @@ type fakeMailbox struct {
 
 	forwardCalls int
 	forwardErr   error
+	forwardedTo  []string
 	replyCalls   int
 	replyErr     error
 }
@@ -67,6 +68,9 @@ func (f *fakeMailbox) Reply(ctx context.Context, providerMessageID, body string)
 
 func (f *fakeMailbox) Forward(ctx context.Context, providerMessageID, to, comment string) error {
 	f.forwardCalls++
+	if f.forwardErr == nil {
+		f.forwardedTo = append(f.forwardedTo, to)
+	}
 	return f.forwardErr
 }
 
