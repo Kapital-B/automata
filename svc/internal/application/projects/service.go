@@ -582,7 +582,7 @@ func (s *AssignService) AssignAfterSync(ctx context.Context, userID, accountID u
 	if err != nil {
 		return err
 	}
-	msgs, err := s.Assignments.ListMessagesNeedingAssign(ctx, userID, accountID, 500)
+	msgs, err := s.Assignments.ListMessagesNeedingAssign(ctx, userID, accountID, driven.AssignCandidateFilter{Limit: 500})
 	if err != nil {
 		return err
 	}
@@ -655,12 +655,16 @@ func (s *AssignService) AssignAccountChunk(ctx context.Context, run driven.RunCo
 	if err != nil {
 		return nil, err
 	}
-	filter := driven.MessageListFilter{AccountID: run.AccountID, Limit: 26}
+	// Only what nobody has decided: walking every message here re-scored
+	// threads the operator had already filed or dismissed, and the model's
+	// provisional row replaced their decision and put the thread back in
+	// triage.
+	filter := driven.AssignCandidateFilter{Limit: 26}
 	if at, id, ok := jobkit.DecodeKeysetCursor(run.Cursor); ok {
 		filter.BeforeReceivedAt = &at
 		filter.BeforeID = &id
 	}
-	msgs, err := s.Messages.ListMessages(ctx, run.UserID, filter)
+	msgs, err := s.Assignments.ListMessagesNeedingAssign(ctx, run.UserID, *run.AccountID, filter)
 	if err != nil {
 		return nil, err
 	}

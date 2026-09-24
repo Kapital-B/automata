@@ -759,6 +759,9 @@ func scanMemberRow(s rowScanner) (*driven.ProjectMemberRow, error) {
 // (cascades included), so batch writes commit in chunks well under that.
 const assignmentUpsertChunk = 100
 
+// The upserts never let an automated write replace a row a user wrote: a
+// triage decision is final until the user changes it. Without the WHERE, the
+// assignment job's provisional guesses overwrote dismissals and filed threads.
 const upsertThreadAssignmentSQL = `
 		INSERT INTO thread_assignments (
 			id, organisation_id, account_id, conversation_id, project_id, status, confidence, reason, source,
@@ -773,7 +776,8 @@ const upsertThreadAssignmentSQL = `
 			source = excluded.source,
 			run_id = excluded.run_id,
 			assigned_by_user_id = excluded.assigned_by_user_id,
-			updated_at = excluded.updated_at`
+			updated_at = excluded.updated_at
+		WHERE thread_assignments.source <> 'user' OR excluded.source = 'user'`
 
 func threadAssignmentArgs(row driven.AssignmentRow) []any {
 	return []any{row.ID.String(), row.OrganisationID.String(), row.AccountID.String(), row.ConversationID,
@@ -834,6 +838,7 @@ func (r *Repository) DeleteThreadAssignment(ctx context.Context, accountID uuid.
 	return err
 }
 
+// See upsertThreadAssignmentSQL: user rows are only replaced by user writes.
 const upsertMessageOverrideSQL = `
 		INSERT INTO message_assignment_overrides (
 			message_id, organisation_id, account_id, project_id, status, confidence, reason, source,
@@ -848,7 +853,8 @@ const upsertMessageOverrideSQL = `
 			source = excluded.source,
 			run_id = excluded.run_id,
 			assigned_by_user_id = excluded.assigned_by_user_id,
-			updated_at = excluded.updated_at`
+			updated_at = excluded.updated_at
+		WHERE message_assignment_overrides.source <> 'user' OR excluded.source = 'user'`
 
 func messageOverrideArgs(row driven.AssignmentRow) []any {
 	return []any{row.MessageID.String(), row.OrganisationID.String(), row.AccountID.String(),
@@ -1200,12 +1206,22 @@ func (r *Repository) CountUnassignedSummary(ctx context.Context, userID uuid.UUI
 	return sum, rows.Err()
 }
 
-// ListMessagesNeedingAssign returns messages on the account with no override row
-// and no thread row, i.e. Wave 1 §9's "effective assignment is Unassigned".
-func (r *Repository) ListMessagesNeedingAssign(ctx context.Context, userID, accountID uuid.UUID, limit int) ([]driven.MessageRow, error) {
+// ListMessagesNeedingAssign returns what automatic assignment may place:
+// messages with no assignment, or only a machine's provisional suggestion.
+// Rows a user wrote are excluded, so a triage decision is never re-scored.
+func (r *Repository) ListMessagesNeedingAssign(ctx context.Context, userID, accountID uuid.UUID, filter driven.AssignCandidateFilter) ([]driven.MessageRow, error) {
+	limit := filter.Limit
 	if limit <= 0 {
 		limit = 500
 	}
+	args := []any{userID.String(), accountID.String()}
+	keyset := ""
+	if filter.BeforeReceivedAt != nil && filter.BeforeID != nil {
+		keyset = `
+		  AND (m.received_at, m.id) < (?, ?)`
+		args = append(args, filter.BeforeReceivedAt.UTC(), filter.BeforeID.String())
+	}
+	args = append(args, limit)
 	rows, err := r.queryContext(ctx, `
 		SELECT m.id, m.account_id, m.provider_message_id, m.conversation_id, m.received_at, m.subject, m.from_json,
 			m.to_json, m.cc_json, m.to_cc_preview, m.body_text, m.body_fetched_at, m.has_attachments, m.raw_etag,
@@ -1221,11 +1237,13 @@ func (r *Repository) ListMessagesNeedingAssign(ctx context.Context, userID, acco
 			AND m.conversation_id IS NOT NULL
 			AND m.conversation_id <> ''
 		WHERE m.account_id = ?
-		  AND o.message_id IS NULL
-		  AND t.id IS NULL
-		ORDER BY m.received_at DESC
+		  AND (
+			(o.message_id IS NULL AND (t.id IS NULL OR (t.status = 'provisional' AND t.source <> 'user')))
+			OR (o.message_id IS NOT NULL AND o.status = 'provisional' AND o.source <> 'user')
+		  )`+keyset+`
+		ORDER BY m.received_at DESC, m.id DESC
 		LIMIT ?
-	`, userID.String(), accountID.String(), limit)
+	`, args...)
 	if err != nil {
 		return nil, err
 	}

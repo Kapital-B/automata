@@ -625,7 +625,7 @@ func Run(t *testing.T, factory Factory) {
 		}
 
 		h.Counter.Reset()
-		if _, err := h.Repo.ListMessagesNeedingAssign(ctx, userID, accountID, 500); err != nil {
+		if _, err := h.Repo.ListMessagesNeedingAssign(ctx, userID, accountID, driven.AssignCandidateFilter{Limit: 500}); err != nil {
 			t.Fatal(err)
 		}
 		if n := h.Counter.Count(); n > 3 {
@@ -833,7 +833,7 @@ func Run(t *testing.T, factory Factory) {
 			t.Fatal(err)
 		}
 
-		msgs, err := h.Repo.ListMessagesNeedingAssign(ctx, userID, accountID, 500)
+		msgs, err := h.Repo.ListMessagesNeedingAssign(ctx, userID, accountID, driven.AssignCandidateFilter{Limit: 500})
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -1648,12 +1648,141 @@ func runNotRelevantTests(t *testing.T, factory Factory) {
 		}
 
 		// And the scorer must not re-propose it either.
-		needing, err := h.Repo.ListMessagesNeedingAssign(ctx, userID, accountID, 100)
+		needing, err := h.Repo.ListMessagesNeedingAssign(ctx, userID, accountID, driven.AssignCandidateFilter{Limit: 100})
 		if err != nil {
 			t.Fatal(err)
 		}
 		if len(needing) != 0 {
 			t.Fatalf("dismissed thread offered to the scorer: %d messages", len(needing))
+		}
+	})
+
+	// Automatic assignment may place what nobody decided and refresh its own
+	// provisional guesses, but a user's decision is final: it re-scored
+	// dismissed and filed threads and put them back in triage.
+	t.Run("automatic_assignment_never_touches_user_decisions", func(t *testing.T) {
+		h := factory(t)
+		ctx := context.Background()
+		now := time.Now().UTC().Truncate(time.Second)
+		userID, orgID, accountID := seedUserAccount(t, h.Repo, uuid.New(), now)
+		svc := &appprojects.Service{
+			Users: h.Repo, Projects: h.Repo, Assignments: h.Repo, Manuals: h.Repo, Timeline: h.Repo, Contacts: h.Repo, Messages: h.Repo,
+		}
+		project, err := svc.Create(ctx, userID, appprojects.CreateProjectInput{Name: "Cooling", Code: "DC01"})
+		if err != nil {
+			t.Fatal(err)
+		}
+		pid := project.ID
+		thread := func(conv, status, source string, projectID *uuid.UUID, dismissed bool) driven.AssignmentRow {
+			row := driven.AssignmentRow{
+				ID: uuid.New(), OrganisationID: orgID, AccountID: accountID, ConversationID: conv,
+				ProjectID: projectID, Status: status, Reason: "test", Source: source, CreatedAt: now, UpdatedAt: now,
+			}
+			if dismissed {
+				row.NotRelevantAt = &now
+			}
+			return row
+		}
+		at := func(i int) time.Time { return now.Add(-time.Duration(i) * time.Minute) }
+
+		open := insertMsg(t, h.Repo, accountID, "open", "c-open", "b", at(1))
+		guessed := insertMsg(t, h.Repo, accountID, "guessed", "c-guessed", "b", at(2))
+		filed := insertMsg(t, h.Repo, accountID, "filed", "c-filed", "b", at(3))
+		dismissed := insertMsg(t, h.Repo, accountID, "dismissed", "c-dismissed", "b", at(4))
+		insertMsg(t, h.Repo, accountID, "ruled", "c-ruled", "b", at(5))
+		overGuess := insertMsg(t, h.Repo, accountID, "override guess", "c-over-guess", "b", at(6))
+		overUser := insertMsg(t, h.Repo, accountID, "override user", "c-over-user", "b", at(7))
+		for _, row := range []driven.AssignmentRow{
+			thread("c-guessed", "provisional", "llm", &pid, false),
+			thread("c-filed", "committed", "user", &pid, false),
+			thread("c-dismissed", "committed", "user", nil, true),
+			thread("c-ruled", "committed", "rule", &pid, false),
+		} {
+			if err := h.Repo.UpsertThreadAssignment(ctx, row); err != nil {
+				t.Fatal(err)
+			}
+		}
+		override := func(id uuid.UUID, source string) driven.AssignmentRow {
+			mid := id
+			return driven.AssignmentRow{
+				OrganisationID: orgID, AccountID: accountID, MessageID: &mid, ProjectID: &pid,
+				Status: "provisional", Reason: "test", Source: source, CreatedAt: now, UpdatedAt: now,
+			}
+		}
+		if err := h.Repo.UpsertMessageOverride(ctx, override(overGuess, "llm")); err != nil {
+			t.Fatal(err)
+		}
+		if err := h.Repo.UpsertMessageOverride(ctx, override(overUser, "user")); err != nil {
+			t.Fatal(err)
+		}
+
+		// Eligible: nothing decided, or only a machine's guess; paged two at a
+		// time, each exactly once, newest first.
+		var got []uuid.UUID
+		filter := driven.AssignCandidateFilter{Limit: 2}
+		for page := 0; page < 10; page++ {
+			msgs, err := h.Repo.ListMessagesNeedingAssign(ctx, userID, accountID, filter)
+			if err != nil {
+				t.Fatal(err)
+			}
+			for _, m := range msgs {
+				got = append(got, m.ID)
+			}
+			if len(msgs) < 2 {
+				break
+			}
+			last := msgs[len(msgs)-1]
+			filter.BeforeReceivedAt, filter.BeforeID = &last.ReceivedAt, &last.ID
+		}
+		want := []uuid.UUID{open, guessed, overGuess}
+		if fmt.Sprint(got) != fmt.Sprint(want) {
+			t.Fatalf("eligible = %v, want %v (open, guessed, override guess)", got, want)
+		}
+
+		// A machine write cannot replace a user's row, at either scope...
+		if err := h.Repo.UpsertThreadAssignment(ctx, thread("c-dismissed", "provisional", "llm", &pid, false)); err != nil {
+			t.Fatal(err)
+		}
+		if err := h.Repo.UpsertThreadAssignment(ctx, thread("c-filed", "provisional", "llm", &pid, false)); err != nil {
+			t.Fatal(err)
+		}
+		if err := h.Repo.UpsertMessageOverride(ctx, override(overUser, "llm")); err != nil {
+			t.Fatal(err)
+		}
+		if row, _ := h.Repo.GetThreadAssignment(ctx, accountID, "c-dismissed"); row == nil || row.Source != "user" || row.NotRelevantAt == nil || row.ProjectID != nil {
+			t.Fatalf("dismissal overwritten: %+v", row)
+		}
+		if row, _ := h.Repo.GetThreadAssignment(ctx, accountID, "c-filed"); row == nil || row.Source != "user" || row.Status != "committed" {
+			t.Fatalf("filed thread overwritten: %+v", row)
+		}
+		if row, _ := h.Repo.GetMessageOverride(ctx, overUser); row == nil || row.Source != "user" {
+			t.Fatalf("user override overwritten: %+v", row)
+		}
+		queue, err := h.Repo.ListUnassigned(ctx, userID, driven.UnassignedListFilter{Status: "all", Limit: 50})
+		if err != nil {
+			t.Fatal(err)
+		}
+		for _, it := range queue {
+			if it.MessageID != nil && (*it.MessageID == dismissed || *it.MessageID == filed) {
+				t.Fatalf("a decided thread is back in triage: %+v", it)
+			}
+		}
+
+		// ...but a user can still change their mind, and a machine can
+		// refresh its own guess.
+		if err := h.Repo.UpsertThreadAssignment(ctx, thread("c-dismissed", "committed", "user", &pid, false)); err != nil {
+			t.Fatal(err)
+		}
+		if row, _ := h.Repo.GetThreadAssignment(ctx, accountID, "c-dismissed"); row == nil || row.ProjectID == nil || row.NotRelevantAt != nil {
+			t.Fatalf("user could not refile a dismissed thread: %+v", row)
+		}
+		fresh := thread("c-guessed", "provisional", "llm", &pid, false)
+		fresh.Reason = "refreshed"
+		if err := h.Repo.UpsertThreadAssignment(ctx, fresh); err != nil {
+			t.Fatal(err)
+		}
+		if row, _ := h.Repo.GetThreadAssignment(ctx, accountID, "c-guessed"); row == nil || row.Reason != "refreshed" {
+			t.Fatalf("machine guess not refreshed: %+v", row)
 		}
 	})
 

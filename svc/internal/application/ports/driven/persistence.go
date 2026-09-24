@@ -408,6 +408,14 @@ type ContactRow struct {
 	PrimaryEmail string
 }
 
+// AssignCandidateFilter pages ListMessagesNeedingAssign. The keyset returns
+// messages strictly older than (BeforeReceivedAt, BeforeID).
+type AssignCandidateFilter struct {
+	Limit            int
+	BeforeReceivedAt *time.Time
+	BeforeID         *uuid.UUID
+}
+
 // ContactIdentityRow is one identity on a contact.
 type ContactIdentityRow struct {
 	ID              uuid.UUID
@@ -963,8 +971,11 @@ type AssignmentRepository interface {
 	EffectiveAssignment(ctx context.Context, userID, messageID uuid.UUID) (*EffectiveAssignment, error)
 	ListUnassigned(ctx context.Context, userID uuid.UUID, filter UnassignedListFilter) ([]UnassignedItem, error)
 	CountUnassignedSummary(ctx context.Context, userID uuid.UUID) (UnassignedSummary, error)
-	// ListMessagesNeedingAssign returns recent messages on an account with no effective project.
-	ListMessagesNeedingAssign(ctx context.Context, userID, accountID uuid.UUID, limit int) ([]MessageRow, error)
+	// ListMessagesNeedingAssign returns messages automatic assignment may
+	// (re)place, newest first: those with no assignment, and those whose only
+	// assignment is a machine's provisional suggestion. Anything a user decided
+	// — a project, a dismissal, a clear — is never returned.
+	ListMessagesNeedingAssign(ctx context.Context, userID, accountID uuid.UUID, filter AssignCandidateFilter) ([]MessageRow, error)
 	FindCommittedSiblingProject(ctx context.Context, userID, accountID uuid.UUID, conversationID string, excludeMessageID uuid.UUID) (*uuid.UUID, error)
 }
 
