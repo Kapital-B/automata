@@ -216,9 +216,14 @@ type ContactDetail struct {
 	SuggestedMerges []driven.ContactRow
 }
 
+// RecentMessageRef is enough of a message to recognise it in a list.
 type RecentMessageRef struct {
-	MessageID uuid.UUID
-	AccountID uuid.UUID
+	MessageID   uuid.UUID
+	AccountID   uuid.UUID
+	Subject     string
+	FromName    string
+	FromAddress string
+	ReceivedAt  time.Time
 }
 
 func (s *Service) Get(ctx context.Context, userID, contactID uuid.UUID) (*ContactDetail, error) {
@@ -247,7 +252,15 @@ func (s *Service) Get(ctx context.Context, userID, contactID uuid.UUID) (*Contac
 		if err != nil || msg == nil {
 			continue
 		}
-		recent = append(recent, RecentMessageRef{MessageID: mid, AccountID: msg.AccountID})
+		ref := RecentMessageRef{MessageID: mid, AccountID: msg.AccountID, Subject: msg.Subject, ReceivedAt: msg.ReceivedAt}
+		var from struct {
+			Name    string `json:"name"`
+			Address string `json:"address"`
+		}
+		if json.Unmarshal([]byte(msg.FromJSON), &from) == nil {
+			ref.FromName, ref.FromAddress = from.Name, from.Address
+		}
+		recent = append(recent, ref)
 	}
 	suggestions, err := s.Contacts.SuggestMerges(ctx, orgID, contactID)
 	if err != nil {

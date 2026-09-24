@@ -381,6 +381,8 @@ export type ContactListItem = {
   organisation_id: string;
   display_name: string;
   company?: string;
+  /** Earliest email identity; present in list results. */
+  primary_email?: string;
   created_at: string;
   updated_at: string;
 };
@@ -393,9 +395,18 @@ export type ContactIdentity = {
   created_at: string;
 };
 
+export type ContactRecentMessage = {
+  message_id: string;
+  account_id: string;
+  subject?: string;
+  from_name?: string;
+  from_address?: string;
+  received_at?: string;
+};
+
 export type ContactDetail = ContactListItem & {
   identities: ContactIdentity[];
-  recent_messages: { message_id: string; account_id: string }[];
+  recent_messages: ContactRecentMessage[];
   suggested_merges: { id: string; display_name: string }[];
 };
 

@@ -5,24 +5,20 @@ import { Plus, RefreshCw, Unplug, AlertTriangle, Loader2, Slack, KeyRound, Info 
 import { useState, useEffect, useMemo } from "react";
 import { useSearchParams } from "react-router-dom";
 import { ConnectMailboxDialog, type ConnectTarget } from "@/components/ConnectMailboxDialog";
+import { SlackConnectorCard } from "@/components/SlackConnectorCard";
 import { cn } from "@/lib/utils";
 import { useAuth } from "@/components/auth/AuthProvider";
 import { useAccountsData } from "@/hooks/useAccountsData";
 import {
   ApiError,
-  createConnectorBinding,
   deleteAccount,
   deleteConnector,
-  listConnectorBindings,
   listConnectors,
   listMailProviders,
   listProjects,
   startConnectorConnect,
   syncAccount,
   syncConnector,
-  type ConnectorAccount,
-  type ConnectorBinding,
-  type ProjectListItem,
 } from "@/lib/auth";
 import { toast } from "@/hooks/use-toast";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
@@ -402,228 +398,85 @@ export default function AccountsPage() {
         ))}
       </ul>
 
-      <section className="space-y-4">
+      <section aria-labelledby="slack-heading" className="space-y-4 border-t border-border/70 pt-8">
         <div className="flex flex-wrap items-end justify-between gap-3">
           <div>
-            <p className="text-xs uppercase tracking-wider text-muted-foreground">Connectors</p>
-            <h2 className="font-display text-2xl font-medium">Slack</h2>
+            <p className="text-xs font-mono uppercase tracking-[0.18em] text-muted-foreground">Connectors</p>
+            <h2 id="slack-heading" className="font-display text-2xl font-medium">
+              Slack
+            </h2>
             <p className="mt-1 max-w-2xl text-sm text-muted-foreground">
-              Bind Slack channels to projects so messages land on the trail. Fake mode uses channel{" "}
-              <code className="rounded bg-muted px-1 py-0.5 text-xs">C_FAKE_DC01</code>.
+              Add a channel to a project and its messages join that project's trail alongside mail.
             </p>
           </div>
-          <Button
-            size="sm"
-            className="bg-foreground text-background hover:bg-foreground/90"
-            onClick={() => slackConnectMutation.mutate()}
-            disabled={slackConnectMutation.isPending}
-          >
-            {slackConnectMutation.isPending ? (
-              <Loader2 className="mr-1.5 h-3.5 w-3.5 animate-spin" />
-            ) : (
-              <Slack className="mr-1.5 h-3.5 w-3.5" />
-            )}
-            Connect Slack
-          </Button>
+          {connectors.length > 0 && (
+            <Button
+              size="sm"
+              variant="outline"
+              onClick={() => slackConnectMutation.mutate()}
+              disabled={slackConnectMutation.isPending}
+            >
+              {slackConnectMutation.isPending ? (
+                <Loader2 aria-hidden="true" className="mr-1.5 h-3.5 w-3.5 animate-spin" />
+              ) : (
+                <Plus aria-hidden="true" className="mr-1.5 h-3.5 w-3.5" />
+              )}
+              Add workspace
+            </Button>
+          )}
         </div>
 
-        {connectorsQuery.isLoading && (
+        {connectorsQuery.isLoading ? (
           <div className="surface-card p-5 text-sm text-muted-foreground">Loading Slack workspaces…</div>
-        )}
-        {connectorsQuery.isError && (
-          <div className="surface-card p-5 text-sm text-destructive">
-            Could not load connectors:{" "}
+        ) : connectorsQuery.isError ? (
+          <div role="alert" className="surface-card p-5 text-sm text-destructive">
+            Could not load Slack workspaces:{" "}
             {connectorsQuery.error instanceof Error ? connectorsQuery.error.message : "unknown error"}
           </div>
-        )}
-        {!connectorsQuery.isLoading && !connectorsQuery.isError && connectors.length === 0 && (
-          <div className="surface-card p-6 text-sm text-muted-foreground">
-            No Slack workspace connected yet.
+        ) : connectors.length === 0 ? (
+          <div className="surface-card flex flex-col items-start gap-3 p-6 sm:flex-row sm:items-center sm:justify-between">
+            <div className="flex items-center gap-3">
+              <span
+                aria-hidden="true"
+                className="flex h-10 w-10 items-center justify-center rounded-md border border-border bg-secondary"
+              >
+                <Slack className="h-5 w-5" />
+              </span>
+              <p className="text-sm text-muted-foreground">No Slack workspace connected yet.</p>
+            </div>
+            <Button
+              size="sm"
+              className="bg-foreground text-background hover:bg-foreground/90"
+              onClick={() => slackConnectMutation.mutate()}
+              disabled={slackConnectMutation.isPending}
+            >
+              {slackConnectMutation.isPending && (
+                <Loader2 aria-hidden="true" className="mr-1.5 h-3.5 w-3.5 animate-spin" />
+              )}
+              Connect Slack
+            </Button>
           </div>
-        )}
-
-        <ul className="space-y-3">
-          {connectors.map((connector) => (
-            <SlackConnectorCard
-              key={connector.id}
-              connector={connector}
-              projects={projects}
-              highlighted={connectedConnectorID === connector.id}
-              syncing={slackSyncMutation.isPending}
-              disconnecting={slackDisconnectMutation.isPending}
-              onSync={() => slackSyncMutation.mutate(connector.id)}
-              onDisconnect={() => {
-                if (window.confirm(`Disconnect ${connector.label}?`)) {
-                  slackDisconnectMutation.mutate(connector.id);
-                }
-              }}
-            />
-          ))}
-        </ul>
-      </section>
-    </div>
-  );
-}
-
-function SlackConnectorCard({
-  connector,
-  projects,
-  highlighted,
-  syncing,
-  disconnecting,
-  onSync,
-  onDisconnect,
-}: {
-  connector: ConnectorAccount;
-  projects: ProjectListItem[];
-  highlighted: boolean;
-  syncing: boolean;
-  disconnecting: boolean;
-  onSync: () => void;
-  onDisconnect: () => void;
-}) {
-  const { accessToken } = useAuth();
-  const queryClient = useQueryClient();
-  const [channelID, setChannelID] = useState("C_FAKE_DC01");
-  const [projectID, setProjectID] = useState("");
-  const [label, setLabel] = useState("#dc01-project");
-
-  const bindingsQuery = useQuery({
-    queryKey: ["connector-bindings", accessToken, connector.id],
-    enabled: Boolean(accessToken),
-    queryFn: () => listConnectorBindings(accessToken!, connector.id),
-  });
-
-  const bindMutation = useMutation({
-    mutationFn: async () => {
-      if (!accessToken) {
-        throw new Error("Not authenticated");
-      }
-      return createConnectorBinding(accessToken, connector.id, {
-        external_channel_id: channelID.trim(),
-        project_id: projectID || undefined,
-        label: label.trim() || undefined,
-      });
-    },
-    onSuccess: () => {
-      void queryClient.invalidateQueries({ queryKey: ["connector-bindings", accessToken, connector.id] });
-      toast({ title: "Channel bound", description: "Sync to pull messages onto the project trail." });
-    },
-    onError: (err) => {
-      toast({
-        title: "Bind failed",
-        description: err instanceof ApiError ? err.message : "Please retry.",
-        variant: "destructive",
-      });
-    },
-  });
-
-  const bindings: ConnectorBinding[] = bindingsQuery.data ?? [];
-  const projectName = (id?: string) => projects.find((p) => p.id === id)?.name ?? id ?? "Unassigned";
-
-  return (
-    <li
-      className={cn(
-        "surface-card p-5",
-        highlighted && "ring-2 ring-success/50 transition-shadow",
-      )}
-    >
-      <div className="flex flex-wrap items-start justify-between gap-3">
-        <div>
-          <div className="flex items-center gap-2">
-            <Slack className="h-4 w-4 text-muted-foreground" />
-            <h3 className="font-display text-lg font-medium">{connector.label}</h3>
-            <span className="rounded-full border border-border px-2 py-0.5 text-[10px] font-medium uppercase tracking-wider">
-              {connector.provider}
-            </span>
-          </div>
-          <p className="mt-1 text-xs text-muted-foreground">
-            Last sync {relativeTime(connector.last_synced_at)}
-          </p>
-          {connector.last_error ? (
-            <p className="mt-2 text-sm text-destructive">{connector.last_error}</p>
-          ) : null}
-        </div>
-        <span
-          className={cn(
-            "inline-flex items-center gap-1.5 rounded-full px-2.5 py-1 text-xs font-medium",
-            connector.connection_status === "connected"
-              ? "bg-success/10 text-success"
-              : "bg-destructive/10 text-destructive",
-          )}
-        >
-          {connector.connection_status}
-        </span>
-      </div>
-
-      <div className="mt-4 space-y-2">
-        <p className="text-xs font-medium uppercase tracking-wider text-muted-foreground">Bindings</p>
-        {bindings.length === 0 ? (
-          <p className="text-sm text-muted-foreground">No channels bound yet.</p>
         ) : (
-          <ul className="space-y-1 text-sm">
-            {bindings.map((b) => (
-              <li key={b.id} className="flex flex-wrap gap-x-2 text-muted-foreground">
-                <span className="font-medium text-foreground">{b.label || b.external_channel_id}</span>
-                <span>→ {projectName(b.project_id)}</span>
-              </li>
+          <ul className="space-y-3">
+            {connectors.map((connector) => (
+              <SlackConnectorCard
+                key={connector.id}
+                connector={connector}
+                projects={projects}
+                highlighted={connectedConnectorID === connector.id}
+                syncing={slackSyncMutation.isPending && slackSyncMutation.variables === connector.id}
+                disconnecting={slackDisconnectMutation.isPending}
+                onSync={() => slackSyncMutation.mutate(connector.id)}
+                onDisconnect={() => {
+                  if (window.confirm(`Disconnect ${connector.label}? Its channels stop syncing.`)) {
+                    slackDisconnectMutation.mutate(connector.id);
+                  }
+                }}
+              />
             ))}
           </ul>
         )}
-      </div>
-
-      <div className="mt-4 grid gap-2 sm:grid-cols-[1fr_1fr_auto]">
-        <input
-          className="h-9 rounded-md border border-input bg-background px-3 text-sm"
-          value={channelID}
-          onChange={(e) => setChannelID(e.target.value)}
-          placeholder="Channel ID"
-          aria-label="Slack channel ID"
-        />
-        <select
-          className="h-9 rounded-md border border-input bg-background px-2 text-sm"
-          value={projectID}
-          onChange={(e) => setProjectID(e.target.value)}
-          aria-label="Project"
-        >
-          <option value="">Unassigned queue</option>
-          {projects.map((p) => (
-            <option key={p.id} value={p.id}>
-              {p.code ? `${p.code} · ${p.name}` : p.name}
-            </option>
-          ))}
-        </select>
-        <Button
-          size="sm"
-          variant="outline"
-          disabled={!channelID.trim() || bindMutation.isPending}
-          onClick={() => bindMutation.mutate()}
-        >
-          {bindMutation.isPending ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : "Bind"}
-        </Button>
-      </div>
-      <input
-        className="mt-2 h-9 w-full rounded-md border border-input bg-background px-3 text-sm"
-        value={label}
-        onChange={(e) => setLabel(e.target.value)}
-        placeholder="Binding label"
-        aria-label="Binding label"
-      />
-
-      <div className="mt-4 flex flex-wrap items-center gap-2">
-        <Button size="sm" variant="outline" onClick={onSync} disabled={syncing || disconnecting}>
-          <RefreshCw className="mr-1.5 h-3.5 w-3.5" /> Sync now
-        </Button>
-        <Button
-          size="sm"
-          variant="ghost"
-          className="text-muted-foreground hover:text-destructive"
-          onClick={onDisconnect}
-          disabled={syncing || disconnecting}
-        >
-          <Unplug className="mr-1.5 h-3.5 w-3.5" /> Disconnect
-        </Button>
-      </div>
-    </li>
+      </section>
+    </div>
   );
 }

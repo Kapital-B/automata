@@ -138,6 +138,18 @@ func Run(t *testing.T, factory Factory) {
 		if len(list) != 1 || list[0].ID != c1 {
 			t.Fatalf("unexpected contact list: %+v", list)
 		}
+		// The merged contact owns both addresses; either is a fair label.
+		if e := list[0].PrimaryEmail; e != "sarah@acme.com" && e != "other@acme.com" {
+			t.Fatalf("merged contact primary email = %q", e)
+		}
+		// Search takes a different query and must fill it too.
+		found, err := h.Repo.ListContacts(ctx, org2, driven.ContactListFilter{Query: "acme"})
+		if err != nil {
+			t.Fatal(err)
+		}
+		if len(found) != 1 || found[0].PrimaryEmail != "sarah@acme.com" {
+			t.Fatalf("search result = %+v, want sarah@acme.com as the primary email", found)
+		}
 	})
 
 	t.Run("project_manual_timeline_flow", func(t *testing.T) {

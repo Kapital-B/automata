@@ -61,15 +61,17 @@ func (r *Repository) ListContacts(ctx context.Context, organisationID uuid.UUID,
 	} else {
 		like := "%" + strings.ToLower(q) + "%"
 		rows, err = r.db.QueryContext(ctx, `
-			SELECT DISTINCT c.id, c.organisation_id, c.display_name, c.company, c.merged_into_contact_id, c.created_at, c.updated_at
+			SELECT c.id, c.organisation_id, c.display_name, c.company, c.merged_into_contact_id, c.created_at, c.updated_at
 			FROM contacts c
-			LEFT JOIN contact_identities i ON i.contact_id = c.id
 			WHERE c.organisation_id = ? AND c.merged_into_contact_id IS NULL
 			  AND (
 				LOWER(c.display_name) LIKE ? OR
 				LOWER(IFNULL(c.company, '')) LIKE ? OR
-				LOWER(i.value_normalized) LIKE ? OR
-				LOWER(i.value_raw) LIKE ?
+				EXISTS (
+					SELECT 1 FROM contact_identities i
+					WHERE i.contact_id = c.id
+					  AND (LOWER(i.value_normalized) LIKE ? OR LOWER(i.value_raw) LIKE ?)
+				)
 			  )
 			ORDER BY c.display_name COLLATE NOCASE ASC, c.created_at ASC
 			LIMIT ? OFFSET ?
@@ -87,7 +89,49 @@ func (r *Repository) ListContacts(ctx context.Context, organisationID uuid.UUID,
 		}
 		out = append(out, *row)
 	}
-	return out, rows.Err()
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	if err := r.attachPrimaryEmails(ctx, out); err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+// attachPrimaryEmails fills PrimaryEmail on a page of contacts with one query
+// rather than one per row.
+func (r *Repository) attachPrimaryEmails(ctx context.Context, contacts []driven.ContactRow) error {
+	if len(contacts) == 0 {
+		return nil
+	}
+	args := make([]any, 0, len(contacts))
+	marks := make([]string, 0, len(contacts))
+	index := make(map[string]int, len(contacts))
+	for i, c := range contacts {
+		args = append(args, c.ID.String())
+		marks = append(marks, "?")
+		index[c.ID.String()] = i
+	}
+	rows, err := r.db.QueryContext(ctx, `
+		SELECT contact_id, value_raw
+		FROM contact_identities
+		WHERE kind = 'email' AND contact_id IN (`+strings.Join(marks, ", ")+`)
+		ORDER BY contact_id, created_at ASC, value_normalized ASC
+	`, args...)
+	if err != nil {
+		return err
+	}
+	defer rows.Close()
+	for rows.Next() {
+		var contactID, value string
+		if err := rows.Scan(&contactID, &value); err != nil {
+			return err
+		}
+		if i, ok := index[contactID]; ok && contacts[i].PrimaryEmail == "" {
+			contacts[i].PrimaryEmail = value
+		}
+	}
+	return rows.Err()
 }
 
 func (r *Repository) GetContact(ctx context.Context, organisationID, contactID uuid.UUID) (*driven.ContactRow, error) {
