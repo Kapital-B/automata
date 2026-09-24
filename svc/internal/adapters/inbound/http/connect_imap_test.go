@@ -11,6 +11,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/Kapital-B/automata/svc/internal/adapters/outbound/imapmail"
 	"github.com/Kapital-B/automata/svc/internal/adapters/outbound/persistence/sqlite"
 	"github.com/Kapital-B/automata/svc/internal/adapters/outbound/security"
 	appaccounts "github.com/Kapital-B/automata/svc/internal/application/accounts"
@@ -45,6 +46,9 @@ func TestConnectIMAPStoresAVerifiedAccountAndReportsRejections(t *testing.T) {
 		AccountSvc: appaccounts.NewService(appaccounts.Deps{
 			Accounts: repo, OAuthState: repo, Vault: vault,
 			PasswordConnectors: map[string]driven.PasswordMailConnector{appaccounts.ProviderIMAP: conn},
+			Mailboxes: &appaccounts.MailboxOpener{Providers: map[string]driven.MailProvider{
+				appaccounts.ProviderIMAP: &imapmail.Provider{},
+			}},
 		}),
 		Accounts: repo, Users: repo,
 		JWTSecret: []byte("abcdefghijklmnopqrstuvwxyz123456"), JWTTTL: time.Hour,
@@ -85,5 +89,40 @@ func TestConnectIMAPStoresAVerifiedAccountAndReportsRejections(t *testing.T) {
 	}
 	if len(rows) != 1 || rows[0].ID.String() != out["account_id"] || rows[0].Provider != "imap" || rows[0].Label != "Personal" {
 		t.Fatalf("accounts = %+v", rows)
+	}
+
+	// The UI learns what the account can do, and what can be connected,
+	// without opening a mailbox.
+	var list []struct {
+		Provider     string `json:"provider"`
+		Capabilities *struct {
+			ServerSideForward bool `json:"server_side_forward"`
+			IncrementalSync   bool `json:"incremental_sync"`
+		} `json:"capabilities"`
+	}
+	getJSON(t, api.URL+"/api/accounts", &list)
+	if len(list) != 1 || list[0].Provider != "imap" || list[0].Capabilities == nil ||
+		list[0].Capabilities.ServerSideForward || !list[0].Capabilities.IncrementalSync {
+		t.Fatalf("account list = %+v", list)
+	}
+	var providers []map[string]any
+	getJSON(t, api.URL+"/api/accounts/providers", &providers)
+	if len(providers) != 1 || providers[0]["provider"] != "imap" || providers[0]["connect"] != "password" {
+		t.Fatalf("providers = %v", providers)
+	}
+}
+
+func getJSON(t *testing.T, url string, out any) {
+	t.Helper()
+	res, err := http.Get(url)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer res.Body.Close()
+	if res.StatusCode != http.StatusOK {
+		t.Fatalf("GET %s: %d", url, res.StatusCode)
+	}
+	if err := json.NewDecoder(res.Body).Decode(out); err != nil {
+		t.Fatal(err)
 	}
 }

@@ -296,6 +296,7 @@ func (r *Runtime) buildServices(ctx context.Context) error {
 		JobRuns:            jobRuns,
 		Connectors:         mailConnectors,
 		PasswordConnectors: passwordConnectors,
+		Mailboxes:          mailboxes,
 		Vault:              vault,
 		Dashboard:          r.Config.DashboardBaseURL,
 		SuccessPath:        r.Config.OAuthSuccessPath,

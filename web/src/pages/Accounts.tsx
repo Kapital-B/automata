@@ -1,17 +1,10 @@
 import { PageHeader } from "@/components/PageHeader";
 import { Button } from "@/components/ui/button";
-import { relativeTime } from "@/lib/accounts";
-import { Plus, RefreshCw, Unplug, AlertTriangle, Loader2, Slack } from "lucide-react";
+import { capabilityNotes, providerLabel, relativeTime, type UiAccount } from "@/lib/accounts";
+import { Plus, RefreshCw, Unplug, AlertTriangle, Loader2, Slack, KeyRound, Info } from "lucide-react";
 import { useState, useEffect, useMemo } from "react";
 import { useSearchParams } from "react-router-dom";
-import {
-  Dialog,
-  DialogContent,
-  DialogDescription,
-  DialogHeader,
-  DialogTitle,
-  DialogTrigger,
-} from "@/components/ui/dialog";
+import { ConnectMailboxDialog, type ConnectTarget } from "@/components/ConnectMailboxDialog";
 import { cn } from "@/lib/utils";
 import { useAuth } from "@/components/auth/AuthProvider";
 import { useAccountsData } from "@/hooks/useAccountsData";
@@ -22,9 +15,9 @@ import {
   deleteConnector,
   listConnectorBindings,
   listConnectors,
+  listMailProviders,
   listProjects,
   startConnectorConnect,
-  startMailboxConnect,
   syncAccount,
   syncConnector,
   type ConnectorAccount,
@@ -35,8 +28,8 @@ import { toast } from "@/hooks/use-toast";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 
 export default function AccountsPage() {
-  const [kind, setKind] = useState<"work" | "personal" | null>(null);
   const [dialogOpen, setDialogOpen] = useState(false);
+  const [connectTarget, setConnectTarget] = useState<ConnectTarget | undefined>(undefined);
   const [searchParams] = useSearchParams();
   const connectedAccountID = searchParams.get("connected_account_id");
   const connectedConnectorID = searchParams.get("connected_connector_id");
@@ -48,6 +41,11 @@ export default function AccountsPage() {
     queryKey: ["connectors", accessToken],
     enabled: Boolean(accessToken),
     queryFn: () => listConnectors(accessToken!),
+  });
+  const providersQuery = useQuery({
+    queryKey: ["mail-providers", accessToken],
+    enabled: Boolean(accessToken),
+    queryFn: () => listMailProviders(accessToken!),
   });
   const projectsQuery = useQuery({
     queryKey: ["projects", accessToken],
@@ -94,24 +92,29 @@ export default function AccountsPage() {
     }
   }, [connectedConnectorID, queryClient]);
 
-  const connectMutation = useMutation({
-    mutationFn: async (selectedKind: "work" | "personal") => {
-      if (!accessToken) {
-        throw new Error("Not authenticated");
-      }
-      return startMailboxConnect(accessToken, selectedKind);
-    },
-    onSuccess: (res) => {
-      window.location.assign(res.authorization_url);
-    },
-    onError: (err) => {
-      toast({
-        title: "Could not start Microsoft connect",
-        description: err instanceof ApiError ? err.message : "Please try again.",
-        variant: "destructive",
-      });
-    },
-  });
+  const openConnect = (target?: ConnectTarget) => {
+    setConnectTarget(target);
+    setDialogOpen(true);
+  };
+
+  // Reconnecting goes through the same connect flow; the server matches the
+  // mailbox to the existing account and restores it rather than adding one.
+  const reconnect = (a: UiAccount) => {
+    if (a.provider === "m365") {
+      openConnect({ provider: "m365", kind: a.kind === "personal" ? "personal" : "work" });
+    } else if (a.provider === "google" || a.provider === "imap") {
+      openConnect({ provider: a.provider, email: a.primaryEmail });
+    }
+  };
+
+  // IMAP connects without a redirect, so it lands here instead of on
+  // ?connected_account_id.
+  const onPasswordConnected = (accountID: string) => {
+    setDialogOpen(false);
+    void queryClient.invalidateQueries({ queryKey: ["accounts"] });
+    void queryClient.invalidateQueries({ queryKey: ["runs"] });
+    toast({ title: "Mailbox connected", description: `Account ${accountID.slice(0, 8)} will sync shortly.` });
+  };
 
   const slackConnectMutation = useMutation({
     mutationFn: async () => {
@@ -232,66 +235,22 @@ export default function AccountsPage() {
         title="Connected mailboxes"
         description="Each connected account is treated as its own source. Every summary, draft, rule, and run is tagged with the account it came from."
         actions={
-          <Dialog
-            open={dialogOpen}
-            onOpenChange={(open) => {
-              setDialogOpen(open);
-              if (!open) setKind(null);
-            }}
+          <Button
+            size="sm"
+            className="bg-foreground text-background hover:bg-foreground/90"
+            onClick={() => openConnect()}
           >
-            <DialogTrigger asChild>
-              <Button size="sm" className="bg-foreground text-background hover:bg-foreground/90">
-                <Plus className="mr-1.5 h-3.5 w-3.5" /> Add account
-              </Button>
-            </DialogTrigger>
-            <DialogContent className="max-w-md">
-              <DialogHeader>
-                <DialogTitle className="font-display text-xl">Connect a Microsoft mailbox</DialogTitle>
-                <DialogDescription>
-                  We'll redirect you to Microsoft to sign in and grant Mail.Read,
-                  Mail.Send, and offline access. Your tokens are stored encrypted, per account.
-                </DialogDescription>
-              </DialogHeader>
-              <div className="grid grid-cols-2 gap-3 pt-2">
-                {(["work", "personal"] as const).map((k) => (
-                  <button
-                    key={k}
-                    onClick={() => setKind(k)}
-                    className={cn(
-                      "rounded-lg border p-4 text-left transition",
-                      kind === k
-                        ? "border-foreground bg-secondary"
-                        : "border-border hover:border-foreground/40",
-                    )}
-                  >
-                    <p className="font-display text-base font-medium capitalize">{k}</p>
-                    <p className="mt-1 text-xs text-muted-foreground">
-                      {k === "work"
-                        ? "Microsoft 365 / Entra (organizations)"
-                        : "Outlook.com, Hotmail, Live (consumers)"}
-                    </p>
-                  </button>
-                ))}
-              </div>
-              <Button
-                disabled={!kind}
-                onClick={() => {
-                  if (kind) connectMutation.mutate(kind);
-                }}
-                className="mt-2 w-full bg-foreground text-background hover:bg-foreground/90"
-              >
-                {connectMutation.isPending ? (
-                  <>
-                    <Loader2 className="mr-1.5 h-3.5 w-3.5 animate-spin" />
-                    Redirecting...
-                  </>
-                ) : (
-                  "Continue to Microsoft sign-in"
-                )}
-              </Button>
-            </DialogContent>
-          </Dialog>
+            <Plus className="mr-1.5 h-3.5 w-3.5" /> Add account
+          </Button>
         }
+      />
+
+      <ConnectMailboxDialog
+        open={dialogOpen}
+        onOpenChange={setDialogOpen}
+        providers={providersQuery.data ?? []}
+        target={connectTarget}
+        onConnected={onPasswordConnected}
       />
 
       {isLoading && (
@@ -308,11 +267,11 @@ export default function AccountsPage() {
         <div className="surface-card p-6">
           <h3 className="font-display text-lg font-medium">No connected mailboxes yet</h3>
           <p className="mt-1 text-sm text-muted-foreground">
-            Connect a Microsoft work or personal mailbox to unlock sync, summaries, and runs.
+            Connect a Microsoft, Google, or IMAP mailbox to unlock sync, summaries, and runs.
           </p>
           <Button
             className="mt-4 bg-foreground text-background hover:bg-foreground/90"
-            onClick={() => setDialogOpen(true)}
+            onClick={() => openConnect()}
           >
             <Plus className="mr-1.5 h-3.5 w-3.5" /> Add account
           </Button>
@@ -337,21 +296,31 @@ export default function AccountsPage() {
                 <div>
                   <div className="flex items-center gap-2">
                     <h3 className="font-display text-lg font-medium">{a.label}</h3>
-                    <span
-                      className={cn(
-                        "rounded-full border px-2 py-0.5 text-[10px] font-medium uppercase tracking-wider",
-                        a.kind === "work"
-                          ? "border-[hsl(184_55%_22%/0.3)] bg-[hsl(184_55%_22%/0.08)] text-[hsl(184_55%_22%)]"
-                          : "border-[hsl(28_70%_52%/0.3)] bg-[hsl(28_70%_52%/0.10)] text-[hsl(28_70%_38%)]",
-                      )}
-                    >
-                      {a.kind}
+                    <span className="rounded-full border border-border px-2 py-0.5 text-[10px] font-medium uppercase tracking-wider text-muted-foreground">
+                      {providerLabel(a.provider)}
                     </span>
+                    {a.provider === "m365" && (
+                      <span
+                        className={cn(
+                          "rounded-full border px-2 py-0.5 text-[10px] font-medium uppercase tracking-wider",
+                          a.kind === "work"
+                            ? "border-[hsl(184_55%_22%/0.3)] bg-[hsl(184_55%_22%/0.08)] text-[hsl(184_55%_22%)]"
+                            : "border-[hsl(28_70%_52%/0.3)] bg-[hsl(28_70%_52%/0.10)] text-[hsl(28_70%_38%)]",
+                        )}
+                      >
+                        {a.kind}
+                      </span>
+                    )}
                   </div>
                   <p className="mt-0.5 text-sm text-muted-foreground">{a.primaryEmail}</p>
                   <p className="mt-2 text-xs text-muted-foreground">
                     Last sync {relativeTime(a.lastSyncedAt)}
                   </p>
+                  {capabilityNotes(a.capabilities).map((note) => (
+                    <p key={note} className="mt-1 flex items-start gap-1.5 text-xs text-muted-foreground">
+                      <Info className="mt-0.5 h-3 w-3 shrink-0" /> {note}
+                    </p>
+                  ))}
                 </div>
               </div>
               <div className="flex items-center gap-2">
@@ -368,19 +337,33 @@ export default function AccountsPage() {
             </div>
             {a.status !== "connected" && (
               <div className="mt-4 rounded-md border border-destructive/30 bg-destructive/5 px-3 py-2 text-sm text-destructive">
-                {a.lastError ?? "Session expired. Sign in again to resume sync and forwarding."}
+                {a.lastError ??
+                  (a.status === "expired"
+                    ? "Session expired. Reconnect to resume sync and forwarding."
+                    : "The last sync failed.")}
               </div>
             )}
             <div className="mt-4 flex flex-wrap items-center gap-2">
-              <Button
-                size="sm"
-                variant="outline"
-                onClick={() => syncMutation.mutate({ accountID: a.id })}
-                disabled={syncMutation.isPending || disconnectMutation.isPending}
-              >
-                <RefreshCw className="mr-1.5 h-3.5 w-3.5" />
-                {a.status === "connected" ? "Sync now" : "Reconnect"}
-              </Button>
+              {a.status === "expired" ? (
+                <Button
+                  size="sm"
+                  variant="outline"
+                  onClick={() => reconnect(a)}
+                  disabled={disconnectMutation.isPending}
+                >
+                  <KeyRound className="mr-1.5 h-3.5 w-3.5" /> Reconnect
+                </Button>
+              ) : (
+                <Button
+                  size="sm"
+                  variant="outline"
+                  onClick={() => syncMutation.mutate({ accountID: a.id })}
+                  disabled={syncMutation.isPending || disconnectMutation.isPending}
+                >
+                  <RefreshCw className="mr-1.5 h-3.5 w-3.5" />
+                  {a.status === "connected" ? "Sync now" : "Retry sync"}
+                </Button>
+              )}
               {a.status === "connected" ? (
                 <Button
                   size="sm"

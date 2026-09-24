@@ -77,6 +77,8 @@ type fakeProvider struct {
 	opens   int
 }
 
+func (p *fakeProvider) Capabilities() driven.MailboxCapabilities { return p.box.Capabilities() }
+
 func (p *fakeProvider) Open(ctx context.Context, account driven.AccountRow, credential []byte) (driven.Mailbox, []byte, error) {
 	p.opens++
 	if p.openErr != nil {

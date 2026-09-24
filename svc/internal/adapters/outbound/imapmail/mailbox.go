@@ -39,15 +39,17 @@ type mailbox struct {
 // sync sees new mail but not removals or edits. Ids are the Message-ID header
 // where there is one, which survives a UIDVALIDITY reset that would renumber
 // every UID; mail without one falls back to the UID.
-func (m *mailbox) Capabilities() driven.MailboxCapabilities {
-	return driven.MailboxCapabilities{
-		IncrementalSync:   true,
-		ServerSideForward: false,
-		ServerSideReply:   false,
-		ReportsRemovals:   false,
-		StableMessageIDs:  false,
-	}
+var capabilities = driven.MailboxCapabilities{
+	IncrementalSync:   true,
+	ServerSideForward: false,
+	ServerSideReply:   false,
+	ReportsRemovals:   false,
+	StableMessageIDs:  false,
 }
+
+func (p *Provider) Capabilities() driven.MailboxCapabilities { return capabilities }
+
+func (m *mailbox) Capabilities() driven.MailboxCapabilities { return capabilities }
 
 func (m *mailbox) session(ctx context.Context) (*client.Client, *imap.MailboxStatus, error) {
 	cl, status, err := m.p.imapSession(ctx, m.cred)

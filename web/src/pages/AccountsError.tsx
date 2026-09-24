@@ -3,10 +3,10 @@ import { AlertTriangle } from "lucide-react";
 import { Button } from "@/components/ui/button";
 
 const errorMessages: Record<string, string> = {
-  access_denied: "You cancelled sign-in or denied consent in Microsoft.",
+  access_denied: "You cancelled sign-in or denied consent with your mail provider.",
   admin_consent_required: "Your Microsoft tenant requires admin consent before this app can connect mail.",
   invalid_state: "The connect request expired or could not be validated. Please try again.",
-  token_exchange_failed: "Microsoft returned to the app, but token exchange failed.",
+  token_exchange_failed: "Your mail provider returned to the app, but token exchange failed.",
 };
 
 export default function AccountsErrorPage() {

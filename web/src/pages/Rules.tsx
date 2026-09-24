@@ -14,7 +14,7 @@ import {
   type ForwardRule,
   updateForwardRule,
 } from "@/lib/auth";
-import { Plus, ShieldCheck, X } from "lucide-react";
+import { AlertTriangle, Plus, ShieldCheck, X } from "lucide-react";
 import type { AccountFilter } from "@/components/AppShell";
 import { useAuth } from "@/components/auth/AuthProvider";
 import { useAccountsData } from "@/hooks/useAccountsData";
@@ -52,6 +52,14 @@ export default function RulesPage({ accountFilter }: Props) {
   const allowlist = useMemo(() => allowlistQuery.data?.emails ?? [], [allowlistQuery.data?.emails]);
   const visible = useMemo(() => rulesQuery.data ?? [], [rulesQuery.data]);
   const getAccount = (id: string) => accounts.find((a) => a.id === id);
+  const selectedAccount = accountID ? getAccount(accountID) : undefined;
+  // Without a server-side forward the rule re-sends a copy from the mailbox:
+  // a new message, with the original attached, that the recipient's spam
+  // filtering judges afresh. Say so before the rule exists.
+  const resendsCopies = Boolean(selectedAccount?.capabilities && !selectedAccount.capabilities.server_side_forward);
+  const resendWarning = selectedAccount
+    ? `${selectedAccount.label} cannot forward server-side, so this rule will send a new message from ${selectedAccount.primaryEmail} with the original attached. It may look different to the recipient, and very large messages cannot be forwarded.`
+    : "";
 
   const saveAllowlist = useMutation({
     mutationFn: async (emails: string[]) => {
@@ -150,7 +158,13 @@ export default function RulesPage({ accountFilter }: Props) {
             </SelectContent>
           </Select>
           <Input value={newForwardTo} onChange={(e) => setNewForwardTo(e.target.value)} placeholder="forward_to@email.com" />
-          <Button onClick={() => createRule.mutate()} disabled={!accountID || createRule.isPending}>
+          <Button
+            onClick={() => {
+              if (resendsCopies && !window.confirm(`${resendWarning}\n\nCreate the rule anyway?`)) return;
+              createRule.mutate();
+            }}
+            disabled={!accountID || createRule.isPending}
+          >
             <Plus className="mr-1.5 h-3.5 w-3.5" /> New rule
           </Button>
         </div>
@@ -159,6 +173,11 @@ export default function RulesPage({ accountFilter }: Props) {
           onChange={(e) => setNewConditionJSON(e.target.value)}
           placeholder='{"all":[{"field":"has_attachments","op":"equals","value":true}]} or {"prompt":"looks like invoice"}'
         />
+        {resendsCopies && (
+          <p role="note" className="flex items-start gap-1.5 rounded-md border border-warning/30 bg-warning/5 px-3 py-2 text-xs text-foreground/80">
+            <AlertTriangle className="mt-0.5 h-3.5 w-3.5 shrink-0" /> {resendWarning}
+          </p>
+        )}
       </div>
 
       <ul className="space-y-3">

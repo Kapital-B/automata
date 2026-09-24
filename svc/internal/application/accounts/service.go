@@ -226,3 +226,40 @@ func (s *Service) findAccount(ctx context.Context, userID uuid.UUID, provider, e
 func (s *Service) Disconnect(ctx context.Context, userID uuid.UUID, id uuid.UUID) error {
 	return s.deps.Accounts.DeleteAccount(ctx, userID, id)
 }
+
+// Connect methods a provider can be added by.
+const (
+	ConnectOAuth    = "oauth"
+	ConnectPassword = "password"
+)
+
+// ProviderInfo is a mailbox provider a user can connect here.
+type ProviderInfo struct {
+	Provider     string
+	Connect      string
+	Capabilities driven.MailboxCapabilities
+}
+
+// Providers lists what can be connected, in a stable order, so the UI offers
+// only what this deployment is configured for.
+func (s *Service) Providers() []ProviderInfo {
+	var out []ProviderInfo
+	add := func(provider, connect string) {
+		caps, _ := s.deps.Mailboxes.Capabilities(provider)
+		out = append(out, ProviderInfo{Provider: provider, Connect: connect, Capabilities: caps})
+	}
+	for _, p := range []string{ProviderM365, ProviderGoogle, ProviderIMAP} {
+		if _, ok := s.deps.Connectors[p]; ok {
+			add(p, ConnectOAuth)
+		} else if _, ok := s.deps.PasswordConnectors[p]; ok {
+			add(p, ConnectPassword)
+		}
+	}
+	return out
+}
+
+// Capabilities reports what an account's provider can do; ok is false when
+// the provider is not configured here.
+func (s *Service) Capabilities(provider string) (driven.MailboxCapabilities, bool) {
+	return s.deps.Mailboxes.Capabilities(provider)
+}

@@ -26,6 +26,8 @@ type stubProvider struct {
 	rotated []byte
 }
 
+func (p *stubProvider) Capabilities() driven.MailboxCapabilities { return driven.MailboxCapabilities{} }
+
 func (p *stubProvider) Open(ctx context.Context, account driven.AccountRow, credential []byte) (driven.Mailbox, []byte, error) {
 	if p.openErr != nil {
 		return nil, nil, p.openErr

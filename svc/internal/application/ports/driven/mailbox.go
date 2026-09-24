@@ -102,6 +102,9 @@ type Mailbox interface {
 // MailProvider turns an account's stored credentials into an open mailbox.
 // Credentials are opaque to everything above the provider.
 type MailProvider interface {
+	// Capabilities is what every mailbox this provider opens can do, known
+	// without opening one, so the UI can say it before anything runs.
+	Capabilities() MailboxCapabilities
 	// Open returns a ready mailbox. rotated is non-nil when the provider
 	// issued replacement credentials that must be persisted.
 	Open(ctx context.Context, account AccountRow, credential []byte) (box Mailbox, rotated []byte, err error)

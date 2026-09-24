@@ -122,15 +122,17 @@ type mailbox struct {
 	maxRaw int64
 }
 
-func (m *mailbox) Capabilities() driven.MailboxCapabilities {
-	return driven.MailboxCapabilities{
-		IncrementalSync:   true,
-		ServerSideForward: true,
-		ServerSideReply:   true,
-		ReportsRemovals:   true,
-		StableMessageIDs:  true,
-	}
+var capabilities = driven.MailboxCapabilities{
+	IncrementalSync:   true,
+	ServerSideForward: true,
+	ServerSideReply:   true,
+	ReportsRemovals:   true,
+	StableMessageIDs:  true,
 }
+
+func (p *Provider) Capabilities() driven.MailboxCapabilities { return capabilities }
+
+func (m *mailbox) Capabilities() driven.MailboxCapabilities { return capabilities }
 
 func (m *mailbox) ListChanges(ctx context.Context, cursor string, pageSize int) (*driven.MailChangePage, error) {
 	return m.graph.ListInboxDelta(ctx, m.token, cursor, pageSize)

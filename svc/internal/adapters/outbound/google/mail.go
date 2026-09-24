@@ -307,15 +307,17 @@ func (m *gmailMailbox) profile(ctx context.Context) (*profileResponse, error) {
 	return &p, nil
 }
 
-func (m *gmailMailbox) Capabilities() driven.MailboxCapabilities {
-	return driven.MailboxCapabilities{
-		IncrementalSync:   true,
-		ServerSideForward: false,
-		ServerSideReply:   false,
-		ReportsRemovals:   true,
-		StableMessageIDs:  true,
-	}
+var capabilities = driven.MailboxCapabilities{
+	IncrementalSync:   true,
+	ServerSideForward: false,
+	ServerSideReply:   false,
+	ReportsRemovals:   true,
+	StableMessageIDs:  true,
 }
+
+func (p *MailProvider) Capabilities() driven.MailboxCapabilities { return capabilities }
+
+func (m *gmailMailbox) Capabilities() driven.MailboxCapabilities { return capabilities }
 
 // Cursors are opaque to callers:
 //

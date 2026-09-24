@@ -175,6 +175,7 @@ func (h *Handlers) Routes() http.Handler {
 	r.Get("/api/accounts", h.listAccounts)
 	r.Post("/api/accounts", h.startConnect)
 	r.Post("/api/accounts/imap", h.connectIMAP)
+	r.Get("/api/accounts/providers", h.listMailProviders)
 	r.Get("/api/accounts/callback", h.oauthCallback)
 	// Google needs its own registered redirect URI; the state decides which
 	// provider completes, so both land in the same handler.
@@ -248,13 +249,15 @@ func (h *Handlers) listAccounts(w http.ResponseWriter, r *http.Request) {
 		ConnectionStatus string  `json:"connection_status"`
 		LastError        *string `json:"last_error,omitempty"`
 		LastSyncedAt     *string `json:"last_synced_at,omitempty"`
+		// Capabilities is absent when the provider is not configured here.
+		Capabilities *capabilitiesBody `json:"capabilities,omitempty"`
 	}
 	out := make([]item, 0, len(rows))
 	for _, a := range rows {
 		it := item{
 			ID:               a.ID.String(),
 			Label:            a.Label,
-			Provider:         a.Provider,
+			Provider:         appaccounts.ProviderKey(a.Provider),
 			MsAccountKind:    string(a.MsAccountKind),
 			PrimaryEmail:     a.PrimaryEmail,
 			ConnectionStatus: a.ConnectionStatus,
@@ -264,7 +267,46 @@ func (h *Handlers) listAccounts(w http.ResponseWriter, r *http.Request) {
 			s := a.LastSyncedAt.UTC().Format(time.RFC3339Nano)
 			it.LastSyncedAt = &s
 		}
+		if h.AccountSvc != nil {
+			if caps, ok := h.AccountSvc.Capabilities(a.Provider); ok {
+				body := capabilitiesJSON(caps)
+				it.Capabilities = &body
+			}
+		}
 		out = append(out, it)
+	}
+	writeJSON(w, http.StatusOK, out)
+}
+
+type capabilitiesBody struct {
+	IncrementalSync   bool `json:"incremental_sync"`
+	ServerSideForward bool `json:"server_side_forward"`
+	ServerSideReply   bool `json:"server_side_reply"`
+	ReportsRemovals   bool `json:"reports_removals"`
+}
+
+func capabilitiesJSON(c driven.MailboxCapabilities) capabilitiesBody {
+	return capabilitiesBody{
+		IncrementalSync:   c.IncrementalSync,
+		ServerSideForward: c.ServerSideForward,
+		ServerSideReply:   c.ServerSideReply,
+		ReportsRemovals:   c.ReportsRemovals,
+	}
+}
+
+// listMailProviders tells the UI which mailbox providers this deployment can
+// connect, and how, so it never offers one that is not configured.
+func (h *Handlers) listMailProviders(w http.ResponseWriter, r *http.Request) {
+	type item struct {
+		Provider     string           `json:"provider"`
+		Connect      string           `json:"connect"`
+		Capabilities capabilitiesBody `json:"capabilities"`
+	}
+	out := []item{}
+	if h.AccountSvc != nil {
+		for _, p := range h.AccountSvc.Providers() {
+			out = append(out, item{Provider: p.Provider, Connect: p.Connect, Capabilities: capabilitiesJSON(p.Capabilities)})
+		}
 	}
 	writeJSON(w, http.StatusOK, out)
 }

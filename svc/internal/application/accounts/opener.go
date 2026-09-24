@@ -85,3 +85,16 @@ func (o *MailboxOpener) Open(ctx context.Context, userID, accountID uuid.UUID) (
 	}
 	return box, row, nil
 }
+
+// Capabilities reports what a provider's mailboxes can do, without opening
+// one. ok is false for a provider with no adapter registered.
+func (o *MailboxOpener) Capabilities(provider string) (caps driven.MailboxCapabilities, ok bool) {
+	if o == nil {
+		return caps, false
+	}
+	p, ok := o.Providers[ProviderKey(provider)]
+	if !ok {
+		return caps, false
+	}
+	return p.Capabilities(), true
+}

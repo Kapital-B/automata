@@ -15,9 +15,11 @@ type Deps struct {
 	Connectors map[string]driven.OAuthMailConnector
 	// PasswordConnectors connect mailboxes from typed-in credentials.
 	PasswordConnectors map[string]driven.PasswordMailConnector
-	Vault              driven.TokenVault
-	Dashboard          string
-	SuccessPath        string
-	ErrorPath          string
-	StateTTL           time.Duration
+	// Mailboxes reports what each provider's mailboxes can do.
+	Mailboxes   *MailboxOpener
+	Vault       driven.TokenVault
+	Dashboard   string
+	SuccessPath string
+	ErrorPath   string
+	StateTTL    time.Duration
 }
