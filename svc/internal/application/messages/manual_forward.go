@@ -29,7 +29,7 @@ func destEmailInForwardAllowlist(dest string, rows []driven.ForwardAllowlistRow)
 // ManualForwardMessage forwards a single message via Microsoft Graph to an allowlisted address.
 // Writes manual_forward_audit on success and failure.
 func (s *ForwardRulesService) ManualForwardMessage(ctx context.Context, userID, messageID uuid.UUID, toEmail, comment string) error {
-	if s == nil || s.Messages == nil || s.Forwards == nil || s.Accounts == nil || s.OAuth == nil || s.Graph == nil || s.Vault == nil {
+	if s == nil || s.Messages == nil || s.Forwards == nil || s.Mailboxes == nil {
 		return fmt.Errorf("forward service not configured")
 	}
 	to := strings.TrimSpace(toEmail)
@@ -55,15 +55,7 @@ func (s *ForwardRulesService) ManualForwardMessage(ctx context.Context, userID, 
 		return fmt.Errorf("message not found")
 	}
 
-	account, cipher, err := s.Accounts.GetAccount(ctx, userID, msg.AccountID)
-	if err != nil {
-		return err
-	}
-	if account == nil {
-		return fmt.Errorf("account not found")
-	}
-
-	accessToken, err := s.refreshToken(ctx, userID, msg.AccountID, account, cipher)
+	box, _, err := s.Mailboxes.Open(ctx, userID, msg.AccountID)
 	if err != nil {
 		return err
 	}
@@ -82,8 +74,7 @@ func (s *ForwardRulesService) ManualForwardMessage(ctx context.Context, userID, 
 	normalizedTo := strings.ToLower(to)
 	now := time.Now().UTC()
 
-	graphID, err := s.Graph.ResolveGraphMessageID(ctx, accessToken, msg.ProviderMessageID)
-	if err != nil {
+	if err := box.Forward(ctx, msg.ProviderMessageID, normalizedTo, c); err != nil {
 		msgErr := err.Error()
 		_ = s.Forwards.InsertManualForwardAudit(ctx, driven.ManualForwardAuditRow{
 			ID:        uuid.New(),
@@ -98,22 +89,12 @@ func (s *ForwardRulesService) ManualForwardMessage(ctx context.Context, userID, 
 		})
 		return err
 	}
-	if err := s.Graph.ForwardMessage(ctx, accessToken, graphID, normalizedTo, c); err != nil {
-		msgErr := err.Error()
-		_ = s.Forwards.InsertManualForwardAudit(ctx, driven.ManualForwardAuditRow{
-			ID:        uuid.New(),
-			UserID:    userID,
-			AccountID: msg.AccountID,
-			MessageID: messageID,
-			ToEmail:   normalizedTo,
-			Comment:   commentPtr,
-			Status:    "failed",
-			Reason:    &msgErr,
-			CreatedAt: now,
-		})
-		return err
+	// Say which route delivered it: a re-sent copy carries us as the sender,
+	// which is worth knowing when it lands somewhere unexpected.
+	okReason := "manual forward (server-side)"
+	if !box.Capabilities().ServerSideForward {
+		okReason = "manual forward (re-sent as attachment)"
 	}
-	okReason := "manual forward via Graph"
 	_ = s.Forwards.InsertManualForwardAudit(ctx, driven.ManualForwardAuditRow{
 		ID:        uuid.New(),
 		UserID:    userID,

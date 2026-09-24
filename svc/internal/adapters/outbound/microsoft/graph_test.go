@@ -1,13 +1,17 @@
 package microsoft
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"io"
 	"net/http"
 	"net/http/httptest"
 	"sync/atomic"
 	"testing"
+
+	"github.com/Kapital-B/automata/svc/internal/application/ports/driven"
 )
 
 func TestListInboxDeltaReturnsSinglePageCursor(t *testing.T) {
@@ -41,11 +45,11 @@ func TestListInboxDeltaReturnsSinglePageCursor(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if res.NextLink != baseURL+"/v1.0/delta-page-2" {
-		t.Fatalf("expected next link, got %q", res.NextLink)
+	if res.NextCursor != baseURL+"/v1.0/delta-page-2" {
+		t.Fatalf("expected next link, got %q", res.NextCursor)
 	}
-	if res.DeltaLink != "" {
-		t.Fatalf("expected final delta link to be deferred, got %q", res.DeltaLink)
+	if res.FinalCursor != "" {
+		t.Fatalf("expected final delta link to be deferred, got %q", res.FinalCursor)
 	}
 	if len(res.Messages) != 1 {
 		t.Fatalf("expected one page of messages, got %d", len(res.Messages))
@@ -55,7 +59,7 @@ func TestListInboxDeltaReturnsSinglePageCursor(t *testing.T) {
 	}
 }
 
-func TestListInboxMessagesRetriesOn429(t *testing.T) {
+func TestListInboxDeltaRetriesOn429(t *testing.T) {
 	var attempts atomic.Int32
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		n := attempts.Add(1)
@@ -70,17 +74,18 @@ func TestListInboxMessagesRetriesOn429(t *testing.T) {
 			"value": []map[string]any{
 				{"id": "m1", "subject": "ok"},
 			},
+			"@odata.deltaLink": "delta-final",
 		})
 	}))
 	defer server.Close()
 
 	client := &GraphClient{APIRoot: server.URL + "/v1.0"}
-	msgs, err := client.ListInboxMessages(context.Background(), "token", 10)
+	page, err := client.ListInboxDelta(context.Background(), "token", "", 10)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(msgs) != 1 {
-		t.Fatalf("expected one message after retry, got %d", len(msgs))
+	if len(page.Messages) != 1 {
+		t.Fatalf("expected one message after retry, got %d", len(page.Messages))
 	}
 	if attempts.Load() != 2 {
 		t.Fatalf("expected one retry, got %d attempts", attempts.Load())
@@ -165,5 +170,56 @@ func TestListInboxDeltaSkipsRemovedTombstones(t *testing.T) {
 	}
 	if res.Messages[0].ID != "kept" {
 		t.Errorf("kept %q, want the message that is still in the folder", res.Messages[0].ID)
+	}
+	if len(res.Removed) != 1 || res.Removed[0] != "gone" {
+		t.Errorf("removed = %v, want the tombstone reported as a removal", res.Removed)
+	}
+}
+
+// An expired delta link has to be distinguishable from any other failure, so
+// sync can fall back to a full enumeration instead of failing forever.
+func TestListInboxDeltaReportsAnExpiredCursor(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusGone)
+		_, _ = w.Write([]byte(`{"error":{"code":"syncStateNotFound"}}`))
+	}))
+	defer server.Close()
+
+	client := &GraphClient{APIRoot: server.URL + "/v1.0"}
+	_, err := client.ListInboxDelta(context.Background(), "token", server.URL+"/v1.0/stale-delta", 10)
+	if !errors.Is(err, driven.ErrCursorExpired) {
+		t.Fatalf("err = %v, want ErrCursorExpired", err)
+	}
+}
+
+// Without a resume cursor the same response is just an error: there is no
+// cursor to have expired.
+func TestListInboxDeltaDoesNotCallAFreshListExpired(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusGone)
+		_, _ = w.Write([]byte(`{"error":{"code":"syncStateNotFound"}}`))
+	}))
+	defer server.Close()
+
+	client := &GraphClient{APIRoot: server.URL + "/v1.0"}
+	_, err := client.ListInboxDelta(context.Background(), "token", "", 10)
+	if err == nil || errors.Is(err, driven.ErrCursorExpired) {
+		t.Fatalf("err = %v, want a plain failure", err)
+	}
+}
+
+func TestGetRawMessageRefusesOversizedMessages(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		_, _ = w.Write(bytes.Repeat([]byte("x"), 64))
+	}))
+	defer server.Close()
+
+	client := &GraphClient{APIRoot: server.URL + "/v1.0"}
+	if _, err := client.GetRawMessage(context.Background(), "token", "m1", 32); !errors.Is(err, driven.ErrMailTooLarge) {
+		t.Fatalf("err = %v, want ErrMailTooLarge", err)
+	}
+	raw, err := client.GetRawMessage(context.Background(), "token", "m1", 128)
+	if err != nil || len(raw) != 64 {
+		t.Fatalf("raw = %d bytes, err = %v; want the whole message", len(raw), err)
 	}
 }

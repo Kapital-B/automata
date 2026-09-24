@@ -402,6 +402,10 @@ type ContactRow struct {
 	MergedIntoContactID *uuid.UUID
 	CreatedAt           time.Time
 	UpdatedAt           time.Time
+	// PrimaryEmail is the contact's earliest email identity. Only
+	// ListContacts fills it, so a list can say who someone is without a
+	// round trip per row.
+	PrimaryEmail string
 }
 
 // ContactIdentityRow is one identity on a contact.

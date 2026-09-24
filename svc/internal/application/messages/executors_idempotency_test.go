@@ -12,15 +12,15 @@ import (
 )
 
 func TestSyncExecutorReplayKeepsSingleMessageUpsert(t *testing.T) {
-	graph := &fakeDeltaGraph{
-		results: []*driven.GraphDeltaResult{
+	graph := &fakeMailbox{
+		results: []*driven.MailChangePage{
 			{
-				Messages:  []driven.GraphMessage{{ID: "provider-1", Subject: "one", ReceivedDateTime: time.Now().UTC().Format(time.RFC3339), FromAddress: "a@example.com"}},
-				DeltaLink: "delta-1",
+				Messages:    []driven.MailMessage{{ID: "provider-1", Subject: "one", ReceivedDateTime: time.Now().UTC().Format(time.RFC3339), FromAddress: "a@example.com"}},
+				FinalCursor: "delta-1",
 			},
 			{
-				Messages:  []driven.GraphMessage{{ID: "provider-1", Subject: "one", ReceivedDateTime: time.Now().UTC().Format(time.RFC3339), FromAddress: "a@example.com"}},
-				DeltaLink: "delta-1",
+				Messages:    []driven.MailMessage{{ID: "provider-1", Subject: "one", ReceivedDateTime: time.Now().UTC().Format(time.RFC3339), FromAddress: "a@example.com"}},
+				FinalCursor: "delta-1",
 			},
 		},
 	}
@@ -131,9 +131,9 @@ func TestDraftSuggestExecutorReplayKeepsSingleDraft(t *testing.T) {
 }
 
 func TestForwardRulesExecutorEffectClaimPreventsDuplicateSend(t *testing.T) {
-	db, svc, repo, userID, accountID, messageID := setupForwardRulesService(t, &fakeForwardGraph{})
-	graph := &fakeForwardGraph{}
-	svc.Graph = graph
+	db, svc, repo, userID, accountID, messageID := setupForwardRulesService(t, &fakeMailbox{})
+	graph := &fakeMailbox{}
+	svc.Mailboxes = testOpener(repo, graph)
 	store := memoryjobs.NewStore()
 	exec := &ForwardRulesExecutor{Service: svc, Store: store}
 	run := driven.RunContext{

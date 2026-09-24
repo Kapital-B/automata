@@ -51,6 +51,12 @@ variable "google_client_id" {
   default     = ""
 }
 
+variable "google_mail_client_id" {
+  description = "Optional Google OAuth client ID for connecting Gmail mailboxes (public). Separate from google_client_id."
+  type        = string
+  default     = ""
+}
+
 variable "slack_mode" {
   description = "Slack integration mode."
   type        = string
@@ -107,6 +113,7 @@ module "automata" {
   ms_redirect_uri               = local.ms_redirect_uri
   ms_auth_redirect_uri          = local.ms_auth_redirect_uri
   google_client_id              = var.google_client_id
+  google_mail_client_id         = var.google_mail_client_id
   google_redirect_uri           = local.google_redirect_uri
   slack_mode                    = var.slack_mode
   slack_client_id               = var.slack_client_id

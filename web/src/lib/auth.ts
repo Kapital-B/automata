@@ -30,15 +30,49 @@ type OAuthStartResponse = {
   authorization_url: string;
 };
 
+/** What a mailbox provider can do; decides what the UI promises. */
+export type MailCapabilities = {
+  incremental_sync: boolean;
+  server_side_forward: boolean;
+  server_side_reply: boolean;
+  reports_removals: boolean;
+};
+
+export type MailProviderId = "m365" | "google" | "imap";
+
 export type MailAccount = {
   id: string;
   label: string;
   provider: string;
+  /** Only meaningful for m365; other providers carry a placeholder. */
   ms_account_kind: "work" | "personal" | "common";
   primary_email: string;
   connection_status: "connected" | "error" | "expired";
   last_error?: string;
   last_synced_at?: string;
+  /** Absent when the account's provider is not configured on this server. */
+  capabilities?: MailCapabilities;
+};
+
+export type MailProviderOption = {
+  provider: MailProviderId;
+  connect: "oauth" | "password";
+  capabilities: MailCapabilities;
+};
+
+export type MailServerSettings = {
+  host: string;
+  port: number;
+  security: "tls" | "starttls";
+};
+
+export type ConnectImapRequest = {
+  email: string;
+  username?: string;
+  password: string;
+  imap: MailServerSettings;
+  smtp: MailServerSettings;
+  label?: string;
 };
 
 export type SyncAccountResponse = {
@@ -347,6 +381,8 @@ export type ContactListItem = {
   organisation_id: string;
   display_name: string;
   company?: string;
+  /** Earliest email identity; present in list results. */
+  primary_email?: string;
   created_at: string;
   updated_at: string;
 };
@@ -359,9 +395,18 @@ export type ContactIdentity = {
   created_at: string;
 };
 
+export type ContactRecentMessage = {
+  message_id: string;
+  account_id: string;
+  subject?: string;
+  from_name?: string;
+  from_address?: string;
+  received_at?: string;
+};
+
 export type ContactDetail = ContactListItem & {
   identities: ContactIdentity[];
-  recent_messages: { message_id: string; account_id: string }[];
+  recent_messages: ContactRecentMessage[];
   suggested_merges: { id: string; display_name: string }[];
 };
 
@@ -1263,11 +1308,31 @@ export async function listAccounts(accessToken: string) {
   });
 }
 
-export async function startMailboxConnect(accessToken: string, kind: "work" | "personal") {
+export async function startMailboxConnect(
+  accessToken: string,
+  provider: "m365" | "google",
+  kind?: "work" | "personal",
+) {
   return apiRequest<OAuthStartResponse>("/api/accounts", {
     method: "POST",
     headers: toAuthHeader(accessToken),
-    body: JSON.stringify({ provider: "m365", ms_account_kind: kind }),
+    body: JSON.stringify(provider === "m365" ? { provider, ms_account_kind: kind } : { provider }),
+  });
+}
+
+export async function listMailProviders(accessToken: string) {
+  return apiRequest<MailProviderOption[]>("/api/accounts/providers", {
+    headers: toAuthHeader(accessToken),
+  });
+}
+
+/** Connects an IMAP/SMTP mailbox. The server logs into both before storing
+ * anything, so a wrong password rejects here with a message naming it. */
+export async function connectImapAccount(accessToken: string, body: ConnectImapRequest) {
+  return apiRequest<{ account_id: string }>("/api/accounts/imap", {
+    method: "POST",
+    headers: toAuthHeader(accessToken),
+    body: JSON.stringify(body),
   });
 }
 

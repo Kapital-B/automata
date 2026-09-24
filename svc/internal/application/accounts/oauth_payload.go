@@ -7,28 +7,33 @@ import (
 	"github.com/Kapital-B/automata/svc/internal/domain/accounts"
 )
 
+// mailboxOAuthPayload rides in OAuth state between starting a connect and
+// its callback.
 type mailboxOAuthPayload struct {
-	MsAccountKind string  `json:"ms_account_kind"`
+	// Provider is empty in states written before provider support; those
+	// were all Microsoft.
+	Provider      string  `json:"provider,omitempty"`
+	MsAccountKind string  `json:"ms_account_kind,omitempty"`
 	Label         *string `json:"label,omitempty"`
 }
 
-func EncodeMailboxOAuthPayload(kind accounts.MsAccountKind, label *string) (string, error) {
-	p := mailboxOAuthPayload{MsAccountKind: string(kind), Label: label}
-	b, err := json.Marshal(p)
+func EncodeMailboxOAuthPayload(provider string, kind accounts.MsAccountKind, label *string) (string, error) {
+	b, err := json.Marshal(mailboxOAuthPayload{Provider: ProviderKey(provider), MsAccountKind: string(kind), Label: label})
 	if err != nil {
 		return "", err
 	}
 	return string(b), nil
 }
 
-func DecodeMailboxOAuthPayload(s string) (accounts.MsAccountKind, *string, error) {
+func DecodeMailboxOAuthPayload(s string) (string, accounts.MsAccountKind, *string, error) {
 	var p mailboxOAuthPayload
 	if err := json.Unmarshal([]byte(s), &p); err != nil {
-		return "", nil, err
+		return "", "", nil, err
 	}
+	provider := ProviderKey(p.Provider)
 	k := accounts.MsAccountKind(p.MsAccountKind)
-	if !k.Valid() {
-		return "", nil, fmt.Errorf("invalid ms_account_kind in state")
+	if provider == ProviderM365 && !k.Valid() {
+		return "", "", nil, fmt.Errorf("invalid ms_account_kind in state")
 	}
-	return k, p.Label, nil
+	return provider, k, p.Label, nil
 }

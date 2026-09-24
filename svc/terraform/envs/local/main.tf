@@ -70,6 +70,8 @@ module "automata" {
   ms_auth_redirect_uri           = var.ms_auth_redirect_uri
   google_client_id               = var.google_client_id
   google_client_secret           = var.google_client_secret
+  google_mail_client_id          = var.google_mail_client_id
+  google_mail_client_secret      = var.google_mail_client_secret
   google_redirect_uri            = var.google_redirect_uri
   slack_mode                     = var.slack_mode
   slack_client_id                = var.slack_client_id

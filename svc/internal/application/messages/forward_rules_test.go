@@ -4,50 +4,17 @@ import (
 	"context"
 	"database/sql"
 	"errors"
-	"strings"
 	"testing"
 	"time"
 
 	"github.com/Kapital-B/automata/svc/internal/adapters/outbound/persistence/sqlite"
-	appaccounts "github.com/Kapital-B/automata/svc/internal/application/accounts"
 	"github.com/Kapital-B/automata/svc/internal/application/ports/driven"
 	domainacc "github.com/Kapital-B/automata/svc/internal/domain/accounts"
 	"github.com/google/uuid"
 	_ "modernc.org/sqlite"
 )
 
-type fakeForwardGraph struct {
-	forwardCalls int
-	forwardErr   error
-}
-
-func (f *fakeForwardGraph) GetMe(ctx context.Context, accessToken string) (*driven.GraphProfile, error) {
-	return nil, errors.New("not implemented")
-}
-func (f *fakeForwardGraph) ListInboxMessages(ctx context.Context, accessToken string, top int) ([]driven.GraphMessage, error) {
-	return nil, errors.New("not implemented")
-}
-func (f *fakeForwardGraph) ListInboxDelta(ctx context.Context, accessToken string, deltaLink string, pageSize int) (*driven.GraphDeltaResult, error) {
-	return nil, errors.New("not implemented")
-}
-func (f *fakeForwardGraph) GetMessageBody(ctx context.Context, accessToken string, providerMessageID string) (*driven.GraphMessage, error) {
-	return nil, errors.New("not implemented")
-}
-func (f *fakeForwardGraph) ResolveGraphMessageID(ctx context.Context, accessToken string, providerMessageID string) (string, error) {
-	return strings.TrimSpace(providerMessageID), nil
-}
-func (f *fakeForwardGraph) SendMail(ctx context.Context, accessToken string, toEmail, subject, body string) error {
-	return errors.New("not implemented")
-}
-func (f *fakeForwardGraph) ReplyToMessage(ctx context.Context, accessToken string, providerMessageID string, body string) error {
-	return errors.New("not implemented")
-}
-func (f *fakeForwardGraph) ForwardMessage(ctx context.Context, accessToken string, providerMessageID string, toEmail string, comment string) error {
-	f.forwardCalls++
-	return f.forwardErr
-}
-
-func setupForwardRulesService(t *testing.T, graph *fakeForwardGraph) (*sql.DB, *ForwardRulesService, *sqlite.Repository, uuid.UUID, uuid.UUID, uuid.UUID) {
+func setupForwardRulesService(t *testing.T, graph *fakeMailbox) (*sql.DB, *ForwardRulesService, *sqlite.Repository, uuid.UUID, uuid.UUID, uuid.UUID) {
 	t.Helper()
 	db, err := sql.Open("sqlite", "file::memory:?cache=shared")
 	if err != nil {
@@ -62,10 +29,7 @@ func setupForwardRulesService(t *testing.T, graph *fakeForwardGraph) (*sql.DB, *
 	accountID := uuid.New()
 	messageID := uuid.New()
 
-	payload, err := appaccounts.EncodeRefreshPayloadForStorage(domainacc.KindWork, "refresh-initial")
-	if err != nil {
-		t.Fatal(err)
-	}
+	payload := []byte("credential")
 	if err := repo.InsertAccount(context.Background(), driven.AccountRow{
 		UserID:           userID,
 		ID:               accountID,
@@ -147,19 +111,16 @@ func setupForwardRulesService(t *testing.T, graph *fakeForwardGraph) (*sql.DB, *
 	}
 
 	svc := &ForwardRulesService{
-		Messages: repo,
-		Forwards: repo,
-		Accounts: repo,
-		OAuth:    &fakeSyncOAuth{},
-		Graph:    graph,
-		Vault:    &passthroughVault{},
-		JobRuns:  repo,
+		Messages:  repo,
+		Forwards:  repo,
+		Mailboxes: testOpener(repo, graph),
+		JobRuns:   repo,
 	}
 	return db, svc, repo, userID, accountID, messageID
 }
 
 func TestForwardRulesUsesForwardSeenMarkerNotReceivedAt(t *testing.T) {
-	db, svc, repo, userID, accountID, messageID := setupForwardRulesService(t, &fakeForwardGraph{})
+	db, svc, repo, userID, accountID, messageID := setupForwardRulesService(t, &fakeMailbox{})
 	_, err := svc.RunAccount(context.Background(), userID, accountID, ForwardRulesOptions{
 		Trigger: "schedule",
 		Since:   ptrTime(time.Date(2026, 5, 1, 10, 17, 48, 0, time.UTC)),
@@ -184,7 +145,7 @@ func TestForwardRulesUsesForwardSeenMarkerNotReceivedAt(t *testing.T) {
 }
 
 func TestForwardRulesSecondRunDoesNotCallGraphAgain(t *testing.T) {
-	graph := &fakeForwardGraph{}
+	graph := &fakeMailbox{}
 	_, svc, _, userID, accountID, _ := setupForwardRulesService(t, graph)
 	_, err := svc.RunAccount(context.Background(), userID, accountID, ForwardRulesOptions{Trigger: "schedule"})
 	if err != nil {
@@ -203,7 +164,7 @@ func TestForwardRulesSecondRunDoesNotCallGraphAgain(t *testing.T) {
 }
 
 func TestForwardRulesSkippedAuditWhenRuleDoesNotMatch(t *testing.T) {
-	graph := &fakeForwardGraph{}
+	graph := &fakeMailbox{}
 	db, svc, repo, userID, accountID, messageID := setupForwardRulesService(t, graph)
 	ruleNoMatchID := uuid.New()
 	forwardTo := "bills@example.com"
@@ -246,7 +207,7 @@ func TestForwardRulesSkippedAuditWhenRuleDoesNotMatch(t *testing.T) {
 }
 
 func TestForwardRulesKeepsMessageUnseenWhenForwardFails(t *testing.T) {
-	db, svc, repo, userID, accountID, messageID := setupForwardRulesService(t, &fakeForwardGraph{forwardErr: errors.New("graph failed")})
+	db, svc, repo, userID, accountID, messageID := setupForwardRulesService(t, &fakeMailbox{forwardErr: errors.New("graph failed")})
 	_, err := svc.RunAccount(context.Background(), userID, accountID, ForwardRulesOptions{Trigger: "schedule"})
 	if err != nil {
 		t.Fatal(err)

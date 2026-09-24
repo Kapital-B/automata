@@ -60,6 +60,9 @@ func (h *Handlers) listContacts(w http.ResponseWriter, r *http.Request) {
 		if c.Company != nil {
 			item["company"] = *c.Company
 		}
+		if c.PrimaryEmail != "" {
+			item["primary_email"] = c.PrimaryEmail
+		}
 		out = append(out, item)
 	}
 	writeJSON(w, http.StatusOK, out)
@@ -104,8 +107,12 @@ func (h *Handlers) getContact(w http.ResponseWriter, r *http.Request) {
 	recent := make([]map[string]string, 0, len(detail.RecentMessages))
 	for _, m := range detail.RecentMessages {
 		recent = append(recent, map[string]string{
-			"message_id": m.MessageID.String(),
-			"account_id": m.AccountID.String(),
+			"message_id":   m.MessageID.String(),
+			"account_id":   m.AccountID.String(),
+			"subject":      m.Subject,
+			"from_name":    m.FromName,
+			"from_address": m.FromAddress,
+			"received_at":  m.ReceivedAt.UTC().Format(time.RFC3339),
 		})
 	}
 	suggestions := make([]map[string]any, 0, len(detail.SuggestedMerges))

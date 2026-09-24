@@ -9,7 +9,7 @@ import (
 )
 
 func TestManualForwardMessageAllowlisted(t *testing.T) {
-	graph := &fakeForwardGraph{}
+	graph := &fakeMailbox{}
 	db, svc, _, userID, _, messageID := setupForwardRulesService(t, graph)
 	err := svc.ManualForwardMessage(context.Background(), userID, messageID, "bills@example.com", "fyi")
 	if err != nil {
@@ -28,7 +28,7 @@ func TestManualForwardMessageAllowlisted(t *testing.T) {
 }
 
 func TestManualForwardMessageRejectsNotOnAllowlist(t *testing.T) {
-	graph := &fakeForwardGraph{}
+	graph := &fakeMailbox{}
 	_, svc, _, userID, _, _ := setupForwardRulesService(t, graph)
 	err := svc.ManualForwardMessage(context.Background(), userID, uuid.Nil, "other@example.com", "")
 	if err == nil {
@@ -40,7 +40,7 @@ func TestManualForwardMessageRejectsNotOnAllowlist(t *testing.T) {
 }
 
 func TestManualForwardMessageFailedGraphWritesAudit(t *testing.T) {
-	graph := &fakeForwardGraph{forwardErr: errors.New("graph down")}
+	graph := &fakeMailbox{forwardErr: errors.New("graph down")}
 	db, svc, _, userID, _, messageID := setupForwardRulesService(t, graph)
 	err := svc.ManualForwardMessage(context.Background(), userID, messageID, "bills@example.com", "")
 	if err == nil {

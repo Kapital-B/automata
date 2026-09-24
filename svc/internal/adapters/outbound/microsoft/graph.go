@@ -20,7 +20,8 @@ import (
 
 const graphBase = "https://graph.microsoft.com/v1.0"
 
-// GraphClient implements driven.MicrosoftGraph.
+// GraphClient talks to Microsoft Graph with a caller-supplied access token.
+// Mailbox (mailbox.go) is what the application sees.
 type GraphClient struct {
 	HTTPClient *http.Client
 	// APIRoot overrides the Graph API root (scheme + host + version prefix), e.g.
@@ -171,8 +172,15 @@ type meResponse struct {
 	UserPrincipalName string `json:"userPrincipalName"`
 }
 
+// Profile is who a Graph access token belongs to.
+type Profile struct {
+	Mail              string
+	UserPrincipalName string
+	TenantID          string // oid of tenant for work; consumers may use placeholder
+}
+
 // GetMe returns profile from Graph /me.
-func (g *GraphClient) GetMe(ctx context.Context, accessToken string) (*driven.GraphProfile, error) {
+func (g *GraphClient) GetMe(ctx context.Context, accessToken string) (*Profile, error) {
 	var me meResponse
 	if err := g.getJSON(ctx, accessToken, g.apiRoot()+"/me", &me); err != nil {
 		return nil, err
@@ -188,7 +196,7 @@ func (g *GraphClient) GetMe(ctx context.Context, accessToken string) (*driven.Gr
 	if tenant == "" {
 		tenant = "unknown"
 	}
-	return &driven.GraphProfile{
+	return &Profile{
 		Mail:              email,
 		UserPrincipalName: me.UserPrincipalName,
 		TenantID:          tenant,
@@ -270,13 +278,13 @@ func mapGraphRecipients(in []struct {
 		Name    string `json:"name"`
 		Address string `json:"address"`
 	} `json:"emailAddress"`
-}) []driven.GraphRecipient {
+}) []driven.MailRecipient {
 	if len(in) == 0 {
 		return nil
 	}
-	out := make([]driven.GraphRecipient, 0, len(in))
+	out := make([]driven.MailRecipient, 0, len(in))
 	for _, r := range in {
-		out = append(out, driven.GraphRecipient{
+		out = append(out, driven.MailRecipient{
 			Name:    r.EmailAddress.Name,
 			Address: r.EmailAddress.Address,
 		})
@@ -284,8 +292,8 @@ func mapGraphRecipients(in []struct {
 	return out
 }
 
-func mapGraphMessage(m graphMessageJSON) driven.GraphMessage {
-	return driven.GraphMessage{
+func mapGraphMessage(m graphMessageJSON) driven.MailMessage {
+	return driven.MailMessage{
 		ID:               m.ID,
 		ConversationID:   m.ConversationID,
 		ReceivedDateTime: m.ReceivedDateTime,
@@ -299,37 +307,12 @@ func mapGraphMessage(m graphMessageJSON) driven.GraphMessage {
 		BodyContentType:  m.Body.ContentType,
 		HasAttachments:   m.HasAttachments,
 		ChangeKey:        m.ChangeKey,
-		Removed:          m.Removed != nil,
 	}
 }
 
-// ListInboxMessages lists top messages from Inbox (no delta in Phase 1).
-func (g *GraphClient) ListInboxMessages(ctx context.Context, accessToken string, top int) ([]driven.GraphMessage, error) {
-	if top <= 0 {
-		top = 25
-	}
-	if top > 100 {
-		top = 100
-	}
-	u, _ := url.Parse(g.apiRoot() + "/me/mailFolders/inbox/messages")
-	q := u.Query()
-	q.Set("$top", fmt.Sprintf("%d", top))
-	q.Set("$orderby", "receivedDateTime desc")
-	q.Set("$select", "id,conversationId,receivedDateTime,subject,body,bodyPreview,from,toRecipients,ccRecipients,hasAttachments,changeKey")
-	u.RawQuery = q.Encode()
-	var res listMessagesResponse
-	if err := g.getJSONMail(ctx, accessToken, u.String(), &res); err != nil {
-		return nil, err
-	}
-	out := make([]driven.GraphMessage, 0, len(res.Value))
-	for _, m := range res.Value {
-		out = append(out, mapGraphMessage(m))
-	}
-	return out, nil
-}
-
-// ListInboxDelta lists exactly one Graph delta page and returns either a next link or a final delta link.
-func (g *GraphClient) ListInboxDelta(ctx context.Context, accessToken string, deltaLink string, pageSize int) (*driven.GraphDeltaResult, error) {
+// ListInboxDelta lists exactly one Graph delta page and returns either a next
+// link or a final delta link.
+func (g *GraphClient) ListInboxDelta(ctx context.Context, accessToken string, deltaLink string, pageSize int) (*driven.MailChangePage, error) {
 	if pageSize <= 0 {
 		pageSize = 50
 	}
@@ -347,41 +330,43 @@ func (g *GraphClient) ListInboxDelta(ctx context.Context, accessToken string, de
 	}
 	var res deltaMessagesResponse
 	if err := g.getJSONMail(ctx, accessToken, nextURL, &res); err != nil {
+		if deltaLink != "" && isExpiredDeltaError(err) {
+			return nil, fmt.Errorf("%w: %v", driven.ErrCursorExpired, err)
+		}
 		return nil, err
 	}
-	out := make([]driven.GraphMessage, 0, len(res.Value))
+	page := &driven.MailChangePage{Messages: make([]driven.MailMessage, 0, len(res.Value))}
 	for _, m := range res.Value {
-		// Graph delta includes tombstones for messages that left the folder.
-		// They carry an id and @removed and nothing else, so decoding one as
-		// a message yields empty everything.
-		if strings.TrimSpace(m.ID) == "" || m.Removed != nil {
+		id := strings.TrimSpace(m.ID)
+		if id == "" {
 			continue
 		}
-		out = append(out, mapGraphMessage(m))
+		// A tombstone carries an id and @removed and nothing else. It is a
+		// removal, reported as one — decoding it as a message yields a row
+		// of empty fields.
+		if m.Removed != nil {
+			page.Removed = append(page.Removed, id)
+			continue
+		}
+		page.Messages = append(page.Messages, mapGraphMessage(m))
 	}
-	if strings.TrimSpace(res.NextLink) == "" && strings.TrimSpace(res.DeltaLink) == "" {
+	page.NextCursor = strings.TrimSpace(res.NextLink)
+	page.FinalCursor = strings.TrimSpace(res.DeltaLink)
+	if page.NextCursor == "" && page.FinalCursor == "" {
 		return nil, fmt.Errorf("graph delta response missing cursor")
 	}
-	return &driven.GraphDeltaResult{
-		Messages:  out,
-		NextLink:  strings.TrimSpace(res.NextLink),
-		DeltaLink: strings.TrimSpace(res.DeltaLink),
-	}, nil
+	return page, nil
 }
 
-// GetMessageBody fetches full message body content.
-func (g *GraphClient) GetMessageBody(ctx context.Context, accessToken string, providerMessageID string) (*driven.GraphMessage, error) {
-	id := strings.TrimSpace(providerMessageID)
-	if id == "" {
-		return nil, fmt.Errorf("empty provider message id")
-	}
-	u := g.apiRoot() + "/me/messages/" + url.PathEscape(id) + "?$select=id,conversationId,receivedDateTime,subject,body,bodyPreview,from,toRecipients,ccRecipients,hasAttachments,changeKey"
-	var m graphMessageJSON
-	if err := g.getJSONMail(ctx, accessToken, u, &m); err != nil {
-		return nil, err
-	}
-	gm := mapGraphMessage(m)
-	return &gm, nil
+// isExpiredDeltaError recognises Graph's ways of saying a delta link is no
+// longer valid and the folder has to be enumerated again.
+func isExpiredDeltaError(err error) bool {
+	msg := strings.ToLower(err.Error())
+	return strings.Contains(msg, "syncstatenotfound") ||
+		strings.Contains(msg, "invaliddeltatoken") ||
+		strings.Contains(msg, "invalid delta token") ||
+		strings.Contains(msg, "resyncrequired") ||
+		strings.Contains(msg, "410 gone")
 }
 
 // ResolveGraphMessageID returns the message id Graph accepts for mutating requests, using immutable ids when supported.
@@ -402,23 +387,6 @@ func (g *GraphClient) ResolveGraphMessageID(ctx context.Context, accessToken str
 		return "", fmt.Errorf("graph returned empty message id")
 	}
 	return out, nil
-}
-
-func (g *GraphClient) SendMail(ctx context.Context, accessToken string, toEmail, subject, body string) error {
-	payload := map[string]any{
-		"message": map[string]any{
-			"subject": subject,
-			"body": map[string]any{
-				"contentType": "Text",
-				"content":     body,
-			},
-			"toRecipients": []map[string]any{
-				{"emailAddress": map[string]any{"address": toEmail}},
-			},
-		},
-		"saveToSentItems": true,
-	}
-	return g.postJSON(ctx, accessToken, g.apiRoot()+"/me/sendMail", payload)
 }
 
 // ReplyToMessage implements POST /me/messages/{id}/reply to keep thread context.
@@ -463,4 +431,35 @@ func (g *GraphClient) ForwardMessage(ctx context.Context, accessToken string, pr
 		},
 	}
 	return g.postJSON(ctx, accessToken, u, payload)
+}
+
+// GetRawMessage returns the full MIME of a message via /$value. Reads are
+// bounded by limit so an oversized message fails rather than exhausting memory.
+func (g *GraphClient) GetRawMessage(ctx context.Context, accessToken, providerMessageID string, limit int64) ([]byte, error) {
+	id := strings.TrimSpace(providerMessageID)
+	if id == "" {
+		return nil, fmt.Errorf("empty provider message id")
+	}
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, g.apiRoot()+"/me/messages/"+url.PathEscape(id)+"/$value", nil)
+	if err != nil {
+		return nil, err
+	}
+	req.Header.Set("Authorization", "Bearer "+accessToken)
+	resp, err := g.client().Do(req)
+	if err != nil {
+		return nil, err
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
+		body, _ := io.ReadAll(io.LimitReader(resp.Body, 4096))
+		return nil, fmt.Errorf("graph %s: %s", resp.Status, truncate(string(body), 300))
+	}
+	raw, err := io.ReadAll(io.LimitReader(resp.Body, limit+1))
+	if err != nil {
+		return nil, err
+	}
+	if int64(len(raw)) > limit {
+		return nil, driven.TooLarge(limit)
+	}
+	return raw, nil
 }

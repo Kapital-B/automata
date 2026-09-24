@@ -32,11 +32,12 @@ func TestHealth(t *testing.T) {
 	repo := sqlite.NewRepository(db, 15*time.Minute)
 	oauth := &microsoft.OAuth{ClientID: "x", ClientSecret: "y", RedirectURI: "http://localhost:8080/api/accounts/callback"}
 	graph := &microsoft.GraphClient{}
+	connectors, mailboxes := m365Wiring(repo, vault, oauth, graph)
 	accountSvc := appaccounts.NewService(appaccounts.Deps{
-		Accounts: repo, OAuthState: repo, JobRuns: repo, OAuth: oauth, Graph: graph, Vault: vault,
+		Accounts: repo, OAuthState: repo, JobRuns: repo, Vault: vault, Connectors: connectors,
 		Dashboard: "http://localhost:5173", SuccessPath: "/ok", ErrorPath: "/err", StateTTL: 0,
 	})
-	syncSvc := &appmessages.SyncService{Accounts: repo, Messages: repo, OAuth: oauth, Graph: graph, Vault: vault, JobRuns: repo}
+	syncSvc := &appmessages.SyncService{Accounts: repo, Messages: repo, Mailboxes: mailboxes, JobRuns: repo}
 	jwtSecret := []byte("abcdefghijklmnopqrstuvwxyz123456")
 	devUser := uuid.MustParse("a0000001-0000-4000-8000-000000000001")
 	authSvc := auth.NewService(repo, repo, repo, nil, nil, jwtSecret, time.Hour, 30*24*time.Hour)

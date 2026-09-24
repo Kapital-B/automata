@@ -13,6 +13,7 @@ import (
 	httphandler "github.com/Kapital-B/automata/svc/internal/adapters/inbound/http"
 	dynamodbjobs "github.com/Kapital-B/automata/svc/internal/adapters/outbound/dynamodbjobs"
 	googleoauth "github.com/Kapital-B/automata/svc/internal/adapters/outbound/google"
+	"github.com/Kapital-B/automata/svc/internal/adapters/outbound/imapmail"
 	llmadapter "github.com/Kapital-B/automata/svc/internal/adapters/outbound/llm"
 	"github.com/Kapital-B/automata/svc/internal/adapters/outbound/microsoft"
 	"github.com/Kapital-B/automata/svc/internal/adapters/outbound/persistence/factory"
@@ -255,21 +256,52 @@ func (r *Runtime) buildServices(ctx context.Context) error {
 		RedirectURI:  r.Config.MSAuthRedirectURI,
 		Scopes:       msSignInScopes,
 	}
-	graph := &microsoft.GraphClient{}
 	repo := r.Repository
 	jobRuns := resolveJobRuns(repo)
 
+	// Every mailbox provider is reached through the same port: services open
+	// an account and never see which vendor, or which token, is behind it.
+	m365 := &microsoft.Provider{OAuth: msMailOAuth, Graph: &microsoft.GraphClient{}}
+	mailboxes := &appaccounts.MailboxOpener{
+		Accounts: repo,
+		Vault:    vault,
+		Providers: map[string]driven.MailProvider{
+			appaccounts.ProviderM365: m365,
+		},
+	}
+	mailConnectors := map[string]driven.OAuthMailConnector{
+		appaccounts.ProviderM365: m365,
+	}
+	// IMAP needs no app registration, so it is always available.
+	imapProvider := &imapmail.Provider{}
+	mailboxes.Providers[appaccounts.ProviderIMAP] = imapProvider
+	passwordConnectors := map[string]driven.PasswordMailConnector{
+		appaccounts.ProviderIMAP: imapProvider,
+	}
+	// Google is optional: without a mail client configured, Google accounts
+	// cannot be connected and any that exist report an unsupported provider.
+	if r.Config.GoogleMailClientID != "" {
+		gmail := &googleoauth.MailProvider{
+			ClientID:     r.Config.GoogleMailClientID,
+			ClientSecret: r.Config.GoogleMailClientSecret,
+			RedirectURI:  r.Config.GoogleMailRedirectURI,
+		}
+		mailboxes.Providers[appaccounts.ProviderGoogle] = gmail
+		mailConnectors[appaccounts.ProviderGoogle] = gmail
+	}
+
 	accountSvc := appaccounts.NewService(appaccounts.Deps{
-		Accounts:    repo,
-		OAuthState:  repo,
-		JobRuns:     jobRuns,
-		OAuth:       msMailOAuth,
-		Graph:       graph,
-		Vault:       vault,
-		Dashboard:   r.Config.DashboardBaseURL,
-		SuccessPath: r.Config.OAuthSuccessPath,
-		ErrorPath:   r.Config.OAuthErrorPath,
-		StateTTL:    r.Config.OAuthStateTTL,
+		Accounts:           repo,
+		OAuthState:         repo,
+		JobRuns:            jobRuns,
+		Connectors:         mailConnectors,
+		PasswordConnectors: passwordConnectors,
+		Mailboxes:          mailboxes,
+		Vault:              vault,
+		Dashboard:          r.Config.DashboardBaseURL,
+		SuccessPath:        r.Config.OAuthSuccessPath,
+		ErrorPath:          r.Config.OAuthErrorPath,
+		StateTTL:           r.Config.OAuthStateTTL,
 	})
 	slackClient := &slackadapter.Client{
 		ClientID:     r.Config.SlackClientID,
@@ -409,14 +441,12 @@ func (r *Runtime) buildServices(ctx context.Context) error {
 		JobRuns:     jobRuns,
 	}
 	syncSvc := &appmessages.SyncService{
-		Accounts: repo,
-		Messages: repo,
-		OAuth:    msMailOAuth,
-		Graph:    graph,
-		Vault:    vault,
-		JobRuns:  jobRuns,
-		Resolve:  resolveSvc,
-		Assign:   assignSvc,
+		Accounts:  repo,
+		Messages:  repo,
+		Mailboxes: mailboxes,
+		JobRuns:   jobRuns,
+		Resolve:   resolveSvc,
+		Assign:    assignSvc,
 	}
 	// Guarded: assigning a nil *Enqueuer into the interface field would make it
 	// non-nil and disable the inline fallback.
@@ -461,23 +491,17 @@ func (r *Runtime) buildServices(ctx context.Context) error {
 		forwardRulesSvc = &appmessages.ForwardRulesService{
 			Messages:  repo,
 			Forwards:  repo,
-			Accounts:  repo,
-			OAuth:     msMailOAuth,
-			Graph:     graph,
-			Vault:     vault,
+			Mailboxes: mailboxes,
 			LLM:       llmClient,
 			JobRuns:   jobRuns,
 			ModelName: llmLabel,
 		}
 	} else {
 		forwardRulesSvc = &appmessages.ForwardRulesService{
-			Messages: repo,
-			Forwards: repo,
-			Accounts: repo,
-			OAuth:    msMailOAuth,
-			Graph:    graph,
-			Vault:    vault,
-			JobRuns:  jobRuns,
+			Messages:  repo,
+			Forwards:  repo,
+			Mailboxes: mailboxes,
+			JobRuns:   jobRuns,
 		}
 	}
 
@@ -530,7 +554,7 @@ func (r *Runtime) buildServices(ctx context.Context) error {
 		CategorizeSvc:        categorizeSvc,
 		SummarizeSvc:         summarizeSvc,
 		AutoDraftSvc:         autoDraftSvc,
-		DraftsSvc:            &appmessages.DraftLifecycleService{Summaries: repo, Messages: repo, Accounts: repo, OAuth: msMailOAuth, Graph: graph, Vault: vault},
+		DraftsSvc:            &appmessages.DraftLifecycleService{Summaries: repo, Messages: repo, Mailboxes: mailboxes},
 		ForwardRulesSvc:      forwardRulesSvc,
 		AuthSvc:              authSvc,
 		ContactSvc:           contactSvc,

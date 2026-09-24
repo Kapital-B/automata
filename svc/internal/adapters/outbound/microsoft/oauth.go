@@ -3,6 +3,7 @@ package microsoft
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
@@ -98,15 +99,31 @@ func (o *OAuth) ExchangeCode(ctx context.Context, kind accounts.MsAccountKind, c
 	})
 }
 
-// RefreshAccessToken refreshes using a refresh token.
+// tokenError is an error answer from the token endpoint.
+type tokenError struct {
+	Code string
+	Desc string
+}
+
+func (e *tokenError) Error() string { return fmt.Sprintf("token error %s: %s", e.Code, e.Desc) }
+
+// RefreshAccessToken refreshes using a refresh token. invalid_grant here means
+// the refresh token is revoked or expired: retrying cannot fix it, so it is
+// reported as rejected credentials and the account can be marked for
+// reconnection instead of failing every sync the same way.
 func (o *OAuth) RefreshAccessToken(ctx context.Context, kind accounts.MsAccountKind, refreshToken string) (driven.TokenPair, error) {
-	return o.postToken(ctx, kind, url.Values{
+	tok, err := o.postToken(ctx, kind, url.Values{
 		"client_id":     {o.ClientID},
 		"client_secret": {o.ClientSecret},
 		"refresh_token": {refreshToken},
 		"grant_type":    {"refresh_token"},
 		"scope":         {o.scopes()},
 	})
+	var te *tokenError
+	if errors.As(err, &te) && te.Code == "invalid_grant" {
+		return tok, fmt.Errorf("%w: %v", driven.ErrCredentialsRejected, err)
+	}
+	return tok, err
 }
 
 func (o *OAuth) postToken(ctx context.Context, kind accounts.MsAccountKind, form url.Values) (driven.TokenPair, error) {
@@ -130,7 +147,7 @@ func (o *OAuth) postToken(ctx context.Context, kind accounts.MsAccountKind, form
 		return driven.TokenPair{}, fmt.Errorf("token json: %w", err)
 	}
 	if tr.Error != "" {
-		return driven.TokenPair{}, fmt.Errorf("token error %s: %s", tr.Error, tr.ErrorDesc)
+		return driven.TokenPair{}, &tokenError{Code: tr.Error, Desc: tr.ErrorDesc}
 	}
 	if tr.AccessToken == "" {
 		return driven.TokenPair{}, fmt.Errorf("empty access_token")

@@ -3,6 +3,7 @@ package messages
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"strings"
 	"time"
@@ -15,10 +16,7 @@ import (
 type ForwardRulesService struct {
 	Messages  driven.MessageRepository
 	Forwards  driven.ForwardRepository
-	Accounts  driven.AccountRepository
-	OAuth     driven.MicrosoftOAuth
-	Graph     driven.MicrosoftGraph
-	Vault     driven.TokenVault
+	Mailboxes *appaccounts.MailboxOpener
 	LLM       driven.LLMClient
 	JobRuns   driven.JobRunRepository
 	ModelName string
@@ -45,7 +43,7 @@ type forwardLLMCondition struct {
 }
 
 func (s *ForwardRulesService) RunAccount(ctx context.Context, userID, accountID uuid.UUID, opts ForwardRulesOptions) (uuid.UUID, error) {
-	if s == nil || s.Messages == nil || s.Forwards == nil || s.Accounts == nil || s.OAuth == nil || s.Graph == nil || s.Vault == nil || s.JobRuns == nil {
+	if s == nil || s.Messages == nil || s.Forwards == nil || s.Mailboxes == nil || s.JobRuns == nil {
 		return uuid.Nil, fmt.Errorf("forward rules service not configured")
 	}
 	jobID := uuid.New()
@@ -91,14 +89,7 @@ func (s *ForwardRulesService) RunAccount(ctx context.Context, userID, accountID 
 		_ = s.JobRuns.UpdateJobRunStatus(ctx, jobID, "success", timePtrForward(time.Now().UTC()), nil, meta)
 		return jobID, nil
 	}
-	account, cipher, err := s.Accounts.GetAccount(ctx, userID, accountID)
-	if err != nil || account == nil {
-		if err == nil {
-			err = fmt.Errorf("account not found")
-		}
-		return s.failRun(ctx, jobID, err)
-	}
-	accessToken, err := s.refreshToken(ctx, userID, accountID, account, cipher)
+	box, _, err := s.Mailboxes.Open(ctx, userID, accountID)
 	if err != nil {
 		return s.failRun(ctx, jobID, err)
 	}
@@ -108,8 +99,9 @@ func (s *ForwardRulesService) RunAccount(ctx context.Context, userID, accountID 
 	for _, msg := range rows {
 		messageForwarded := false
 		messageHadFailure := false
-		var graphMsgID string
-		var graphResolveErr error
+		// Once a forward fails before sending, the rest of this message's
+		// rules would fail the same way; they are left for the next run.
+		notSent := false
 		for _, rule := range rules {
 			if !rule.Enabled {
 				continue
@@ -134,26 +126,21 @@ func (s *ForwardRulesService) RunAccount(ctx context.Context, userID, accountID 
 				skipped++
 				continue
 			}
-			if graphResolveErr != nil {
+			if notSent {
 				continue
 			}
-			if graphMsgID == "" {
-				var err error
-				graphMsgID, err = s.Graph.ResolveGraphMessageID(ctx, accessToken, msg.ProviderMessageID)
-				if err != nil {
-					graphResolveErr = err
-					e := err.Error()
-					_ = s.insertAudit(ctx, userID, accountID, msg.ID, rule.ID, jobID, "failed", &e)
-					failed++
-					messageHadFailure = true
-					continue
-				}
-			}
-			if err := s.Graph.ForwardMessage(ctx, accessToken, graphMsgID, rule.ForwardTo, ""); err != nil {
+			if err := box.Forward(ctx, msg.ProviderMessageID, rule.ForwardTo, ""); err != nil {
 				e := err.Error()
 				_ = s.insertAudit(ctx, userID, accountID, msg.ID, rule.ID, jobID, "failed", &e)
 				failed++
-				messageHadFailure = true
+				// Too large is permanent: recorded, then not retried every
+				// run. Anything else leaves the message for the next run.
+				if !errors.Is(err, driven.ErrMailTooLarge) {
+					messageHadFailure = true
+				}
+				if errors.Is(err, driven.ErrMailNotSent) {
+					notSent = true
+				}
 				continue
 			}
 			okReason := "rule matched and message forwarded"
@@ -259,37 +246,6 @@ func predicateMatches(msg driven.MessageRow, p forwardPredicate) bool {
 		return (op == "equals" || op == "eq") && got == want
 	}
 	return false
-}
-
-func (s *ForwardRulesService) refreshToken(ctx context.Context, userID, accountID uuid.UUID, account *driven.AccountRow, cipher []byte) (string, error) {
-	raw, err := s.Vault.Decrypt(cipher)
-	if err != nil {
-		return "", err
-	}
-	kind, refresh, err := appaccounts.DecodeRefreshPayload(raw)
-	if err != nil {
-		return "", err
-	}
-	tok, err := s.OAuth.RefreshAccessToken(ctx, kind, refresh)
-	if err != nil {
-		return "", err
-	}
-	nextRefresh := refresh
-	if tok.RefreshToken != "" {
-		nextRefresh = tok.RefreshToken
-	}
-	payload, err := appaccounts.EncodeRefreshPayloadForStorage(kind, nextRefresh)
-	if err != nil {
-		return "", err
-	}
-	newCipher, err := s.Vault.Encrypt(payload)
-	if err != nil {
-		return "", err
-	}
-	if err := s.Accounts.UpdateAccountTokens(ctx, userID, accountID, newCipher, account.PrimaryEmail, account.GraphTenantID, account.MsalHomeAccountID, "connected", nil); err != nil {
-		return "", err
-	}
-	return tok.AccessToken, nil
 }
 
 func deref(v *string) string {
