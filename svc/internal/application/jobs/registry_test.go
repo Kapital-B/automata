@@ -1,6 +1,7 @@
 package jobs
 
 import (
+	"errors"
 	"testing"
 
 	"github.com/google/uuid"
@@ -94,5 +95,30 @@ func TestSummarizeMapBatchClamp(t *testing.T) {
 	}
 	if SummarizeMaxMessages/12 > SummarizeMaxPartials {
 		t.Fatal("partials cap inconsistent with message cap")
+	}
+}
+
+func TestNormalizeScheduleChain(t *testing.T) {
+	r := DefaultRegistry()
+	got, err := r.NormalizeScheduleChain([]string{" Sync ", "forward"})
+	if err != nil || len(got) != 2 || got[0] != TypeSync || got[1] != TypeForwardRules {
+		t.Fatalf("got %v, %v; want aliases resolved to canonical names", got, err)
+	}
+	cases := map[string]struct {
+		chain []string
+		want  error
+	}{
+		"typo":            {[]string{"sync", "categorise"}, ErrUnknownJobType},
+		"needs a message": {[]string{"auto-draft"}, ErrNotSchedulable},
+		"per project":     {[]string{"interpret_project"}, ErrNotSchedulable},
+		"reserved":        {[]string{"sync_teams"}, ErrReservedJobType},
+	}
+	for name, c := range cases {
+		if _, err := r.NormalizeScheduleChain(c.chain); !errors.Is(err, c.want) {
+			t.Errorf("%s: err = %v, want %v", name, err, c.want)
+		}
+	}
+	if _, err := r.NormalizeScheduleChain(nil); err == nil {
+		t.Error("an empty chain was accepted")
 	}
 }

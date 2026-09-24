@@ -70,7 +70,7 @@ export function StartRuleDialog({
       void queryClient.invalidateQueries({ queryKey: ["forward-rules"] });
       toast({
         title: "Rule switched on",
-        description: "It forwards when rules next run: from Run now, or a schedule that includes forward_rules.",
+        description: "It forwards when rules next run: from Run now, or a schedule with the Run forwarding rules step.",
       });
       onOpenChange(false);
     },

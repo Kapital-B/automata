@@ -263,3 +263,43 @@ func insertSchedulerAccount(t *testing.T, repo *sqlite.Repository, userID, accou
 		t.Fatal(err)
 	}
 }
+
+// One chain the registry cannot run (a typo, or the "auto-draft" the
+// settings page used to suggest) must not stop every other user's schedules,
+// and must not stay due for ever.
+func TestSchedulerSkipsAChainItCannotRunWithoutStallingOthers(t *testing.T) {
+	ctx := context.Background()
+	repo := newSchedulerSQLiteRepo(t)
+	store := memoryjobs.NewStore()
+	now := time.Date(2026, 8, 29, 21, 0, 0, 0, time.UTC)
+	badUser, badAccount := uuid.New(), uuid.New()
+	goodUser, goodAccount := uuid.New(), uuid.New()
+	insertSchedulerAccount(t, repo, badUser, badAccount, "bad")
+	insertSchedulerAccount(t, repo, goodUser, goodAccount, "good")
+	bad, good := uuid.New(), uuid.New()
+	chain := func(user, account, id uuid.UUID, jobs []string, due time.Time) {
+		t.Helper()
+		if err := repo.ReplaceSchedulesByUser(ctx, user, []driven.ScheduleChainRow{{
+			ID: id, UserID: user, Name: "c", AccountID: &account, Jobs: jobs, IntervalMinutes: 60,
+			Enabled: true, NextRunAt: due, CreatedAt: now.Add(-time.Hour), UpdatedAt: now.Add(-time.Hour),
+		}}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	chain(badUser, badAccount, bad, []string{"sync", "auto-draft"}, now.Add(-time.Minute))
+	chain(goodUser, goodAccount, good, []string{TypeSync, TypeCategorize}, now)
+
+	service := SchedulerService{OAuthStates: repo, Schedules: repo, Accounts: repo, Store: store, OAuthStateTTL: 15 * time.Minute}
+	_ = service.Tick(ctx, now)
+
+	if _, err := store.GetByID(ctx, DeterministicScheduleJobID(good, now.Format(time.RFC3339), TypeSync)); err != nil {
+		t.Fatalf("a valid chain was not enqueued behind an invalid one: %v", err)
+	}
+	rows, err := repo.ListSchedulesByUser(ctx, badUser)
+	if err != nil || len(rows) != 1 {
+		t.Fatalf("schedules: %v", err)
+	}
+	if !rows[0].NextRunAt.After(now) {
+		t.Fatalf("the invalid chain is still due (next run %v); it would fail every tick", rows[0].NextRunAt)
+	}
+}
