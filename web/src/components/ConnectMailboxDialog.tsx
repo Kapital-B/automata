@@ -72,7 +72,7 @@ export function ConnectMailboxDialog({
                 <button
                   key={p.provider}
                   onClick={() => setProvider(p.provider)}
-                  className="rounded-lg border border-border p-4 text-left transition hover:border-foreground/40"
+                  className="rounded-lg border border-border p-4 text-left transition hover:border-foreground/40 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
                 >
                   <p className="font-display text-base font-medium">{providerCopy[p.provider]?.title ?? p.provider}</p>
                   <p className="mt-1 text-xs text-muted-foreground">{providerCopy[p.provider]?.blurb}</p>
@@ -88,7 +88,7 @@ export function ConnectMailboxDialog({
             {!target && (
               <button
                 onClick={() => setProvider(null)}
-                className="inline-flex w-fit items-center gap-1 text-xs text-muted-foreground hover:text-foreground"
+                className="inline-flex w-fit items-center gap-1 rounded-sm text-xs text-muted-foreground hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
               >
                 <ArrowLeft className="h-3 w-3" /> All providers
               </button>
@@ -148,7 +148,7 @@ function MicrosoftStep({ initialKind }: { initialKind?: "work" | "personal" }) {
             key={k}
             onClick={() => setKind(k)}
             className={cn(
-              "rounded-lg border p-4 text-left transition",
+              "rounded-lg border p-4 text-left transition focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring",
               kind === k ? "border-foreground bg-secondary" : "border-border hover:border-foreground/40",
             )}
           >

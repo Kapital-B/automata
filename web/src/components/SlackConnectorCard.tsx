@@ -1,6 +1,6 @@
 import { useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { AlertTriangle, Hash, Loader2, Plus, RefreshCw, Slack, Unplug } from "lucide-react";
+import { Hash, Loader2, Plus, RefreshCw, Slack, Unplug } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -8,7 +8,13 @@ import { Skeleton } from "@/components/ui/skeleton";
 import { useAuth } from "@/components/auth/AuthProvider";
 import { toast } from "@/hooks/use-toast";
 import { relativeTime } from "@/lib/accounts";
-import { cn } from "@/lib/utils";
+import {
+  ConfirmAction,
+  ConnectionCard,
+  ConnectionCardBody,
+  ConnectionIcon,
+  Tag,
+} from "@/components/ConnectionCard";
 import {
   ApiError,
   createConnectorBinding,
@@ -58,44 +64,56 @@ export function SlackConnectorCard({
   };
 
   return (
-    <li className={cn("surface-card overflow-hidden", highlighted && "ring-2 ring-success/50 transition-shadow")}>
-      <div className="flex flex-wrap items-start justify-between gap-4 p-5">
-        <div className="flex min-w-0 items-start gap-3">
-          <span
-            aria-hidden="true"
-            className="flex h-10 w-10 shrink-0 items-center justify-center rounded-md border border-border bg-secondary"
-          >
-            <Slack className="h-5 w-5" />
-          </span>
-          <div className="min-w-0">
-            <div className="flex flex-wrap items-center gap-2">
-              <h3 className="truncate font-display text-lg font-medium">{connector.label}</h3>
-              {fake && (
-                <span className="rounded-full border border-border px-2 py-0.5 text-[10px] font-medium uppercase tracking-wider text-muted-foreground">
-                  Test workspace
-                </span>
-              )}
-            </div>
-            <p className="mt-0.5 text-sm text-muted-foreground">
-              Last sync {relativeTime(connector.last_synced_at)}
-              {bindingsQuery.isSuccess && ` · ${bindings.length} ${bindings.length === 1 ? "channel" : "channels"}`}
-            </p>
-          </div>
-        </div>
-        <StatusPill status={connector.connection_status} />
-      </div>
-
-      {connector.last_error && (
-        <div
-          role="alert"
-          className="mx-5 mb-4 flex items-start gap-2 rounded-md border border-destructive/30 bg-destructive/5 px-3 py-2 text-sm text-destructive"
-        >
-          <AlertTriangle aria-hidden="true" className="mt-0.5 h-4 w-4 shrink-0" />
-          {connector.last_error}
-        </div>
-      )}
-
-      <section aria-label={`Channels in ${connector.label}`} className="border-t border-border/70">
+    <ConnectionCard
+      icon={<ConnectionIcon icon={Slack} />}
+      title={connector.label}
+      tags={fake && <Tag>Test workspace</Tag>}
+      meta={
+        <>
+          Last sync {relativeTime(connector.last_synced_at)}
+          {bindingsQuery.isSuccess && ` · ${bindings.length} ${bindings.length === 1 ? "channel" : "channels"}`}
+        </>
+      }
+      status={connector.connection_status}
+      problem={connector.last_error}
+      highlighted={highlighted}
+      actions={
+        <>
+          {!adding && (
+            <Button size="sm" variant="outline" onClick={() => setAdding(true)} disabled={!connected || disconnecting}>
+              <Plus aria-hidden="true" className="mr-1.5 h-3.5 w-3.5" /> Add channel
+            </Button>
+          )}
+          <Button size="sm" variant="outline" onClick={onSync} disabled={syncing || disconnecting || !connected}>
+            {syncing ? (
+              <Loader2 aria-hidden="true" className="mr-1.5 h-3.5 w-3.5 animate-spin" />
+            ) : (
+              <RefreshCw aria-hidden="true" className="mr-1.5 h-3.5 w-3.5" />
+            )}
+            Sync now
+          </Button>
+          <ConfirmAction
+            title={`Disconnect ${connector.label}?`}
+            description="This removes its channel links and deletes every Slack message synced from it. Connecting it again starts with no channels."
+            confirmLabel="Disconnect"
+            destructive
+            onConfirm={onDisconnect}
+            trigger={(open) => (
+              <Button
+                size="sm"
+                variant="ghost"
+                className="ml-auto text-muted-foreground hover:text-destructive"
+                onClick={open}
+                disabled={syncing || disconnecting}
+              >
+                <Unplug aria-hidden="true" className="mr-1.5 h-3.5 w-3.5" /> Disconnect
+              </Button>
+            )}
+          />
+        </>
+      }
+    >
+      <ConnectionCardBody label={`Channels in ${connector.label}`}>
         {bindingsQuery.isLoading ? (
           <div className="space-y-2 px-5 py-4">
             <Skeleton className="h-4 w-48" />
@@ -120,7 +138,7 @@ export function SlackConnectorCard({
             ))}
           </ul>
         )}
-      </section>
+      </ConnectionCardBody>
 
       {adding && (
         <BindChannelForm
@@ -130,47 +148,7 @@ export function SlackConnectorCard({
           onDone={() => setAdding(false)}
         />
       )}
-
-      <div className="flex flex-wrap items-center gap-2 border-t border-border/70 bg-muted/30 px-5 py-3">
-        {!adding && (
-          <Button size="sm" variant="outline" onClick={() => setAdding(true)} disabled={!connected}>
-            <Plus aria-hidden="true" className="mr-1.5 h-3.5 w-3.5" /> Add channel
-          </Button>
-        )}
-        <Button size="sm" variant="outline" onClick={onSync} disabled={syncing || disconnecting || !connected}>
-          {syncing ? (
-            <Loader2 aria-hidden="true" className="mr-1.5 h-3.5 w-3.5 animate-spin" />
-          ) : (
-            <RefreshCw aria-hidden="true" className="mr-1.5 h-3.5 w-3.5" />
-          )}
-          Sync now
-        </Button>
-        <Button
-          size="sm"
-          variant="ghost"
-          className="ml-auto text-muted-foreground hover:text-destructive"
-          onClick={onDisconnect}
-          disabled={syncing || disconnecting}
-        >
-          <Unplug aria-hidden="true" className="mr-1.5 h-3.5 w-3.5" /> Disconnect
-        </Button>
-      </div>
-    </li>
-  );
-}
-
-function StatusPill({ status }: { status: string }) {
-  if (status === "connected") {
-    return (
-      <span className="inline-flex items-center gap-1.5 rounded-full bg-success/10 px-2.5 py-1 text-xs font-medium text-success">
-        <span aria-hidden="true" className="h-1.5 w-1.5 rounded-full bg-success" /> Connected
-      </span>
-    );
-  }
-  return (
-    <span className="inline-flex items-center gap-1.5 rounded-full bg-destructive/10 px-2.5 py-1 text-xs font-medium capitalize text-destructive">
-      <AlertTriangle aria-hidden="true" className="h-3 w-3" /> {status.replace(/_/g, " ")}
-    </span>
+    </ConnectionCard>
   );
 }
 

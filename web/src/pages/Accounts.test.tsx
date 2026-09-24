@@ -1,5 +1,5 @@
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import { fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { MemoryRouter } from "react-router-dom";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import AccountsPage from "@/pages/Accounts";
@@ -38,6 +38,7 @@ vi.mock("@/lib/auth", async () => {
     connectImapAccount: vi.fn(),
     startMailboxConnect: vi.fn(),
     listConnectorBindings: vi.fn(),
+    deleteAccount: vi.fn(),
     createConnectorBinding: vi.fn(),
   };
 });
@@ -89,22 +90,32 @@ describe("Accounts sync controls", () => {
   // An ordinary sync only collects what changed, so a message whose stored
   // content was lost locally is never refetched without this.
   it("forces a full resync once confirmed", async () => {
-    const confirmSpy = vi.spyOn(window, "confirm").mockReturnValue(true);
     renderPage();
     fireEvent.click(await screen.findByRole("button", { name: /full resync/i }));
-    expect(confirmSpy).toHaveBeenCalled();
+    const dialog = await screen.findByRole("alertdialog");
+    expect(dialog).toHaveTextContent(/fetches every message again/);
+    fireEvent.click(within(dialog).getByRole("button", { name: /full resync/i }));
     await waitFor(() =>
       expect(syncAccount).toHaveBeenCalledWith("token", "acc1", { force: true }),
     );
-    confirmSpy.mockRestore();
   });
 
   it("does not resync when the confirmation is declined", async () => {
-    const confirmSpy = vi.spyOn(window, "confirm").mockReturnValue(false);
     renderPage();
     fireEvent.click(await screen.findByRole("button", { name: /full resync/i }));
+    fireEvent.click(await screen.findByRole("button", { name: "Cancel" }));
     expect(syncAccount).not.toHaveBeenCalled();
-    confirmSpy.mockRestore();
+  });
+
+  // Disconnecting deletes the mailbox's synced mail, so the prompt has to say so.
+  it("says what disconnecting deletes before it does it", async () => {
+    const deleteAccount = vi.mocked(auth.deleteAccount);
+    renderPage();
+    fireEvent.click(await screen.findByRole("button", { name: /disconnect/i }));
+    const dialog = await screen.findByRole("alertdialog");
+    expect(dialog).toHaveTextContent(/deletes everything synced from this mailbox/);
+    fireEvent.click(within(dialog).getByRole("button", { name: "Cancel" }));
+    expect(deleteAccount).not.toHaveBeenCalled();
   });
 });
 
@@ -122,7 +133,7 @@ describe("Connecting mailboxes", () => {
 
   it("offers only the providers the server can connect", async () => {
     renderPage();
-    fireEvent.click(screen.getAllByRole("button", { name: /add account/i })[0]);
+    fireEvent.click(screen.getByRole("button", { name: /add mailbox/i }));
     expect(await screen.findByText("Other (IMAP)")).toBeInTheDocument();
     expect(screen.getByText("Microsoft")).toBeInTheDocument();
     expect(screen.queryByText("Google")).not.toBeInTheDocument();
@@ -134,7 +145,7 @@ describe("Connecting mailboxes", () => {
       new auth.ApiError("the IMAP server at imap.fastmail.com refused the username or password", 422),
     );
     renderPage();
-    fireEvent.click(screen.getAllByRole("button", { name: /add account/i })[0]);
+    fireEvent.click(screen.getByRole("button", { name: /add mailbox/i }));
     fireEvent.click(await screen.findByText("Other (IMAP)"));
     fireEvent.change(screen.getByLabelText(/^email address/i), { target: { value: "me@fastmail.com" } });
     fireEvent.change(screen.getByLabelText(/^password/i), { target: { value: "wrong" } });

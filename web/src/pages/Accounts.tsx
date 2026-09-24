@@ -1,12 +1,19 @@
 import { PageHeader } from "@/components/PageHeader";
 import { Button } from "@/components/ui/button";
-import { capabilityNotes, providerLabel, relativeTime, type UiAccount } from "@/lib/accounts";
-import { Plus, RefreshCw, Unplug, AlertTriangle, Loader2, Slack, KeyRound, Info } from "lucide-react";
+import type { UiAccount } from "@/lib/accounts";
+import { Loader2, Mail, Plus, Slack } from "lucide-react";
 import { useState, useEffect, useMemo } from "react";
 import { useSearchParams } from "react-router-dom";
 import { ConnectMailboxDialog, type ConnectTarget } from "@/components/ConnectMailboxDialog";
 import { SlackConnectorCard } from "@/components/SlackConnectorCard";
-import { cn } from "@/lib/utils";
+import { MailboxCard } from "@/components/MailboxCard";
+import {
+  ConnectionEmpty,
+  ConnectionError,
+  ConnectionIcon,
+  ConnectionSection,
+  ConnectionSkeleton,
+} from "@/components/ConnectionCard";
 import { useAuth } from "@/components/auth/AuthProvider";
 import { useAccountsData } from "@/hooks/useAccountsData";
 import {
@@ -26,7 +33,7 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 export default function AccountsPage() {
   const [dialogOpen, setDialogOpen] = useState(false);
   const [connectTarget, setConnectTarget] = useState<ConnectTarget | undefined>(undefined);
-  const [searchParams] = useSearchParams();
+  const [searchParams, setSearchParams] = useSearchParams();
   const connectedAccountID = searchParams.get("connected_account_id");
   const connectedConnectorID = searchParams.get("connected_connector_id");
   const { accessToken } = useAuth();
@@ -76,7 +83,7 @@ export default function AccountsPage() {
       void queryClient.invalidateQueries({ queryKey: ["connectors"] });
       toast({
         title: "Slack connected",
-        description: "Bind a channel to a project, then sync.",
+        description: "Add a channel to a project, then sync.",
       });
       const timer = window.setTimeout(() => {
         const url = new URL(window.location.href);
@@ -103,13 +110,11 @@ export default function AccountsPage() {
     }
   };
 
-  // IMAP connects without a redirect, so it lands here instead of on
-  // ?connected_account_id.
+  // A password connect has no redirect; it lands the same way an OAuth one
+  // does, through ?connected_account_id, so both confirm identically.
   const onPasswordConnected = (accountID: string) => {
     setDialogOpen(false);
-    void queryClient.invalidateQueries({ queryKey: ["accounts"] });
-    void queryClient.invalidateQueries({ queryKey: ["runs"] });
-    toast({ title: "Mailbox connected", description: `Account ${accountID.slice(0, 8)} will sync shortly.` });
+    setSearchParams({ connected_account_id: accountID }, { replace: true });
   };
 
   const slackConnectMutation = useMutation({
@@ -138,12 +143,12 @@ export default function AccountsPage() {
       }
       return syncAccount(accessToken, args.accountID, { force: args.force });
     },
-    onSuccess: (result, args) => {
+    onSuccess: (_result, args) => {
       void queryClient.invalidateQueries({ queryKey: ["accounts"] });
       void queryClient.invalidateQueries({ queryKey: ["runs"] });
       toast({
         title: args.force ? "Full resync queued" : "Sync queued",
-        description: `Run ${result.job_run_id.slice(0, 8)} started in background.`,
+        description: "It runs in the background; progress shows on the Runs page.",
       });
     },
     onError: (err) => {
@@ -165,7 +170,7 @@ export default function AccountsPage() {
     onSuccess: () => {
       void queryClient.invalidateQueries({ queryKey: ["accounts"] });
       void queryClient.invalidateQueries({ queryKey: ["runs"] });
-      toast({ title: "Account disconnected" });
+      toast({ title: "Mailbox disconnected" });
     },
     onError: (err) => {
       toast({
@@ -188,16 +193,16 @@ export default function AccountsPage() {
       void queryClient.invalidateQueries({ queryKey: ["runs"] });
       void queryClient.invalidateQueries({ queryKey: ["project-timeline"] });
       toast({
-        title: result.status === "queued" ? "Slack sync queued" : "Slack sync complete",
+        title: result.status === "queued" ? "Sync queued" : "Sync complete",
         description:
           typeof result.messages_upserted === "number"
-            ? `${result.messages_upserted} message(s) upserted.`
-            : `Run ${result.job_run_id.slice(0, 8)}.`,
+            ? `${result.messages_upserted} message(s) brought in.`
+            : "It runs in the background; progress shows on the Runs page.",
       });
     },
     onError: (err) => {
       toast({
-        title: "Slack sync failed",
+        title: "Sync failed",
         description: err instanceof ApiError ? err.message : "Please retry.",
         variant: "destructive",
       });
@@ -224,21 +229,40 @@ export default function AccountsPage() {
     },
   });
 
+  const mailboxBusy = disconnectMutation.isPending;
+  const addMailbox = (primary: boolean) => (
+    <Button
+      size="sm"
+      variant={primary ? "default" : "outline"}
+      className={primary ? "bg-foreground text-background hover:bg-foreground/90" : undefined}
+      onClick={() => openConnect()}
+    >
+      <Plus aria-hidden="true" className="mr-1.5 h-3.5 w-3.5" /> Add mailbox
+    </Button>
+  );
+  const addSlack = (primary: boolean) => (
+    <Button
+      size="sm"
+      variant={primary ? "default" : "outline"}
+      className={primary ? "bg-foreground text-background hover:bg-foreground/90" : undefined}
+      onClick={() => slackConnectMutation.mutate()}
+      disabled={slackConnectMutation.isPending}
+    >
+      {slackConnectMutation.isPending ? (
+        <Loader2 aria-hidden="true" className="mr-1.5 h-3.5 w-3.5 animate-spin" />
+      ) : (
+        <Plus aria-hidden="true" className="mr-1.5 h-3.5 w-3.5" />
+      )}
+      Add workspace
+    </Button>
+  );
+
   return (
     <div className="space-y-10">
       <PageHeader
-        eyebrow="Settings · Accounts"
-        title="Connected mailboxes"
-        description="Each connected account is treated as its own source. Every summary, draft, rule, and run is tagged with the account it came from."
-        actions={
-          <Button
-            size="sm"
-            className="bg-foreground text-background hover:bg-foreground/90"
-            onClick={() => openConnect()}
-          >
-            <Plus className="mr-1.5 h-3.5 w-3.5" /> Add account
-          </Button>
-        }
+        eyebrow="Settings"
+        title="Accounts"
+        description="The mailboxes and workspaces Automata reads from. Every summary, draft, rule and run is tagged with the account it came from."
       />
 
       <ConnectMailboxDialog
@@ -249,213 +273,61 @@ export default function AccountsPage() {
         onConnected={onPasswordConnected}
       />
 
-      {isLoading && (
-        <div className="surface-card p-5 text-sm text-muted-foreground">Loading connected accounts...</div>
-      )}
+      <ConnectionSection
+        id="mailboxes-heading"
+        title="Mailboxes"
+        description="Mail is synced, summarised and filed to projects. Each mailbox is its own account."
+        action={accounts.length > 0 ? addMailbox(false) : undefined}
+      >
+        {isLoading ? (
+          <ConnectionSkeleton label="Loading mailboxes" />
+        ) : isError ? (
+          <ConnectionError>
+            Could not load mailboxes: {error instanceof Error ? error.message : "unknown error"}
+          </ConnectionError>
+        ) : accounts.length === 0 ? (
+          <ConnectionEmpty
+            icon={<ConnectionIcon icon={Mail} />}
+            message="No mailbox connected yet. Connect Microsoft, Google or any IMAP mailbox."
+            action={addMailbox(true)}
+          />
+        ) : (
+          <ul className="space-y-3">
+            {accounts.map((a) => (
+              <MailboxCard
+                key={a.id}
+                account={a}
+                highlighted={highlightActive && connectedAccountID === a.id}
+                syncing={syncMutation.isPending && syncMutation.variables?.accountID === a.id}
+                busy={mailboxBusy}
+                onSync={(force) => syncMutation.mutate({ accountID: a.id, force })}
+                onReconnect={() => reconnect(a)}
+                onDisconnect={() => disconnectMutation.mutate(a.id)}
+              />
+            ))}
+          </ul>
+        )}
+      </ConnectionSection>
 
-      {isError && (
-        <div className="surface-card p-5 text-sm text-destructive">
-          Could not load accounts: {error instanceof Error ? error.message : "unknown error"}
-        </div>
-      )}
-
-      {!isLoading && !isError && accounts.length === 0 && (
-        <div className="surface-card p-6">
-          <h3 className="font-display text-lg font-medium">No connected mailboxes yet</h3>
-          <p className="mt-1 text-sm text-muted-foreground">
-            Connect a Microsoft, Google, or IMAP mailbox to unlock sync, summaries, and runs.
-          </p>
-          <Button
-            className="mt-4 bg-foreground text-background hover:bg-foreground/90"
-            onClick={() => openConnect()}
-          >
-            <Plus className="mr-1.5 h-3.5 w-3.5" /> Add account
-          </Button>
-        </div>
-      )}
-
-      <ul className="space-y-3">
-        {accounts.map((a) => (
-          <li
-            key={a.id}
-            className={cn(
-              "surface-card p-5",
-              highlightActive && connectedAccountID === a.id && "ring-2 ring-success/50 transition-shadow",
-            )}
-          >
-            <div className="flex items-start justify-between gap-4">
-              <div className="flex items-start gap-3">
-                <span
-                  className="mt-1.5 acct-dot h-3 w-3"
-                  style={{ background: `hsl(var(--${a.colorVar}))` }}
-                />
-                <div>
-                  <div className="flex items-center gap-2">
-                    <h3 className="font-display text-lg font-medium">{a.label}</h3>
-                    <span className="rounded-full border border-border px-2 py-0.5 text-[10px] font-medium uppercase tracking-wider text-muted-foreground">
-                      {providerLabel(a.provider)}
-                    </span>
-                    {a.provider === "m365" && (
-                      <span
-                        className={cn(
-                          "rounded-full border px-2 py-0.5 text-[10px] font-medium uppercase tracking-wider",
-                          a.kind === "work"
-                            ? "border-[hsl(184_55%_22%/0.3)] bg-[hsl(184_55%_22%/0.08)] text-[hsl(184_55%_22%)]"
-                            : "border-[hsl(28_70%_52%/0.3)] bg-[hsl(28_70%_52%/0.10)] text-[hsl(28_70%_38%)]",
-                        )}
-                      >
-                        {a.kind}
-                      </span>
-                    )}
-                  </div>
-                  <p className="mt-0.5 text-sm text-muted-foreground">{a.primaryEmail}</p>
-                  <p className="mt-2 text-xs text-muted-foreground">
-                    Last sync {relativeTime(a.lastSyncedAt)}
-                  </p>
-                  {capabilityNotes(a.capabilities).map((note) => (
-                    <p key={note} className="mt-1 flex items-start gap-1.5 text-xs text-muted-foreground">
-                      <Info className="mt-0.5 h-3 w-3 shrink-0" /> {note}
-                    </p>
-                  ))}
-                </div>
-              </div>
-              <div className="flex items-center gap-2">
-                {a.status === "connected" ? (
-                  <span className="inline-flex items-center gap-1.5 rounded-full bg-success/10 px-2.5 py-1 text-xs font-medium text-success">
-                    <span className="h-1.5 w-1.5 rounded-full bg-success" /> Connected
-                  </span>
-                ) : (
-                  <span className="inline-flex items-center gap-1.5 rounded-full bg-destructive/10 px-2.5 py-1 text-xs font-medium text-destructive">
-                    <AlertTriangle className="h-3 w-3" /> {a.status}
-                  </span>
-                )}
-              </div>
-            </div>
-            {a.status !== "connected" && (
-              <div className="mt-4 rounded-md border border-destructive/30 bg-destructive/5 px-3 py-2 text-sm text-destructive">
-                {a.lastError ??
-                  (a.status === "expired"
-                    ? "Session expired. Reconnect to resume sync and forwarding."
-                    : "The last sync failed.")}
-              </div>
-            )}
-            <div className="mt-4 flex flex-wrap items-center gap-2">
-              {a.status === "expired" ? (
-                <Button
-                  size="sm"
-                  variant="outline"
-                  onClick={() => reconnect(a)}
-                  disabled={disconnectMutation.isPending}
-                >
-                  <KeyRound className="mr-1.5 h-3.5 w-3.5" /> Reconnect
-                </Button>
-              ) : (
-                <Button
-                  size="sm"
-                  variant="outline"
-                  onClick={() => syncMutation.mutate({ accountID: a.id })}
-                  disabled={syncMutation.isPending || disconnectMutation.isPending}
-                >
-                  <RefreshCw className="mr-1.5 h-3.5 w-3.5" />
-                  {a.status === "connected" ? "Sync now" : "Retry sync"}
-                </Button>
-              )}
-              {a.status === "connected" ? (
-                <Button
-                  size="sm"
-                  variant="ghost"
-                  className="text-muted-foreground"
-                  title="Refetch every message from scratch, not just what changed"
-                  disabled={syncMutation.isPending || disconnectMutation.isPending}
-                  onClick={() => {
-                    if (
-                      window.confirm(
-                        `Refetch the full mailbox for ${a.label}? An ordinary sync only collects what changed since the last one, so use this when a message is missing its sender, subject or body. It takes longer than a normal sync.`,
-                      )
-                    ) {
-                      syncMutation.mutate({ accountID: a.id, force: true });
-                    }
-                  }}
-                >
-                  Full resync
-                </Button>
-              ) : null}
-              <Button
-                size="sm"
-                variant="ghost"
-                className="text-muted-foreground hover:text-destructive"
-                onClick={() => {
-                  if (window.confirm(`Disconnect ${a.label}?`)) {
-                    disconnectMutation.mutate(a.id);
-                  }
-                }}
-                disabled={syncMutation.isPending || disconnectMutation.isPending}
-              >
-                <Unplug className="mr-1.5 h-3.5 w-3.5" /> Disconnect
-              </Button>
-            </div>
-          </li>
-        ))}
-      </ul>
-
-      <section aria-labelledby="slack-heading" className="space-y-4 border-t border-border/70 pt-8">
-        <div className="flex flex-wrap items-end justify-between gap-3">
-          <div>
-            <p className="text-xs font-mono uppercase tracking-[0.18em] text-muted-foreground">Connectors</p>
-            <h2 id="slack-heading" className="font-display text-2xl font-medium">
-              Slack
-            </h2>
-            <p className="mt-1 max-w-2xl text-sm text-muted-foreground">
-              Add a channel to a project and its messages join that project's trail alongside mail.
-            </p>
-          </div>
-          {connectors.length > 0 && (
-            <Button
-              size="sm"
-              variant="outline"
-              onClick={() => slackConnectMutation.mutate()}
-              disabled={slackConnectMutation.isPending}
-            >
-              {slackConnectMutation.isPending ? (
-                <Loader2 aria-hidden="true" className="mr-1.5 h-3.5 w-3.5 animate-spin" />
-              ) : (
-                <Plus aria-hidden="true" className="mr-1.5 h-3.5 w-3.5" />
-              )}
-              Add workspace
-            </Button>
-          )}
-        </div>
-
+      <ConnectionSection
+        id="slack-heading"
+        title="Slack"
+        description="Add a channel to a project and its messages join that project's trail alongside mail."
+        action={connectors.length > 0 ? addSlack(false) : undefined}
+      >
         {connectorsQuery.isLoading ? (
-          <div className="surface-card p-5 text-sm text-muted-foreground">Loading Slack workspaces…</div>
+          <ConnectionSkeleton label="Loading Slack workspaces" />
         ) : connectorsQuery.isError ? (
-          <div role="alert" className="surface-card p-5 text-sm text-destructive">
+          <ConnectionError>
             Could not load Slack workspaces:{" "}
             {connectorsQuery.error instanceof Error ? connectorsQuery.error.message : "unknown error"}
-          </div>
+          </ConnectionError>
         ) : connectors.length === 0 ? (
-          <div className="surface-card flex flex-col items-start gap-3 p-6 sm:flex-row sm:items-center sm:justify-between">
-            <div className="flex items-center gap-3">
-              <span
-                aria-hidden="true"
-                className="flex h-10 w-10 items-center justify-center rounded-md border border-border bg-secondary"
-              >
-                <Slack className="h-5 w-5" />
-              </span>
-              <p className="text-sm text-muted-foreground">No Slack workspace connected yet.</p>
-            </div>
-            <Button
-              size="sm"
-              className="bg-foreground text-background hover:bg-foreground/90"
-              onClick={() => slackConnectMutation.mutate()}
-              disabled={slackConnectMutation.isPending}
-            >
-              {slackConnectMutation.isPending && (
-                <Loader2 aria-hidden="true" className="mr-1.5 h-3.5 w-3.5 animate-spin" />
-              )}
-              Connect Slack
-            </Button>
-          </div>
+          <ConnectionEmpty
+            icon={<ConnectionIcon icon={Slack} />}
+            message="No Slack workspace connected yet."
+            action={addSlack(true)}
+          />
         ) : (
           <ul className="space-y-3">
             {connectors.map((connector) => (
@@ -467,16 +339,12 @@ export default function AccountsPage() {
                 syncing={slackSyncMutation.isPending && slackSyncMutation.variables === connector.id}
                 disconnecting={slackDisconnectMutation.isPending}
                 onSync={() => slackSyncMutation.mutate(connector.id)}
-                onDisconnect={() => {
-                  if (window.confirm(`Disconnect ${connector.label}? Its channels stop syncing.`)) {
-                    slackDisconnectMutation.mutate(connector.id);
-                  }
-                }}
+                onDisconnect={() => slackDisconnectMutation.mutate(connector.id)}
               />
             ))}
           </ul>
         )}
-      </section>
+      </ConnectionSection>
     </div>
   );
 }

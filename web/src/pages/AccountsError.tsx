@@ -20,7 +20,7 @@ export default function AccountsErrorPage() {
         <div className="mx-auto grid h-10 w-10 place-items-center rounded-full bg-destructive/15 text-destructive">
           <AlertTriangle className="h-5 w-5" />
         </div>
-        <h1 className="mt-4 font-display text-2xl font-semibold">Connection failed</h1>
+        <h1 className="mt-4 font-display text-2xl font-medium">Connection failed</h1>
         <p className="mt-2 text-sm text-muted-foreground">{message}</p>
         <Button asChild className="mt-6">
           <Link to="/accounts">Back to Accounts</Link>
