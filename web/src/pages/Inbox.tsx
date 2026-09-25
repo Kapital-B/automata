@@ -40,7 +40,7 @@ import type { AccountFilter } from "@/components/AppShell";
 import { useAuth } from "@/components/auth/AuthProvider";
 import { useAccountsData } from "@/hooks/useAccountsData";
 import { useIsBelowLg } from "@/hooks/use-mobile";
-import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import { useInfiniteQuery, useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { toast } from "@/hooks/use-toast";
 import { Link, useSearchParams } from "react-router-dom";
 
@@ -51,6 +51,7 @@ interface Props {
 const HTML_TAG_RE = /<\/?[a-z][\s\S]*>/i;
 const HTML_DOCUMENT_RE = /<(?:!doctype|html|head|body)\b/i;
 const TEXT_BODY_URL_RE = /\[https?:\/\/[^\]]+\]/i;
+const INBOX_PAGE_SIZE = 50;
 const EMAIL_CSP =
   "default-src 'none'; img-src http: https: data: cid: blob:; style-src 'unsafe-inline' http: https:; font-src http: https: data:; connect-src 'none'; script-src 'none'; form-action 'none'; frame-ancestors 'none';";
 
@@ -159,15 +160,19 @@ export default function InboxPage({ accountFilter }: Props) {
     enabled: Boolean(accessToken),
   });
 
-  const messagesQuery = useQuery({
+  const messagesQuery = useInfiniteQuery({
     queryKey: ["messages", accessToken, accountFilter, cat, projectFilter],
-    queryFn: () =>
+    queryFn: ({ pageParam }) =>
       listMessages(accessToken!, {
         accountId: accountFilter === "all" ? undefined : accountFilter,
         category: cat === "all" ? undefined : cat,
         projectId: projectFilter === "all" ? undefined : projectFilter,
-        limit: 200,
+        limit: INBOX_PAGE_SIZE,
+        offset: pageParam,
       }),
+    initialPageParam: 0,
+    getNextPageParam: (lastPage, pages) =>
+      lastPage.length === INBOX_PAGE_SIZE ? pages.length * INBOX_PAGE_SIZE : undefined,
     enabled: Boolean(accessToken),
   });
   const selectedMessageQuery = useQuery({
@@ -176,7 +181,7 @@ export default function InboxPage({ accountFilter }: Props) {
     enabled: Boolean(accessToken && selectedId),
   });
   const projectsQuery = useQuery({
-    queryKey: ["projects", accessToken, "inbox-filter"],
+    queryKey: ["projects", accessToken],
     queryFn: () => listProjects(accessToken!),
     enabled: Boolean(accessToken),
   });
@@ -268,13 +273,13 @@ export default function InboxPage({ accountFilter }: Props) {
   }, [categoriesQuery.data]);
 
   const filtered = useMemo(
-    () => messagesQuery.data ?? [],
+    () => messagesQuery.data?.pages.flat() ?? [],
     [messagesQuery.data]
   );
 
   const hasCategorizedMessages = useMemo(
-    () => (messagesQuery.data ?? []).some((m: MessageItem) => Boolean(m.category_slug)),
-    [messagesQuery.data]
+    () => filtered.some((m: MessageItem) => Boolean(m.category_slug)),
+    [filtered]
   );
 
   useEffect(() => {
@@ -469,7 +474,7 @@ export default function InboxPage({ accountFilter }: Props) {
       {messagesQuery.isLoading && (
         <div className="surface-card px-4 py-3 text-sm text-muted-foreground">Loading messages...</div>
       )}
-      {messagesQuery.isError && (
+      {messagesQuery.isError && !messagesQuery.data && (
         <div className="surface-card px-4 py-3 text-sm text-destructive">
           Could not load messages: {messagesQuery.error instanceof Error ? messagesQuery.error.message : "unknown error"}
         </div>
@@ -483,6 +488,7 @@ export default function InboxPage({ accountFilter }: Props) {
       >
         {/* List — full width on narrow when browsing messages */}
         {showMessageList && (
+        <div className="space-y-3">
         <ul className="surface-card divide-y divide-border/70 overflow-hidden">
           {filtered.map((m) => {
             const acct = accounts.find((a) => a.id === m.account_id);
@@ -536,6 +542,24 @@ export default function InboxPage({ accountFilter }: Props) {
             );
           })}
         </ul>
+        {(messagesQuery.hasNextPage || messagesQuery.isFetchingNextPage || messagesQuery.isFetchNextPageError) && (
+          <div className="flex flex-col items-center gap-2">
+            <Button
+              type="button"
+              size="sm"
+              variant="outline"
+              disabled={!messagesQuery.hasNextPage || messagesQuery.isFetchingNextPage}
+              onClick={() => void messagesQuery.fetchNextPage()}
+            >
+              {messagesQuery.isFetchingNextPage && <Loader2 aria-hidden="true" className="mr-1.5 h-3.5 w-3.5 animate-spin" />}
+              {messagesQuery.isFetchingNextPage ? "Loading…" : "Load more"}
+            </Button>
+            {messagesQuery.isFetchNextPageError && (
+              <p role="alert" className="text-xs text-destructive">Could not load more messages. Try again.</p>
+            )}
+          </div>
+        )}
+        </div>
         )}
 
         {/* Detail — on narrow widths, replaces the list until user goes back */}

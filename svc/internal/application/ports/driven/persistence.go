@@ -1008,6 +1008,7 @@ type AssignmentRepository interface {
 	GetMessageOverride(ctx context.Context, messageID uuid.UUID) (*AssignmentRow, error)
 	DeleteMessageOverride(ctx context.Context, messageID uuid.UUID) error
 	EffectiveAssignment(ctx context.Context, userID, messageID uuid.UUID) (*EffectiveAssignment, error)
+	EffectiveProjectIDsForMessages(ctx context.Context, userID uuid.UUID, messages []MessageRow) (map[uuid.UUID]*uuid.UUID, error)
 	ListUnassigned(ctx context.Context, userID uuid.UUID, filter UnassignedListFilter) ([]UnassignedItem, error)
 	CountUnassignedSummary(ctx context.Context, userID uuid.UUID) (UnassignedSummary, error)
 	// ListMessagesNeedingAssign returns messages automatic assignment may

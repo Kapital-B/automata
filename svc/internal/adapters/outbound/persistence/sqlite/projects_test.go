@@ -155,6 +155,67 @@ func TestMessageOverrideSurvivesThreadReassign(t *testing.T) {
 	}
 }
 
+func TestEffectiveProjectIDsForMessagesMatchesIndividualAssignments(t *testing.T) {
+	db := openMigrated(t)
+	repo := sqlite.NewRepository(db, time.Minute)
+	svc := &appprojects.Service{Users: repo, Projects: repo, Assignments: repo, Contacts: repo, Messages: repo}
+	ctx := context.Background()
+	userID, orgID, accountID := seedUserAccount(t, repo)
+	_, _, otherAccountID := seedUserAccount(t, repo)
+	p1, err := svc.Create(ctx, userID, appprojects.CreateProjectInput{Name: "A", Code: "AA01"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	p2, err := svc.Create(ctx, userID, appprojects.CreateProjectInput{Name: "B", Code: "BB01"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	thread := insertMsg(t, repo, accountID, "Thread", "conv-batch", "body")
+	override := insertMsg(t, repo, accountID, "Override", "conv-batch", "body")
+	cleared := insertMsg(t, repo, accountID, "Cleared", "conv-batch", "body")
+	unassigned := insertMsg(t, repo, accountID, "Unassigned", "conv-other", "body")
+	foreign := insertMsg(t, repo, otherAccountID, "Foreign", "conv-batch", "body")
+	if _, err := svc.AssignMessage(ctx, userID, thread, appprojects.AssignInput{
+		ProjectID: &p1.ID, Scope: domainprojects.ScopeThread, Status: domainprojects.StatusCommitted,
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := svc.AssignMessage(ctx, userID, override, appprojects.AssignInput{
+		ProjectID: &p2.ID, Scope: domainprojects.ScopeMessage, Status: domainprojects.StatusCommitted,
+	}); err != nil {
+		t.Fatal(err)
+	}
+	now := time.Now().UTC()
+	if err := repo.UpsertMessageOverride(ctx, driven.AssignmentRow{
+		ID: uuid.New(), OrganisationID: orgID, AccountID: accountID, MessageID: &cleared,
+		Status: "committed", Source: "user", CreatedAt: now, UpdatedAt: now,
+	}); err != nil {
+		t.Fatal(err)
+	}
+	messageIDs := []uuid.UUID{thread, override, cleared, unassigned, foreign}
+	messages := make([]driven.MessageRow, 0, len(messageIDs))
+	for _, id := range messageIDs {
+		messages = append(messages, driven.MessageRow{ID: id})
+	}
+	got, err := repo.EffectiveProjectIDsForMessages(ctx, userID, messages)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, id := range messageIDs[:4] {
+		eff, err := repo.EffectiveAssignment(ctx, userID, id)
+		if err != nil {
+			t.Fatal(err)
+		}
+		projectID := got[id]
+		if (projectID == nil) != (eff.ProjectID == nil) || (projectID != nil && *projectID != *eff.ProjectID) {
+			t.Fatalf("message %s: batch=%v individual=%v", id, projectID, eff.ProjectID)
+		}
+	}
+	if got[foreign] != nil {
+		t.Fatalf("foreign user's message leaked: %v", got[foreign])
+	}
+}
+
 func TestAssignDoesNotCreateProjectMembers(t *testing.T) {
 	db := openMigrated(t)
 	repo := sqlite.NewRepository(db, time.Minute)
