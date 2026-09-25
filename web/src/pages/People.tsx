@@ -1,12 +1,12 @@
 import { PageHeader } from "@/components/PageHeader";
 import { ContactAvatar } from "@/components/ContactAvatar";
 import { contactName } from "@/lib/contacts";
-import { Input } from "@/components/ui/input";
-import { Skeleton } from "@/components/ui/skeleton";
+import { SearchField } from "@/components/SearchField";
+import { ListSkeleton } from "@/components/ListSkeleton";
 import { useAuth } from "@/components/auth/AuthProvider";
 import { ApiError, listContacts, type ContactListItem } from "@/lib/auth";
 import { useQuery } from "@tanstack/react-query";
-import { ChevronRight, Search, Users, X } from "lucide-react";
+import { ChevronRight, Users } from "lucide-react";
 import { useEffect, useMemo, useState } from "react";
 import { Link } from "react-router-dom";
 
@@ -41,30 +41,7 @@ export default function PeoplePage() {
       />
 
       <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
-        <div className="relative w-full sm:max-w-sm">
-          <Search
-            aria-hidden="true"
-            className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground"
-          />
-          <Input
-            type="search"
-            value={q}
-            onChange={(e) => setQ(e.target.value)}
-            placeholder="Search name, email or company"
-            className="pl-9 pr-9"
-            aria-label="Search people"
-          />
-          {q && (
-            <button
-              type="button"
-              onClick={() => setQ("")}
-              aria-label="Clear search"
-              className="absolute right-1 top-1/2 inline-flex h-8 w-8 -translate-y-1/2 items-center justify-center rounded-md text-muted-foreground hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
-            >
-              <X className="h-4 w-4" />
-            </button>
-          )}
-        </div>
+        <SearchField value={q} onChange={setQ} label="Search people" placeholder="Search name, email or company" />
         {!query.isLoading && !query.isError && contacts.length > 0 && (
           <p className="text-sm text-muted-foreground" aria-live="polite">
             {searching
@@ -77,7 +54,7 @@ export default function PeoplePage() {
       </div>
 
       {query.isLoading ? (
-        <ListSkeleton />
+        <ListSkeleton label="Loading people" />
       ) : query.isError ? (
         <div role="alert" className="surface-card p-5 text-sm text-destructive">
           {query.error instanceof ApiError ? query.error.message : "Could not load people."}
@@ -92,22 +69,6 @@ export default function PeoplePage() {
         </ul>
       )}
     </div>
-  );
-}
-
-function ListSkeleton() {
-  return (
-    <ul aria-label="Loading people" className="surface-card divide-y divide-border/70">
-      {Array.from({ length: 6 }, (_, i) => (
-        <li key={i} className="flex items-center gap-3 px-4 py-3">
-          <Skeleton className="h-9 w-9 rounded-full" />
-          <div className="space-y-1.5">
-            <Skeleton className="h-4 w-40" />
-            <Skeleton className="h-3 w-56" />
-          </div>
-        </li>
-      ))}
-    </ul>
   );
 }
 

@@ -1,5 +1,6 @@
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import { fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { fireEvent, render, screen, waitFor, within } from "@testing-library/react";
+import { MemoryRouter } from "react-router-dom";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import RunsPage from "@/pages/Runs";
 import * as auth from "@/lib/auth";
@@ -51,7 +52,9 @@ function renderPage(accountFilter: "all" | string = "all") {
 
   return render(
     <QueryClientProvider client={client}>
-      <RunsPage accountFilter={accountFilter} />
+      <MemoryRouter>
+        <RunsPage accountFilter={accountFilter} />
+      </MemoryRouter>
     </QueryClientProvider>,
   );
 }
@@ -104,6 +107,16 @@ describe("RunsPage", () => {
             finished_at: "2026-08-29T20:55:00Z",
             meta_json: { drafts_generated: 4, action_items_seen: 7 },
           },
+          {
+            id: "run-4",
+            account_id: "acc-1",
+            job_type: "forward_rules",
+            trigger: "api",
+            status: "success",
+            started_at: "2026-08-29T20:40:00Z",
+            finished_at: "2026-08-29T20:40:05Z",
+            meta_json: {},
+          },
         ],
         nextCursor: "cursor-2",
       };
@@ -115,7 +128,11 @@ describe("RunsPage", () => {
     expect(await screen.findByRole("heading", { name: "Job runs" })).toBeInTheDocument();
     expect(await screen.findByText("1/2 processed")).toBeInTheDocument();
     expect(screen.getByText("4 drafts generated · 7 seen")).toBeInTheDocument();
-    expect(screen.getByText("—")).toBeInTheDocument();
+    // A run that recorded nothing says so, instead of a dash.
+    expect(screen.getByText("Nothing to do")).toBeInTheDocument();
+    // Jobs read as words, not internal identifiers.
+    expect(within(screen.getByRole("list", { name: "Runs" })).getByText("Run forwarding rules")).toBeInTheDocument();
+    expect(screen.getByText("took 5s")).toBeInTheDocument();
 
     fireEvent.click(screen.getByRole("button", { name: "Load more" }));
 
@@ -128,7 +145,7 @@ describe("RunsPage", () => {
         }),
       ),
     );
-    expect(await screen.findByText("summarize")).toBeInTheDocument();
+    expect(await within(screen.getByRole("list", { name: "Runs" })).findByText("Summarise")).toBeInTheDocument();
 
     fireEvent.click(screen.getByRole("button", { name: "Cancel" }));
 
@@ -154,5 +171,42 @@ describe("RunsPage", () => {
         }),
       ),
     );
+  });
+
+  // A failed run used to show only the word "failed"; the reason was never rendered.
+  it("shows why a run failed, and its details on request", async () => {
+    listRuns.mockResolvedValue({
+      runs: [
+        {
+          id: "run-9",
+          account_id: "acc-1",
+          job_type: "sync",
+          trigger: "schedule",
+          status: "failed",
+          started_at: "2026-08-29T20:00:00Z",
+          finished_at: "2026-08-29T20:00:30Z",
+          error_message: "mailbox credentials rejected: reconnect the account",
+          meta_json: { forwarded: 3, skipped: 10, failed: 0 },
+        },
+      ],
+    });
+    renderPage();
+    expect(await screen.findByText(/mailbox credentials rejected/)).toBeInTheDocument();
+    expect(screen.getByText("Failed")).toBeInTheDocument();
+    expect(screen.getByText("Scheduled")).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: /details/i }));
+    const details = document.getElementById("run-details-run-9")!;
+    expect(within(details).getByText("Forwarded")).toBeInTheDocument();
+    expect(within(details).getByText("run-9")).toBeInTheDocument();
+  });
+
+  it("filters by job type on the server", async () => {
+    listRuns.mockResolvedValue({ runs: [] });
+    renderPage();
+    fireEvent.change(await screen.findByLabelText("Job type"), { target: { value: "summarize" } });
+    await waitFor(() =>
+      expect(listRuns).toHaveBeenCalledWith("token", expect.objectContaining({ jobType: "summarize" })),
+    );
+    expect(await screen.findByText("No summarise runs yet")).toBeInTheDocument();
   });
 });
