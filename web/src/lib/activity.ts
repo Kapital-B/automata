@@ -32,9 +32,9 @@ export function activityHref(item: ActivityItem): string {
       return `/projects/${item.project_id}/issues/${item.ref_id}`;
     case "fact_version":
     case "decision":
-      return `/projects/${item.project_id}?mode=position`;
+      return `/projects/${item.project_id}#position`;
     case "contradiction":
-      return `/projects/${item.project_id}?mode=open`;
+      return `/projects/${item.project_id}#needs-you`;
     default:
       return `/projects/${item.project_id}`;
   }

@@ -45,7 +45,7 @@ export function ExtractionStatus({
       <Button
         variant="outline"
         size="sm"
-        className="h-7 text-xs"
+        className="h-8 text-xs"
         disabled={pending || reviewing}
         onClick={onCheckNow}
       >

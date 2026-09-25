@@ -1,5 +1,5 @@
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { MemoryRouter, Route, Routes } from "react-router-dom";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import ProjectDetailPage from "@/pages/ProjectDetail";
@@ -75,10 +75,6 @@ const listProjectDecisions = vi.mocked(auth.listProjectDecisions);
 const confirmDecision = vi.mocked(auth.confirmDecision);
 const askProject = vi.mocked(auth.askProject);
 const getProjectAttention = vi.mocked(auth.getProjectAttention);
-
-function selectMode(name: RegExp) {
-  fireEvent.click(screen.getByRole("tab", { name }));
-}
 
 function newClient() {
   return new QueryClient({
@@ -179,13 +175,10 @@ describe("Project workspace UI", () => {
     createProjectIssue.mockResolvedValue(issueDetail());
     renderPage(newClient());
 
-    expect(await screen.findByText("Cooling Upgrade")).toBeInTheDocument();
-    selectMode(/^Open$/i);
+    expect(await screen.findByRole("heading", { name: "Cooling Upgrade" })).toBeInTheDocument();
     fireEvent.click(screen.getByRole("button", { name: /^new issue$/i }));
-    fireEvent.change(screen.getByPlaceholderText(/pump p-03/i), {
-      target: { value: "Pump P-03" },
-    });
-    fireEvent.click(screen.getByRole("button", { name: /^create$/i }));
+    fireEvent.change(await screen.findByLabelText(/^title$/i), { target: { value: "Pump P-03" } });
+    fireEvent.click(screen.getByRole("button", { name: /^create issue$/i }));
     await waitFor(() =>
       expect(createProjectIssue).toHaveBeenCalledWith("token", "p1", {
         title: "Pump P-03",
@@ -195,14 +188,22 @@ describe("Project workspace UI", () => {
     );
   });
 
-  it("creates an issue from a timeline row with that row pre-attached", async () => {
+  function rowActions(title: string) {
+    const row = screen.getByText(title).closest("li")!;
+    fireEvent.click(within(row).getByRole("button", { name: /^actions$/i }));
+    return row;
+  }
+
+  it("creates an issue from correspondence with that item pre-attached", async () => {
     createProjectIssue.mockResolvedValue(issueDetail());
     renderPage(newClient());
 
     expect(await screen.findByText("Teams note")).toBeInTheDocument();
-    fireEvent.click(screen.getAllByRole("button", { name: /^new issue…$/i })[0]!);
-    expect(await screen.findByText(/pre-attached from timeline/i)).toBeInTheDocument();
-    fireEvent.click(screen.getByRole("button", { name: /^create$/i }));
+    const row = rowActions("Teams note");
+    fireEvent.click(within(row).getByRole("button", { name: /new issue from this/i }));
+    expect(await screen.findByText(/pre-attached from the correspondence/i)).toBeInTheDocument();
+    expect(screen.getByLabelText(/^title$/i)).toHaveValue("Teams note");
+    fireEvent.click(screen.getByRole("button", { name: /^create issue$/i }));
     await waitFor(() =>
       expect(createProjectIssue).toHaveBeenCalledWith("token", "p1", {
         title: "Teams note",
@@ -212,15 +213,17 @@ describe("Project workspace UI", () => {
     );
   });
 
-  it("attaches a timeline item to an issue", async () => {
+  it("attaches correspondence to an issue from its actions", async () => {
     listProjectIssues.mockResolvedValue([issue()]);
     addIssueItem.mockResolvedValue(issueDetail());
     renderPage(newClient());
 
     expect(await screen.findByText("Teams note")).toBeInTheDocument();
-    const attachSelect = screen.getAllByLabelText(/attach to issue/i)[0]!;
-    fireEvent.change(attachSelect, { target: { value: "iss1" } });
-    fireEvent.click(screen.getAllByRole("button", { name: /^attach$/i })[0]!);
+    // Actions stay out of the way until asked for.
+    expect(screen.queryByLabelText(/attach to issue/i)).not.toBeInTheDocument();
+    const row = rowActions("Teams note");
+    fireEvent.change(within(row).getByLabelText(/attach to issue/i), { target: { value: "iss1" } });
+    fireEvent.click(within(row).getByRole("button", { name: /^attach$/i }));
     await waitFor(() =>
       expect(addIssueItem).toHaveBeenCalledWith("token", "iss1", {
         message_id: undefined,
@@ -229,7 +232,7 @@ describe("Project workspace UI", () => {
     );
   });
 
-  it("renders timeline mail and manual in order and paste submits", async () => {
+  it("lists correspondence newest first and pastes a note", async () => {
     createManualItem.mockResolvedValue({
       id: "man2",
       organisation_id: "o1",
@@ -243,27 +246,80 @@ describe("Project workspace UI", () => {
     });
     renderPage(newClient());
 
-    expect(await screen.findByText("Cooling Upgrade")).toBeInTheDocument();
-    expect(await screen.findByText("Teams note")).toBeInTheDocument();
-    expect(screen.getByText("Outlook: pump")).toBeInTheDocument();
+    const list = await screen.findByRole("list", { name: "Correspondence" });
+    const titles = within(list).getAllByRole("listitem").map((li) => li.textContent ?? "");
+    expect(titles[0]).toContain("Teams note");
+    expect(titles[1]).toContain("Outlook: pump");
+    expect(within(list).getByRole("link", { name: "Outlook: pump" })).toHaveAttribute(
+      "href",
+      "/inbox?message_id=msg1&account_id=acc1",
+    );
 
     fireEvent.click(screen.getByRole("button", { name: /paste correspondence/i }));
-    fireEvent.change(screen.getByLabelText(/^body$/i), {
-      target: { value: "90 kW is approved" },
-    });
+    fireEvent.change(screen.getByLabelText(/^body$/i), { target: { value: "90 kW is approved" } });
     fireEvent.click(screen.getByRole("button", { name: /add to timeline/i }));
     await waitFor(() =>
       expect(createManualItem).toHaveBeenCalledWith(
         "token",
-        expect.objectContaining({
-          body_text: "90 kW is approved",
-          project_id: "p1",
-        }),
+        expect.objectContaining({ body_text: "90 kW is approved", project_id: "p1" }),
       ),
     );
   });
 
-  it("shows current position, says it is derived, and creates a confirmed fact", async () => {
+  it("filters correspondence by source on the server", async () => {
+    renderPage(newClient());
+    expect(await screen.findByText("Teams note")).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("radio", { name: "Mail" }));
+    await waitFor(() =>
+      expect(getProjectTimeline).toHaveBeenLastCalledWith("token", "p1", expect.objectContaining({ source: "mail" })),
+    );
+    fireEvent.click(screen.getByRole("switch", { name: /not on an issue/i }));
+    await waitFor(() =>
+      expect(getProjectTimeline).toHaveBeenLastCalledWith(
+        "token",
+        "p1",
+        expect.objectContaining({ unassigned_to_issue: true }),
+      ),
+    );
+  });
+
+  const dutyFact = (): auth.FactDetail => ({
+    id: "f1",
+    organisation_id: "o1",
+    project_id: "p1",
+    subject_key: "pump.p03.duty_kw",
+    label: "Pump P-03 duty",
+    created_at: "2026-03-01T00:00:00Z",
+    updated_at: "2026-03-02T00:00:00Z",
+    versions: [
+      {
+        id: "v1",
+        fact_id: "f1",
+        status: "active",
+        value_json: 90,
+        value_text: "90",
+        unit: "kW",
+        source: "user",
+        created_at: "2026-03-02T00:00:00Z",
+        evidence: [],
+      },
+      {
+        id: "v0",
+        fact_id: "f1",
+        status: "superseded",
+        value_json: 75,
+        value_text: "75",
+        unit: "kW",
+        source: "llm",
+        created_at: "2026-03-01T00:00:00Z",
+        evidence: [],
+      },
+    ],
+  });
+
+  // The position is the first thing on the page after what needs you, not a
+  // tab: it is what the page is for.
+  it("shows the current position up front, with where it came from and its history", async () => {
     getCurrentPosition.mockResolvedValue({
       facts: [
         {
@@ -277,95 +333,84 @@ describe("Project workspace UI", () => {
           evidence_count: 1,
         },
       ],
-      decisions: [],
+      decisions: [{ decision_id: "d1", statement: "Proceed with 90 kW", status: "accepted", evidence_count: 2 }],
     });
-    listProjectFacts.mockResolvedValue([
+    listProjectFacts.mockResolvedValue([dutyFact()]);
+    listProjectDecisions.mockResolvedValue([
       {
-        id: "f1",
+        id: "d1",
         organisation_id: "o1",
         project_id: "p1",
-        subject_key: "pump.p03.duty_kw",
-        label: "Pump P-03 duty",
-        created_at: "2026-03-01T00:00:00Z",
-        updated_at: "2026-03-02T00:00:00Z",
-        versions: [
-          {
-            id: "v1",
-            fact_id: "f1",
-            status: "active",
-            value_json: 90,
-            value_text: "90",
-            unit: "kW",
-            source: "user",
-            created_at: "2026-03-02T00:00:00Z",
-            evidence: [],
-          },
-        ],
+        statement: "Proceed with 90 kW",
+        status: "accepted",
+        source: "llm",
+        created_at: "2026-03-03T00:00:00Z",
+        updated_at: "2026-03-03T00:00:00Z",
+        evidence: [],
       },
     ]);
-    createProjectFact.mockResolvedValue({
-      id: "f2",
-      organisation_id: "o1",
-      project_id: "p1",
-      subject_key: "pump.p03.flow",
-      label: "Pump P-03 flow",
-      created_at: "2026-03-03T00:00:00Z",
-      updated_at: "2026-03-03T00:00:00Z",
-      versions: [],
-    });
 
     renderPage(newClient());
 
-    const position = await screen.findByLabelText(/current position/i);
+    const position = await screen.findByRole("region", { name: /current position/i });
+    await waitFor(() => expect(position).toHaveTextContent("90 kW"));
     expect(position).toHaveTextContent("Pump P-03 duty");
-    expect(position).toHaveTextContent("90 kW");
-    // §8.4: the panel states where the position comes from, so confirming a
-    // fact and the position changing is not a coincidence the operator has to
-    // infer.
     expect(position).toHaveTextContent(/derived from confirmed facts and accepted decisions/i);
+    expect(position).toHaveTextContent("from 1 message · from a person");
+    expect(position).toHaveTextContent("Proceed with 90 kW");
+    expect(position).toHaveTextContent("from 2 messages · from the model");
+    fireEvent.click(within(position).getByRole("button", { name: /1 earlier value/i }));
+    expect(within(position).getByText("75 kW")).toBeInTheDocument();
+  });
 
-    selectMode(/^Position$/i);
-    expect(screen.getByRole("heading", { name: /^facts$/i })).toBeInTheDocument();
+  it("records a new fact with an identifier derived from its name", async () => {
+    listProjectFacts.mockResolvedValue([dutyFact()]);
+    createProjectFact.mockResolvedValue(dutyFact());
+    renderPage(newClient());
 
-    fireEvent.click(screen.getByRole("button", { name: /^add fact$/i }));
-    fireEvent.change(screen.getByPlaceholderText("pump.p03.duty_kw"), {
-      target: { value: "pump.p03.flow" },
-    });
-    fireEvent.change(screen.getByPlaceholderText("Pump P-03 duty"), {
-      target: { value: "Pump P-03 flow" },
-    });
-    fireEvent.change(screen.getByPlaceholderText("90"), { target: { value: "12" } });
-    fireEvent.change(screen.getByPlaceholderText("kW"), { target: { value: "L/s" } });
+    fireEvent.click(await screen.findByRole("button", { name: /^record fact$/i }));
+    fireEvent.change(await screen.findByLabelText(/^what it is$/i), { target: { value: "Pump P-03 flow" } });
+    fireEvent.change(screen.getByLabelText(/^value$/i), { target: { value: "12" } });
+    fireEvent.change(screen.getByLabelText(/^unit/i), { target: { value: "L/s" } });
     fireEvent.click(screen.getByRole("button", { name: /save fact/i }));
-
     await waitFor(() =>
       expect(createProjectFact).toHaveBeenCalledWith(
         "token",
         "p1",
-        expect.objectContaining({
-          subject_key: "pump.p03.flow",
-          label: "Pump P-03 flow",
-          value: 12,
-          unit: "L/s",
-          confirm: true,
-        }),
+        expect.objectContaining({ subject_key: "pump_p_03_flow", label: "Pump P-03 flow", value: 12, unit: "L/s", confirm: true }),
+      ),
+    );
+  });
+
+  it("updates an existing fact as a new version that replaces the current one", async () => {
+    listProjectFacts.mockResolvedValue([dutyFact()]);
+    createProjectFact.mockResolvedValue(dutyFact());
+    renderPage(newClient());
+
+    fireEvent.click(await screen.findByRole("button", { name: /^record fact$/i }));
+    fireEvent.change(await screen.findByLabelText(/^fact$/i), { target: { value: "pump.p03.duty_kw" } });
+    expect(screen.queryByLabelText(/^what it is$/i)).not.toBeInTheDocument();
+    expect(screen.getByLabelText(/^unit/i)).toHaveValue("kW");
+    fireEvent.change(screen.getByLabelText(/^new value$/i), { target: { value: "95" } });
+    fireEvent.click(screen.getByRole("button", { name: /save fact/i }));
+    await waitFor(() =>
+      expect(createProjectFact).toHaveBeenCalledWith(
+        "token",
+        "p1",
+        expect.objectContaining({ subject_key: "pump.p03.duty_kw", value: 95, supersedes_version_id: "v1" }),
       ),
     );
   });
 
   // R4 exit criterion: the words "interpret", "reconcile" and "interpretation"
   // do not appear in the UI. They are this spec family's own stage names.
-  it("never names the pipeline's stages", async () => {
-    listProjectFacts.mockResolvedValue([]);
+  it("never names the pipeline's stages, and has no mode tabs", async () => {
     renderPage(newClient());
-
-    expect(await screen.findByText("Cooling Upgrade")).toBeInTheDocument();
-    for (const mode of [/^Trail$/i, /^Position$/i, /^Open$/i]) {
-      selectMode(mode);
-      const text = document.body.textContent ?? "";
-      expect(text).not.toMatch(/interpret/i);
-      expect(text).not.toMatch(/reconcile/i);
-    }
+    expect(await screen.findByRole("heading", { name: "Cooling Upgrade" })).toBeInTheDocument();
+    const text = document.body.textContent ?? "";
+    expect(text).not.toMatch(/interpret/i);
+    expect(text).not.toMatch(/reconcile/i);
+    expect(screen.queryByRole("tab")).not.toBeInTheDocument();
   });
 
   it("reports the extraction watermark and queues a run on Check now", async () => {
@@ -431,8 +476,6 @@ describe("Project workspace UI", () => {
     expect(await screen.findByText(/not reviewed yet/i)).toBeInTheDocument();
   });
 
-  // §8.2: proposed fact versions, proposed decisions and open contradictions
-  // are one queue, not three scattered across two tabs.
   it("collects every pending confirmation into one panel", async () => {
     listProjectFacts.mockResolvedValue([
       {
@@ -523,7 +566,7 @@ describe("Project workspace UI", () => {
 
     renderPage(newClient());
 
-    const panel = await screen.findByRole("region", { name: /needs your confirmation/i });
+    const panel = await screen.findByRole("region", { name: /^needs you$/i });
     // All three kinds, in one place, each saying what it would change.
     expect(panel).toHaveTextContent("Pump P-03 duty");
     expect(panel).toHaveTextContent("75 kW → 90 kW");
@@ -539,7 +582,7 @@ describe("Project workspace UI", () => {
       }),
     );
 
-    fireEvent.click(screen.getByRole("button", { name: /^keep proposed$/i }));
+    fireEvent.click(screen.getByRole("button", { name: /^keep new value$/i }));
     await waitFor(() =>
       expect(resolveContradiction).toHaveBeenCalledWith("token", "c1", {
         resolution: "supersede",
@@ -576,7 +619,7 @@ describe("Project workspace UI", () => {
 
     renderPage(newClient());
 
-    const panel = await screen.findByRole("region", { name: /needs your confirmation/i });
+    const panel = await screen.findByRole("region", { name: /^needs you$/i });
     expect(panel).toHaveTextContent("Proceed with 90 kW duty");
     fireEvent.click(screen.getByRole("button", { name: /^accept$/i }));
     await waitFor(() => expect(confirmDecision).toHaveBeenCalledWith("token", "d1"));
@@ -584,7 +627,7 @@ describe("Project workspace UI", () => {
 
   // R4 exit criterion: every fact, decision and issue shows its evidence count
   // and source.
-  it("shows provenance on issues and discards one", async () => {
+  it("shows provenance on issues and discards one after asking", async () => {
     listProjectIssues.mockResolvedValue([
       issue({ id: "iss1", title: "Seal leak", item_count: 3, source: "llm" }),
       issue({ id: "iss2", title: "Raised by hand", item_count: 1, source: "human" }),
@@ -593,13 +636,14 @@ describe("Project workspace UI", () => {
 
     renderPage(newClient());
 
-    expect(await screen.findByText("Cooling Upgrade")).toBeInTheDocument();
-    selectMode(/^Open$/i);
-    expect(await screen.findByText("Seal leak")).toBeInTheDocument();
-    expect(screen.getByText("from 3 messages · from the model")).toBeInTheDocument();
-    expect(screen.getByText("from 1 message · from a person")).toBeInTheDocument();
+    const issues = await screen.findByRole("region", { name: /open issues/i });
+    expect(await within(issues).findByText("Seal leak")).toBeInTheDocument();
+    expect(within(issues).getByText("from 3 messages · from the model")).toBeInTheDocument();
+    expect(within(issues).getByText("from 1 message · from a person")).toBeInTheDocument();
 
-    fireEvent.click(screen.getAllByRole("button", { name: /^discard$/i })[0]!);
+    fireEvent.click(within(issues).getByRole("button", { name: "Discard Seal leak" }));
+    const dialog = await screen.findByRole("alertdialog");
+    fireEvent.click(within(dialog).getByRole("button", { name: /discard issue/i }));
     await waitFor(() => expect(discardIssue).toHaveBeenCalledWith("token", "iss1"));
   });
 
@@ -608,35 +652,51 @@ describe("Project workspace UI", () => {
       issue({ id: "iss1", title: "Seal leak" }),
       issue({ id: "iss2", title: "Should not have been raised", discarded_at: "2026-03-04T00:00:00Z" }),
     ]);
-
     renderPage(newClient());
-
-    expect(await screen.findByText("Cooling Upgrade")).toBeInTheDocument();
-    selectMode(/^Open$/i);
     expect(await screen.findByText("Seal leak")).toBeInTheDocument();
     expect(screen.queryByText("Should not have been raised")).not.toBeInTheDocument();
   });
 
-  // §8.4: empty states carry the definition rather than an apology.
-  it("teaches what facts and issues are when there are none", async () => {
+  it("lists issues awaiting you first, and other attention in Needs you", async () => {
+    listProjectIssues.mockResolvedValue([
+      issue({ id: "iss1", title: "Older one", updated_at: "2026-03-01T00:00:00Z" }),
+      issue({ id: "iss2", title: "Yours", awaiting_me: true, updated_at: "2026-02-01T00:00:00Z" }),
+    ]);
+    getProjectAttention.mockResolvedValue({
+      items: [
+        { id: "a1", why_me: "issue_assignee", title: "Yours", project_id: "p1", ref_type: "issue", ref_id: "iss2" },
+        // The confirmation rows cover proposals; this must not be listed twice.
+        { id: "a2", why_me: "provisional_fact", title: "Confirm fact", project_id: "p1", ref_type: "fact_version", ref_id: "v9" },
+      ],
+      counts: { total: 2, issue_assignee: 1, member_role: 0, provisional_fact: 1, provisional_decision: 0, open_contradiction: 0, mail_action_item: 0 },
+    });
     renderPage(newClient());
 
-    expect(await screen.findByText("Cooling Upgrade")).toBeInTheDocument();
-    selectMode(/^Position$/i);
-    expect(
-      screen.getByText(/facts are values that are currently true about this project/i),
-    ).toBeInTheDocument();
-    expect(
-      screen.getByText(/decisions are choices this project has committed to/i),
-    ).toBeInTheDocument();
+    const issues = await screen.findByRole("region", { name: /open issues/i });
+    const items = await within(issues).findAllByRole("listitem");
+    expect(items[0]).toHaveTextContent("Yours");
+    expect(items[0]).toHaveTextContent("Awaiting you");
 
-    selectMode(/^Open$/i);
-    expect(
-      screen.getByText(/issues are open questions or work someone has to act on/i),
-    ).toBeInTheDocument();
+    const needs = screen.getByRole("region", { name: /^needs you$/i });
+    expect(within(needs).getByRole("link", { name: /assigned to you.*yours/i })).toHaveAttribute("href", "/projects/p1/issues/iss2");
+    expect(within(needs).queryByText("Confirm fact")).not.toBeInTheDocument();
   });
 
-  it("asks Project AI and shows answer with citations", async () => {
+  it("says plainly when nothing needs you", async () => {
+    renderPage(newClient());
+    const needs = await screen.findByRole("region", { name: /^needs you$/i });
+    expect(await within(needs).findByText(/nothing is waiting on you/i)).toBeInTheDocument();
+  });
+
+  // §8.4: empty states carry the definition rather than an apology.
+  it("teaches what facts, decisions and issues are when there are none", async () => {
+    renderPage(newClient());
+    expect(await screen.findByText(/facts are values that are currently true about this project/i)).toBeInTheDocument();
+    expect(screen.getByText(/decisions are choices this project has committed to/i)).toBeInTheDocument();
+    expect(await screen.findByText(/issues are open questions or work someone has to act on/i)).toBeInTheDocument();
+  });
+
+  it("answers questions about the project, saying how many sources it used", async () => {
     askProject.mockResolvedValue({
       answer: "Pump P-03 duty is 90 kW",
       citations: [{ type: "fact_version", id: "aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee" }],
@@ -644,35 +704,58 @@ describe("Project workspace UI", () => {
     });
     renderPage(newClient());
 
-    expect(await screen.findByRole("region", { name: /ask project ai/i })).toBeInTheDocument();
-    fireEvent.change(screen.getByPlaceholderText(/ask a grounded question/i), {
-      target: { value: "What is Pump P-03 duty?" },
-    });
-    fireEvent.click(screen.getByRole("button", { name: /^ask$/i }));
-    await waitFor(() =>
-      expect(askProject).toHaveBeenCalledWith("token", "p1", "What is Pump P-03 duty?"),
-    );
-    expect(await screen.findByText(/Pump P-03 duty is 90 kW/i)).toBeInTheDocument();
-    expect(screen.getByText(/Citations:/i)).toBeInTheDocument();
+    const ask = await screen.findByRole("region", { name: /ask this project/i });
+    await waitFor(() => expect(within(ask).getByLabelText("Question")).toBeEnabled());
+    fireEvent.change(within(ask).getByLabelText("Question"), { target: { value: "What is Pump P-03 duty?" } });
+    fireEvent.click(within(ask).getByRole("button", { name: /^ask$/i }));
+    await waitFor(() => expect(askProject).toHaveBeenCalledWith("token", "p1", "What is Pump P-03 duty?"));
+    expect(await within(ask).findByText(/Pump P-03 duty is 90 kW/i)).toBeInTheDocument();
+    expect(within(ask).getByText(/based on 1 source/i)).toBeInTheDocument();
   });
 
-  it("opens Position mode from ?mode= and keeps Trail as default", async () => {
+  it("edits project details including client and description", async () => {
+    vi.mocked(auth.updateProject).mockResolvedValue({} as auth.ProjectListItem);
+    vi.mocked(auth.updateProjectMember).mockResolvedValue({} as auth.ProjectMember);
     renderPage(newClient());
-    expect(await screen.findByRole("tab", { name: /^Trail$/i })).toHaveAttribute(
-      "aria-selected",
-      "true",
-    );
-    expect(screen.getByRole("tabpanel", { name: /^Trail$/i })).toBeInTheDocument();
-    expect(screen.queryByRole("heading", { name: /^facts$/i })).not.toBeInTheDocument();
 
-    cleanup();
-
-    renderPage(newClient(), "/projects/p1?mode=position");
-    expect(await screen.findByRole("tab", { name: /^Position$/i })).toHaveAttribute(
-      "aria-selected",
-      "true",
+    fireEvent.click(await screen.findByRole("button", { name: /edit details/i }));
+    fireEvent.change(await screen.findByLabelText(/^client$/i), { target: { value: "Acme" } });
+    fireEvent.change(screen.getByLabelText(/^keywords$/i), { target: { value: "chiller, P-03, chiller" } });
+    fireEvent.click(screen.getByRole("button", { name: /save changes/i }));
+    await waitFor(() =>
+      expect(auth.updateProject).toHaveBeenCalledWith(
+        "token",
+        "p1",
+        expect.objectContaining({ name: "Cooling Upgrade", client: "Acme", keywords: ["chiller", "P-03"] }),
+      ),
     );
-    expect(screen.getByRole("tabpanel", { name: /^Position$/i })).toBeInTheDocument();
-    expect(screen.getByRole("heading", { name: /^facts$/i })).toBeInTheDocument();
+    expect(auth.updateProjectMember).toHaveBeenCalledWith("token", "p1", expect.objectContaining({ role: "ME" }));
+  });
+
+  it("archives only after asking", async () => {
+    vi.mocked(auth.updateProject).mockResolvedValue({} as auth.ProjectListItem);
+    renderPage(newClient());
+    fireEvent.click(await screen.findByRole("button", { name: /^archive$/i }));
+    const dialog = await screen.findByRole("alertdialog");
+    fireEvent.click(within(dialog).getByRole("button", { name: "Cancel" }));
+    expect(auth.updateProject).not.toHaveBeenCalled();
+  });
+
+  // Home and activity link to sections; old ?mode= links still land.
+  it("scrolls to the section a link names", async () => {
+    const scrolled: string[] = [];
+    const original = Element.prototype.scrollIntoView;
+    Element.prototype.scrollIntoView = function (this: Element) {
+      scrolled.push(this.id);
+    };
+    try {
+      renderPage(newClient(), "/projects/p1#issues");
+      await waitFor(() => expect(scrolled).toContain("issues"));
+      cleanup();
+      renderPage(newClient(), "/projects/p1?mode=position");
+      await waitFor(() => expect(scrolled).toContain("position"));
+    } finally {
+      Element.prototype.scrollIntoView = original;
+    }
   });
 });
