@@ -2,15 +2,33 @@ import { Link } from "react-router-dom";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import {
   AlertTriangle,
+  Check,
   CheckCircle2,
+  ChevronDown,
+  ChevronRight,
+  CircleDot,
+  FileCheck2,
   FolderKanban,
+  History,
   Inbox,
+  Info,
+  Loader2,
+  Mail,
   PenLine,
   Plug,
+  Scale,
+  Sparkles,
+  Users,
+  type LucideIcon,
 } from "lucide-react";
 import type { AccountFilter } from "@/components/AppShell";
+import { PageHeader } from "@/components/PageHeader";
+import { ListSkeleton } from "@/components/ListSkeleton";
+import { Tag } from "@/components/ConnectionCard";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
+import { Skeleton } from "@/components/ui/skeleton";
+import { cn } from "@/lib/utils";
 import { useAuth } from "@/components/auth/AuthProvider";
 import { relativeTime } from "@/lib/accounts";
 import {
@@ -27,7 +45,7 @@ import {
   type OverviewProject,
 } from "@/lib/auth";
 import { activityHref, activityLabel, groupActivityByDay, isAdverse } from "@/lib/activity";
-import { mergeNeedsMeRows } from "@/lib/needsMe";
+import { mergeNeedsMeRows, type NeedsMeRow } from "@/lib/needsMe";
 import { toast } from "@/hooks/use-toast";
 import { useAssistantHomeData } from "@/hooks/useAssistantHomeData";
 import { useState } from "react";
@@ -136,16 +154,24 @@ export default function AssistantHomePage({ accountFilter }: Props) {
 
   if (loading) {
     return (
-      <div className="space-y-4" role="status" aria-label="Loading home">
-        <div className="h-16 animate-pulse rounded-md bg-muted/60" />
-        <div className="h-48 animate-pulse rounded-md bg-muted/60" />
+      <div className="space-y-8" role="status" aria-label="Loading home">
+        <div className="space-y-2 border-b border-border/70 pb-6">
+          <Skeleton className="h-3 w-24" />
+          <Skeleton className="h-9 w-72" />
+        </div>
+        <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-5">
+          {Array.from({ length: 5 }, (_, i) => (
+            <Skeleton key={i} className="h-[4.5rem] rounded-lg" />
+          ))}
+        </div>
+        <ListSkeleton label="Loading what needs you" rows={4} />
       </div>
     );
   }
 
   if (accountsError) {
     return (
-      <div className="space-y-3 rounded-md border border-destructive/30 px-4 py-5 text-sm text-destructive">
+      <div role="alert" className="surface-card space-y-3 p-5 text-sm text-destructive">
         <p>Could not load accounts.</p>
         <Button
           size="sm"
@@ -161,17 +187,13 @@ export default function AssistantHomePage({ accountFilter }: Props) {
   }
 
   return (
-    <div className="space-y-12">
-      <section className="space-y-6" aria-labelledby="home-needs-heading">
-        <div className="space-y-2">
-          <p className="font-display text-sm tracking-wide text-muted-foreground">Automata</p>
-          <h1 id="home-needs-heading" className="font-display text-3xl md:text-4xl font-medium leading-tight">
-            Across your projects
-          </h1>
-          <p className="max-w-2xl text-sm text-muted-foreground">
-            What needs you, what changed, and where things stand.
-          </p>
-        </div>
+    <div className="space-y-10">
+      <div className="space-y-6">
+        <PageHeader
+          eyebrow="Automata"
+          title="Across your projects"
+          description="What needs you, what changed, and where things stand."
+        />
 
         <nav aria-label="Overview" className="grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-5">
           <MetricCard label="Needs you" value={counts?.needs_you ?? 0} to="#home-needs-list" />
@@ -189,7 +211,7 @@ export default function AssistantHomePage({ accountFilter }: Props) {
           />
           <MetricCard label="Projects" value={counts?.active_projects ?? 0} to="/projects" />
         </nav>
-      </section>
+      </div>
 
       <AskAcrossProjects
         llmEnabled={llmEnabled}
@@ -200,33 +222,33 @@ export default function AssistantHomePage({ accountFilter }: Props) {
         onAsk={() => askMutation.mutate()}
       />
 
-      <section className="space-y-4" aria-labelledby="home-actions-heading">
-        <h2 id="home-actions-heading" className="font-display text-2xl">
-          Needs you
-        </h2>
+      <section className="space-y-3" aria-labelledby="home-actions-heading">
+        <SectionHeading
+          id="home-actions-heading"
+          title="Needs you"
+          description="Proposals to confirm, disagreements to settle, and mail to act on."
+        />
         {needsMe.length === 0 ? (
-          <div className="space-y-4 border-y border-border/70 py-8">
-            <div className="flex items-start gap-3 text-sm text-muted-foreground">
-              <CheckCircle2 className="mt-0.5 h-4 w-4 shrink-0 text-success" />
-              <p>Nothing waiting on you right now.</p>
-            </div>
-            <div className="flex flex-wrap gap-2">
+          <div className="surface-card flex flex-col items-center gap-3 px-6 py-10 text-center">
+            <CheckCircle2 aria-hidden="true" className="h-8 w-8 text-success" />
+            <p className="text-sm text-muted-foreground">Nothing waiting on you right now.</p>
+            <div className="flex flex-wrap justify-center gap-2">
               <Button asChild variant="outline" size="sm">
                 <Link to="/projects">
-                  <FolderKanban className="mr-1.5 h-3.5 w-3.5" />
+                  <FolderKanban aria-hidden="true" className="mr-1.5 h-3.5 w-3.5" />
                   Projects
                 </Link>
               </Button>
               <Button asChild variant="outline" size="sm">
                 <Link to="/triage">
-                  <Inbox className="mr-1.5 h-3.5 w-3.5" />
+                  <Inbox aria-hidden="true" className="mr-1.5 h-3.5 w-3.5" />
                   Triage
                 </Link>
               </Button>
               {connectedAccounts.length === 0 && (
                 <Button asChild size="sm">
                   <Link to="/accounts">
-                    <Plug className="mr-1.5 h-3.5 w-3.5" />
+                    <Plug aria-hidden="true" className="mr-1.5 h-3.5 w-3.5" />
                     Connect email
                   </Link>
                 </Button>
@@ -235,148 +257,293 @@ export default function AssistantHomePage({ accountFilter }: Props) {
           </div>
         ) : (
           <>
-          <ul id="home-needs-list" className="divide-y divide-border/70 border-y border-border/70">
-            {visibleNeedsMe.map((row) => (
-              <li key={row.id} className="flex items-start gap-3 py-3.5">
-                <div className="min-w-0 flex-1">
-                  <p className="text-[10px] uppercase tracking-[0.14em] text-muted-foreground">
-                    {row.whyMeLabel}
-                    {row.projectLabel ? ` · ${row.projectLabel}` : ""}
-                  </p>
-                  <Link to={row.href} className="mt-1 block text-sm font-medium hover:underline">
-                    {row.title}
-                  </Link>
-                </div>
-                {row.kind === "mail" && row.mailActionId ? (
-                  <Button
-                    size="sm"
-                    variant="outline"
-                    onClick={() => doneMutation.mutate(row.mailActionId!)}
-                    disabled={doneMutation.isPending}
-                  >
-                    Done
-                  </Button>
-                ) : null}
-              </li>
-            ))}
-          </ul>
-          {needsMe.length > NEEDS_ME_PREVIEW ? (
-            <Button
-              variant="ghost"
-              size="sm"
-              aria-expanded={showAllNeedsMe}
-              onClick={() => setShowAllNeedsMe((v) => !v)}
+            <ul
+              id="home-needs-list"
+              aria-label="Needs you"
+              className="surface-card scroll-mt-20 divide-y divide-border/70 overflow-hidden"
             >
-              {showAllNeedsMe
-                ? "Show fewer"
-                : `Show all ${needsMe.length}`}
-            </Button>
-          ) : null}
+              {visibleNeedsMe.map((row) => (
+                <NeedsMeItem
+                  key={row.id}
+                  row={row}
+                  pending={doneMutation.isPending}
+                  onDone={(id) => doneMutation.mutate(id)}
+                />
+              ))}
+            </ul>
+            {needsMe.length > NEEDS_ME_PREVIEW ? (
+              <Button
+                variant="ghost"
+                size="sm"
+                className="text-muted-foreground"
+                aria-expanded={showAllNeedsMe}
+                aria-controls="home-needs-list"
+                onClick={() => setShowAllNeedsMe((v) => !v)}
+              >
+                <ChevronDown
+                  aria-hidden="true"
+                  className={cn(
+                    "mr-1.5 h-3.5 w-3.5 transition-transform motion-reduce:transition-none",
+                    showAllNeedsMe && "rotate-180",
+                  )}
+                />
+                {showAllNeedsMe ? "Show fewer" : `Show all ${needsMe.length}`}
+              </Button>
+            ) : null}
           </>
         )}
       </section>
 
-      <section className="space-y-4" aria-labelledby="home-changed-heading">
-        <div className="flex items-end justify-between gap-3">
-          <h2 id="home-changed-heading" className="font-display text-2xl">
-            What changed
-          </h2>
-        </div>
-        {activityQuery.isError ? (
-          <p className="text-sm text-destructive">Could not load recent activity.</p>
-        ) : activityGroups.length === 0 ? (
-          <p className="text-sm text-muted-foreground">
-            No recorded changes yet. Decisions, facts and issues appear here as they move.
-          </p>
-        ) : (
-          <div className="space-y-6">
-            {activityGroups.map((group) => (
-              <div key={group.key} className="space-y-2">
-                <h3 className="text-[10px] uppercase tracking-[0.14em] text-muted-foreground">
-                  {group.label}
-                </h3>
-                <ul className="divide-y divide-border/70 border-y border-border/70">
-                  {group.items.map((item) => (
-                    <ActivityRow key={`${item.kind}:${item.ref_id}`} item={item} />
-                  ))}
-                </ul>
+      <div className="grid gap-10 lg:grid-cols-[minmax(0,1fr)_minmax(0,22rem)]">
+        <section className="space-y-3" aria-labelledby="home-changed-heading">
+          <SectionHeading
+            id="home-changed-heading"
+            title="What changed"
+            description="Decisions, facts and issues as they move."
+          />
+          {activityQuery.isLoading ? (
+            <ListSkeleton label="Loading recent activity" rows={4} />
+          ) : activityQuery.isError ? (
+            <div role="alert" className="surface-card p-5 text-sm text-destructive">
+              Could not load recent activity.
+            </div>
+          ) : activityGroups.length === 0 ? (
+            <div className="surface-card flex flex-col items-center gap-2 px-6 py-10 text-center">
+              <History aria-hidden="true" className="h-7 w-7 text-muted-foreground" />
+              <p className="max-w-sm text-sm text-muted-foreground">
+                No recorded changes yet. Decisions, facts and issues appear here as they move.
+              </p>
+            </div>
+          ) : (
+            <div className="space-y-5">
+              {activityGroups.map((group) => (
+                <div key={group.key} className="space-y-2">
+                  <h3 className="text-xs font-medium uppercase tracking-wider text-muted-foreground">
+                    {group.label}
+                  </h3>
+                  <ul
+                    aria-label={`Changes ${group.label.toLowerCase()}`}
+                    className="surface-card divide-y divide-border/70 overflow-hidden"
+                  >
+                    {group.items.map((item) => (
+                      <ActivityRow key={`${item.kind}:${item.ref_id}`} item={item} />
+                    ))}
+                  </ul>
+                </div>
+              ))}
+            </div>
+          )}
+        </section>
+
+        <div className="space-y-10">
+          <section className="space-y-3" aria-labelledby="home-recent-heading">
+            <div className="flex items-end justify-between gap-3">
+              <SectionHeading id="home-recent-heading" title="Projects" />
+              <Button asChild variant="ghost" size="sm" className="text-muted-foreground">
+                <Link to="/projects">
+                  All projects
+                  <ChevronRight aria-hidden="true" className="ml-1 h-3.5 w-3.5" />
+                </Link>
+              </Button>
+            </div>
+            {overviewQuery.isError ? (
+              <div role="alert" className="surface-card p-5 text-sm text-destructive">
+                Could not load projects.
               </div>
-            ))}
-          </div>
-        )}
-      </section>
+            ) : recentProjects.length === 0 ? (
+              <div className="surface-card flex flex-col items-center gap-3 px-6 py-10 text-center">
+                <FolderKanban aria-hidden="true" className="h-7 w-7 text-muted-foreground" />
+                <p className="text-sm text-muted-foreground">No projects yet.</p>
+                <Button asChild size="sm">
+                  <Link to="/projects">Create a project</Link>
+                </Button>
+              </div>
+            ) : (
+              <ul aria-label="Recent projects" className="surface-card divide-y divide-border/70 overflow-hidden">
+                {recentProjects.map((project) => (
+                  <RecentProjectRow key={project.id} project={project} />
+                ))}
+              </ul>
+            )}
+          </section>
 
-      <section className="space-y-4" aria-labelledby="home-recent-heading">
-        <div className="flex items-end justify-between gap-3">
-          <h2 id="home-recent-heading" className="font-display text-2xl">
-            Projects
-          </h2>
-          <Button asChild variant="ghost" size="sm">
-            <Link to="/projects">All projects</Link>
-          </Button>
-        </div>
-        {overviewQuery.isError ? (
-          <p className="text-sm text-destructive">Could not load projects.</p>
-        ) : recentProjects.length === 0 ? (
-          <div className="flex flex-wrap items-center gap-3 text-sm text-muted-foreground">
-            <span>No projects yet.</span>
-            <Button asChild size="sm">
-              <Link to="/projects">Create a project</Link>
-            </Button>
-          </div>
-        ) : (
-          <ul className="space-y-3">
-            {recentProjects.map((project) => (
-              <RecentProjectRow key={project.id} project={project} />
-            ))}
-          </ul>
-        )}
-      </section>
-
-      <section className="grid gap-6 sm:grid-cols-2" aria-label="Queues and channel pulse">
-        <div className="space-y-2">
-          <h2 className="font-display text-xl">Triage</h2>
-          <p className="text-sm text-muted-foreground">
-            {triageCount === 0
-              ? "Filing queue is clear."
-              : `${triageCount} item${triageCount === 1 ? "" : "s"} waiting to be assigned.`}
-          </p>
-          <Button asChild variant="outline" size="sm">
-            <Link to="/triage">Open triage</Link>
-          </Button>
-        </div>
-        <div className="space-y-2">
-          <h2 className="font-display text-xl">Channel pulse</h2>
-          <ul className="space-y-1.5 text-sm text-muted-foreground">
-            <li>
-              {typeof draftsReady === "number" && draftsReady > 0 ? (
-                <Link to="/drafts" className="inline-flex items-center gap-1.5 text-foreground hover:underline">
-                  <PenLine className="h-3.5 w-3.5" />
-                  {draftsReady} draft{draftsReady === 1 ? "" : "s"} ready
-                </Link>
-              ) : (
-                <span className="inline-flex items-center gap-1.5">
-                  <PenLine className="h-3.5 w-3.5" />
-                  No drafts waiting
-                </span>
+          <section className="space-y-3" aria-labelledby="home-queues-heading">
+            <SectionHeading id="home-queues-heading" title="Queues" />
+            <ul className="surface-card divide-y divide-border/70 overflow-hidden">
+              <QueueRow
+                icon={Inbox}
+                title="Triage"
+                detail={
+                  triageCount === 0
+                    ? "Filing queue is clear."
+                    : `${triageCount} item${triageCount === 1 ? "" : "s"} waiting to be assigned.`
+                }
+                to="/triage"
+                linkLabel="Open triage"
+              />
+              <QueueRow
+                icon={PenLine}
+                title="Drafts"
+                detail={
+                  typeof draftsReady === "number" && draftsReady > 0
+                    ? `${draftsReady} draft${draftsReady === 1 ? "" : "s"} ready`
+                    : "No drafts waiting."
+                }
+                to={typeof draftsReady === "number" && draftsReady > 0 ? "/drafts" : undefined}
+                linkLabel={
+                  typeof draftsReady === "number" && draftsReady > 0
+                    ? `${draftsReady} draft${draftsReady === 1 ? "" : "s"} ready`
+                    : undefined
+                }
+              />
+              {fyi.length > 0 && (
+                <QueueRow
+                  icon={Info}
+                  title="FYI"
+                  detail={`${fyi.length} item${fyi.length === 1 ? "" : "s"} from mail summaries.`}
+                />
               )}
-            </li>
-            {fyi.length > 0 && (
-              <li>
-                {fyi.length} FYI item{fyi.length === 1 ? "" : "s"} from mail summaries
-              </li>
-            )}
-            {connectedAccounts.length === 0 && (
-              <li>
-                <Link to="/accounts" className="text-foreground hover:underline">
-                  Connect email under Connectors
-                </Link>
-              </li>
-            )}
-          </ul>
+              {connectedAccounts.length === 0 && (
+                <QueueRow
+                  icon={Plug}
+                  title="Email"
+                  detail="No mailbox connected yet."
+                  to="/accounts"
+                  linkLabel="Connect email"
+                />
+              )}
+            </ul>
+          </section>
         </div>
-      </section>
+      </div>
     </div>
+  );
+}
+
+function SectionHeading({ id, title, description }: { id: string; title: string; description?: string }) {
+  return (
+    <div>
+      <h2 id={id} className="font-display text-xl font-medium">
+        {title}
+      </h2>
+      {description && <p className="text-sm text-muted-foreground">{description}</p>}
+    </div>
+  );
+}
+
+/** A square icon in the style the project page and lists use. */
+function IconTile({ icon: Icon, tone }: { icon: LucideIcon; tone?: "adverse" }) {
+  return (
+    <span
+      aria-hidden="true"
+      className={cn(
+        "mt-0.5 flex h-8 w-8 shrink-0 items-center justify-center rounded-md border",
+        tone === "adverse" ? "border-destructive/30 bg-destructive/5" : "border-border bg-secondary",
+      )}
+    >
+      <Icon className={cn("h-4 w-4", tone === "adverse" ? "text-destructive" : "text-muted-foreground")} />
+    </span>
+  );
+}
+
+const NEEDS_ME_ICONS: Record<string, LucideIcon> = {
+  open_contradiction: AlertTriangle,
+  provisional_decision: Scale,
+  provisional_fact: FileCheck2,
+  issue_assignee: CircleDot,
+  member_role: Users,
+  mail_action_item: Mail,
+};
+
+function NeedsMeItem({
+  row,
+  pending,
+  onDone,
+}: {
+  row: NeedsMeRow;
+  pending: boolean;
+  onDone: (mailActionID: string) => void;
+}) {
+  const adverse = row.whyMe === "open_contradiction";
+  return (
+    <li className="flex items-start gap-3 px-4 py-3">
+      <IconTile icon={NEEDS_ME_ICONS[row.whyMe] ?? CircleDot} tone={adverse ? "adverse" : undefined} />
+      <div className="min-w-0 flex-1 space-y-1">
+        <Link
+          to={row.href}
+          className="block rounded-sm font-medium hover:underline focus-visible:underline focus-visible:outline-none"
+        >
+          {row.title}
+        </Link>
+        <div className="flex flex-wrap items-center gap-x-2 gap-y-1 text-xs text-muted-foreground">
+          <span className={cn(adverse && "font-medium text-destructive")}>{row.whyMeLabel}</span>
+          {row.projectLabel && (
+            <>
+              <span aria-hidden="true">·</span>
+              <span className="truncate">{row.projectLabel}</span>
+            </>
+          )}
+        </div>
+      </div>
+      {row.kind === "mail" && row.mailActionId ? (
+        <Button
+          size="sm"
+          variant="outline"
+          className="shrink-0"
+          aria-label={`Mark “${row.title}” done`}
+          onClick={() => onDone(row.mailActionId!)}
+          disabled={pending}
+        >
+          <Check aria-hidden="true" className="mr-1.5 h-3.5 w-3.5" />
+          Done
+        </Button>
+      ) : null}
+    </li>
+  );
+}
+
+function QueueRow({
+  icon,
+  title,
+  detail,
+  to,
+  linkLabel,
+}: {
+  icon: LucideIcon;
+  title: string;
+  detail: string;
+  to?: string;
+  linkLabel?: string;
+}) {
+  const body = (
+    <>
+      <IconTile icon={icon} />
+      <div className="min-w-0 flex-1">
+        <p className="font-medium">{title}</p>
+        <p className="text-sm text-muted-foreground">{detail}</p>
+      </div>
+      {to && (
+        <ChevronRight
+          aria-hidden="true"
+          className="mt-2 h-4 w-4 shrink-0 text-muted-foreground transition-transform group-hover:translate-x-0.5 motion-reduce:transition-none motion-reduce:group-hover:translate-x-0"
+        />
+      )}
+    </>
+  );
+  return (
+    <li>
+      {to ? (
+        <Link
+          to={to}
+          aria-label={linkLabel}
+          className="group flex items-start gap-3 px-4 py-3 transition-colors hover:bg-muted/50 focus-visible:bg-muted/50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring"
+        >
+          {body}
+        </Link>
+      ) : (
+        <div className="flex items-start gap-3 px-4 py-3">{body}</div>
+      )}
+    </li>
   );
 }
 
@@ -396,49 +563,70 @@ function AskAcrossProjects({
   onAsk: () => void;
 }) {
   return (
-    <section aria-label="Ask across projects" className="space-y-3">
-      <div className="flex flex-col gap-2 sm:flex-row">
-        <Input
-          value={question}
-          onChange={(e) => setQuestion(e.target.value)}
-          placeholder="Ask across projects…"
-          aria-label="Ask across projects"
-          disabled={!llmEnabled || pending}
-          onKeyDown={(e) => {
-            if (e.key === "Enter" && question.trim()) onAsk();
-          }}
-        />
+    <section aria-label="Ask across projects" className="surface-card overflow-hidden">
+      <form
+        className="flex flex-col gap-2 p-3 sm:flex-row sm:items-center"
+        onSubmit={(e) => {
+          e.preventDefault();
+          if (question.trim() && !pending) onAsk();
+        }}
+      >
+        <div className="relative flex-1">
+          <Sparkles
+            aria-hidden="true"
+            className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground"
+          />
+          <Input
+            value={question}
+            onChange={(e) => setQuestion(e.target.value)}
+            placeholder="Ask across projects…"
+            aria-label="Ask across projects"
+            className="h-10 pl-9"
+            disabled={!llmEnabled || pending}
+          />
+        </div>
         <Button
-          variant="outline"
+          type="submit"
+          className="h-10"
           disabled={!llmEnabled || !question.trim() || pending}
           title={
             llmEnabled
               ? "Answer from structured project state across your projects"
               : "Configure LLM_BASE_URL and LLM_MODEL on the API"
           }
-          onClick={onAsk}
         >
+          {pending && <Loader2 aria-hidden="true" className="mr-1.5 h-3.5 w-3.5 animate-spin" />}
           {pending ? "Asking…" : llmEnabled ? "Ask" : "Ask (LLM off)"}
         </Button>
-      </div>
+      </form>
+      {!llmEnabled && (
+        <p className="border-t border-border/70 px-4 py-2 text-xs text-muted-foreground">
+          Asking needs a language model configured on the API.
+        </p>
+      )}
       {answer ? (
-        <div className="space-y-2 border-t border-border/70 pt-3 text-sm">
-          <p>{answer.answer}</p>
+        <div aria-live="polite" className="space-y-3 border-t border-border/70 bg-muted/20 px-4 py-3 text-sm">
+          <p className="max-w-prose leading-relaxed">{answer.answer}</p>
           {answer.citations.length > 0 ? (
-            <ul className="space-y-1 text-xs text-muted-foreground">
+            <ul aria-label="Sources" className="flex flex-wrap gap-1.5">
               {answer.citations.map((c) => {
                 const href = citationHref(c);
-                const label = [c.project_code, c.type, c.id.slice(0, 8)]
-                  .filter(Boolean)
-                  .join(" · ");
+                const label = [c.project_code, c.type, c.id.slice(0, 8)].filter(Boolean).join(" · ");
+                const chip = "inline-flex items-center rounded-full border border-border bg-background px-2.5 py-0.5 font-mono text-[11px]";
                 return (
                   <li key={`${c.type}:${c.id}`}>
                     {href ? (
-                      <Link to={href} className="hover:underline">
+                      <Link
+                        to={href}
+                        className={cn(
+                          chip,
+                          "transition-colors hover:border-foreground/30 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring",
+                        )}
+                      >
                         {label}
                       </Link>
                     ) : (
-                      label
+                      <span className={cn(chip, "text-muted-foreground")}>{label}</span>
                     )}
                   </li>
                 );
@@ -471,13 +659,18 @@ function MetricCard({
     <Link
       to={to}
       aria-label={`${label}, ${value}`}
-      className="surface-card px-4 py-3 transition hover:border-foreground/30"
+      className={cn(
+        "surface-card px-4 py-3 transition-colors hover:border-foreground/30 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring",
+        highlight && "border-destructive/40",
+      )}
     >
-      <p className="text-[10px] uppercase tracking-widest text-muted-foreground">{label}</p>
+      <p className="text-xs font-medium uppercase tracking-wider text-muted-foreground">{label}</p>
       <p
-        className={`mt-1 flex items-center gap-1.5 font-display text-2xl ${
-          value === 0 ? "text-muted-foreground" : ""
-        } ${highlight ? "text-destructive" : ""}`}
+        className={cn(
+          "mt-1 flex items-center gap-1.5 font-display text-2xl tabular-nums",
+          value === 0 && "text-muted-foreground",
+          highlight && "text-destructive",
+        )}
       >
         {highlight ? <AlertTriangle className="h-4 w-4" aria-hidden="true" /> : null}
         {value}
@@ -486,32 +679,43 @@ function MetricCard({
   );
 }
 
+const ACTIVITY_ICONS: Partial<Record<ActivityItem["kind"], LucideIcon>> = {
+  decision_proposed: Scale,
+  decision_accepted: Scale,
+  decision_withdrawn: Scale,
+  fact_recorded: FileCheck2,
+  fact_superseded: FileCheck2,
+  contradiction_opened: AlertTriangle,
+  contradiction_resolved: AlertTriangle,
+  issue_opened: CircleDot,
+  issue_resolved: CircleDot,
+};
+
 function ActivityRow({ item }: { item: ActivityItem }) {
   const at = new Date(item.occurred_at);
+  const adverse = isAdverse(item.kind);
   return (
-    <li className="flex items-start gap-3 py-3">
+    <li className="flex items-start gap-3 px-4 py-3">
+      <IconTile icon={ACTIVITY_ICONS[item.kind] ?? History} tone={adverse ? "adverse" : undefined} />
       <div className="min-w-0 flex-1 space-y-1">
-        <p className="flex flex-wrap items-center gap-1.5 text-[10px] uppercase tracking-[0.14em] text-muted-foreground">
-          <span className={isAdverse(item.kind) ? "text-destructive" : ""}>
-            {activityLabel(item.kind)}
-          </span>
+        <div className="flex flex-wrap items-baseline justify-between gap-x-3">
+          <Link
+            to={activityHref(item)}
+            className="min-w-0 rounded-sm font-medium hover:underline focus-visible:underline focus-visible:outline-none"
+          >
+            {item.title}
+          </Link>
+          <time className="shrink-0 text-xs text-muted-foreground" dateTime={item.occurred_at} title={at.toLocaleString()}>
+            {relativeTime(item.occurred_at)}
+          </time>
+        </div>
+        <div className="flex flex-wrap items-center gap-x-2 gap-y-1 text-xs text-muted-foreground">
+          <span className={cn(adverse && "font-medium text-destructive")}>{activityLabel(item.kind)}</span>
           <span aria-hidden="true">·</span>
-          <span className="font-mono normal-case tracking-normal">{item.project_code}</span>
-          {item.source ? (
-            <span className="rounded bg-muted px-1.5 py-0.5 tracking-normal">{item.source}</span>
-          ) : null}
-        </p>
-        <Link to={activityHref(item)} className="block text-sm font-medium hover:underline">
-          {item.title}
-        </Link>
+          <span className="font-mono">{item.project_code}</span>
+          {item.source ? <Tag>{item.source}</Tag> : null}
+        </div>
       </div>
-      <time
-        className="shrink-0 text-xs text-muted-foreground"
-        dateTime={item.occurred_at}
-        title={at.toLocaleString()}
-      >
-        {relativeTime(item.occurred_at)}
-      </time>
     </li>
   );
 }
@@ -521,29 +725,34 @@ function RecentProjectRow({ project }: { project: OverviewProject }) {
     <li>
       <Link
         to={`/projects/${project.id}`}
-        className="block space-y-1 transition hover:text-foreground"
+        className="group flex items-start gap-3 px-4 py-3 transition-colors hover:bg-muted/50 focus-visible:bg-muted/50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring"
       >
-        <div className="flex flex-wrap items-baseline gap-2">
-          <span className="font-mono text-xs uppercase tracking-wider text-muted-foreground">
-            {project.code}
-          </span>
-          <span className="text-sm font-medium">{project.name}</span>
-          {project.attention_count > 0 ? (
-            <span className="rounded bg-muted px-1.5 py-0.5 text-xs text-foreground">
-              {project.attention_count} needs you
-            </span>
-          ) : null}
-          <span className="text-xs text-muted-foreground">
-            {project.last_activity_at
-              ? `Active ${relativeTime(project.last_activity_at)}`
-              : "No activity yet"}
-          </span>
+        <span
+          aria-hidden="true"
+          className="inline-flex h-9 min-w-9 shrink-0 items-center justify-center rounded-md border border-border bg-secondary px-1.5 font-mono text-[11px] font-medium"
+        >
+          {project.code}
+        </span>
+        <div className="min-w-0 flex-1 space-y-0.5">
+          <div className="flex flex-wrap items-center gap-2">
+            <p className="truncate font-medium text-foreground">{project.name}</p>
+            {project.attention_count > 0 ? (
+              <span className="rounded-full bg-primary/10 px-2 py-0.5 text-[11px] font-medium text-primary">
+                {project.attention_count} needs you
+              </span>
+            ) : null}
+          </div>
+          <p className="line-clamp-2 text-sm text-muted-foreground">
+            {project.teaser || "No current position yet."}
+          </p>
+          <p className="text-xs text-muted-foreground">
+            {project.last_activity_at ? `Active ${relativeTime(project.last_activity_at)}` : "No activity yet"}
+          </p>
         </div>
-        {project.teaser ? (
-          <p className="text-xs text-muted-foreground line-clamp-2">{project.teaser}</p>
-        ) : (
-          <p className="text-xs text-muted-foreground">No current position yet.</p>
-        )}
+        <ChevronRight
+          aria-hidden="true"
+          className="mt-2.5 h-4 w-4 shrink-0 text-muted-foreground transition-transform group-hover:translate-x-0.5 motion-reduce:transition-none motion-reduce:group-hover:translate-x-0"
+        />
       </Link>
     </li>
   );
