@@ -208,11 +208,11 @@ describe("AssistantHomePage", () => {
     expect(screen.getByText("llm")).toBeInTheDocument();
     expect(screen.getByRole("link", { name: "Proceed with 90 kW" })).toHaveAttribute(
       "href",
-      "/projects/p1?mode=position",
+      "/projects/p1#position",
     );
     expect(screen.getByRole("link", { name: "Duty stated twice" })).toHaveAttribute(
       "href",
-      "/projects/p1?mode=open",
+      "/projects/p1#needs-you",
     );
     expect(screen.getByRole("heading", { name: "Today" })).toBeInTheDocument();
     expect(screen.getByRole("heading", { name: "Yesterday" })).toBeInTheDocument();
@@ -290,7 +290,7 @@ describe("AssistantHomePage", () => {
     expect(screen.getByRole("link", { name: /2 drafts ready/i })).toHaveAttribute("href", "/drafts");
     expect(
       screen.getByRole("link", { name: /Confirm decision: Proceed with 90 kW/i }),
-    ).toHaveAttribute("href", "/projects/p1?mode=position");
+    ).toHaveAttribute("href", "/projects/p1#needs-you");
     expect(screen.getByRole("link", { name: /Reply to invoice/i })).toHaveAttribute(
       "href",
       "/inbox?message_id=m1&account_id=a1",
@@ -408,7 +408,7 @@ describe("AssistantHomePage", () => {
     expect(await screen.findByText(/Pump P-03 duty is 90 kW on DC01/i)).toBeInTheDocument();
     expect(screen.getByRole("link", { name: /DC01 · fact_version · aaaaaaaa/i })).toHaveAttribute(
       "href",
-      "/projects/p1?mode=position",
+      "/projects/p1#position",
     );
   });
 });

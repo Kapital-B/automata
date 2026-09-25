@@ -62,19 +62,16 @@ export function attentionHref(item: AttentionItem): string {
     return `/projects/${item.project_id}/issues/${item.ref_id}`;
   }
 
+  // Proposals and disagreements wait in the project's Needs you section.
   if (POSITION_WHY.has(item.why_me) || POSITION_REF.has(item.ref_type)) {
-    return `/projects/${item.project_id}?mode=position`;
+    return `/projects/${item.project_id}#needs-you`;
   }
 
-  if (
-    item.why_me === "issue_assignee" ||
-    item.why_me === "member_role" ||
-    item.ref_type === "issue"
-  ) {
-    return `/projects/${item.project_id}?mode=open`;
+  if (item.why_me === "issue_assignee" || item.why_me === "member_role" || item.ref_type === "issue") {
+    return `/projects/${item.project_id}#issues`;
   }
 
-  return `/projects/${item.project_id}?mode=open`;
+  return `/projects/${item.project_id}#needs-you`;
 }
 
 function rowFromAttention(item: AttentionItem): NeedsMeRow {

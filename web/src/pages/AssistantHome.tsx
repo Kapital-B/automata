@@ -44,7 +44,7 @@ function citationHref(c: AskCitation): string | undefined {
   if (!c.project_id) return undefined;
   if (c.type === "issue") return `/projects/${c.project_id}/issues/${c.id}`;
   if (c.type === "fact_version" || c.type === "decision") {
-    return `/projects/${c.project_id}?mode=position`;
+    return `/projects/${c.project_id}#position`;
   }
   return `/projects/${c.project_id}`;
 }

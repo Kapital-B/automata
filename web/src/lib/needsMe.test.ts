@@ -29,7 +29,7 @@ describe("needsMe helpers", () => {
         ref_type: "decision",
         ref_id: "d1",
       }),
-    ).toBe("/projects/p1?mode=position");
+    ).toBe("/projects/p1#needs-you");
 
     expect(
       attentionHref({
@@ -41,7 +41,7 @@ describe("needsMe helpers", () => {
         ref_type: "contradiction",
         ref_id: "c1",
       }),
-    ).toBe("/projects/p1?mode=position");
+    ).toBe("/projects/p1#needs-you");
 
     expect(
       attentionHref({
@@ -52,7 +52,7 @@ describe("needsMe helpers", () => {
         ref_type: "fact_version",
         ref_id: "v1",
       }),
-    ).toBe("/projects/p1?mode=position");
+    ).toBe("/projects/p1#needs-you");
 
     expect(
       attentionHref({
@@ -63,7 +63,7 @@ describe("needsMe helpers", () => {
         ref_type: "issue",
         ref_id: "",
       }),
-    ).toBe("/projects/p1?mode=open");
+    ).toBe("/projects/p1#issues");
 
     expect(
       attentionHref({
@@ -114,8 +114,8 @@ describe("needsMe helpers", () => {
       "decision:d1",
       "mail:a1",
     ]);
-    expect(rows[0]?.href).toBe("/projects/p1?mode=position");
-    expect(rows[1]?.href).toBe("/projects/p1?mode=position");
+    expect(rows[0]?.href).toBe("/projects/p1#needs-you");
+    expect(rows[1]?.href).toBe("/projects/p1#needs-you");
     expect(rows[2]?.href).toContain("/inbox?");
     expect(rows[2]?.kind).toBe("mail");
   });

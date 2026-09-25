@@ -33,9 +33,9 @@ describe("activity", () => {
 
   it("deep links by referenced object", () => {
     expect(activityHref(item({ ref_type: "issue", ref_id: "i1" }))).toBe("/projects/p1/issues/i1");
-    expect(activityHref(item({ ref_type: "decision" }))).toBe("/projects/p1?mode=position");
-    expect(activityHref(item({ ref_type: "fact_version" }))).toBe("/projects/p1?mode=position");
-    expect(activityHref(item({ ref_type: "contradiction" }))).toBe("/projects/p1?mode=open");
+    expect(activityHref(item({ ref_type: "decision" }))).toBe("/projects/p1#position");
+    expect(activityHref(item({ ref_type: "fact_version" }))).toBe("/projects/p1#position");
+    expect(activityHref(item({ ref_type: "contradiction" }))).toBe("/projects/p1#needs-you");
     expect(activityHref(item({ ref_type: "mystery" }))).toBe("/projects/p1");
   });
 

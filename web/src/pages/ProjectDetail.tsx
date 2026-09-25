@@ -1,27 +1,24 @@
-import { PageHeader } from "@/components/PageHeader";
+import { useEffect, useState } from "react";
+import { Link, useLocation, useNavigate, useParams, useSearchParams } from "react-router-dom";
+import { useMutation, useQueryClient } from "@tanstack/react-query";
+import { ArrowLeft, ClipboardPaste, Pencil, Archive } from "lucide-react";
 import { Button } from "@/components/ui/button";
-import { Input } from "@/components/ui/input";
-import { Textarea } from "@/components/ui/textarea";
-import {
-  Dialog,
-  DialogContent,
-  DialogDescription,
-  DialogHeader,
-  DialogTitle,
-} from "@/components/ui/dialog";
+import { Dialog } from "@/components/ui/dialog";
+import { Skeleton } from "@/components/ui/skeleton";
+import { ConfirmAction, Tag } from "@/components/ConnectionCard";
 import { useAuth } from "@/components/auth/AuthProvider";
 import { useAccountsData } from "@/hooks/useAccountsData";
+import { useProjectDetailData } from "@/hooks/useProjectDetailData";
+import { toast } from "@/hooks/use-toast";
 import {
   ApiError,
   addIssueItem,
-  askProject,
-  confirmFactVersion,
   confirmDecision,
+  confirmFactVersion,
   createProjectDecision,
   createProjectFact,
   createProjectIssue,
   discardIssue,
-  getProject,
   rejectFactVersion,
   resolveContradiction,
   updateProject,
@@ -29,355 +26,222 @@ import {
   withdrawDecision,
   type TimelineItem,
 } from "@/lib/auth";
-import { toast } from "@/hooks/use-toast";
-import { useProjectDetailData } from "@/hooks/useProjectDetailData";
-import { useMutation, useQueryClient } from "@tanstack/react-query";
-import { Loader2, Plus } from "lucide-react";
-import { useEffect, useState } from "react";
-import { Link, useNavigate, useParams, useSearchParams } from "react-router-dom";
 import { ExtractionStatus } from "./project/ExtractionStatus";
-import { NeedsConfirmation } from "./project/NeedsConfirmation";
-import { OpenMode } from "./project/OpenMode";
+import { NeedsYou } from "./project/NeedsYou";
+import { PositionSection } from "./project/PositionSection";
+import { IssuesPanel } from "./project/IssuesPanel";
+import { AskPanel } from "./project/AskPanel";
+import { CorrespondenceSection, type TimelineFilterState } from "./project/CorrespondenceSection";
 import { PasteDialog } from "./project/PasteDialog";
-import { PositionMode } from "./project/PositionMode";
-import { TrailMode, type TimelineFilterState } from "./project/TrailMode";
-import { DEFINITIONS } from "./project/definitions";
+import {
+  DecisionDialog,
+  EditProjectDialog,
+  FactDialog,
+  IssueDialog,
+  type FactInput,
+  type ProjectEdit,
+} from "./project/ProjectDialogs";
+import { sectionForLegacyMode, type ItemRef } from "./project/format";
 
-const PROJECT_MODES = [
-  { id: "trail" as const, label: "Trail" },
-  { id: "position" as const, label: "Position" },
-  { id: "open" as const, label: "Open" },
-];
-
-type ProjectMode = (typeof PROJECT_MODES)[number]["id"];
-
-function parseProjectMode(raw: string | null): ProjectMode {
-  if (raw === "position" || raw === "open") return raw;
-  return "trail";
+function refFor(item: TimelineItem): ItemRef[] {
+  const ref = item.message_id ? { message_id: item.message_id } : { manual_item_id: item.manual_item_id };
+  return ref.message_id || ref.manual_item_id ? [ref] : [];
 }
 
-function itemRef(item: TimelineItem) {
-  return item.message_id
-    ? { message_id: item.message_id }
-    : { manual_item_id: item.manual_item_id };
+/** Numbers stay numbers, so facts compare and chart properly. */
+function factValue(raw: string): string | number {
+  return /^-?\d+(\.\d+)?$/.test(raw) ? Number(raw) : raw;
 }
 
 export default function ProjectDetailPage() {
   const { id } = useParams<{ id: string }>();
-  const [searchParams, setSearchParams] = useSearchParams();
-  const mode = parseProjectMode(searchParams.get("mode"));
-  const setMode = (next: ProjectMode) => {
-    setSearchParams(
-      (prev) => {
-        const nextParams = new URLSearchParams(prev);
-        if (next === "trail") nextParams.delete("mode");
-        else nextParams.set("mode", next);
-        return nextParams;
-      },
-      { replace: true },
-    );
-  };
+  const projectID = id!;
   const { accessToken } = useAuth();
   const queryClient = useQueryClient();
   const navigate = useNavigate();
+  const location = useLocation();
+  const [searchParams] = useSearchParams();
   const { accounts } = useAccountsData();
 
-  const [filters, setFilters] = useState<TimelineFilterState>({
-    source: "all",
-    unassignedToIssue: false,
-  });
+  const [filters, setFilters] = useState<TimelineFilterState>({ source: "all", unassignedToIssue: false });
+  const data = useProjectDetailData(id, filters);
+
   const [pasteOpen, setPasteOpen] = useState(false);
-  const [createIssueOpen, setCreateIssueOpen] = useState(false);
-  const [newIssueTitle, setNewIssueTitle] = useState("");
-  const [newIssueNote, setNewIssueNote] = useState("");
-  const [pendingItemRefs, setPendingItemRefs] = useState<
-    { message_id?: string; manual_item_id?: string }[]
-  >([]);
-  const [issueDialogHint, setIssueDialogHint] = useState<string | null>(null);
-  const [createFactOpen, setCreateFactOpen] = useState(false);
-  const [factSubjectKey, setFactSubjectKey] = useState("pump.p03.duty_kw");
-  const [factLabel, setFactLabel] = useState("");
-  const [factValue, setFactValue] = useState("");
-  const [factUnit, setFactUnit] = useState("");
-  const [factConfirmNow, setFactConfirmNow] = useState(true);
-  const [factEvidence, setFactEvidence] = useState<
-    { message_id?: string; manual_item_id?: string }[]
-  >([]);
-  const [createDecisionOpen, setCreateDecisionOpen] = useState(false);
-  const [decisionStatement, setDecisionStatement] = useState("");
-  const [decisionConfirmNow, setDecisionConfirmNow] = useState(true);
-  const [askQuestion, setAskQuestion] = useState("");
-  const [askAnswer, setAskAnswer] = useState<{
-    answer: string;
-    citations: { type: string; id: string }[];
-    confidence: number;
-  } | null>(null);
+  const [editOpen, setEditOpen] = useState(false);
+  const [decisionOpen, setDecisionOpen] = useState(false);
+  const [factDialog, setFactDialog] = useState<{ open: boolean; seed?: { label?: string; evidence?: ItemRef[] } }>({ open: false });
+  const [issueDialog, setIssueDialog] = useState<{ open: boolean; seed?: { title?: string; items?: ItemRef[] } }>({ open: false });
 
-  const data = useProjectDetailData(id, {
-    source: filters.source,
-    unassignedToIssue: filters.unassignedToIssue,
-  });
+  // Deep links (#position, or the old ?mode=) land on their section once the
+  // page has content to scroll to.
+  const loaded = Boolean(data.project);
+  useEffect(() => {
+    if (!loaded) return;
+    const target = location.hash.replace(/^#/, "") || sectionForLegacyMode(searchParams.get("mode"));
+    if (!target) return;
+    document.getElementById(target)?.scrollIntoView?.({ block: "start" });
+  }, [loaded, location.hash, searchParams]);
 
-  const invalidateFacts = async () => {
-    await queryClient.invalidateQueries({ queryKey: ["project-facts"] });
-    await queryClient.invalidateQueries({ queryKey: ["project-current-position"] });
+  const invalidate = (...keys: string[]) =>
+    Promise.all(keys.map((key) => queryClient.invalidateQueries({ queryKey: [key] })));
+  const failed = (title: string) => (err: unknown) =>
+    toast({ title, description: err instanceof ApiError ? err.message : "Please try again.", variant: "destructive" });
+  const authed = () => {
+    if (!accessToken) throw new Error("Not authenticated");
+    return accessToken;
   };
 
-  const failed = (title: string) => (err: unknown) => {
-    toast({
-      title,
-      description: err instanceof ApiError ? err.message : "Please try again.",
-      variant: "destructive",
-    });
-  };
-
-  const createIssueMutation = useMutation({
-    mutationFn: async () => {
-      if (!accessToken || !id) throw new Error("Not authenticated");
-      return createProjectIssue(accessToken, id, {
-        title: newIssueTitle.trim(),
-        current_position_note: newIssueNote.trim() || undefined,
-        item_refs: pendingItemRefs.length > 0 ? pendingItemRefs : undefined,
-      });
-    },
+  const createIssue = useMutation({
+    mutationFn: (input: { title: string; note: string; items: ItemRef[] }) =>
+      createProjectIssue(authed(), projectID, {
+        title: input.title,
+        current_position_note: input.note || undefined,
+        item_refs: input.items.length > 0 ? input.items : undefined,
+      }),
     onSuccess: async () => {
       toast({ title: "Issue created" });
-      setCreateIssueOpen(false);
-      setNewIssueTitle("");
-      setNewIssueNote("");
-      setPendingItemRefs([]);
-      setIssueDialogHint(null);
-      await queryClient.invalidateQueries({ queryKey: ["project-issues"] });
-      await queryClient.invalidateQueries({ queryKey: ["project-timeline"] });
+      setIssueDialog({ open: false });
+      await invalidate("project-issues", "project-timeline");
     },
-    onError: failed("Could not create issue"),
+    onError: failed("Could not create the issue"),
   });
-
-  const discardIssueMutation = useMutation({
-    mutationFn: async (issueID: string) => {
-      if (!accessToken) throw new Error("Not authenticated");
-      return discardIssue(accessToken, issueID);
-    },
+  const discard = useMutation({
+    mutationFn: (issueID: string) => discardIssue(authed(), issueID),
     onSuccess: async () => {
       toast({ title: "Issue discarded" });
-      await queryClient.invalidateQueries({ queryKey: ["project-issues"] });
-      await queryClient.invalidateQueries({ queryKey: ["project-attention"] });
+      await invalidate("project-issues", "project-attention");
     },
-    onError: failed("Discard failed"),
+    onError: failed("Could not discard the issue"),
   });
-
-  const attachMutation = useMutation({
-    mutationFn: async (args: { issueID: string; messageID?: string; manualItemID?: string }) => {
-      if (!accessToken) throw new Error("Not authenticated");
-      return addIssueItem(accessToken, args.issueID, {
-        message_id: args.messageID,
-        manual_item_id: args.manualItemID,
-      });
-    },
+  const attach = useMutation({
+    mutationFn: (args: { issueID: string; item: TimelineItem }) =>
+      addIssueItem(authed(), args.issueID, { message_id: args.item.message_id, manual_item_id: args.item.manual_item_id }),
     onSuccess: async () => {
-      toast({ title: "Attached to issue" });
-      await queryClient.invalidateQueries({ queryKey: ["project-timeline"] });
-      await queryClient.invalidateQueries({ queryKey: ["project-issues"] });
-      await queryClient.invalidateQueries({ queryKey: ["issue"] });
+      toast({ title: "Attached to the issue" });
+      await invalidate("project-timeline", "project-issues", "issue");
     },
-    onError: failed("Attach failed"),
+    onError: failed("Could not attach"),
   });
-
-  const createFactMutation = useMutation({
-    mutationFn: async () => {
-      if (!accessToken || !id) throw new Error("Not authenticated");
-      const trimmed = factValue.trim();
-      const asNumber = Number(trimmed);
-      const value =
-        trimmed !== "" && !Number.isNaN(asNumber) && /^-?\d+(\.\d+)?$/.test(trimmed)
-          ? asNumber
-          : trimmed;
-      const existing = data.facts.find((f) => f.subject_key === factSubjectKey.trim());
-      const active = existing?.versions.find((v) => v.status === "active");
-      return createProjectFact(accessToken, id, {
-        subject_key: factSubjectKey.trim(),
-        label: factLabel.trim(),
-        value,
-        unit: factUnit.trim() || undefined,
-        confirm: factConfirmNow,
-        supersedes_version_id: factConfirmNow && active ? active.id : undefined,
-        evidence: factEvidence.length > 0 ? factEvidence : undefined,
+  const createFact = useMutation({
+    mutationFn: (input: FactInput) => {
+      const active = data.facts.find((f) => f.subject_key === input.subjectKey)?.versions.find((v) => v.status === "active");
+      return createProjectFact(authed(), projectID, {
+        subject_key: input.subjectKey,
+        label: input.label,
+        value: factValue(input.value),
+        unit: input.unit || undefined,
+        confirm: input.confirm,
+        supersedes_version_id: input.confirm && active ? active.id : undefined,
+        evidence: input.evidence.length > 0 ? input.evidence : undefined,
       });
     },
-    onSuccess: async () => {
-      toast({ title: factConfirmNow ? "Fact confirmed" : "Fact proposed" });
-      setCreateFactOpen(false);
-      setFactLabel("");
-      setFactValue("");
-      setFactUnit("");
-      setFactEvidence([]);
-      setFactConfirmNow(true);
-      await invalidateFacts();
+    onSuccess: async (_d, input) => {
+      toast({ title: input.confirm ? "Fact recorded" : "Fact proposed", description: input.confirm ? undefined : "It waits in Needs you." });
+      setFactDialog({ open: false });
+      await invalidate("project-facts", "project-current-position");
     },
-    onError: failed("Could not save fact"),
+    onError: failed("Could not save the fact"),
+  });
+  const createDecision = useMutation({
+    mutationFn: (input: { statement: string; accept: boolean }) =>
+      createProjectDecision(authed(), projectID, { statement: input.statement, confirm: input.accept }),
+    onSuccess: async (_d, input) => {
+      toast({ title: input.accept ? "Decision recorded" : "Decision proposed" });
+      setDecisionOpen(false);
+      await invalidate("project-decisions", "project-current-position", "attention");
+    },
+    onError: failed("Could not save the decision"),
   });
 
-  const confirmFactMutation = useMutation({
-    mutationFn: async (args: { versionID: string; supersedesVersionID?: string }) => {
-      if (!accessToken) throw new Error("Not authenticated");
-      return confirmFactVersion(accessToken, args.versionID, {
-        supersedes_version_id: args.supersedesVersionID,
-      });
-    },
+  // Confirmation queue.
+  const confirmFact = useMutation({
+    mutationFn: (args: { versionID: string; supersedes?: string }) =>
+      confirmFactVersion(authed(), args.versionID, { supersedes_version_id: args.supersedes }),
     onSuccess: async () => {
       toast({ title: "Fact confirmed" });
-      await invalidateFacts();
+      await invalidate("project-facts", "project-current-position", "project-attention");
     },
-    onError: failed("Confirm failed"),
+    onError: failed("Could not confirm"),
   });
-
-  const rejectFactMutation = useMutation({
-    mutationFn: async (versionID: string) => {
-      if (!accessToken) throw new Error("Not authenticated");
-      return rejectFactVersion(accessToken, versionID);
-    },
+  const rejectFact = useMutation({
+    mutationFn: (versionID: string) => rejectFactVersion(authed(), versionID),
     onSuccess: async () => {
-      toast({ title: "Proposal rejected" });
-      await invalidateFacts();
+      toast({ title: "Change rejected" });
+      await invalidate("project-facts", "project-current-position", "project-attention");
     },
-    onError: failed("Reject failed"),
+    onError: failed("Could not reject"),
   });
-
-  const resolveContradictionMutation = useMutation({
-    mutationFn: async (args: {
-      id: string;
-      resolution: "supersede" | "reject_a" | "reject_b" | "note";
-      keep_fact_version_id?: string;
-    }) => {
-      if (!accessToken) throw new Error("Not authenticated");
-      return resolveContradiction(accessToken, args.id, {
-        resolution: args.resolution,
-        keep_fact_version_id: args.keep_fact_version_id,
-      });
-    },
+  const acceptDecision = useMutation({
+    mutationFn: (decisionID: string) => confirmDecision(authed(), decisionID),
     onSuccess: async () => {
-      toast({ title: "Contradiction resolved" });
-      await queryClient.invalidateQueries({ queryKey: ["project-contradictions"] });
-      await invalidateFacts();
+      toast({ title: "Decision accepted" });
+      await invalidate("project-decisions", "project-current-position", "attention", "project-attention");
     },
-    onError: failed("Resolve failed"),
+    onError: failed("Could not accept"),
   });
-
-  const createDecisionMutation = useMutation({
-    mutationFn: async () => {
-      if (!accessToken || !id) throw new Error("Not authenticated");
-      return createProjectDecision(accessToken, id, {
-        statement: decisionStatement.trim(),
-        confirm: decisionConfirmNow,
-      });
-    },
-    onSuccess: async () => {
-      toast({ title: decisionConfirmNow ? "Decision accepted" : "Decision proposed" });
-      setCreateDecisionOpen(false);
-      setDecisionStatement("");
-      await queryClient.invalidateQueries({ queryKey: ["project-decisions"] });
-      await queryClient.invalidateQueries({ queryKey: ["project-current-position"] });
-      await queryClient.invalidateQueries({ queryKey: ["attention"] });
-    },
-    onError: failed("Create decision failed"),
-  });
-
-  const confirmDecisionMutation = useMutation({
-    mutationFn: async (decisionID: string) => {
-      if (!accessToken) throw new Error("Not authenticated");
-      return confirmDecision(accessToken, decisionID);
-    },
-    onSuccess: async () => {
-      toast({ title: "Decision confirmed" });
-      await queryClient.invalidateQueries({ queryKey: ["project-decisions"] });
-      await queryClient.invalidateQueries({ queryKey: ["project-current-position"] });
-      await queryClient.invalidateQueries({ queryKey: ["attention"] });
-    },
-    onError: failed("Confirm failed"),
-  });
-
-  const withdrawDecisionMutation = useMutation({
-    mutationFn: async (decisionID: string) => {
-      if (!accessToken) throw new Error("Not authenticated");
-      return withdrawDecision(accessToken, decisionID);
-    },
+  const withdraw = useMutation({
+    mutationFn: (decisionID: string) => withdrawDecision(authed(), decisionID),
     onSuccess: async () => {
       toast({ title: "Decision withdrawn" });
-      await queryClient.invalidateQueries({ queryKey: ["project-decisions"] });
-      await queryClient.invalidateQueries({ queryKey: ["project-current-position"] });
-      await queryClient.invalidateQueries({ queryKey: ["attention"] });
+      await invalidate("project-decisions", "project-current-position", "attention", "project-attention");
     },
-    onError: failed("Withdraw failed"),
+    onError: failed("Could not withdraw"),
+  });
+  const resolve = useMutation({
+    mutationFn: (args: { id: string; resolution: "supersede" | "reject_a" | "reject_b" | "note"; keep?: string }) =>
+      resolveContradiction(authed(), args.id, { resolution: args.resolution, keep_fact_version_id: args.keep }),
+    onSuccess: async () => {
+      toast({ title: "Resolved" });
+      await invalidate("project-contradictions", "project-facts", "project-current-position", "project-attention");
+    },
+    onError: failed("Could not resolve"),
   });
 
-  const askMutation = useMutation({
-    mutationFn: async () => {
-      if (!accessToken || !id) throw new Error("Not authenticated");
-      return askProject(accessToken, id, askQuestion.trim());
-    },
-    onSuccess: (res) => setAskAnswer(res),
-    onError: failed("Ask failed"),
-  });
-
-  const [name, setName] = useState("");
-  const [keywords, setKeywords] = useState("");
-  const [role, setRole] = useState("");
-  const [discipline, setDiscipline] = useState("");
-  const [scope, setScope] = useState("");
-
-  useEffect(() => {
-    if (!data.project) return;
-    setName(data.project.name);
-    setKeywords((data.project.keywords ?? []).join(", "));
-    setRole(data.project.member?.role ?? "");
-    setDiscipline(data.project.member?.discipline ?? "");
-    setScope(data.project.member?.current_scope ?? "");
-  }, [data.project]);
-
-  const saveMutation = useMutation({
-    mutationFn: async () => {
-      if (!accessToken || !id) throw new Error("Not authenticated");
-      await updateProject(accessToken, id, {
-        name: name.trim(),
-        keywords: keywords
-          .split(/[,;\n]+/)
-          .map((k) => k.trim())
-          .filter(Boolean),
+  const saveDetails = useMutation({
+    mutationFn: async (input: ProjectEdit) => {
+      const token = authed();
+      await updateProject(token, projectID, {
+        name: input.name,
+        client: input.client || null,
+        description: input.description || null,
+        keywords: input.keywords,
       });
-      await updateProjectMember(accessToken, id, {
-        role: role.trim(),
-        discipline: discipline.trim() || null,
-        current_scope: scope.trim() || null,
+      await updateProjectMember(token, projectID, {
+        role: input.role,
+        discipline: input.discipline || null,
+        current_scope: input.scope || null,
       });
     },
     onSuccess: async () => {
       toast({ title: "Project saved" });
-      await queryClient.invalidateQueries({ queryKey: ["project", accessToken, id] });
-      await queryClient.invalidateQueries({ queryKey: ["projects"] });
+      setEditOpen(false);
+      await invalidate("project", "projects");
     },
-    onError: failed("Save failed"),
+    onError: failed("Could not save the project"),
   });
-
-  const archiveMutation = useMutation({
-    mutationFn: async () => {
-      if (!accessToken || !id) throw new Error("Not authenticated");
-      return updateProject(accessToken, id, { archived: true });
-    },
+  const archive = useMutation({
+    mutationFn: () => updateProject(authed(), projectID, { archived: true }),
     onSuccess: async () => {
       toast({ title: "Project archived" });
-      await queryClient.invalidateQueries({ queryKey: ["projects"] });
+      await invalidate("projects");
       navigate("/projects");
     },
+    onError: failed("Could not archive the project"),
   });
-
-  const accountFor = (accountID?: string) =>
-    accountID ? accounts.find((x) => x.id === accountID) : undefined;
 
   if (data.projectQuery.isLoading) {
     return (
-      <div className="flex items-center gap-2 text-sm text-muted-foreground">
-        <Loader2 className="h-4 w-4 animate-spin" />
-        Loading project…
+      <div aria-label="Loading project" className="space-y-6">
+        <Skeleton className="h-4 w-24" />
+        <div className="flex items-center gap-4">
+          <Skeleton className="h-12 w-12 rounded-md" />
+          <div className="space-y-2">
+            <Skeleton className="h-8 w-64" />
+            <Skeleton className="h-4 w-48" />
+          </div>
+        </div>
+        <Skeleton className="h-24 w-full" />
+        <Skeleton className="h-64 w-full" />
       </div>
     );
   }
@@ -385,457 +249,180 @@ export default function ProjectDetailPage() {
   if (data.projectQuery.isError || !data.project) {
     return (
       <div className="space-y-4">
-        <p className="text-sm text-destructive">
-          {data.projectQuery.error instanceof ApiError
-            ? data.projectQuery.error.message
-            : "Project not found."}
-        </p>
-        <Button variant="outline" onClick={() => navigate("/projects")}>
-          Back to Projects
-        </Button>
+        <BackLink />
+        <div role="alert" className="surface-card p-5 text-sm text-destructive">
+          {data.projectQuery.error instanceof ApiError ? data.projectQuery.error.message : "This project could not be found."}
+        </div>
       </div>
     );
   }
 
   const project = data.project;
-  const positionFacts = data.currentPosition?.facts ?? [];
-  const positionDecisions = data.currentPosition?.decisions ?? [];
+  const member = project.member;
+  const subtitle = [project.client, project.description].filter(Boolean).join(" · ");
+  const busy = confirmFact.isPending || rejectFact.isPending || acceptDecision.isPending || withdraw.isPending || resolve.isPending;
 
   return (
-    <div className="space-y-6">
-      <Dialog open={createFactOpen} onOpenChange={setCreateFactOpen}>
-        <DialogContent>
-          <DialogHeader>
-            <DialogTitle>Add fact</DialogTitle>
-            <DialogDescription>
-              Creates a versioned assertion. Same subject key appends a new version —
-              never overwrites in place.
-            </DialogDescription>
-          </DialogHeader>
-          <div className="space-y-3">
-            <Input
-              value={factSubjectKey}
-              onChange={(e) => setFactSubjectKey(e.target.value)}
-              placeholder="pump.p03.duty_kw"
-            />
-            <Input
-              value={factLabel}
-              onChange={(e) => setFactLabel(e.target.value)}
-              placeholder="Pump P-03 duty"
-            />
-            <div className="flex gap-2">
-              <Input
-                value={factValue}
-                onChange={(e) => setFactValue(e.target.value)}
-                placeholder="90"
-                className="flex-1"
-              />
-              <Input
-                value={factUnit}
-                onChange={(e) => setFactUnit(e.target.value)}
-                placeholder="kW"
-                className="w-24"
-              />
+    <div className="space-y-8">
+      <header className="space-y-4 border-b border-border/70 pb-6">
+        <BackLink />
+        <div className="flex flex-wrap items-start justify-between gap-4">
+          <div className="flex min-w-0 items-start gap-4">
+            <span
+              aria-hidden="true"
+              className="inline-flex h-12 min-w-12 shrink-0 items-center justify-center rounded-md border border-border bg-secondary px-2 font-mono text-sm font-medium"
+            >
+              {project.code}
+            </span>
+            <div className="min-w-0 space-y-1">
+              <p className="sr-only">Project {project.code}</p>
+              <div className="flex flex-wrap items-center gap-2">
+                <h1 className="font-display text-3xl font-medium leading-tight md:text-4xl">{project.name}</h1>
+                {project.archived_at && <Tag>Archived</Tag>}
+              </div>
+              {subtitle && <p className="text-muted-foreground">{subtitle}</p>}
+              <div className="flex flex-wrap items-center gap-x-3 gap-y-1 text-sm text-muted-foreground">
+                {member?.role && (
+                  <span>
+                    You: <span className="text-foreground">{member.role}</span>
+                    {member.discipline ? `, ${member.discipline}` : ""}
+                  </span>
+                )}
+                <ExtractionStatus
+                  lastExtractedAt={data.extraction.lastExtractedAt}
+                  reviewing={data.extraction.reviewing}
+                  stalled={data.extraction.stalled}
+                  pending={data.extraction.pending}
+                  onCheckNow={data.extraction.checkNow}
+                />
+              </div>
             </div>
-            <label className="flex items-center gap-2 text-sm">
-              <input
-                type="checkbox"
-                checked={factConfirmNow}
-                onChange={(e) => setFactConfirmNow(e.target.checked)}
-              />
-              Confirm as active now
-            </label>
-            {factEvidence.length > 0 ? (
-              <p className="text-xs text-muted-foreground">
-                {factEvidence.length} evidence item(s) attached
-              </p>
-            ) : null}
-            <Button
-              className="w-full"
-              disabled={
-                !factSubjectKey.trim() ||
-                !factLabel.trim() ||
-                !factValue.trim() ||
-                createFactMutation.isPending
-              }
-              onClick={() => createFactMutation.mutate()}
-            >
-              {createFactMutation.isPending ? "Saving…" : "Save fact"}
-            </Button>
           </div>
-        </DialogContent>
-      </Dialog>
-
-      <Dialog open={createDecisionOpen} onOpenChange={setCreateDecisionOpen}>
-        <DialogContent>
-          <DialogHeader>
-            <DialogTitle>Add decision</DialogTitle>
-            <DialogDescription>
-              Record an approval or go/no-go. Evidence is attached as correspondence
-              supporting it arrives.
-            </DialogDescription>
-          </DialogHeader>
-          <div className="space-y-3">
-            <Textarea
-              value={decisionStatement}
-              onChange={(e) => setDecisionStatement(e.target.value)}
-              placeholder="Proceed with 90 kW duty for Pump P-03"
-              rows={3}
-            />
-            <label className="flex items-center gap-2 text-sm">
-              <input
-                type="checkbox"
-                checked={decisionConfirmNow}
-                onChange={(e) => setDecisionConfirmNow(e.target.checked)}
-              />
-              Accept now
-            </label>
-            <Button
-              className="w-full"
-              disabled={!decisionStatement.trim() || createDecisionMutation.isPending}
-              onClick={() => createDecisionMutation.mutate()}
-            >
-              {createDecisionMutation.isPending ? "Saving…" : "Save decision"}
+          <div className="flex flex-wrap items-center gap-2">
+            <Button size="sm" className="bg-foreground text-background hover:bg-foreground/90" onClick={() => setPasteOpen(true)}>
+              <ClipboardPaste aria-hidden="true" className="mr-1.5 h-3.5 w-3.5" /> Paste correspondence
             </Button>
+            <Button size="sm" variant="outline" onClick={() => setEditOpen(true)}>
+              <Pencil aria-hidden="true" className="mr-1.5 h-3.5 w-3.5" /> Edit details
+            </Button>
+            {!project.archived_at && (
+              <ConfirmAction
+                title={`Archive ${project.name}?`}
+                description="It leaves the project list and stops receiving new correspondence. Everything already on it is kept, and you can find it again with Show archived."
+                confirmLabel="Archive project"
+                onConfirm={() => archive.mutate()}
+                trigger={(open) => (
+                  <Button size="sm" variant="ghost" className="text-muted-foreground" onClick={open} disabled={archive.isPending}>
+                    <Archive aria-hidden="true" className="mr-1.5 h-3.5 w-3.5" /> Archive
+                  </Button>
+                )}
+              />
+            )}
           </div>
-        </DialogContent>
-      </Dialog>
+        </div>
+      </header>
 
-      <Dialog
-        open={createIssueOpen}
-        onOpenChange={(open) => {
-          setCreateIssueOpen(open);
-          if (!open) {
-            setIssueDialogHint(null);
-            setPendingItemRefs([]);
-          }
+      <NeedsYou
+        rows={data.confirmationRows}
+        attention={data.attention?.items ?? []}
+        loading={data.factsQuery.isLoading || data.decisionsQuery.isLoading || data.contradictionsQuery.isLoading}
+        projectID={projectID}
+        actions={{
+          confirmFact: (versionID, supersedes) => confirmFact.mutate({ versionID, supersedes }),
+          rejectFact: (versionID) => rejectFact.mutate(versionID),
+          confirmDecision: (decisionID) => acceptDecision.mutate(decisionID),
+          withdrawDecision: (decisionID) => withdraw.mutate(decisionID),
+          resolveContradiction: (cid, resolution, keep) => resolve.mutate({ id: cid, resolution, keep }),
+          busy,
         }}
-      >
-        <DialogContent>
-          <DialogHeader>
-            <DialogTitle>Create issue</DialogTitle>
-            <DialogDescription>
-              Default assignee is you. Confirm to create — suggestions are never auto-saved.
-            </DialogDescription>
-          </DialogHeader>
-          <div className="space-y-3">
-            {issueDialogHint ? (
-              <p className="text-xs text-muted-foreground">{issueDialogHint}</p>
-            ) : null}
-            <Input
-              value={newIssueTitle}
-              onChange={(e) => setNewIssueTitle(e.target.value)}
-              placeholder="Pump P-03 Sizing"
-            />
-            <Textarea
-              value={newIssueNote}
-              onChange={(e) => setNewIssueNote(e.target.value)}
-              placeholder="Optional current position note"
-              rows={2}
-            />
-            <Button
-              className="w-full"
-              disabled={!newIssueTitle.trim() || createIssueMutation.isPending}
-              onClick={() => createIssueMutation.mutate()}
-            >
-              {createIssueMutation.isPending ? "Creating…" : "Create"}
-            </Button>
-          </div>
-        </DialogContent>
-      </Dialog>
+      />
 
+      <div className="grid gap-8 lg:grid-cols-[minmax(0,1fr)_22rem]">
+        <div className="min-w-0 space-y-8">
+          <PositionSection
+            position={data.currentPosition}
+            facts={data.facts}
+            decisions={data.decisions}
+            loading={data.currentPositionQuery.isLoading}
+            onAddFact={() => setFactDialog({ open: true })}
+            onAddDecision={() => setDecisionOpen(true)}
+          />
+          <CorrespondenceSection
+            items={data.timeline}
+            loading={data.timelineQuery.isLoading}
+            filters={filters}
+            onFiltersChange={setFilters}
+            projectID={projectID}
+            issues={data.openIssues}
+            accountFor={(accountID) => (accountID ? accounts.find((a) => a.id === accountID) : undefined)}
+            attaching={attach.isPending}
+            onAttach={(issueID, item) => attach.mutate({ issueID, item })}
+            onCreateIssue={(item) => setIssueDialog({ open: true, seed: { title: item.title?.trim(), items: refFor(item) } })}
+            onRecordFact={(item) => setFactDialog({ open: true, seed: { label: item.title?.trim(), evidence: refFor(item) } })}
+          />
+        </div>
+        <aside className="space-y-8">
+          <IssuesPanel
+            issues={data.openIssues}
+            loading={data.issuesQuery.isLoading}
+            projectID={projectID}
+            onNewIssue={() => setIssueDialog({ open: true })}
+            onDiscard={(issueID) => discard.mutate(issueID)}
+            discarding={discard.isPending}
+          />
+          <AskPanel projectID={projectID} enabled={data.llmEnabled} />
+        </aside>
+      </div>
+
+      <FactDialog
+        open={factDialog.open}
+        onOpenChange={(open) => setFactDialog((d) => ({ ...d, open }))}
+        facts={data.facts}
+        seed={factDialog.seed}
+        pending={createFact.isPending}
+        onSubmit={(input) => createFact.mutate(input)}
+      />
+      <DecisionDialog
+        open={decisionOpen}
+        onOpenChange={setDecisionOpen}
+        pending={createDecision.isPending}
+        onSubmit={(input) => createDecision.mutate(input)}
+      />
+      <IssueDialog
+        open={issueDialog.open}
+        onOpenChange={(open) => setIssueDialog((d) => ({ ...d, open }))}
+        seed={issueDialog.seed}
+        pending={createIssue.isPending}
+        onSubmit={(input) => createIssue.mutate(input)}
+      />
+      <EditProjectDialog
+        open={editOpen}
+        onOpenChange={setEditOpen}
+        project={project}
+        pending={saveDetails.isPending}
+        onSubmit={(input) => saveDetails.mutate(input)}
+      />
       <Dialog open={pasteOpen} onOpenChange={setPasteOpen}>
         <PasteDialog
-          projectID={id!}
+          projectID={projectID}
           accessToken={accessToken!}
           onDone={async () => {
             setPasteOpen(false);
-            await queryClient.invalidateQueries({
-              queryKey: ["project-timeline", accessToken, id],
-            });
-            await queryClient.invalidateQueries({ queryKey: ["unassigned"] });
+            await invalidate("project-timeline", "unassigned");
           }}
         />
       </Dialog>
-
-      <PageHeader
-        eyebrow={project.code}
-        title={project.name}
-        description="Where this project stands, and what needs you."
-        actions={
-          <div className="flex flex-wrap gap-2">
-            <Button onClick={() => setPasteOpen(true)}>
-              <Plus className="mr-2 h-4 w-4" />
-              Paste correspondence
-            </Button>
-            <Button variant="outline" asChild>
-              <Link to="/projects">All projects</Link>
-            </Button>
-            <Button
-              variant="outline"
-              disabled={archiveMutation.isPending}
-              onClick={() => archiveMutation.mutate()}
-            >
-              Archive
-            </Button>
-          </div>
-        }
-      />
-
-      <ExtractionStatus
-        lastExtractedAt={data.extraction.lastExtractedAt}
-        reviewing={data.extraction.reviewing}
-        stalled={data.extraction.stalled}
-        pending={data.extraction.pending}
-        onCheckNow={data.extraction.checkNow}
-      />
-
-      <details className="max-w-xl text-sm">
-        <summary className="cursor-pointer text-muted-foreground">Edit header &amp; role</summary>
-        <div className="mt-3 space-y-3">
-          <div className="space-y-1">
-            <label className="text-xs text-muted-foreground" htmlFor="proj-name">
-              Name
-            </label>
-            <Input id="proj-name" value={name} onChange={(e) => setName(e.target.value)} />
-          </div>
-          <div className="space-y-1">
-            <label className="text-xs text-muted-foreground" htmlFor="proj-keywords">
-              Keywords
-            </label>
-            <Input
-              id="proj-keywords"
-              value={keywords}
-              onChange={(e) => setKeywords(e.target.value)}
-              placeholder="cooling, chiller, P-03"
-            />
-            <p className="text-[11px] text-muted-foreground">Comma-separated; used for auto-assign.</p>
-          </div>
-          <p className="font-mono text-xs text-muted-foreground">Code: {project.code}</p>
-          <div className="space-y-1">
-            <label className="text-xs text-muted-foreground" htmlFor="member-role">
-              Your role
-            </label>
-            <Input
-              id="member-role"
-              value={role}
-              onChange={(e) => setRole(e.target.value)}
-              placeholder="Mechanical Engineer"
-            />
-          </div>
-          <div className="space-y-1">
-            <label className="text-xs text-muted-foreground" htmlFor="member-discipline">
-              Discipline
-            </label>
-            <Input
-              id="member-discipline"
-              value={discipline}
-              onChange={(e) => setDiscipline(e.target.value)}
-            />
-          </div>
-          <div className="space-y-1">
-            <label className="text-xs text-muted-foreground" htmlFor="member-scope">
-              Current scope
-            </label>
-            <Input id="member-scope" value={scope} onChange={(e) => setScope(e.target.value)} />
-          </div>
-          <Button disabled={saveMutation.isPending} onClick={() => saveMutation.mutate()}>
-            {saveMutation.isPending ? "Saving…" : "Save"}
-          </Button>
-        </div>
-      </details>
-
-      <section
-        aria-label="Current position"
-        className="sticky top-14 z-20 border-y border-border/70 bg-background/95 py-3 backdrop-blur"
-      >
-        <h2 className="mb-1 text-xs font-medium uppercase tracking-wider text-muted-foreground">
-          Current position
-        </h2>
-        <p className="mb-2 max-w-prose text-xs text-muted-foreground">{DEFINITIONS.position}</p>
-        {data.currentPositionQuery.isLoading ? (
-          <Loader2 className="h-4 w-4 animate-spin text-muted-foreground" />
-        ) : positionFacts.length === 0 && positionDecisions.length === 0 ? (
-          <p className="text-sm text-muted-foreground">No active facts or decisions yet.</p>
-        ) : (
-          <div className="space-y-2">
-            {positionFacts.length > 0 ? (
-              <ul className="flex flex-wrap gap-x-6 gap-y-2">
-                {positionFacts.map((f) => (
-                  <li key={f.version_id} className="text-sm">
-                    <span className="text-muted-foreground">{f.label}</span>
-                    <span className="mx-1.5 text-muted-foreground/60">·</span>
-                    <span className="font-medium">
-                      {f.value_text}
-                      {f.unit ? ` ${f.unit}` : ""}
-                    </span>
-                    <span className="ml-1.5 text-xs text-muted-foreground">
-                      ({f.evidence_count} evidence)
-                    </span>
-                  </li>
-                ))}
-              </ul>
-            ) : null}
-            {positionDecisions.length > 0 ? (
-              <ul className="space-y-1">
-                {positionDecisions.map((d) => (
-                  <li key={d.decision_id} className="text-sm">
-                    <span className="text-[10px] uppercase tracking-wider text-muted-foreground">
-                      Decision
-                    </span>{" "}
-                    <span className="font-medium">{d.statement}</span>
-                    <span className="ml-1.5 text-xs text-muted-foreground">
-                      ({d.evidence_count} evidence)
-                    </span>
-                  </li>
-                ))}
-              </ul>
-            ) : null}
-          </div>
-        )}
-      </section>
-
-      <NeedsConfirmation
-        rows={data.confirmationRows}
-        loading={
-          data.factsQuery.isLoading ||
-          data.decisionsQuery.isLoading ||
-          data.contradictionsQuery.isLoading
-        }
-        actions={{
-          confirmFact: (versionID, supersedesVersionID) =>
-            confirmFactMutation.mutate({ versionID, supersedesVersionID }),
-          rejectFact: (versionID) => rejectFactMutation.mutate(versionID),
-          confirmDecision: (decisionID) => confirmDecisionMutation.mutate(decisionID),
-          withdrawDecision: (decisionID) => withdrawDecisionMutation.mutate(decisionID),
-          resolveContradiction: (contradictionID, resolution, keepFactVersionID) =>
-            resolveContradictionMutation.mutate({
-              id: contradictionID,
-              resolution,
-              keep_fact_version_id: keepFactVersionID,
-            }),
-          busy:
-            confirmFactMutation.isPending ||
-            rejectFactMutation.isPending ||
-            confirmDecisionMutation.isPending ||
-            withdrawDecisionMutation.isPending ||
-            resolveContradictionMutation.isPending,
-        }}
-      />
-
-      <section aria-label="Ask Project AI" className="space-y-2 border-b border-border/70 pb-4">
-        <h2 className="text-xs font-medium uppercase tracking-wider text-muted-foreground">
-          Ask Project AI
-        </h2>
-        <div className="flex flex-col gap-2 sm:flex-row">
-          <Input
-            value={askQuestion}
-            onChange={(e) => setAskQuestion(e.target.value)}
-            placeholder="Ask a grounded question about this project"
-            disabled={!data.llmEnabled || askMutation.isPending}
-            onKeyDown={(e) => {
-              if (e.key === "Enter" && askQuestion.trim()) askMutation.mutate();
-            }}
-          />
-          <Button
-            variant="outline"
-            disabled={!data.llmEnabled || !askQuestion.trim() || askMutation.isPending}
-            title={
-              data.llmEnabled
-                ? "Answer from project facts, decisions, and correspondence"
-                : "Configure LLM_BASE_URL and LLM_MODEL on the API"
-            }
-            onClick={() => askMutation.mutate()}
-          >
-            {askMutation.isPending ? "Asking…" : data.llmEnabled ? "Ask" : "Ask (LLM off)"}
-          </Button>
-        </div>
-        {askAnswer ? (
-          <div className="space-y-1 text-sm">
-            <p>{askAnswer.answer}</p>
-            {askAnswer.citations.length > 0 ? (
-              <p className="text-xs text-muted-foreground">
-                Citations:{" "}
-                {askAnswer.citations.map((c) => `${c.type}:${c.id.slice(0, 8)}`).join(", ")}
-              </p>
-            ) : null}
-          </div>
-        ) : null}
-      </section>
-
-      <div
-        role="tablist"
-        aria-label="Project workspace mode"
-        className="flex flex-wrap gap-2 border-b border-border/70 pb-3"
-      >
-        {PROJECT_MODES.map((item) => (
-          <Button
-            key={item.id}
-            role="tab"
-            aria-selected={mode === item.id}
-            size="sm"
-            variant={mode === item.id ? "default" : "outline"}
-            onClick={() => setMode(item.id)}
-          >
-            {item.label}
-          </Button>
-        ))}
-      </div>
-
-      {mode === "trail" ? (
-        <TrailMode
-          items={data.timeline}
-          loading={data.timelineQuery.isLoading}
-          filters={filters}
-          onFiltersChange={setFilters}
-          projectID={id!}
-          issues={data.openIssues}
-          accountFor={accountFor}
-          attaching={attachMutation.isPending}
-          onAttach={(issueID, item) =>
-            attachMutation.mutate({
-              issueID,
-              messageID: item.message_id,
-              manualItemID: item.manual_item_id,
-            })
-          }
-          onCreateIssue={(item) => {
-            setPendingItemRefs([itemRef(item)].filter((r) => r.message_id || r.manual_item_id));
-            setNewIssueTitle(item.title?.trim() || "");
-            setIssueDialogHint("Pre-attached from timeline");
-            setCreateIssueOpen(true);
-          }}
-          onAddFactEvidence={(item) => {
-            setFactEvidence([itemRef(item)].filter((r) => r.message_id || r.manual_item_id));
-            setFactLabel(item.title?.trim() || "");
-            setCreateFactOpen(true);
-          }}
-        />
-      ) : null}
-
-      {mode === "position" ? (
-        <PositionMode
-          facts={data.facts}
-          factsLoading={data.factsQuery.isLoading}
-          decisions={data.decisions}
-          decisionsLoading={data.decisionsQuery.isLoading}
-          onAddFact={() => setCreateFactOpen(true)}
-          onAddDecision={() => setCreateDecisionOpen(true)}
-        />
-      ) : null}
-
-      {mode === "open" ? (
-        <OpenMode
-          attention={data.attention}
-          attentionLoading={data.attentionQuery.isLoading}
-          issues={data.openIssues}
-          issuesLoading={data.issuesQuery.isLoading}
-          projectID={id!}
-          onNewIssue={() => setCreateIssueOpen(true)}
-          onDiscard={(issueID) => discardIssueMutation.mutate(issueID)}
-          discarding={discardIssueMutation.isPending}
-        />
-      ) : null}
     </div>
+  );
+}
+
+function BackLink() {
+  return (
+    <Link
+      to="/projects"
+      className="inline-flex items-center gap-1.5 rounded-sm text-sm text-muted-foreground hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+    >
+      <ArrowLeft aria-hidden="true" className="h-4 w-4" /> Projects
+    </Link>
   );
 }
