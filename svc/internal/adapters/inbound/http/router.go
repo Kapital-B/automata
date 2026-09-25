@@ -625,6 +625,15 @@ func (h *Handlers) listMessages(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "internal"})
 		return
 	}
+	var projectIDs map[uuid.UUID]*uuid.UUID
+	if h.Assignments != nil {
+		projectIDs, err = h.Assignments.EffectiveProjectIDsForMessages(r.Context(), uid, rows)
+		if err != nil {
+			h.Log.Error("list message projects", "err", err)
+			writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "internal"})
+			return
+		}
+	}
 	type item struct {
 		ID                 string          `json:"id"`
 		AccountID          string          `json:"account_id"`
@@ -658,11 +667,9 @@ func (h *Handlers) listMessages(w http.ResponseWriter, r *http.Request) {
 			CategoryConfidence: m.CategoryConfidence,
 			ConversationID:     m.ConversationID,
 		}
-		if h.Assignments != nil {
-			if eff, err := h.Assignments.EffectiveAssignment(r.Context(), uid, m.ID); err == nil && eff != nil && eff.ProjectID != nil {
-				s := eff.ProjectID.String()
-				it.ProjectID = &s
-			}
+		if projectID := projectIDs[m.ID]; projectID != nil {
+			s := projectID.String()
+			it.ProjectID = &s
 		}
 		out = append(out, it)
 	}

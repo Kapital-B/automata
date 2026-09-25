@@ -504,22 +504,55 @@ func (r *Repository) EffectiveAssignment(ctx context.Context, userID, messageID 
 	return out, nil
 }
 
-// EffectiveProjectIDsForMessages returns committed/provisional project ids for the given messages.
+// EffectiveProjectIDsForMessages resolves projects for a page of messages in one query.
 func (r *Repository) EffectiveProjectIDsForMessages(ctx context.Context, userID uuid.UUID, messages []driven.MessageRow) (map[uuid.UUID]*uuid.UUID, error) {
 	out := make(map[uuid.UUID]*uuid.UUID, len(messages))
 	if len(messages) == 0 {
 		return out, nil
 	}
-	for _, m := range messages {
-		eff, err := r.EffectiveAssignment(ctx, userID, m.ID)
-		if err != nil {
+	var b strings.Builder
+	b.WriteString(`SELECT m.id, CASE WHEN o.message_id IS NOT NULL THEN o.project_id ELSE t.project_id END
+		FROM messages m
+		INNER JOIN accounts a ON a.id = m.account_id AND a.user_id = ?
+		LEFT JOIN message_assignment_overrides o ON o.message_id = m.id
+		LEFT JOIN thread_assignments t ON t.account_id = m.account_id
+			AND t.conversation_id = m.conversation_id
+			AND m.conversation_id IS NOT NULL AND TRIM(m.conversation_id) <> ''
+		WHERE m.id IN (`)
+	args := make([]any, 0, len(messages)+1)
+	args = append(args, userID.String())
+	for i, m := range messages {
+		if i > 0 {
+			b.WriteByte(',')
+		}
+		b.WriteByte('?')
+		args = append(args, m.ID.String())
+	}
+	b.WriteByte(')')
+	rows, err := r.db.QueryContext(ctx, b.String(), args...)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	for rows.Next() {
+		var messageID string
+		var projectID sql.NullString
+		if err := rows.Scan(&messageID, &projectID); err != nil {
 			return nil, err
 		}
-		if eff != nil && eff.ProjectID != nil {
-			out[m.ID] = eff.ProjectID
+		if projectID.Valid {
+			mid, err := uuid.Parse(messageID)
+			if err != nil {
+				return nil, err
+			}
+			pid, err := uuid.Parse(projectID.String)
+			if err != nil {
+				return nil, err
+			}
+			out[mid] = &pid
 		}
 	}
-	return out, nil
+	return out, rows.Err()
 }
 
 // unassignedEffCTE mirrors the postgres adapter: one statement resolves the

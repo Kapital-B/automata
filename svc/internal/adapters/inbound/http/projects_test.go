@@ -150,4 +150,21 @@ func TestAssignMessageHTTP(t *testing.T) {
 	if eff["project_id"] != p.ID.String() {
 		t.Fatalf("eff=%v", eff)
 	}
+	listReq, _ := http.NewRequest(http.MethodGet, srv.URL+"/api/messages?account_id="+accountID.String(), nil)
+	listReq.Header.Set("Authorization", "Bearer "+tokens.AccessToken)
+	listRes, err := http.DefaultClient.Do(listReq)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer listRes.Body.Close()
+	if listRes.StatusCode != http.StatusOK {
+		t.Fatalf("list messages status %d", listRes.StatusCode)
+	}
+	var messages []map[string]any
+	if err := json.NewDecoder(listRes.Body).Decode(&messages); err != nil {
+		t.Fatal(err)
+	}
+	if len(messages) != 1 || messages[0]["project_id"] != p.ID.String() {
+		t.Fatalf("listed messages=%v", messages)
+	}
 }
