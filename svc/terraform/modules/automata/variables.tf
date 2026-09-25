@@ -175,12 +175,6 @@ variable "jwt_secret" {
   sensitive   = true
 }
 
-variable "auth_default_user_id" {
-  description = "Fallback local-style user UUID consumed by the current service runtime."
-  type        = string
-  default     = "a0000001-0000-4000-8000-000000000001"
-}
-
 variable "bedrock_model_id" {
   description = "Bedrock model or inference profile identifier."
   type        = string

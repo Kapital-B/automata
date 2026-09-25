@@ -54,7 +54,7 @@ func newForwardAPI(t *testing.T) *forwardAPI {
 	h := &Handlers{
 		Log: slog.New(slog.NewTextHandler(io.Discard, nil)), Accounts: repo, Forwards: repo, Messages: repo, Schedules: repo,
 		ForwardRulesSvc: &appmessages.ForwardRulesService{Messages: repo, Forwards: repo, JobRuns: repo, Effects: memoryjobs.NewStore()},
-		JWTSecret:       []byte("abcdefghijklmnopqrstuvwxyz123456"), DefaultUserID: a.userID,
+		JWTSecret:       []byte("abcdefghijklmnopqrstuvwxyz123456"),
 	}
 	a.srv = httptest.NewServer(h.Routes())
 	t.Cleanup(a.srv.Close)
@@ -68,6 +68,7 @@ func (a *forwardAPI) do(method, path, body string, out any) (int, string) {
 		a.t.Fatal(err)
 	}
 	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("Authorization", "Bearer "+testBearerToken(a.t, a.userID))
 	res, err := http.DefaultClient.Do(req)
 	if err != nil {
 		a.t.Fatal(err)

@@ -77,7 +77,6 @@ locals {
       DATABASE_URL                   = local.effective_database_url
       DASHBOARD_BASE_URL             = local.effective_dashboard_base_url
       CORS_ORIGINS                   = local.effective_cors_origins_csv
-      AUTH_DEFAULT_USER_ID           = var.auth_default_user_id
       MS_CLIENT_ID                   = var.ms_client_id
       MS_REDIRECT_URI                = var.ms_redirect_uri
       MS_AUTH_REDIRECT_URI           = var.ms_auth_redirect_uri

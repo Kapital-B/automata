@@ -45,7 +45,7 @@ This document specifies how to host Automata on AWS using the **same infrastruct
 | OAuth GC | Goroutine inside `cmd/server`: ticker every **5m**, deletes expired `oauth_states` |
 | Queue | Redis + Asynq. HTTP handlers insert `job_runs` as `pending`, then `JobQueue.Enqueue*` |
 | Persistence | SQLite via `modernc.org/sqlite`, migrations embedded and applied on process start |
-| Auth | App-issued JWT (`JWT_SECRET`) + hashed refresh tokens. Dev fallback: `AUTH_DEFAULT_USER_ID` when no Bearer header |
+| Auth | App-issued JWT (`JWT_SECRET`) + hashed refresh tokens. Protected routes require a valid Bearer token in every environment. |
 | Frontend | Talks to `VITE_API_BASE_URL`; stores tokens in `localStorage`; OAuth return via `DASHBOARD_BASE_URL` |
 | Infra / CI | **None.** No `terraform/`, no `.github/workflows/` |
 | Local extras | `docker-compose.yml` runs Redis 7 only |
@@ -171,7 +171,7 @@ flowchart LR
 | Python 3.13 zip via `uv pip install --target` | Go `provided.al2023` bootstrap binaries |
 | DynamoDB for product **and** jobs | **DSQL for product**, **DynamoDB for jobs only** |
 | No VPC | No VPC (DSQL IAM + public endpoint; DynamoDB public), same as Heimdall Lambdas |
-| Cognito JWT verification | Existing app JWT; disable `AUTH_DEFAULT_USER_ID` in AWS |
+| Cognito JWT verification | Existing app JWT; protected routes reject missing or invalid tokens |
 | DynamoDB stream Lambda for async jobs | **Same pattern** (copy Heimdall’s stream wiring; Go worker) |
 | Same zip, Python handler path | Separate Go bootstrap binaries per function (api / scheduler / worker / migrate) |
 
@@ -807,7 +807,7 @@ Follow `svc/terraform/modules/heimdall_aws/secrets.tf`: create Secrets Manager e
 
 Hosted DSQL does **not** use an `automata/DATABASE_URL` password secret. Cluster endpoint/identifier, region, database name, and runtime role are non-secret Lambda environment variables; the connector generates short-lived IAM auth. `DATABASE_URL` exists only for local/CI Postgres. Non-secret URLs, client IDs, CORS origins, `DASHBOARD_BASE_URL`, table/bucket names, and retention values come from `locals.tf`.
 
-**Hosted must set** `AUTH_DEFAULT_USER_ID` unused / middleware must **reject** unauthenticated requests. The current default-user fallback is a local-dev footgun.
+Protected routes reject unauthenticated requests in local and hosted environments.
 
 OAuth redirect URIs in Entra/Google/Slack must include the API Gateway (or custom) callback URLs for each environment.
 
@@ -930,7 +930,6 @@ Heimdall’s `linear-check.yml` is Yonda-process specific (`Yonda-Tax/ci-templat
 | `LAMBDA_ARCH` | local build override; Terraform maps Go `amd64|arm64` to Lambda `x86_64|arm64` |
 | `DASHBOARD_BASE_URL` | `https://automata.{zone}` |
 | `CORS_ORIGINS` | that same origin (plus localhost if still desired on dev) |
-| `AUTH_DEFAULT_USER_ID` | **disabled** |
 
 Frontend: `VITE_API_BASE_URL` only, injected at Terraform build.
 
@@ -1078,7 +1077,7 @@ Browser verification after Phase 5: login, connect mailbox, trigger/cancel sync,
 | DSQL 3,000-row / 5-minute caps | Chunk deletes and bulk updates; never wrap Graph/LLM in one SQL tx |
 | DSQL missing partial indexes | Generated columns / unique on nullable keys ([addendum-aurora-dsql.md](addendum-aurora-dsql.md)) |
 | Accidental data loss | DSQL deletion protection + daily AWS Backup; DynamoDB PITR/deletion protection; restore drill |
-| Secrets / default user | Fail closed without JWT in AWS and Floci `local` |
+| Authentication | Fail closed without JWT in AWS and Floci `local` |
 | Provider/runtime packaging drift | Locked AWS provider >=6.15,<7; setup Go in apply; root-bootstrap archive test |
 | Heimdall apply-on-PR | Copying apply-dev on every PR can deploy broken API to shared dev — same as Heimdall; use a dedicated Automata dev account |
 

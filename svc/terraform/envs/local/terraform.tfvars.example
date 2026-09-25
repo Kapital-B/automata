@@ -18,7 +18,6 @@ slack_redirect_uri  = "http://localhost:4566/restapis/replace-after-deploy/local
 
 encryption_key       = "12345678901234567890123456789012"
 jwt_secret           = "abcdefghijklmnopqrstuvwxyz123456"
-auth_default_user_id = "a0000001-0000-4000-8000-000000000001"
 
 bedrock_model_id          = "eu.amazon.nova-2-lite-v1:0"
 bedrock_runtime_endpoint  = "http://floci:4566"

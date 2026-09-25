@@ -107,7 +107,7 @@ someone confirms.
 
 - Connect with the **AWS DSQL Go connector** (IAM token, TLS). Instantiate a small pool (1–3) **outside** the handler; set max connection lifetime **&lt; 60 minutes**.
 - **Do not put API/scheduler/worker Lambdas in a VPC** solely for the database. Keep Graph, Entra, Google, Slack, and LLM on the public internet.
-- Auth: disable `AUTH_DEFAULT_USER_ID` in AWS (unchanged from the parent spec).
+- Auth: all non-public API routes require a valid bearer token in every environment.
 
 ---
 
