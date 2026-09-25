@@ -18,7 +18,6 @@ import (
 	"github.com/Kapital-B/automata/svc/internal/application/auth"
 	appmessages "github.com/Kapital-B/automata/svc/internal/application/messages"
 	"github.com/Kapital-B/automata/svc/internal/application/ports/driven"
-	"github.com/google/uuid"
 	_ "modernc.org/sqlite"
 )
 
@@ -47,14 +46,13 @@ func TestAuthRefreshRotatesTokens(t *testing.T) {
 	}
 	syncSvc := &appmessages.SyncService{Accounts: repo, Messages: repo, Mailboxes: mailboxes, JobRuns: repo}
 	jwtSecret := []byte("abcdefghijklmnopqrstuvwxyz123456")
-	devUser := uuid.MustParse("a0000001-0000-4000-8000-000000000001")
 	authSvc := auth.NewService(repo, repo, repo, nil, nil, jwtSecret, time.Hour, 30*24*time.Hour)
 	h := &Handlers{
 		Log:        slog.New(slog.NewTextHandler(io.Discard, nil)),
 		AccountSvc: accountSvc, SyncSvc: syncSvc, AuthSvc: authSvc,
 		Accounts: repo, Messages: repo, JobRuns: repo, OAuthStates: repo, Users: repo,
 		Dashboard: "http://localhost:5173", SuccessPath: "/ok", ErrorPath: "/err",
-		JWTSecret: jwtSecret, JWTTTL: time.Hour, DefaultUserID: devUser,
+		JWTSecret: jwtSecret, JWTTTL: time.Hour,
 	}
 	srv := httptest.NewServer(h.Routes())
 	defer srv.Close()

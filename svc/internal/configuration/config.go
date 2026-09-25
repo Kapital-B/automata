@@ -6,8 +6,6 @@ import (
 	"os"
 	"strings"
 	"time"
-
-	"github.com/google/uuid"
 )
 
 // Config holds environment-backed settings (spec §9).
@@ -44,7 +42,6 @@ type Config struct {
 	SlackSuccessPath           string
 	AuthSuccessPath            string
 	AuthErrorPath              string
-	DefaultUserID              uuid.UUID
 	JobsInline                 bool
 	JobTerminalRetention       time.Duration
 	JobLeaseDuration           time.Duration
@@ -201,11 +198,6 @@ func Load() (Config, error) {
 		}
 	}
 
-	defaultUID, err := uuid.Parse(getenv("AUTH_DEFAULT_USER_ID", "a0000001-0000-4000-8000-000000000001"))
-	if err != nil {
-		return Config{}, fmt.Errorf("AUTH_DEFAULT_USER_ID: %w", err)
-	}
-
 	jobLeaseDuration := time.Duration(getenvInt("JOB_LEASE_SECONDS", 960)) * time.Second
 	jobPendingWakeAfter := time.Duration(getenvInt("JOB_PENDING_WAKE_AFTER_SECONDS", 120)) * time.Second
 	jobTerminalRetention := time.Duration(getenvInt("JOB_TERMINAL_RETENTION_DAYS", 30)) * 24 * time.Hour
@@ -267,7 +259,6 @@ func Load() (Config, error) {
 		SlackSuccessPath:           getenv("SLACK_SUCCESS_PATH", "/accounts?connector=slack"),
 		AuthSuccessPath:            getenv("AUTH_SUCCESS_PATH", "/auth/callback"),
 		AuthErrorPath:              getenv("AUTH_ERROR_PATH", "/auth/error"),
-		DefaultUserID:              defaultUID,
 		JobsInline:                 getenvBool("JOBS_INLINE", false),
 		JobTerminalRetention:       jobTerminalRetention,
 		JobLeaseDuration:           jobLeaseDuration,

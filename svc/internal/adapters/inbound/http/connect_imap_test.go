@@ -40,6 +40,7 @@ func TestConnectIMAPStoresAVerifiedAccountAndReportsRejections(t *testing.T) {
 		t.Fatal(err)
 	}
 	repo := sqlite.NewRepository(db, 15*time.Minute)
+	devUser := uuid.MustParse("a0000001-0000-4000-8000-000000000001")
 	conn := &recordingPasswordConnector{password: "right"}
 	h := &Handlers{
 		Log: slog.New(slog.NewTextHandler(io.Discard, nil)),
@@ -52,7 +53,6 @@ func TestConnectIMAPStoresAVerifiedAccountAndReportsRejections(t *testing.T) {
 		}),
 		Accounts: repo, Users: repo,
 		JWTSecret: []byte("abcdefghijklmnopqrstuvwxyz123456"), JWTTTL: time.Hour,
-		DefaultUserID: uuid.MustParse("a0000001-0000-4000-8000-000000000001"),
 	}
 	api := httptest.NewServer(h.Routes())
 	defer api.Close()
@@ -61,7 +61,7 @@ func TestConnectIMAPStoresAVerifiedAccountAndReportsRejections(t *testing.T) {
 		body := `{"email":"me@fastmail.com","password":"` + password + `",
 			"imap":{"host":"imap.fastmail.com","port":993,"security":"tls"},
 			"smtp":{"host":"smtp.fastmail.com","port":465,"security":"tls"},"label":"Personal"}`
-		res, err := http.Post(api.URL+"/api/accounts/imap", "application/json", strings.NewReader(body))
+		res, err := authedPost(t, api.URL+"/api/accounts/imap", body, devUser)
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -83,7 +83,7 @@ func TestConnectIMAPStoresAVerifiedAccountAndReportsRejections(t *testing.T) {
 	if conn.got.IMAP != (driven.MailServer{Host: "imap.fastmail.com", Port: 993, Security: "tls"}) || conn.got.SMTP.Port != 465 {
 		t.Errorf("servers reached the connector as %+v / %+v", conn.got.IMAP, conn.got.SMTP)
 	}
-	rows, err := repo.ListAccounts(context.Background(), h.DefaultUserID)
+	rows, err := repo.ListAccounts(context.Background(), devUser)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -100,21 +100,21 @@ func TestConnectIMAPStoresAVerifiedAccountAndReportsRejections(t *testing.T) {
 			IncrementalSync   bool `json:"incremental_sync"`
 		} `json:"capabilities"`
 	}
-	getJSON(t, api.URL+"/api/accounts", &list)
+	getJSON(t, api.URL+"/api/accounts", devUser, &list)
 	if len(list) != 1 || list[0].Provider != "imap" || list[0].Capabilities == nil ||
 		list[0].Capabilities.ServerSideForward || !list[0].Capabilities.IncrementalSync {
 		t.Fatalf("account list = %+v", list)
 	}
 	var providers []map[string]any
-	getJSON(t, api.URL+"/api/accounts/providers", &providers)
+	getJSON(t, api.URL+"/api/accounts/providers", devUser, &providers)
 	if len(providers) != 1 || providers[0]["provider"] != "imap" || providers[0]["connect"] != "password" {
 		t.Fatalf("providers = %v", providers)
 	}
 }
 
-func getJSON(t *testing.T, url string, out any) {
+func getJSON(t *testing.T, url string, userID uuid.UUID, out any) {
 	t.Helper()
-	res, err := http.Get(url)
+	res, err := authedGet(t, url, userID)
 	if err != nil {
 		t.Fatal(err)
 	}

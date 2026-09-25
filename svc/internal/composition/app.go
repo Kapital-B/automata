@@ -602,7 +602,6 @@ func (r *Runtime) buildServices(ctx context.Context) error {
 		StateTTL:             r.Config.OAuthStateTTL,
 		JWTSecret:            r.Config.JWTSecret,
 		JWTTTL:               r.Config.JWTTTL,
-		DefaultUserID:        r.Config.DefaultUserID,
 		JobQueue:             r.QueueClient,
 		CORSOrigins:          r.Config.CORSOrigins,
 	}

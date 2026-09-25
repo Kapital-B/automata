@@ -12,9 +12,6 @@ import (
 
 // overview serves the Home metric cards and project list in one request.
 func (h *Handlers) overview(w http.ResponseWriter, r *http.Request) {
-	// The auth middleware always injects a user id, falling back to the dev
-	// DefaultUserID, so a missing token arrives as uuid.Nil rather than as a
-	// missing value. Treat that as unauthenticated instead of querying for it.
 	uid, ok := UserIDFromContext(r.Context())
 	if !ok || uid == uuid.Nil {
 		writeJSON(w, http.StatusUnauthorized, map[string]string{"error": "unauthorized"})
@@ -62,9 +59,6 @@ func (h *Handlers) overview(w http.ResponseWriter, r *http.Request) {
 
 // activity serves the cross-project change feed.
 func (h *Handlers) activity(w http.ResponseWriter, r *http.Request) {
-	// The auth middleware always injects a user id, falling back to the dev
-	// DefaultUserID, so a missing token arrives as uuid.Nil rather than as a
-	// missing value. Treat that as unauthenticated instead of querying for it.
 	uid, ok := UserIDFromContext(r.Context())
 	if !ok || uid == uuid.Nil {
 		writeJSON(w, http.StatusUnauthorized, map[string]string{"error": "unauthorized"})

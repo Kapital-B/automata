@@ -139,13 +139,11 @@ UI and API consumers should treat the runs API as the durable source of truth fo
 
 **Linking:** Microsoft/Google sign-in uses the IdP **email** claim. If a user already exists with that email (e.g. registered with password), the external identity is **attached** to the same `users` row (`user_identities`).
 
-## Dev fallback user
-
-If a request has **no** `Authorization: Bearer` header, middleware treats the caller as **`AUTH_DEFAULT_USER_ID`** (default matches the seeded `dev@localhost` user from migration `002_users_auth.sql`). Use a real Bearer token in staging/production.
+All API routes other than health, sign-in, registration, token refresh, and OAuth callbacks require a valid bearer token, including in local development.
 
 ## Mail (unchanged flow, now per logged-in user)
 
-Send `Authorization: Bearer <jwt>` (or omit in dev for default user).
+Send `Authorization: Bearer <jwt>`.
 
 - `POST /api/accounts` — start mailbox OAuth (state ties connection to JWT user).
 - `GET /api/accounts/callback` — Microsoft returns here; redirects to `OAUTH_SUCCESS_PATH?account_id=...`

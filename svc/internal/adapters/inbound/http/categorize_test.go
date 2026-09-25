@@ -89,7 +89,7 @@ func newCategorizeTestServer(t *testing.T) (*httptest.Server, *sqlite.Repository
 		AccountSvc: accountSvc, SyncSvc: syncSvc, CategorizeSvc: categorizeSvc, AuthSvc: authSvc,
 		Accounts: repo, Messages: repo, JobRuns: repo, OAuthStates: repo, Users: repo,
 		Dashboard: "http://localhost:5173", SuccessPath: "/ok", ErrorPath: "/err",
-		JWTSecret: jwtSecret, JWTTTL: time.Hour, DefaultUserID: devUser, JobsInline: true,
+		JWTSecret: jwtSecret, JWTTTL: time.Hour, JobsInline: true,
 	}
 	srv := httptest.NewServer(h.Routes())
 	t.Cleanup(srv.Close)
@@ -97,11 +97,12 @@ func newCategorizeTestServer(t *testing.T) (*httptest.Server, *sqlite.Repository
 }
 
 func TestCategorizeEndpointAndMessageFilter(t *testing.T) {
-	srv, _, _, accountID := newCategorizeTestServer(t)
+	srv, _, devUser, accountID := newCategorizeTestServer(t)
 	req, err := http.NewRequest(http.MethodPost, srv.URL+"/api/accounts/"+accountID.String()+"/categorize", bytes.NewBufferString(`{"recategorize":true}`))
 	if err != nil {
 		t.Fatal(err)
 	}
+	req.Header.Set("Authorization", "Bearer "+testBearerToken(t, devUser))
 	res, err := http.DefaultClient.Do(req)
 	if err != nil {
 		t.Fatal(err)
@@ -121,7 +122,7 @@ func TestCategorizeEndpointAndMessageFilter(t *testing.T) {
 		t.Fatalf("expected recategorize true in response, got %+v", catRes["recategorize"])
 	}
 
-	res2, err := http.Get(srv.URL + "/api/messages?account_id=" + accountID.String() + "&category=important")
+	res2, err := authedGet(t, srv.URL+"/api/messages?account_id="+accountID.String()+"&category=important", devUser)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -139,8 +140,8 @@ func TestCategorizeEndpointAndMessageFilter(t *testing.T) {
 }
 
 func TestListCategories(t *testing.T) {
-	srv, _, _, _ := newCategorizeTestServer(t)
-	res, err := http.Get(srv.URL + "/api/categories")
+	srv, _, devUser, _ := newCategorizeTestServer(t)
+	res, err := authedGet(t, srv.URL+"/api/categories", devUser)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -158,7 +159,7 @@ func TestListCategories(t *testing.T) {
 }
 
 func TestCategoryCRUDEndpoints(t *testing.T) {
-	srv, _, _, _ := newCategorizeTestServer(t)
+	srv, _, devUser, _ := newCategorizeTestServer(t)
 
 	createReq, err := http.NewRequest(http.MethodPost, srv.URL+"/api/categories", bytes.NewBufferString(`{
 		"slug":"travel",
@@ -169,6 +170,7 @@ func TestCategoryCRUDEndpoints(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	createReq.Header.Set("Authorization", "Bearer "+testBearerToken(t, devUser))
 	createRes, err := http.DefaultClient.Do(createReq)
 	if err != nil {
 		t.Fatal(err)
@@ -195,6 +197,7 @@ func TestCategoryCRUDEndpoints(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	updateReq.Header.Set("Authorization", "Bearer "+testBearerToken(t, devUser))
 	updateRes, err := http.DefaultClient.Do(updateReq)
 	if err != nil {
 		t.Fatal(err)
@@ -206,12 +209,13 @@ func TestCategoryCRUDEndpoints(t *testing.T) {
 }
 
 func TestDeleteCategoryRequiresReplacementWhenInUse(t *testing.T) {
-	srv, _, _, accountID := newCategorizeTestServer(t)
+	srv, _, devUser, accountID := newCategorizeTestServer(t)
 	// Categorize once so "important" is in active use.
 	req, err := http.NewRequest(http.MethodPost, srv.URL+"/api/accounts/"+accountID.String()+"/categorize", bytes.NewBufferString(`{"recategorize":true}`))
 	if err != nil {
 		t.Fatal(err)
 	}
+	req.Header.Set("Authorization", "Bearer "+testBearerToken(t, devUser))
 	res, err := http.DefaultClient.Do(req)
 	if err != nil {
 		t.Fatal(err)
@@ -221,7 +225,7 @@ func TestDeleteCategoryRequiresReplacementWhenInUse(t *testing.T) {
 		t.Fatalf("categorize status %d", res.StatusCode)
 	}
 
-	listRes, err := http.Get(srv.URL + "/api/categories")
+	listRes, err := authedGet(t, srv.URL+"/api/categories", devUser)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -249,6 +253,7 @@ func TestDeleteCategoryRequiresReplacementWhenInUse(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	delReq.Header.Set("Authorization", "Bearer "+testBearerToken(t, devUser))
 	delRes, err := http.DefaultClient.Do(delReq)
 	if err != nil {
 		t.Fatal(err)
@@ -262,6 +267,7 @@ func TestDeleteCategoryRequiresReplacementWhenInUse(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	delReq2.Header.Set("Authorization", "Bearer "+testBearerToken(t, devUser))
 	delRes2, err := http.DefaultClient.Do(delReq2)
 	if err != nil {
 		t.Fatal(err)

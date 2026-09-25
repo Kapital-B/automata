@@ -84,7 +84,6 @@ type Handlers struct {
 	StateTTL             time.Duration
 	JWTSecret            []byte
 	JWTTTL               time.Duration
-	DefaultUserID        uuid.UUID // dev fallback when no Bearer token
 	JobQueue             *asynqadapter.QueueClient
 	CORSOrigins          []string
 }
@@ -106,7 +105,7 @@ func (h *Handlers) Routes() http.Handler {
 	if h.Log != nil {
 		r.Use(requestLogMiddleware(h.Log))
 	}
-	r.Use(optionalAuthMiddleware(h.JWTSecret, h.DefaultUserID))
+	r.Use(authMiddleware(h.JWTSecret))
 	r.Get("/api/health", h.health)
 
 	r.Post("/api/auth/register", h.register)

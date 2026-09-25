@@ -79,7 +79,6 @@ module "automata" {
   slack_redirect_uri             = var.slack_redirect_uri
   encryption_key                 = var.encryption_key
   jwt_secret                     = var.jwt_secret
-  auth_default_user_id           = var.auth_default_user_id
   bedrock_model_id               = var.bedrock_model_id
   bedrock_runtime_endpoint       = var.bedrock_runtime_endpoint != "" ? var.bedrock_runtime_endpoint : local.lambda_runtime_endpoint
   job_cursor_secret              = var.job_cursor_secret != "" ? var.job_cursor_secret : var.jwt_secret

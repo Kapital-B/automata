@@ -94,11 +94,6 @@ variable "jwt_secret" {
   default = "abcdefghijklmnopqrstuvwxyz123456"
 }
 
-variable "auth_default_user_id" {
-  type    = string
-  default = "a0000001-0000-4000-8000-000000000001"
-}
-
 variable "bedrock_model_id" {
   type    = string
   default = "eu.amazon.nova-2-lite-v1:0"

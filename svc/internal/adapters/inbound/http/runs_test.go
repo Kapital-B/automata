@@ -55,7 +55,7 @@ func newRunsTestServer(t *testing.T) (*httptest.Server, *sqlite.Repository, uuid
 		AccountSvc: accountSvc, SyncSvc: syncSvc, AuthSvc: authSvc,
 		Accounts: repo, Messages: repo, JobRuns: repo, OAuthStates: repo, Users: repo,
 		Dashboard: "http://localhost:5173", SuccessPath: "/ok", ErrorPath: "/err",
-		JWTSecret: jwtSecret, JWTTTL: time.Hour, DefaultUserID: devUser,
+		JWTSecret: jwtSecret, JWTTTL: time.Hour,
 	}
 	srv := httptest.NewServer(h.Routes())
 	t.Cleanup(srv.Close)
@@ -102,7 +102,7 @@ func TestRunsListAndFilter(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	res, err := http.Get(srv.URL + "/api/runs")
+	res, err := authedGet(t, srv.URL+"/api/runs", devUser)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -115,13 +115,13 @@ func TestRunsListAndFilter(t *testing.T) {
 		t.Fatal(err)
 	}
 	if len(all) != 2 {
-		t.Fatalf("want 2 runs for default user got %d", len(all))
+		t.Fatalf("want 2 runs for authenticated user got %d", len(all))
 	}
 	if all[0]["job_type"] != "sync" {
 		t.Fatalf("newest first expected sync got %v", all[0]["job_type"])
 	}
 
-	res2, err := http.Get(srv.URL + "/api/runs?account_id=" + devAccount.String() + "&job_type=sync")
+	res2, err := authedGet(t, srv.URL+"/api/runs?account_id="+devAccount.String()+"&job_type=sync", devUser)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -155,7 +155,7 @@ func TestGetRunNotFoundOrNotOwned(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	res, err := http.Get(srv.URL + "/api/runs/" + uuid.NewString())
+	res, err := authedGet(t, srv.URL+"/api/runs/"+uuid.NewString(), devUser)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -164,7 +164,7 @@ func TestGetRunNotFoundOrNotOwned(t *testing.T) {
 		t.Fatalf("missing run status %d", res.StatusCode)
 	}
 
-	res2, err := http.Get(srv.URL + "/api/runs/" + otherRunID.String())
+	res2, err := authedGet(t, srv.URL+"/api/runs/"+otherRunID.String(), devUser)
 	if err != nil {
 		t.Fatal(err)
 	}

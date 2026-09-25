@@ -69,12 +69,6 @@ variable "slack_client_id" {
   default     = ""
 }
 
-variable "auth_default_user_id" {
-  description = "Fallback UUID consumed by the current auth middleware."
-  type        = string
-  default     = "a0000001-0000-4000-8000-000000000001"
-}
-
 locals {
   environment = "dev"
   aws_region  = "eu-west-1"
@@ -118,7 +112,6 @@ module "automata" {
   slack_mode                    = var.slack_mode
   slack_client_id               = var.slack_client_id
   slack_redirect_uri            = local.slack_redirect_uri
-  auth_default_user_id          = var.auth_default_user_id
   bedrock_model_id              = "eu.amazon.nova-2-lite-v1:0"
   job_terminal_retention_days   = 30
   cloudwatch_log_retention_days = 30
