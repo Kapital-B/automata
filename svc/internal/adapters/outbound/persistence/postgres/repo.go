@@ -1129,10 +1129,86 @@ func scanActionItems(rows *sql.Rows) ([]driven.ActionItemRow, error) {
 
 func (r *Repository) MarkActionItemDone(ctx context.Context, userID uuid.UUID, itemID uuid.UUID, at time.Time) error {
 	_, err := r.execContext(ctx, `
-		UPDATE action_items SET status = 'done', actioned_at = ?, updated_at = ?
+		UPDATE action_items SET status = 'done', actioned_at = ?, updated_at = ?, actioned_by_user_id = ?
 		WHERE id = ? AND user_id = ?
-	`, at.UTC(), at.UTC(), itemID.String(), userID.String())
+	`, at.UTC(), at.UTC(), userID.String(), itemID.String(), userID.String())
 	return err
+}
+
+func (r *Repository) CompleteActionItem(ctx context.Context, itemID, byUserID uuid.UUID, at time.Time) error {
+	_, err := r.execContext(ctx, `
+		UPDATE action_items SET status = 'done', actioned_at = ?, updated_at = ?, actioned_by_user_id = ?
+		WHERE id = ? AND status = 'open'
+	`, at.UTC(), at.UTC(), byUserID.String(), itemID.String())
+	return err
+}
+
+const projectTodosSQL = `
+	SELECT ai.id, ai.user_id, ai.account_id, ai.message_id, ai.run_id, ai.text, ai.due_at, ai.status,
+		ai.actioned_at, ai.auto_draft_seen_at, ai.created_at, ai.updated_at,
+		u.email,
+		CASE WHEN i.project_id = p.id THEN i.id END,
+		CASE WHEN i.project_id = p.id THEN i.title END
+	FROM action_items ai
+	INNER JOIN projects p ON p.id = ? AND p.organisation_id = ?
+	INNER JOIN project_members pm ON pm.project_id = p.id AND pm.user_id = ai.user_id
+	INNER JOIN users u ON u.id = ai.user_id
+	INNER JOIN messages m ON m.id = ai.message_id
+	LEFT JOIN message_assignment_overrides o ON o.message_id = m.id
+	LEFT JOIN thread_assignments t ON t.account_id = m.account_id
+		AND t.conversation_id = m.conversation_id
+		AND m.conversation_id IS NOT NULL AND TRIM(m.conversation_id) <> ''
+	LEFT JOIN issue_items ii ON ii.message_id = m.id
+	LEFT JOIN issues i ON i.id = ii.issue_id AND i.discarded_at IS NULL AND i.organisation_id = p.organisation_id
+	WHERE ai.status = 'open'
+		AND (
+			(CASE WHEN o.message_id IS NOT NULL THEN o.project_id ELSE t.project_id END) = p.id
+			OR ((CASE WHEN o.message_id IS NOT NULL THEN o.project_id ELSE t.project_id END) IS NULL AND i.project_id = p.id)
+		)
+	ORDER BY ai.created_at DESC
+	LIMIT 500`
+
+func (r *Repository) ListOpenActionItemsForProject(ctx context.Context, organisationID, projectID uuid.UUID) ([]driven.ProjectTodoRow, error) {
+	rows, err := r.queryContext(ctx, projectTodosSQL, projectID.String(), organisationID.String())
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	out := make([]driven.ProjectTodoRow, 0)
+	for rows.Next() {
+		var idStr, userStr, accountStr, messageStr, runStr, text, status, email string
+		var dueAt, actionedAt, autoDraftSeenAt sql.NullTime
+		var createdAt, updatedAt time.Time
+		var issueID, issueTitle sql.NullString
+		if err := rows.Scan(&idStr, &userStr, &accountStr, &messageStr, &runStr, &text, &dueAt, &status, &actionedAt, &autoDraftSeenAt,
+			&createdAt, &updatedAt, &email, &issueID, &issueTitle); err != nil {
+			return nil, err
+		}
+		id, _ := uuid.Parse(idStr)
+		userID, _ := uuid.Parse(userStr)
+		accountID, _ := uuid.Parse(accountStr)
+		messageID, _ := uuid.Parse(messageStr)
+		runID, _ := uuid.Parse(runStr)
+		row := driven.ProjectTodoRow{
+			Item: driven.ActionItemRow{
+				ID: id, UserID: userID, AccountID: accountID, MessageID: messageID, RunID: runID,
+				Text: text, DueAt: nullTimePtr(dueAt), Status: status,
+				ActionedAt: nullTimePtr(actionedAt), AutoDraftSeenAt: nullTimePtr(autoDraftSeenAt),
+				CreatedAt: createdAt.UTC(), UpdatedAt: updatedAt.UTC(),
+			},
+			OwnerEmail: email,
+			IssueTitle: issueTitle.String,
+		}
+		if issueID.Valid {
+			iid, err := uuid.Parse(issueID.String)
+			if err != nil {
+				return nil, err
+			}
+			row.IssueID = &iid
+		}
+		out = append(out, row)
+	}
+	return out, rows.Err()
 }
 
 func (r *Repository) InsertFYI(ctx context.Context, rows []driven.FYIRow) error {

@@ -203,6 +203,15 @@ type ActionItemRow struct {
 	UpdatedAt       time.Time
 }
 
+// ProjectTodoRow is an open to-do on a project, with whose it is and the
+// project issue its message is on, if any.
+type ProjectTodoRow struct {
+	Item       ActionItemRow
+	OwnerEmail string
+	IssueID    *uuid.UUID
+	IssueTitle string
+}
+
 type FYIRow struct {
 	ID        uuid.UUID
 	UserID    uuid.UUID
@@ -1053,6 +1062,14 @@ type SummaryRepository interface {
 	InsertActionItems(ctx context.Context, rows []ActionItemRow) error
 	ListOpenActionItems(ctx context.Context, userID uuid.UUID, accountID *uuid.UUID) ([]ActionItemRow, error)
 	MarkActionItemDone(ctx context.Context, userID uuid.UUID, itemID uuid.UUID, at time.Time) error
+	// ListOpenActionItemsForProject returns every open to-do filed to the
+	// project, whoever's mailbox it came from, as long as its owner is a
+	// member. Mail filed nowhere but on one of the project's issues counts
+	// as filed to the project.
+	ListOpenActionItemsForProject(ctx context.Context, organisationID, projectID uuid.UUID) ([]ProjectTodoRow, error)
+	// CompleteActionItem marks a to-do done on behalf of byUserID, who need
+	// not own it. Callers authorise; this only records.
+	CompleteActionItem(ctx context.Context, itemID, byUserID uuid.UUID, at time.Time) error
 	InsertFYI(ctx context.Context, rows []FYIRow) error
 	ListFYIByRun(ctx context.Context, userID uuid.UUID, runID uuid.UUID) ([]FYIRow, error)
 	ListOpenFYI(ctx context.Context, userID uuid.UUID, accountID *uuid.UUID, limit int) ([]FYIRow, error)

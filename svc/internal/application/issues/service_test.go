@@ -12,6 +12,7 @@ import (
 	appissues "github.com/Kapital-B/automata/svc/internal/application/issues"
 	"github.com/Kapital-B/automata/svc/internal/application/ports/driven"
 	appprojects "github.com/Kapital-B/automata/svc/internal/application/projects"
+	apptodos "github.com/Kapital-B/automata/svc/internal/application/todos"
 	domainprojects "github.com/Kapital-B/automata/svc/internal/domain/projects"
 	"github.com/google/uuid"
 	_ "modernc.org/sqlite"
@@ -242,11 +243,11 @@ func TestTimelineUnassignedToIssue(t *testing.T) {
 	t.Fatal("linked item not found")
 }
 
-// An issue shows the caller's to-dos from mail on its trail, and resolving it
+// An issue shows the team's to-dos from mail on its trail, and resolving it
 // can mark them done in the same step. It never touches to-dos elsewhere.
 func TestIssueTodosFromTrailAndCompleteOnResolve(t *testing.T) {
-	_, repo, issueSvc, projectSvc, userID, projectID, accountID := setupIssues(t, "issuetodos")
-	issueSvc.Summaries = repo
+	db, repo, issueSvc, projectSvc, userID, projectID, accountID := setupIssues(t, "issuetodos")
+	issueSvc.Todos = &apptodos.Service{Users: repo, Projects: repo, Summaries: repo}
 	ctx := context.Background()
 	now := time.Now().UTC()
 	newMsg := func(subject, conv string) uuid.UUID {
@@ -286,16 +287,77 @@ func TestIssueTodosFromTrailAndCompleteOnResolve(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(view.Todos) != 1 || view.Todos[0].ID != trailTodo {
-		t.Fatalf("want the trail's one to-do, got %+v", view.Todos)
+
+	// A teammate on the project has mail of their own on the same issue.
+	mateID := uuid.New()
+	if _, err := repo.CreateUserWithHomeOrg(ctx, mateID, "mate@example.com", nil, now, "password", "Mate", "mate@example.com"); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := db.Exec(`INSERT INTO project_members (id, project_id, user_id, role, created_at, updated_at) VALUES (?, ?, ?, 'member', ?, ?)`,
+		uuid.New().String(), projectID.String(), mateID.String(), now.Format(time.RFC3339Nano), now.Format(time.RFC3339Nano)); err != nil {
+		t.Fatal(err)
+	}
+	mateAccount := uuid.New()
+	if err := repo.InsertAccount(ctx, driven.AccountRow{
+		UserID: mateID, ID: mateAccount, Label: "Work", Provider: "m365", MsAccountKind: "work",
+		PrimaryEmail: "mate@example.com", ConnectionStatus: "connected",
+	}, []byte("tok")); err != nil {
+		t.Fatal(err)
+	}
+	mateMsg := uuid.New()
+	mateConv := "c-3"
+	if err := repo.UpsertMessage(ctx, driven.MessageRow{
+		ID: mateMsg, AccountID: mateAccount, ProviderMessageID: mateMsg.String(),
+		ReceivedAt: now, Subject: "Pump duty", FromJSON: `{}`, ConversationID: &mateConv,
+	}); err != nil {
+		t.Fatal(err)
+	}
+	mateRun := uuid.New()
+	if err := repo.InsertJobRun(ctx, mateRun, mateAccount, "summarize", "api", "success", now, now, nil, `{}`); err != nil {
+		t.Fatal(err)
+	}
+	mateTodo := uuid.New()
+	if err := repo.InsertActionItems(ctx, []driven.ActionItemRow{
+		{ID: mateTodo, UserID: mateID, AccountID: mateAccount, MessageID: mateMsg, RunID: mateRun, Text: "Chase the drawing", Status: "open", CreatedAt: now, UpdatedAt: now},
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if err := repo.AddIssueItem(ctx, driven.IssueItemRow{ID: uuid.New(), IssueID: view.Issue.ID, MessageID: &mateMsg, AddedAt: now}); err != nil {
+		t.Fatal(err)
+	}
+
+	view, err = issueSvc.Get(ctx, userID, view.Issue.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(view.Todos) != 2 {
+		t.Fatalf("want both people's to-dos on the issue, got %+v", view.Todos)
+	}
+	for _, td := range view.Todos {
+		switch td.ID {
+		case trailTodo:
+			if !td.Mine || td.OwnerLabel != "You" || td.MessageID == nil {
+				t.Errorf("own to-do should be marked mine and open its mail: %+v", td)
+			}
+		case mateTodo:
+			if td.Mine || td.OwnerLabel != "mate@example.com" || td.MessageID != nil || td.AccountID != nil {
+				t.Errorf("teammate's to-do should name them and keep their mail private: %+v", td)
+			}
+		default:
+			t.Errorf("unexpected to-do %+v", td)
+		}
 	}
 
 	openCount := func() int {
-		items, err := repo.ListOpenActionItems(ctx, userID, nil)
+		mine, err := repo.ListOpenActionItems(ctx, userID, nil)
 		if err != nil {
 			t.Fatal(err)
 		}
-		return len(items)
+		theirs, err := repo.ListOpenActionItems(ctx, mateID, nil)
+		if err != nil {
+			t.Fatal(err)
+		}
+		return len(mine) + len(theirs)
 	}
 	resolved, reopened := "resolved", "open"
 
@@ -303,15 +365,15 @@ func TestIssueTodosFromTrailAndCompleteOnResolve(t *testing.T) {
 	if _, err := issueSvc.Update(ctx, userID, view.Issue.ID, appissues.UpdateInput{Status: &resolved}); err != nil {
 		t.Fatal(err)
 	}
-	if n := openCount(); n != 2 {
-		t.Fatalf("resolve alone closed to-dos: %d open, want 2", n)
+	if n := openCount(); n != 3 {
+		t.Fatalf("resolve alone closed to-dos: %d open, want 3", n)
 	}
 	// Asking to complete them on an update that does not resolve does nothing.
 	if _, err := issueSvc.Update(ctx, userID, view.Issue.ID, appissues.UpdateInput{Status: &reopened, CompleteTodos: true}); err != nil {
 		t.Fatal(err)
 	}
-	if n := openCount(); n != 2 {
-		t.Fatalf("reopening closed to-dos: %d open, want 2", n)
+	if n := openCount(); n != 3 {
+		t.Fatalf("reopening closed to-dos: %d open, want 3", n)
 	}
 
 	view, err = issueSvc.Update(ctx, userID, view.Issue.ID, appissues.UpdateInput{Status: &resolved, CompleteTodos: true})
@@ -327,5 +389,8 @@ func TestIssueTodosFromTrailAndCompleteOnResolve(t *testing.T) {
 	}
 	if len(left) != 1 || left[0].ID != otherTodo {
 		t.Fatalf("want only the unrelated to-do open, got %+v", left)
+	}
+	if n := openCount(); n != 1 {
+		t.Fatalf("resolving should also close the teammate's to-do: %d open, want 1", n)
 	}
 }

@@ -911,6 +911,25 @@ func ensureLegacyJobRunIfPresent(t *testing.T, db *sql.DB, runID, accountID uuid
 	t.Fatal(lastErr)
 }
 
+// addProjectMember writes a membership row directly: the product has no way
+// to add a second member yet.
+func addProjectMember(t *testing.T, db *sql.DB, projectID, userID uuid.UUID, now time.Time) {
+	t.Helper()
+	ts := now.Format(time.RFC3339Nano)
+	var lastErr error
+	for _, q := range []string{
+		`INSERT INTO project_members (id, project_id, user_id, role, created_at, updated_at) VALUES (?, ?, ?, 'member', ?, ?)`,
+		`INSERT INTO project_members (id, project_id, user_id, role, created_at, updated_at) VALUES ($1, $2, $3, 'member', $4, $5)`,
+	} {
+		_, err := db.Exec(q, uuid.New().String(), projectID.String(), userID.String(), ts, ts)
+		if err == nil {
+			return
+		}
+		lastErr = err
+	}
+	t.Fatal(lastErr)
+}
+
 func ptrStr(v string) *string { return &v }
 
 func samePtrUUID(a, b *uuid.UUID) bool {
@@ -1155,6 +1174,117 @@ func runHomeOverviewTimestampTests(t *testing.T, factory Factory) {
 		// Scoped to the project, so another project's issues cannot inflate it.
 		if _, ok := counts[elsewhere]; ok {
 			t.Error("counts must not reach outside the project")
+		}
+	})
+
+	t.Run("project_todos_are_shared_with_members_and_closable_by_them", func(t *testing.T) {
+		h := factory(t)
+		ctx := context.Background()
+		now := time.Now().UTC()
+		ownerID, orgID, ownerAccount := seedUserAccount(t, h.Repo, uuid.New(), now)
+		mateID, _, mateAccount := seedUserAccount(t, h.Repo, uuid.New(), now)
+		outsiderID, _, outsiderAccount := seedUserAccount(t, h.Repo, uuid.New(), now)
+		projectID := createProject(t, h.Repo, orgID, ownerID, "DC16", "Shared")
+		otherProjectID := createProject(t, h.Repo, orgID, ownerID, "DC17", "Elsewhere")
+		// Projects cannot gain members through the product yet; the query
+		// must already honour them when they can.
+		addProjectMember(t, h.DB, projectID, mateID, now)
+
+		file := func(accountID, msg uuid.UUID, project uuid.UUID) {
+			m := msg
+			p := project
+			if err := h.Repo.UpsertMessageOverride(ctx, driven.AssignmentRow{
+				ID: uuid.New(), OrganisationID: orgID, AccountID: accountID, MessageID: &m, ProjectID: &p,
+				Status: "committed", Reason: "seed", Source: string(domainprojects.SourceUser), CreatedAt: now, UpdatedAt: now,
+			}); err != nil {
+				t.Fatal(err)
+			}
+		}
+		todo := func(userID, accountID, msg uuid.UUID, text, status string) uuid.UUID {
+			runID := uuid.New()
+			ensureLegacyJobRunIfPresent(t, h.DB, runID, accountID, now)
+			id := uuid.New()
+			if err := h.Repo.InsertActionItems(ctx, []driven.ActionItemRow{{
+				ID: id, UserID: userID, AccountID: accountID, MessageID: msg, RunID: runID,
+				Text: text, Status: status, CreatedAt: now, UpdatedAt: now,
+			}}); err != nil {
+				t.Fatal(err)
+			}
+			return id
+		}
+
+		ownerFiled := insertMsg(t, h.Repo, ownerAccount, "Filed", "o1", "b", now)
+		file(ownerAccount, ownerFiled, projectID)
+		ownerTodo := todo(ownerID, ownerAccount, ownerFiled, "Send the datasheet", "open")
+
+		ownerElsewhere := insertMsg(t, h.Repo, ownerAccount, "Elsewhere", "o2", "b", now)
+		file(ownerAccount, ownerElsewhere, otherProjectID)
+		todo(ownerID, ownerAccount, ownerElsewhere, "Other project", "open")
+
+		ownerDone := insertMsg(t, h.Repo, ownerAccount, "Done", "o3", "b", now)
+		file(ownerAccount, ownerDone, projectID)
+		todo(ownerID, ownerAccount, ownerDone, "Already done", "done")
+
+		// The teammate's mail is filed nowhere, but sits on one of the
+		// project's issues, so it belongs to the project.
+		mateOnIssue := insertMsg(t, h.Repo, mateAccount, "On issue", "m1", "b", now)
+		issueID := uuid.New()
+		if err := h.Repo.CreateIssue(ctx, driven.IssueRow{
+			ID: issueID, OrganisationID: orgID, ProjectID: projectID, Title: "Pump duty", Status: "open", CreatedAt: now, UpdatedAt: now,
+		}); err != nil {
+			t.Fatal(err)
+		}
+		if err := h.Repo.AddIssueItem(ctx, driven.IssueItemRow{ID: uuid.New(), IssueID: issueID, MessageID: &mateOnIssue, AddedAt: now}); err != nil {
+			t.Fatal(err)
+		}
+		mateTodo := todo(mateID, mateAccount, mateOnIssue, "Reply to Jan", "open")
+
+		// Someone who is not on the project cannot put to-dos in front of it.
+		outsiderMsg := insertMsg(t, h.Repo, outsiderAccount, "Outsider", "x1", "b", now)
+		file(outsiderAccount, outsiderMsg, projectID)
+		todo(outsiderID, outsiderAccount, outsiderMsg, "Not a member", "open")
+
+		rows, err := h.Repo.ListOpenActionItemsForProject(ctx, orgID, projectID)
+		if err != nil {
+			t.Fatal(err)
+		}
+		got := map[uuid.UUID]driven.ProjectTodoRow{}
+		for _, r := range rows {
+			got[r.Item.ID] = r
+		}
+		if len(got) != 2 {
+			t.Fatalf("want the owner's and the teammate's to-dos only, got %+v", rows)
+		}
+		if r, ok := got[ownerTodo]; !ok || r.IssueID != nil || r.OwnerEmail != ownerID.String()+"@ex.com" {
+			t.Errorf("owner's filed to-do = %+v (found %v)", r, ok)
+		}
+		if r, ok := got[mateTodo]; !ok || r.IssueID == nil || *r.IssueID != issueID || r.IssueTitle != "Pump duty" || r.Item.UserID != mateID {
+			t.Errorf("teammate's to-do on the issue = %+v (found %v)", r, ok)
+		}
+
+		// Another organisation sees nothing, even with the project id.
+		_, otherOrg, _ := seedUserAccount(t, h.Repo, uuid.New(), now)
+		if leaked, err := h.Repo.ListOpenActionItemsForProject(ctx, otherOrg, projectID); err != nil || len(leaked) != 0 {
+			t.Errorf("other organisation got %+v, %v", leaked, err)
+		}
+
+		// The owner closes the teammate's to-do.
+		if err := h.Repo.CompleteActionItem(ctx, mateTodo, ownerID, now); err != nil {
+			t.Fatal(err)
+		}
+		rows, err = h.Repo.ListOpenActionItemsForProject(ctx, orgID, projectID)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if len(rows) != 1 || rows[0].Item.ID != ownerTodo {
+			t.Errorf("after closing, want only the owner's to-do, got %+v", rows)
+		}
+		mateOpen, err := h.Repo.ListOpenActionItems(ctx, mateID, nil)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if len(mateOpen) != 0 {
+			t.Errorf("the teammate still sees their closed to-do: %+v", mateOpen)
 		}
 	})
 
