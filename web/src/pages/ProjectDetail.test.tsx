@@ -729,6 +729,37 @@ describe("Project workspace UI", () => {
     expect(screen.queryByRole("region", { name: /^to-dos/i })).not.toBeInTheDocument();
   });
 
+  it("shows an email by subject only, never its raw body", async () => {
+    getProjectTimeline.mockResolvedValue([
+      {
+        source: "mail",
+        occurred_at: "2026-03-01T10:00:00Z",
+        title: "Outlook: pump",
+        snippet: "<html><body><div style=\"color:red\">pump sizing</div>",
+        contacts: [],
+        account_id: "acc1",
+        account_label: "Work",
+        message_id: "msg1",
+      },
+      {
+        source: "manual",
+        occurred_at: "2026-03-02T15:00:00Z",
+        title: "Teams note",
+        snippet: "Consider 90 kW",
+        contacts: [],
+        manual_item_id: "man1",
+        channel: "teams",
+        body_text: "Consider 90 kW",
+      },
+    ]);
+    renderPage(newClient());
+    const list = await screen.findByRole("list", { name: "Correspondence" });
+    expect(within(list).getByRole("link", { name: "Outlook: pump" })).toBeInTheDocument();
+    expect(within(list).queryByText(/<html>/)).not.toBeInTheDocument();
+    expect(within(list).queryByText(/pump sizing/)).not.toBeInTheDocument();
+    expect(within(list).getByText("Consider 90 kW")).toBeInTheDocument();
+  });
+
   it("says plainly when nothing needs you", async () => {
     renderPage(newClient());
     const needs = await screen.findByRole("region", { name: /^needs you$/i });
