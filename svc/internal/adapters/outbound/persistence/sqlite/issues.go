@@ -4,6 +4,7 @@ import (
 	"context"
 	"database/sql"
 	"errors"
+	"strings"
 
 	"github.com/Kapital-B/automata/svc/internal/application/ports/driven"
 	"github.com/google/uuid"
@@ -169,6 +170,54 @@ func (r *Repository) FindIssueIDByMessage(ctx context.Context, messageID uuid.UU
 		return nil, err
 	}
 	return &id, nil
+}
+
+// ListIssueLinksForMessages resolves the issue for many messages in one query.
+func (r *Repository) ListIssueLinksForMessages(ctx context.Context, organisationID uuid.UUID, messageIDs []uuid.UUID) (map[uuid.UUID]driven.IssueLink, error) {
+	out := make(map[uuid.UUID]driven.IssueLink, len(messageIDs))
+	if len(messageIDs) == 0 {
+		return out, nil
+	}
+	var b strings.Builder
+	b.WriteString(`SELECT ii.message_id, i.id, i.project_id, i.title, i.status
+		FROM issue_items ii
+		INNER JOIN issues i ON i.id = ii.issue_id
+		WHERE i.organisation_id = ? AND i.discarded_at IS NULL AND ii.message_id IN (`)
+	args := make([]any, 0, len(messageIDs)+1)
+	args = append(args, organisationID.String())
+	for i, id := range messageIDs {
+		if i > 0 {
+			b.WriteByte(',')
+		}
+		b.WriteByte('?')
+		args = append(args, id.String())
+	}
+	b.WriteByte(')')
+	rows, err := r.db.QueryContext(ctx, b.String(), args...)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	for rows.Next() {
+		var messageID, issueID, projectID, title, status string
+		if err := rows.Scan(&messageID, &issueID, &projectID, &title, &status); err != nil {
+			return nil, err
+		}
+		mid, err := uuid.Parse(messageID)
+		if err != nil {
+			return nil, err
+		}
+		iid, err := uuid.Parse(issueID)
+		if err != nil {
+			return nil, err
+		}
+		pid, err := uuid.Parse(projectID)
+		if err != nil {
+			return nil, err
+		}
+		out[mid] = driven.IssueLink{IssueID: iid, ProjectID: pid, Title: title, Status: status}
+	}
+	return out, rows.Err()
 }
 
 func (r *Repository) FindIssueIDByManualItem(ctx context.Context, manualItemID uuid.UUID) (*uuid.UUID, error) {

@@ -795,6 +795,14 @@ type IssueItemRow struct {
 	AddedAt      time.Time
 }
 
+// IssueLink is the issue a message sits on, with enough to label it.
+type IssueLink struct {
+	IssueID   uuid.UUID
+	ProjectID uuid.UUID
+	Title     string
+	Status    string
+}
+
 // IssueRepository persists issues and trail links.
 type IssueRepository interface {
 	CreateIssue(ctx context.Context, row IssueRow) error
@@ -810,6 +818,10 @@ type IssueRepository interface {
 	// lookup per row.
 	CountIssueItemsByProject(ctx context.Context, organisationID, projectID uuid.UUID) (map[uuid.UUID]int, error)
 	FindIssueIDByMessage(ctx context.Context, messageID uuid.UUID) (*uuid.UUID, error)
+	// ListIssueLinksForMessages returns, for each message on an issue's trail,
+	// the issue it belongs to. Discarded issues are left out. A message can be
+	// on at most one issue, so the result is keyed by message id.
+	ListIssueLinksForMessages(ctx context.Context, organisationID uuid.UUID, messageIDs []uuid.UUID) (map[uuid.UUID]IssueLink, error)
 	FindIssueIDByManualItem(ctx context.Context, manualItemID uuid.UUID) (*uuid.UUID, error)
 }
 

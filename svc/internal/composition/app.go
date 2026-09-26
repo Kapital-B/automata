@@ -347,6 +347,7 @@ func (r *Runtime) buildServices(ctx context.Context) error {
 		Contacts:    repo,
 		Messages:    repo,
 		Timeline:    repo,
+		Summaries:   repo,
 	}
 	factSvc := &appfacts.Service{
 		Users:       repo,
@@ -416,6 +417,7 @@ func (r *Runtime) buildServices(ctx context.Context) error {
 		Decisions:      repo,
 		Contradictions: repo,
 		Summaries:      repo,
+		Assignments:    repo,
 	}
 	overviewSvc := &appoverview.Service{
 		Users:     repo,
