@@ -19,6 +19,7 @@ import {
   createProjectFact,
   createProjectIssue,
   discardIssue,
+  markActionItemDone,
   rejectFactVersion,
   resolveContradiction,
   updateProject,
@@ -104,6 +105,14 @@ export default function ProjectDetailPage() {
       await invalidate("project-issues", "project-timeline");
     },
     onError: failed("Could not create the issue"),
+  });
+  const completeTodo = useMutation({
+    mutationFn: (actionItemID: string) => markActionItemDone(authed(), actionItemID),
+    onSuccess: async () => {
+      toast({ title: "To-do done" });
+      await invalidate("project-attention", "attention", "overview", "summary");
+    },
+    onError: failed("Could not mark the to-do done"),
   });
   const discard = useMutation({
     mutationFn: (issueID: string) => discardIssue(authed(), issueID),
@@ -333,7 +342,8 @@ export default function ProjectDetailPage() {
           confirmDecision: (decisionID) => acceptDecision.mutate(decisionID),
           withdrawDecision: (decisionID) => withdraw.mutate(decisionID),
           resolveContradiction: (cid, resolution, keep) => resolve.mutate({ id: cid, resolution, keep }),
-          busy,
+          completeTodo: (id) => completeTodo.mutate(id),
+          busy: busy || completeTodo.isPending,
         }}
       />
 

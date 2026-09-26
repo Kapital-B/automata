@@ -2,7 +2,6 @@ import { Link } from "react-router-dom";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import {
   AlertTriangle,
-  Check,
   CheckCircle2,
   ChevronDown,
   ChevronRight,
@@ -12,6 +11,7 @@ import {
   History,
   Inbox,
   Info,
+  ListTodo,
   Loader2,
   Mail,
   PenLine,
@@ -19,6 +19,7 @@ import {
   Scale,
   Sparkles,
   Users,
+  X,
   type LucideIcon,
 } from "lucide-react";
 import type { AccountFilter } from "@/components/AppShell";
@@ -38,14 +39,18 @@ import {
   getAttention,
   getOverview,
   listActivity,
+  dismissFYI,
   markActionItemDone,
   type ActivityItem,
   type AskAnswer,
   type AskCitation,
   type OverviewProject,
+  type SummaryFYI,
 } from "@/lib/auth";
 import { activityHref, activityLabel, groupActivityByDay, isAdverse } from "@/lib/activity";
 import { mergeNeedsMeRows, type NeedsMeRow } from "@/lib/needsMe";
+import { inboxHref } from "@/lib/todos";
+import { TodoItem } from "@/components/TodoItem";
 import { toast } from "@/hooks/use-toast";
 import { useAssistantHomeData } from "@/hooks/useAssistantHomeData";
 import { useState } from "react";
@@ -57,6 +62,8 @@ type Props = {
 
 /** How many attention rows Home shows before asking to expand. */
 const NEEDS_ME_PREVIEW = 5;
+/** How many FYIs Home shows before asking to expand. */
+const FYI_PREVIEW = 4;
 
 function citationHref(c: AskCitation): string | undefined {
   if (!c.project_id) return undefined;
@@ -121,12 +128,13 @@ export default function AssistantHomePage({ accountFilter }: Props) {
     },
     onSuccess: () => {
       void queryClient.invalidateQueries({ queryKey: ["attention"] });
+      void queryClient.invalidateQueries({ queryKey: ["overview"] });
       void queryClient.invalidateQueries({ queryKey: ["summary"] });
       void queryClient.invalidateQueries({ queryKey: ["draft-suggestions"] });
     },
     onError: (err) => {
       toast({
-        title: "Could not mark action item done",
+        title: "Could not mark the to-do done",
         description: err instanceof Error ? err.message : "Please try again.",
         variant: "destructive",
       });
@@ -226,7 +234,7 @@ export default function AssistantHomePage({ accountFilter }: Props) {
         <SectionHeading
           id="home-actions-heading"
           title="Needs you"
-          description="Proposals to confirm, disagreements to settle, and mail to act on."
+          description="Proposals to confirm, disagreements to settle, and to-dos from your mail."
         />
         {needsMe.length === 0 ? (
           <div className="surface-card flex flex-col items-center gap-3 px-6 py-10 text-center">
@@ -262,14 +270,24 @@ export default function AssistantHomePage({ accountFilter }: Props) {
               aria-label="Needs you"
               className="surface-card scroll-mt-20 divide-y divide-border/70 overflow-hidden"
             >
-              {visibleNeedsMe.map((row) => (
-                <NeedsMeItem
-                  key={row.id}
-                  row={row}
-                  pending={doneMutation.isPending}
-                  onDone={(id) => doneMutation.mutate(id)}
-                />
-              ))}
+              {visibleNeedsMe.map((row) =>
+                row.kind === "mail" && row.mailActionId ? (
+                  <TodoItem
+                    key={row.id}
+                    text={row.title}
+                    href={row.href}
+                    label={row.whyMeLabel}
+                    projectLabel={row.projectLabel}
+                    issueTitle={row.issueTitle}
+                    issueHref={row.issueHref}
+                    dueAt={row.dueAt}
+                    pending={doneMutation.isPending}
+                    onDone={() => doneMutation.mutate(row.mailActionId!)}
+                  />
+                ) : (
+                  <NeedsMeItem key={row.id} row={row} />
+                ),
+              )}
             </ul>
             {needsMe.length > NEEDS_ME_PREVIEW ? (
               <Button
@@ -396,13 +414,6 @@ export default function AssistantHomePage({ accountFilter }: Props) {
                     : undefined
                 }
               />
-              {fyi.length > 0 && (
-                <QueueRow
-                  icon={Info}
-                  title="FYI"
-                  detail={`${fyi.length} item${fyi.length === 1 ? "" : "s"} from mail summaries.`}
-                />
-              )}
               {connectedAccounts.length === 0 && (
                 <QueueRow
                   icon={Plug}
@@ -414,6 +425,8 @@ export default function AssistantHomePage({ accountFilter }: Props) {
               )}
             </ul>
           </section>
+
+          {fyi.length > 0 && <FyiSection items={fyi} />}
         </div>
       </div>
     </div>
@@ -452,18 +465,10 @@ const NEEDS_ME_ICONS: Record<string, LucideIcon> = {
   provisional_fact: FileCheck2,
   issue_assignee: CircleDot,
   member_role: Users,
-  mail_action_item: Mail,
+  mail_action_item: ListTodo,
 };
 
-function NeedsMeItem({
-  row,
-  pending,
-  onDone,
-}: {
-  row: NeedsMeRow;
-  pending: boolean;
-  onDone: (mailActionID: string) => void;
-}) {
+function NeedsMeItem({ row }: { row: NeedsMeRow }) {
   const adverse = row.whyMe === "open_contradiction";
   return (
     <li className="flex items-start gap-3 px-4 py-3">
@@ -485,19 +490,6 @@ function NeedsMeItem({
           )}
         </div>
       </div>
-      {row.kind === "mail" && row.mailActionId ? (
-        <Button
-          size="sm"
-          variant="outline"
-          className="shrink-0"
-          aria-label={`Mark “${row.title}” done`}
-          onClick={() => onDone(row.mailActionId!)}
-          disabled={pending}
-        >
-          <Check aria-hidden="true" className="mr-1.5 h-3.5 w-3.5" />
-          Done
-        </Button>
-      ) : null}
     </li>
   );
 }
@@ -755,5 +747,83 @@ function RecentProjectRow({ project }: { project: OverviewProject }) {
         />
       </Link>
     </li>
+  );
+}
+
+/**
+ * Things mail told you that ask nothing of you. Each opens its message, and
+ * Dismiss clears it once read; unlike a to-do there is nothing to finish.
+ */
+function FyiSection({ items }: { items: SummaryFYI[] }) {
+  const { accessToken } = useAuth();
+  const queryClient = useQueryClient();
+  const [showAll, setShowAll] = useState(false);
+  const visible = showAll ? items : items.slice(0, FYI_PREVIEW);
+  const dismiss = useMutation({
+    mutationFn: async (id: string) => {
+      if (!accessToken) throw new Error("Not authenticated");
+      return dismissFYI(accessToken, id);
+    },
+    onSuccess: () => {
+      void queryClient.invalidateQueries({ queryKey: ["summary"] });
+    },
+    onError: (err) => {
+      toast({
+        title: "Could not dismiss",
+        description: err instanceof ApiError ? err.message : "Please try again.",
+        variant: "destructive",
+      });
+    },
+  });
+
+  return (
+    <section className="space-y-3" aria-labelledby="home-fyi-heading">
+      <SectionHeading
+        id="home-fyi-heading"
+        title="For your information"
+        description="What mail told you that needs nothing from you."
+      />
+      <ul id="home-fyi-list" aria-label="For your information" className="surface-card divide-y divide-border/70 overflow-hidden">
+        {visible.map((item) => (
+          <li key={item.id} className="flex items-start gap-3 px-4 py-3">
+            <IconTile icon={Info} />
+            <div className="min-w-0 flex-1 space-y-0.5">
+              <Link
+                to={inboxHref(item.message_id, item.account_id)}
+                className="line-clamp-3 rounded-sm text-sm hover:underline focus-visible:underline focus-visible:outline-none"
+              >
+                {item.text}
+              </Link>
+              <time dateTime={item.created_at} className="block text-xs text-muted-foreground">
+                {relativeTime(item.created_at)}
+              </time>
+            </div>
+            <Button
+              size="icon"
+              variant="ghost"
+              className="h-9 w-9 shrink-0 text-muted-foreground"
+              aria-label={`Dismiss “${item.text}”`}
+              title="Dismiss"
+              disabled={dismiss.isPending && dismiss.variables === item.id}
+              onClick={() => dismiss.mutate(item.id)}
+            >
+              <X aria-hidden="true" className="h-4 w-4" />
+            </Button>
+          </li>
+        ))}
+      </ul>
+      {items.length > FYI_PREVIEW && (
+        <Button
+          variant="ghost"
+          size="sm"
+          className="text-muted-foreground"
+          aria-expanded={showAll}
+          aria-controls="home-fyi-list"
+          onClick={() => setShowAll((v) => !v)}
+        >
+          {showAll ? "Show fewer" : `Show all ${items.length}`}
+        </Button>
+      )}
+    </section>
   );
 }

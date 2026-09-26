@@ -9,6 +9,10 @@ export type NeedsMeRow = {
   projectLabel?: string;
   kind: "attention" | "mail";
   mailActionId?: string;
+  /** A mail to-do on an issue's trail links to that issue. */
+  issueTitle?: string;
+  issueHref?: string;
+  dueAt?: string;
 };
 
 const WHY_ME_LABELS: Record<string, string> = {
@@ -17,7 +21,7 @@ const WHY_ME_LABELS: Record<string, string> = {
   provisional_fact: "Confirm fact",
   provisional_decision: "Confirm decision",
   open_contradiction: "Contradiction",
-  mail_action_item: "Mail action",
+  mail_action_item: "To-do",
 };
 
 const WHY_ME_RANK: Record<string, number> = {
@@ -85,6 +89,10 @@ function rowFromAttention(item: AttentionItem): NeedsMeRow {
     projectLabel: item.project_name || undefined,
     kind: isMail ? "mail" : "attention",
     mailActionId: isMail ? item.ref_id : undefined,
+    issueTitle: item.issue_title || undefined,
+    issueHref:
+      item.issue_id && item.project_id ? `/projects/${item.project_id}/issues/${item.issue_id}` : undefined,
+    dueAt: item.due_at || undefined,
   };
 }
 
@@ -111,6 +119,7 @@ export function mergeNeedsMeRows(
       href: `/inbox?message_id=${encodeURIComponent(item.message_id)}&account_id=${encodeURIComponent(item.account_id)}`,
       kind: "mail",
       mailActionId: item.id,
+      dueAt: item.due_at,
     }));
 
   return [...fromAttention, ...fromMail].sort((a, b) => {

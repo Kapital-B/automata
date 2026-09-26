@@ -52,6 +52,7 @@ vi.mock("@/lib/auth", async () => {
     withdrawDecision: vi.fn(),
     askProject: vi.fn(),
     getProjectAttention: vi.fn(),
+    markActionItemDone: vi.fn(),
   };
 });
 
@@ -680,6 +681,30 @@ describe("Project workspace UI", () => {
     const needs = screen.getByRole("region", { name: /^needs you$/i });
     expect(within(needs).getByRole("link", { name: /assigned to you.*yours/i })).toHaveAttribute("href", "/projects/p1/issues/iss2");
     expect(within(needs).queryByText("Confirm fact")).not.toBeInTheDocument();
+  });
+
+  it("lists your to-dos from mail in Needs you, linked to their issue, and closes them", async () => {
+    vi.mocked(auth.markActionItemDone).mockResolvedValue({ status: "ok" });
+    getProjectAttention.mockResolvedValue({
+      items: [
+        {
+          id: "mail:t1", why_me: "mail_action_item", title: "Send the datasheet", project_id: "p1",
+          ref_type: "action_item", ref_id: "t1", account_id: "a1", message_id: "m1",
+          issue_id: "iss2", issue_title: "Pump P-03 duty",
+        },
+      ],
+      counts: { total: 1, issue_assignee: 0, member_role: 0, provisional_fact: 0, provisional_decision: 0, open_contradiction: 0, mail_action_item: 1 },
+    });
+    renderPage(newClient());
+
+    const needs = await screen.findByRole("region", { name: /^needs you$/i });
+    expect(await within(needs).findByRole("link", { name: "Send the datasheet" })).toHaveAttribute(
+      "href",
+      "/inbox?message_id=m1&account_id=a1",
+    );
+    expect(within(needs).getByRole("link", { name: "On: Pump P-03 duty" })).toHaveAttribute("href", "/projects/p1/issues/iss2");
+    fireEvent.click(within(needs).getByRole("button", { name: "Mark “Send the datasheet” done" }));
+    await waitFor(() => expect(auth.markActionItemDone).toHaveBeenCalledWith("token", "t1"));
   });
 
   it("says plainly when nothing needs you", async () => {

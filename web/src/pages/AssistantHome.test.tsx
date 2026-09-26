@@ -22,6 +22,7 @@ vi.mock("@/lib/auth", async () => {
     getOverview: vi.fn(),
     listActivity: vi.fn(),
     markActionItemDone: vi.fn(),
+    dismissFYI: vi.fn(),
     getApiHealth: vi.fn(),
     askAcross: vi.fn(),
   };
@@ -33,6 +34,8 @@ const getOverview = vi.mocked(auth.getOverview);
 const listActivity = vi.mocked(auth.listActivity);
 const getApiHealth = vi.mocked(auth.getApiHealth);
 const askAcross = vi.mocked(auth.askAcross);
+const markActionItemDone = vi.mocked(auth.markActionItemDone);
+const dismissFYI = vi.mocked(auth.dismissFYI);
 
 function renderPage() {
   const client = new QueryClient({
@@ -410,5 +413,75 @@ describe("AssistantHomePage", () => {
       "href",
       "/projects/p1#position",
     );
+  });
+
+  it("shows a mail to-do with its project, issue and due date, and marks it done", async () => {
+    getAttention.mockResolvedValue({
+      items: [
+        {
+          id: "mail:t1",
+          why_me: "mail_action_item",
+          title: "Reply to Jan about the pump",
+          project_id: "p1",
+          project_name: "Cooling",
+          ref_type: "action_item",
+          ref_id: "t1",
+          account_id: "a1",
+          message_id: "m1",
+          issue_id: "i1",
+          issue_title: "Pump P-03 duty",
+          due_at: new Date(Date.now() - 3 * 24 * 60 * 60 * 1000).toISOString(),
+        },
+      ],
+      counts: {
+        total: 1,
+        issue_assignee: 0,
+        member_role: 0,
+        provisional_fact: 0,
+        provisional_decision: 0,
+        open_contradiction: 0,
+        mail_action_item: 1,
+      },
+    });
+    markActionItemDone.mockResolvedValue({ status: "ok" } as never);
+    mockedUseAssistantHomeData.mockReturnValue(baseMailState());
+    renderPage();
+
+    const todo = await screen.findByRole("link", { name: "Reply to Jan about the pump" });
+    expect(todo).toHaveAttribute("href", "/inbox?message_id=m1&account_id=a1");
+    expect(screen.getByText("To-do")).toBeInTheDocument();
+    expect(screen.getByText("Cooling")).toBeInTheDocument();
+    expect(screen.getByRole("link", { name: "On: Pump P-03 duty" })).toHaveAttribute("href", "/projects/p1/issues/i1");
+    expect(screen.getByText(/Overdue by 3 days/)).toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole("button", { name: "Mark “Reply to Jan about the pump” done" }));
+    await waitFor(() => expect(markActionItemDone).toHaveBeenCalledWith("token", "t1"));
+  });
+
+  it("lists FYIs with their message and lets them be dismissed", async () => {
+    dismissFYI.mockResolvedValue({ status: "ok" });
+    mockedUseAssistantHomeData.mockReturnValue(
+      baseMailState({
+        fyi: [
+          { id: "f1", account_id: "a1", message_id: "m9", text: "Site closed Friday", created_at: new Date().toISOString() },
+        ],
+      }),
+    );
+    renderPage();
+
+    expect(await screen.findByRole("heading", { name: "For your information" })).toBeInTheDocument();
+    expect(screen.getByRole("link", { name: "Site closed Friday" })).toHaveAttribute(
+      "href",
+      "/inbox?message_id=m9&account_id=a1",
+    );
+    fireEvent.click(screen.getByRole("button", { name: "Dismiss “Site closed Friday”" }));
+    await waitFor(() => expect(dismissFYI).toHaveBeenCalledWith("token", "f1"));
+  });
+
+  it("leaves the FYI card out when there are none", async () => {
+    mockedUseAssistantHomeData.mockReturnValue(baseMailState());
+    renderPage();
+    await screen.findByRole("heading", { name: "Across your projects" });
+    expect(screen.queryByRole("heading", { name: "For your information" })).not.toBeInTheDocument();
   });
 });

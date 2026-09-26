@@ -9,14 +9,26 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
+import {
+  AlertDialog,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from "@/components/ui/alert-dialog";
 import { useAuth } from "@/components/auth/AuthProvider";
+import { TodoItem } from "@/components/TodoItem";
 import {
   ApiError,
   getIssue,
   listContacts,
+  markActionItemDone,
   removeIssueItem,
   updateIssue,
 } from "@/lib/auth";
+import { inboxHref } from "@/lib/todos";
 import { toast } from "@/hooks/use-toast";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Loader2 } from "lucide-react";
@@ -44,6 +56,8 @@ export default function IssueDetailPage() {
   const [note, setNote] = useState("");
   const [status, setStatus] = useState("open");
   const [assignee, setAssignee] = useState("me");
+  // Resolving an issue with open to-dos asks whether they are done too.
+  const [confirmResolve, setConfirmResolve] = useState(false);
 
   useEffect(() => {
     if (!issueQuery.data) return;
@@ -59,14 +73,23 @@ export default function IssueDetailPage() {
     }
   }, [issueQuery.data]);
 
+  // To-dos, the project's Needs you and Home all read the same items.
+  const refreshTodos = () =>
+    Promise.all(
+      ["attention", "project-attention", "overview", "summary"].map((key) =>
+        queryClient.invalidateQueries({ queryKey: [key] }),
+      ),
+    );
+
   const saveMutation = useMutation({
-    mutationFn: async () => {
+    mutationFn: async ({ completeTodos = false }: { completeTodos?: boolean } = {}) => {
       if (!accessToken || !issueId) throw new Error("Not authenticated");
       const body: Record<string, unknown> = {
         title: title.trim(),
         current_position_note: note.trim(),
         status,
       };
+      if (completeTodos) body.complete_todos = true;
       if (assignee === "none") {
         body.assignee_user_id = null;
         body.assignee_contact_id = null;
@@ -79,14 +102,35 @@ export default function IssueDetailPage() {
       }
       return updateIssue(accessToken, issueId, body);
     },
-    onSuccess: async () => {
-      toast({ title: "Issue saved" });
+    onSuccess: async (_data, vars) => {
+      setConfirmResolve(false);
+      toast({ title: vars?.completeTodos ? "Issue resolved and to-dos done" : "Issue saved" });
       await queryClient.invalidateQueries({ queryKey: ["issue", accessToken, issueId] });
       await queryClient.invalidateQueries({ queryKey: ["project-issues"] });
+      await refreshTodos();
     },
     onError: (err) => {
       toast({
         title: "Save failed",
+        description: err instanceof ApiError ? err.message : "Please try again.",
+        variant: "destructive",
+      });
+    },
+  });
+
+  const todoMutation = useMutation({
+    mutationFn: async (actionItemID: string) => {
+      if (!accessToken) throw new Error("Not authenticated");
+      return markActionItemDone(accessToken, actionItemID);
+    },
+    onSuccess: async () => {
+      toast({ title: "To-do done" });
+      await queryClient.invalidateQueries({ queryKey: ["issue", accessToken, issueId] });
+      await refreshTodos();
+    },
+    onError: (err) => {
+      toast({
+        title: "Could not mark the to-do done",
         description: err instanceof ApiError ? err.message : "Please try again.",
         variant: "destructive",
       });
@@ -126,6 +170,14 @@ export default function IssueDetailPage() {
   }
 
   const issue = issueQuery.data;
+  const todos = issue.todos ?? [];
+  const save = () => {
+    if (status === "resolved" && issue.status !== "resolved" && todos.length > 0) {
+      setConfirmResolve(true);
+      return;
+    }
+    saveMutation.mutate({});
+  };
 
   return (
     <div className="space-y-6">
@@ -139,6 +191,31 @@ export default function IssueDetailPage() {
           </Button>
         }
       />
+
+      {todos.length > 0 && (
+        <section aria-labelledby="issue-todos-heading" className="max-w-3xl space-y-3">
+          <div>
+            <h2 id="issue-todos-heading" className="font-display text-xl font-medium">
+              Your to-dos
+            </h2>
+            <p className="text-sm text-muted-foreground">
+              What this issue&apos;s mail asks you to do. Only you see these.
+            </p>
+          </div>
+          <ul aria-label="Your to-dos" className="surface-card divide-y divide-border/70 overflow-hidden">
+            {todos.map((t) => (
+              <TodoItem
+                key={t.id}
+                text={t.text}
+                href={inboxHref(t.message_id, t.account_id)}
+                dueAt={t.due_at}
+                pending={todoMutation.isPending}
+                onDone={() => todoMutation.mutate(t.id)}
+              />
+            ))}
+          </ul>
+        </section>
+      )}
 
       <section className="max-w-xl space-y-3">
         <div className="space-y-1">
@@ -154,9 +231,11 @@ export default function IssueDetailPage() {
           <Textarea id="issue-note" value={note} onChange={(e) => setNote(e.target.value)} rows={3} />
         </div>
         <div className="space-y-1">
-          <label className="text-xs text-muted-foreground">Status</label>
+          <label className="text-xs text-muted-foreground" htmlFor="issue-status">
+            Status
+          </label>
           <Select value={status} onValueChange={setStatus}>
-            <SelectTrigger>
+            <SelectTrigger id="issue-status">
               <SelectValue />
             </SelectTrigger>
             <SelectContent>
@@ -167,9 +246,11 @@ export default function IssueDetailPage() {
           </Select>
         </div>
         <div className="space-y-1">
-          <label className="text-xs text-muted-foreground">Assignee</label>
+          <label className="text-xs text-muted-foreground" htmlFor="issue-assignee">
+            Assignee
+          </label>
           <Select value={assignee} onValueChange={setAssignee}>
-            <SelectTrigger>
+            <SelectTrigger id="issue-assignee">
               <SelectValue />
             </SelectTrigger>
             <SelectContent>
@@ -183,10 +264,31 @@ export default function IssueDetailPage() {
             </SelectContent>
           </Select>
         </div>
-        <Button disabled={saveMutation.isPending} onClick={() => saveMutation.mutate()}>
+        <Button disabled={saveMutation.isPending} onClick={save}>
           {saveMutation.isPending ? "Saving…" : "Save"}
         </Button>
       </section>
+
+      <AlertDialog open={confirmResolve} onOpenChange={setConfirmResolve}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>Resolve this issue?</AlertDialogTitle>
+            <AlertDialogDescription>
+              You still have {todos.length} open {todos.length === 1 ? "to-do" : "to-dos"} from this issue&apos;s mail. Mark{" "}
+              {todos.length === 1 ? "it" : "them"} done as well?
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel>Cancel</AlertDialogCancel>
+            <Button variant="outline" disabled={saveMutation.isPending} onClick={() => saveMutation.mutate({})}>
+              Resolve only
+            </Button>
+            <Button disabled={saveMutation.isPending} onClick={() => saveMutation.mutate({ completeTodos: true })}>
+              Resolve and mark done
+            </Button>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
 
       <section className="space-y-3">
         <h2 className="text-sm font-medium uppercase tracking-wider text-muted-foreground">
