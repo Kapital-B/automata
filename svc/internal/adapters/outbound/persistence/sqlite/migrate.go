@@ -467,6 +467,16 @@ func migrateOrganisationsContacts(db *sql.DB) error {
 	if err := migrateForwardRuleScope(db); err != nil {
 		return err
 	}
+	// Mirrors common/008_action_item_actor.sql.
+	hasActionedBy, err := tableHasColumn(db, "action_items", "actioned_by_user_id")
+	if err != nil {
+		return err
+	}
+	if !hasActionedBy {
+		if _, err := db.Exec(`ALTER TABLE action_items ADD COLUMN actioned_by_user_id TEXT`); err != nil {
+			return err
+		}
+	}
 
 	return backfillHomeOrganisations(db)
 }

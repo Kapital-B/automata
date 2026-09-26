@@ -31,6 +31,7 @@ import (
 	appprojectai "github.com/Kapital-B/automata/svc/internal/application/projectai"
 	appprojects "github.com/Kapital-B/automata/svc/internal/application/projects"
 	appreconcile "github.com/Kapital-B/automata/svc/internal/application/reconcile"
+	apptodos "github.com/Kapital-B/automata/svc/internal/application/todos"
 	domainacc "github.com/Kapital-B/automata/svc/internal/domain/accounts"
 	"github.com/go-chi/chi/v5"
 	"github.com/go-chi/cors"
@@ -52,6 +53,7 @@ type Handlers struct {
 	ContactSvc           *appcontacts.Service
 	ProjectSvc           *appprojects.Service
 	IssueSvc             *appissues.Service
+	TodoSvc              *apptodos.Service
 	FactSvc              *appfacts.Service
 	InterpretSvc         *appinterpret.Service
 	ReconcileSvc         *appreconcile.Service
@@ -158,6 +160,8 @@ func (h *Handlers) Routes() http.Handler {
 	r.Get("/api/projects/{id}/issues", h.listProjectIssues)
 	r.Post("/api/projects/{id}/issues/suggest", h.suggestProjectIssue)
 	r.Post("/api/projects/{id}/issues", h.createProjectIssue)
+	r.Get("/api/projects/{id}/todos", h.listProjectTodos)
+	r.Post("/api/projects/{id}/todos/{todoID}/done", h.completeProjectTodo)
 	r.Get("/api/issues/{id}", h.getIssue)
 	r.Patch("/api/issues/{id}", h.updateIssue)
 	r.Post("/api/issues/{id}/discard", h.discardIssue)

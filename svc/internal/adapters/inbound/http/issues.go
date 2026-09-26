@@ -441,17 +441,7 @@ func issueJSON(v appissues.IssueView, withItems bool) map[string]any {
 		out["items"] = items
 		todos := make([]map[string]any, 0, len(v.Todos))
 		for _, t := range v.Todos {
-			row := map[string]any{
-				"id":         t.ID.String(),
-				"text":       t.Text,
-				"account_id": t.AccountID.String(),
-				"message_id": t.MessageID.String(),
-				"created_at": t.CreatedAt.UTC().Format(time.RFC3339Nano),
-			}
-			if t.DueAt != nil {
-				row["due_at"] = t.DueAt.UTC().Format(time.RFC3339Nano)
-			}
-			todos = append(todos, row)
+			todos = append(todos, todoJSON(t))
 		}
 		out["todos"] = todos
 	}

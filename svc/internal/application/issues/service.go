@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/Kapital-B/automata/svc/internal/application/ports/driven"
+	apptodos "github.com/Kapital-B/automata/svc/internal/application/todos"
 	domainissues "github.com/Kapital-B/automata/svc/internal/domain/issues"
 	"github.com/google/uuid"
 )
@@ -33,9 +34,9 @@ type Service struct {
 	Messages    driven.MessageRepository
 	Timeline    driven.TimelineRepository
 	LLM         driven.LLMClient
-	// Summaries supplies the caller's to-dos from mail on an issue's trail.
+	// Todos supplies the project's to-dos from mail on an issue's trail.
 	// Optional: without it an issue shows no to-dos.
-	Summaries driven.SummaryRepository
+	Todos *apptodos.Service
 }
 
 func (s *Service) homeOrg(ctx context.Context, userID uuid.UUID) (uuid.UUID, error) {
@@ -56,9 +57,9 @@ type IssueView struct {
 	// query for the whole project rather than per issue; on a single issue
 	// it is len(Items).
 	ItemCount int
-	// Todos are the caller's open to-dos from mail on this issue's trail.
-	// They are personal, so only a single-issue view carries them.
-	Todos []driven.ActionItemRow
+	// Todos are the project's open to-dos from mail on this issue's trail,
+	// whoever's mailbox they came from. Only a single-issue view carries them.
+	Todos []apptodos.Todo
 }
 
 type TrailItem struct {
@@ -96,8 +97,8 @@ type UpdateInput struct {
 	AssigneeUserID    *uuid.UUID
 	AssigneeContactID *uuid.UUID
 	SetAssignee       bool // true when client sent assignee fields
-	// CompleteTodos marks the caller's to-dos on the trail done when this
-	// update resolves the issue.
+	// CompleteTodos marks the to-dos on the trail done, the team's as well as
+	// the caller's, when this update resolves the issue.
 	CompleteTodos bool
 }
 
@@ -168,9 +169,12 @@ func (s *Service) Get(ctx context.Context, userID, issueID uuid.UUID) (*IssueVie
 		}
 		return ai.Before(*aj)
 	})
-	todos, err := s.todosOnTrail(ctx, userID, items)
-	if err != nil {
-		return nil, err
+	var todos []apptodos.Todo
+	if s.Todos != nil {
+		todos, err = s.Todos.ForIssue(ctx, userID, row.ProjectID, issueID)
+		if err != nil {
+			return nil, err
+		}
 	}
 	return &IssueView{
 		Issue: *row, AwaitingMe: awaitingMe(*row, userID),
@@ -179,33 +183,6 @@ func (s *Service) Get(ctx context.Context, userID, issueID uuid.UUID) (*IssueVie
 		ItemCount:     len(trail),
 		Todos:         todos,
 	}, nil
-}
-
-// todosOnTrail returns the caller's open to-dos whose message is on the trail.
-func (s *Service) todosOnTrail(ctx context.Context, userID uuid.UUID, items []driven.IssueItemRow) ([]driven.ActionItemRow, error) {
-	if s.Summaries == nil {
-		return nil, nil
-	}
-	onTrail := make(map[uuid.UUID]struct{}, len(items))
-	for _, it := range items {
-		if it.MessageID != nil {
-			onTrail[*it.MessageID] = struct{}{}
-		}
-	}
-	if len(onTrail) == 0 {
-		return nil, nil
-	}
-	open, err := s.Summaries.ListOpenActionItems(ctx, userID, nil)
-	if err != nil {
-		return nil, err
-	}
-	out := make([]driven.ActionItemRow, 0)
-	for _, a := range open {
-		if _, ok := onTrail[a.MessageID]; ok {
-			out = append(out, a)
-		}
-	}
-	return out, nil
 }
 
 // sourceOrHuman defaults an unset source to human: every operator-facing path
@@ -320,19 +297,9 @@ func (s *Service) Update(ctx context.Context, userID, issueID uuid.UUID, in Upda
 	if err := s.Issues.UpdateIssue(ctx, *row); err != nil {
 		return nil, err
 	}
-	if resolving && in.CompleteTodos && s.Summaries != nil {
-		items, err := s.Issues.ListIssueItems(ctx, issueID)
-		if err != nil {
+	if resolving && in.CompleteTodos && s.Todos != nil {
+		if _, err := s.Todos.CompleteForIssue(ctx, userID, row.ProjectID, issueID); err != nil {
 			return nil, err
-		}
-		todos, err := s.todosOnTrail(ctx, userID, items)
-		if err != nil {
-			return nil, err
-		}
-		for _, t := range todos {
-			if err := s.Summaries.MarkActionItemDone(ctx, userID, t.ID, row.UpdatedAt); err != nil {
-				return nil, err
-			}
 		}
 	}
 	return s.Get(ctx, userID, issueID)

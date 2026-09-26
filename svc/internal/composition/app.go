@@ -39,6 +39,7 @@ import (
 	appprojectai "github.com/Kapital-B/automata/svc/internal/application/projectai"
 	appprojects "github.com/Kapital-B/automata/svc/internal/application/projects"
 	appreconcile "github.com/Kapital-B/automata/svc/internal/application/reconcile"
+	apptodos "github.com/Kapital-B/automata/svc/internal/application/todos"
 	"github.com/Kapital-B/automata/svc/internal/configuration"
 	"github.com/aws/aws-sdk-go-v2/aws"
 	awsconfig "github.com/aws/aws-sdk-go-v2/config"
@@ -338,6 +339,7 @@ func (r *Runtime) buildServices(ctx context.Context) error {
 		Contacts:    repo,
 		Messages:    repo,
 	}
+	todoSvc := &apptodos.Service{Users: repo, Projects: repo, Summaries: repo}
 	issueSvc := &appissues.Service{
 		Users:       repo,
 		Projects:    repo,
@@ -347,7 +349,7 @@ func (r *Runtime) buildServices(ctx context.Context) error {
 		Contacts:    repo,
 		Messages:    repo,
 		Timeline:    repo,
-		Summaries:   repo,
+		Todos:       todoSvc,
 	}
 	factSvc := &appfacts.Service{
 		Users:       repo,
@@ -572,6 +574,7 @@ func (r *Runtime) buildServices(ctx context.Context) error {
 		ContactSvc:           contactSvc,
 		ProjectSvc:           projectSvc,
 		IssueSvc:             issueSvc,
+		TodoSvc:              todoSvc,
 		FactSvc:              factSvc,
 		InterpretSvc:         interpretSvc,
 		ReconcileSvc:         reconcileSvc,
