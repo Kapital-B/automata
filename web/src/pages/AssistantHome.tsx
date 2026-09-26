@@ -129,6 +129,7 @@ export default function AssistantHomePage({ accountFilter }: Props) {
     onSuccess: () => {
       void queryClient.invalidateQueries({ queryKey: ["attention"] });
       void queryClient.invalidateQueries({ queryKey: ["overview"] });
+      void queryClient.invalidateQueries({ queryKey: ["project-todos"] });
       void queryClient.invalidateQueries({ queryKey: ["summary"] });
       void queryClient.invalidateQueries({ queryKey: ["draft-suggestions"] });
     },

@@ -52,7 +52,8 @@ vi.mock("@/lib/auth", async () => {
     withdrawDecision: vi.fn(),
     askProject: vi.fn(),
     getProjectAttention: vi.fn(),
-    markActionItemDone: vi.fn(),
+    listProjectTodos: vi.fn(),
+    completeProjectTodo: vi.fn(),
   };
 });
 
@@ -118,6 +119,7 @@ const issueDetail = (over: Partial<auth.IssueListItem> = {}): auth.IssueDetail =
 describe("Project workspace UI", () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    vi.mocked(auth.listProjectTodos).mockResolvedValue([]);
     listContacts.mockResolvedValue([]);
     listProjectIssues.mockResolvedValue([]);
     getCurrentPosition.mockResolvedValue({ facts: [], decisions: [] });
@@ -683,28 +685,48 @@ describe("Project workspace UI", () => {
     expect(within(needs).queryByText("Confirm fact")).not.toBeInTheDocument();
   });
 
-  it("lists your to-dos from mail in Needs you, linked to their issue, and closes them", async () => {
-    vi.mocked(auth.markActionItemDone).mockResolvedValue({ status: "ok" });
+  it("shares the project's to-dos with everyone on it, keeping a teammate's mail private", async () => {
+    vi.mocked(auth.completeProjectTodo).mockResolvedValue({ status: "done" });
+    vi.mocked(auth.listProjectTodos).mockResolvedValue([
+      {
+        id: "t1", text: "Send the datasheet", owner_user_id: "u1", owner_label: "You", is_mine: true,
+        created_at: "2026-09-20T00:00:00Z", account_id: "a1", message_id: "m1", issue_id: "iss2", issue_title: "Pump P-03 duty",
+      },
+      {
+        id: "t2", text: "Chase the drawing", owner_user_id: "u2", owner_label: "sam@example.com", is_mine: false,
+        created_at: "2026-09-21T00:00:00Z",
+      },
+    ]);
+    // The caller's own to-do also arrives as attention; it must not be listed twice.
     getProjectAttention.mockResolvedValue({
       items: [
-        {
-          id: "mail:t1", why_me: "mail_action_item", title: "Send the datasheet", project_id: "p1",
-          ref_type: "action_item", ref_id: "t1", account_id: "a1", message_id: "m1",
-          issue_id: "iss2", issue_title: "Pump P-03 duty",
-        },
+        { id: "mail:t1", why_me: "mail_action_item", title: "Send the datasheet", project_id: "p1", ref_type: "action_item", ref_id: "t1", account_id: "a1", message_id: "m1" },
       ],
       counts: { total: 1, issue_assignee: 0, member_role: 0, provisional_fact: 0, provisional_decision: 0, open_contradiction: 0, mail_action_item: 1 },
     });
     renderPage(newClient());
 
-    const needs = await screen.findByRole("region", { name: /^needs you$/i });
-    expect(await within(needs).findByRole("link", { name: "Send the datasheet" })).toHaveAttribute(
-      "href",
-      "/inbox?message_id=m1&account_id=a1",
-    );
-    expect(within(needs).getByRole("link", { name: "On: Pump P-03 duty" })).toHaveAttribute("href", "/projects/p1/issues/iss2");
-    fireEvent.click(within(needs).getByRole("button", { name: "Mark “Send the datasheet” done" }));
-    await waitFor(() => expect(auth.markActionItemDone).toHaveBeenCalledWith("token", "t1"));
+    const todos = await screen.findByRole("region", { name: /^to-dos/i });
+    expect(within(todos).getByRole("link", { name: "Send the datasheet" })).toHaveAttribute("href", "/inbox?message_id=m1&account_id=a1");
+    expect(within(todos).getByRole("link", { name: "On: Pump P-03 duty" })).toHaveAttribute("href", "/projects/p1/issues/iss2");
+    expect(within(todos).getByText("You")).toBeInTheDocument();
+    // A teammate's to-do names them and does not link to their mail.
+    expect(within(todos).getByText("Chase the drawing")).toBeInTheDocument();
+    expect(within(todos).queryByRole("link", { name: "Chase the drawing" })).not.toBeInTheDocument();
+    expect(within(todos).getByText("sam@example.com")).toBeInTheDocument();
+
+    const needs = screen.getByRole("region", { name: /^needs you$/i });
+    expect(within(needs).queryByText("Send the datasheet")).not.toBeInTheDocument();
+
+    fireEvent.click(within(todos).getByRole("button", { name: "Mark “Chase the drawing” done" }));
+    await waitFor(() => expect(auth.completeProjectTodo).toHaveBeenCalledWith("token", "p1", "t2"));
+  });
+
+  it("leaves the to-do section out when the project has none", async () => {
+    renderPage(newClient());
+    await screen.findByRole("region", { name: /^needs you$/i });
+    await waitFor(() => expect(auth.listProjectTodos).toHaveBeenCalled());
+    expect(screen.queryByRole("region", { name: /^to-dos/i })).not.toBeInTheDocument();
   });
 
   it("says plainly when nothing needs you", async () => {

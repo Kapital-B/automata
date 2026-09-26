@@ -13,13 +13,13 @@ import { toast } from "@/hooks/use-toast";
 import {
   ApiError,
   addIssueItem,
+  completeProjectTodo,
   confirmDecision,
   confirmFactVersion,
   createProjectDecision,
   createProjectFact,
   createProjectIssue,
   discardIssue,
-  markActionItemDone,
   rejectFactVersion,
   resolveContradiction,
   updateProject,
@@ -29,6 +29,7 @@ import {
 } from "@/lib/auth";
 import { ExtractionStatus } from "./project/ExtractionStatus";
 import { NeedsYou } from "./project/NeedsYou";
+import { TodosSection } from "./project/TodosSection";
 import { PositionSection } from "./project/PositionSection";
 import { IssuesPanel } from "./project/IssuesPanel";
 import { AskPanel } from "./project/AskPanel";
@@ -107,10 +108,10 @@ export default function ProjectDetailPage() {
     onError: failed("Could not create the issue"),
   });
   const completeTodo = useMutation({
-    mutationFn: (actionItemID: string) => markActionItemDone(authed(), actionItemID),
+    mutationFn: (todoID: string) => completeProjectTodo(authed(), projectID, todoID),
     onSuccess: async () => {
       toast({ title: "To-do done" });
-      await invalidate("project-attention", "attention", "overview", "summary");
+      await invalidate("project-todos", "project-attention", "attention", "overview", "summary", "issue");
     },
     onError: failed("Could not mark the to-do done"),
   });
@@ -342,9 +343,16 @@ export default function ProjectDetailPage() {
           confirmDecision: (decisionID) => acceptDecision.mutate(decisionID),
           withdrawDecision: (decisionID) => withdraw.mutate(decisionID),
           resolveContradiction: (cid, resolution, keep) => resolve.mutate({ id: cid, resolution, keep }),
-          completeTodo: (id) => completeTodo.mutate(id),
-          busy: busy || completeTodo.isPending,
+          busy,
         }}
+      />
+
+      <TodosSection
+        todos={data.todos}
+        loading={data.todosQuery.isLoading}
+        projectID={projectID}
+        busy={completeTodo.isPending}
+        onDone={(id) => completeTodo.mutate(id)}
       />
 
       <div className="grid gap-8 lg:grid-cols-[minmax(0,1fr)_22rem]">
