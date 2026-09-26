@@ -1,139 +1,50 @@
-import { useEffect, useMemo, useRef, useState, type SyntheticEvent } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
+import { useSearchParams } from "react-router-dom";
+import { useInfiniteQuery, useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import { ChevronDown, Loader2, Tags } from "lucide-react";
 import { PageHeader } from "@/components/PageHeader";
-import { AccountBadge } from "@/components/AccountBadge";
-import { CategoryPill } from "@/components/CategoryPill";
-import { relativeTime } from "@/lib/accounts";
-import {
-  categorizeAccount,
-  forwardMessage,
-  generateDraftSuggestions,
-  getForwardAllowlist,
-  listCategories,
-  listDraftSuggestions,
-  listMessages,
-  getMessage,
-  listProjects,
-  syncAccount,
-  type MessageItem,
-} from "@/lib/auth";
-import { ProjectAssignControl } from "@/components/ProjectAssignControl";
-import { Paperclip, Reply, Forward, Loader2, ChevronDown, ChevronLeft } from "lucide-react";
-import { cn } from "@/lib/utils";
 import { Button } from "@/components/ui/button";
 import {
   DropdownMenu,
   DropdownMenuContent,
   DropdownMenuItem,
+  DropdownMenuLabel,
+  DropdownMenuSeparator,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
-import {
-  Dialog,
-  DialogContent,
-  DialogDescription,
-  DialogFooter,
-  DialogHeader,
-  DialogTitle,
-} from "@/components/ui/dialog";
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
-import { Textarea } from "@/components/ui/textarea";
 import type { AccountFilter } from "@/components/AppShell";
 import { useAuth } from "@/components/auth/AuthProvider";
 import { useAccountsData } from "@/hooks/useAccountsData";
 import { useIsBelowLg } from "@/hooks/use-mobile";
-import { useInfiniteQuery, useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { toast } from "@/hooks/use-toast";
-import { Link, useSearchParams } from "react-router-dom";
+import {
+  categorizeAccount,
+  forwardMessage,
+  generateDraftSuggestions,
+  getForwardAllowlist,
+  getMessage,
+  listCategories,
+  listDraftSuggestions,
+  listMessages,
+  listProjects,
+  syncAccount,
+} from "@/lib/auth";
+import { cn } from "@/lib/utils";
+import { ForwardDialog } from "./inbox/ForwardDialog";
+import { MessageDetail } from "./inbox/MessageDetail";
+import { MessageList } from "./inbox/MessageList";
+import { looksLikeTextConvertedHtml } from "./inbox/format";
 
 interface Props {
   accountFilter: AccountFilter;
 }
 
-const HTML_TAG_RE = /<\/?[a-z][\s\S]*>/i;
-const HTML_DOCUMENT_RE = /<(?:!doctype|html|head|body)\b/i;
-const TEXT_BODY_URL_RE = /\[https?:\/\/[^\]]+\]/i;
 const INBOX_PAGE_SIZE = 50;
-const EMAIL_CSP =
-  "default-src 'none'; img-src http: https: data: cid: blob:; style-src 'unsafe-inline' http: https:; font-src http: https: data:; connect-src 'none'; script-src 'none'; form-action 'none'; frame-ancestors 'none';";
 
-/** Primary line is display name or address; secondary is the other part when both exist. */
-function senderLines(from: MessageItem["from_json"]): { primary: string; secondary?: string } {
-  const name = from?.name?.trim() ?? "";
-  const addr = from?.address?.trim() ?? "";
-  if (name && addr) {
-    const same =
-      name.toLowerCase().replace(/^mailto:/i, "") === addr.toLowerCase().replace(/^mailto:/i, "");
-    if (same) return { primary: name };
-    return { primary: name, secondary: addr };
-  }
-  if (addr) return { primary: addr };
-  if (name) return { primary: name };
-  return { primary: "Unknown sender" };
-}
-
-function isProbablyHtml(body: string) {
-  return HTML_TAG_RE.test(body);
-}
-
-function looksLikeTextConvertedHtml(body: string) {
-  return !isProbablyHtml(body) && TEXT_BODY_URL_RE.test(body);
-}
-
-function buildEmailSrcDoc(html: string) {
-  const securityHead = `<base target="_blank"><meta charset="utf-8"><meta http-equiv="Content-Security-Policy" content="${EMAIL_CSP}">`;
-
-  if (HTML_DOCUMENT_RE.test(html)) {
-    if (/<head\b[^>]*>/i.test(html)) {
-      return html.replace(/<head\b([^>]*)>/i, `<head$1>${securityHead}`);
-    }
-    if (/<html\b[^>]*>/i.test(html)) {
-      return html.replace(/<html\b([^>]*)>/i, `<html$1><head>${securityHead}</head>`);
-    }
-    return `<!doctype html><html><head>${securityHead}</head>${html}</html>`;
-  }
-
-  return `<!doctype html>
-<html>
-  <head>
-    ${securityHead}
-  </head>
-  <body>${html}</body>
-</html>`;
-}
-
-function EmailBody({ body }: { body: string }) {
-  const [height, setHeight] = useState(320);
-  const html = useMemo(() => isProbablyHtml(body), [body]);
-  const srcDoc = useMemo(() => buildEmailSrcDoc(body), [body]);
-
-  if (!html) {
-    return (
-      <div className="prose prose-sm max-w-none whitespace-pre-wrap px-6 py-5 text-foreground/90">
-        {body}
-      </div>
-    );
-  }
-
-  const resizeFrame = (event: SyntheticEvent<HTMLIFrameElement>) => {
-    const documentHeight = event.currentTarget.contentDocument?.documentElement.scrollHeight;
-    if (documentHeight) {
-      setHeight(Math.min(Math.max(documentHeight, 320), 6000));
-    }
-  };
-
-  return (
-    <div className="px-6 py-5">
-      <iframe
-        title="Email body"
-        srcDoc={srcDoc}
-        sandbox="allow-popups allow-popups-to-escape-sandbox allow-same-origin"
-        onLoad={resizeFrame}
-        className="w-full rounded-md border border-border bg-white"
-        style={{ height }}
-      />
-    </div>
-  );
-}
-
+/**
+ * Mail from connected accounts. Wide screens show the list and the open
+ * message side by side; narrow screens show one at a time, with a way back.
+ */
 export default function InboxPage({ accountFilter }: Props) {
   const { accessToken } = useAuth();
   const { accounts } = useAccountsData();
@@ -159,7 +70,6 @@ export default function InboxPage({ accountFilter }: Props) {
     queryFn: () => listCategories(accessToken!),
     enabled: Boolean(accessToken),
   });
-
   const messagesQuery = useInfiniteQuery({
     queryKey: ["messages", accessToken, accountFilter, cat, projectFilter],
     queryFn: ({ pageParam }) =>
@@ -171,8 +81,7 @@ export default function InboxPage({ accountFilter }: Props) {
         offset: pageParam,
       }),
     initialPageParam: 0,
-    getNextPageParam: (lastPage, pages) =>
-      lastPage.length === INBOX_PAGE_SIZE ? pages.length * INBOX_PAGE_SIZE : undefined,
+    getNextPageParam: (lastPage, pages) => (lastPage.length === INBOX_PAGE_SIZE ? pages.length * INBOX_PAGE_SIZE : undefined),
     enabled: Boolean(accessToken),
   });
   const selectedMessageQuery = useQuery({
@@ -185,13 +94,6 @@ export default function InboxPage({ accountFilter }: Props) {
     queryFn: () => listProjects(accessToken!),
     enabled: Boolean(accessToken),
   });
-  const projectById = useMemo(() => {
-    const map = new Map<string, string>();
-    for (const p of projectsQuery.data ?? []) {
-      map.set(p.id, p.code);
-    }
-    return map;
-  }, [projectsQuery.data]);
   const draftsScope = accountFilter === "all" ? "all" : accountFilter;
   const draftsQuery = useQuery({
     queryKey: ["draft-suggestions", accessToken, draftsScope],
@@ -204,6 +106,17 @@ export default function InboxPage({ accountFilter }: Props) {
     enabled: Boolean(accessToken && forwardDialogOpen),
   });
 
+  const projectCodeByID = useMemo(() => {
+    const map = new Map<string, string>();
+    for (const p of projectsQuery.data ?? []) map.set(p.id, p.code);
+    return map;
+  }, [projectsQuery.data]);
+  const categoryNameBySlug = useMemo(() => {
+    const map = new Map<string, string>();
+    for (const c of categoriesQuery.data ?? []) map.set(c.slug, c.display_name);
+    return map;
+  }, [categoriesQuery.data]);
+
   const categorizeMutation = useMutation({
     mutationFn: async ({ recategorize }: { recategorize: boolean }) => {
       if (!accessToken || accountFilter === "all") return;
@@ -213,13 +126,13 @@ export default function InboxPage({ accountFilter }: Props) {
       void queryClient.invalidateQueries({ queryKey: ["messages"] });
       void queryClient.invalidateQueries({ queryKey: ["runs"] });
       toast({
-        title: vars.recategorize ? "Re-categorization queued" : "Categorization queued",
-        description: res?.job_run_id ? `Run ${res.job_run_id.slice(0, 8)} started in background.` : undefined,
+        title: vars.recategorize ? "Re-categorising queued" : "Categorising queued",
+        description: res?.job_run_id ? `Run ${res.job_run_id.slice(0, 8)} started in the background.` : undefined,
       });
     },
     onError: (err) => {
       toast({
-        title: "Categorization failed",
+        title: "Categorising failed",
         description: err instanceof Error ? err.message : "Please try again.",
         variant: "destructive",
       });
@@ -233,63 +146,29 @@ export default function InboxPage({ accountFilter }: Props) {
     onSuccess: () => {
       void queryClient.invalidateQueries({ queryKey: ["draft-suggestions"] });
       void queryClient.invalidateQueries({ queryKey: ["runs"] });
-      toast({ title: "Draft generation queued" });
+      toast({ title: "Drafting a reply" });
     },
-    onError: (err) => {
-      toast({
-        title: "Could not queue draft generation",
-        description: err instanceof Error ? err.message : "Please try again.",
-        variant: "destructive",
+    onError: (err, vars) => {
+      setPendingDraftMessageKeys((prev) => {
+        const next = new Set(prev);
+        next.delete(`${vars.accountID}:${vars.messageID}`);
+        return next;
       });
-    },
-  });
-  const forwardMutation = useMutation({
-    mutationFn: async () => {
-      if (!accessToken || !selected) throw new Error("Not authenticated");
-      const trimmed = forwardTo.trim().toLowerCase();
-      if (!trimmed) throw new Error("Choose a destination");
-      await forwardMessage(accessToken, selected.id, {
-        to_email: trimmed,
-        comment: forwardComment.trim() || undefined,
-      });
-    },
-    onSuccess: () => {
-      toast({ title: "Message forwarded" });
-      setForwardDialogOpen(false);
-      setForwardComment("");
-    },
-    onError: (err) => {
       toast({
-        title: "Could not forward message",
+        title: "Could not start the draft",
         description: err instanceof Error ? err.message : "Please try again.",
         variant: "destructive",
       });
     },
   });
 
-  const categoryFilters = useMemo(() => {
-    const slugs = categoriesQuery.data?.map((c) => c.slug) ?? [];
-    return ["all", ...slugs];
-  }, [categoriesQuery.data]);
-
-  const filtered = useMemo(
-    () => messagesQuery.data?.pages.flat() ?? [],
-    [messagesQuery.data]
-  );
-
-  const hasCategorizedMessages = useMemo(
-    () => filtered.some((m: MessageItem) => Boolean(m.category_slug)),
-    [filtered]
-  );
+  const messages = useMemo(() => messagesQuery.data?.pages.flat() ?? [], [messagesQuery.data]);
+  const hasCategorizedMessages = useMemo(() => messages.some((m) => Boolean(m.category_slug)), [messages]);
 
   useEffect(() => {
-    if (!deepLinkedMessageID || filtered.length === 0) {
-      return;
-    }
-    const target = filtered.find((m) => m.id === deepLinkedMessageID);
-    if (!target) {
-      return;
-    }
+    if (!deepLinkedMessageID || messages.length === 0) return;
+    const target = messages.find((m) => m.id === deepLinkedMessageID);
+    if (!target) return;
     setSelectedId(target.id);
     setNarrowInboxPane("detail");
     // Clean query string after honoring the deep link to avoid reselect loops.
@@ -297,7 +176,7 @@ export default function InboxPage({ accountFilter }: Props) {
     next.delete("message_id");
     next.delete("account_id");
     setSearchParams(next, { replace: true });
-  }, [deepLinkedMessageID, filtered, searchParams, setSearchParams]);
+  }, [deepLinkedMessageID, messages, searchParams, setSearchParams]);
 
   useEffect(() => {
     if (wasStackedInboxRef.current === null) {
@@ -306,37 +185,48 @@ export default function InboxPage({ accountFilter }: Props) {
     }
     const prev = wasStackedInboxRef.current;
     wasStackedInboxRef.current = isStackedInbox;
-    if (isStackedInbox && !prev && selectedId) {
-      setNarrowInboxPane("detail");
-    }
+    if (isStackedInbox && !prev && selectedId) setNarrowInboxPane("detail");
   }, [isStackedInbox, selectedId]);
 
   useEffect(() => {
     // Avoid overriding deep-link selection before it is applied.
-    if (deepLinkedMessageID) {
-      return;
-    }
-    if (filtered.length === 0) {
+    if (deepLinkedMessageID) return;
+    if (messages.length === 0) {
       setSelectedId("");
       return;
     }
-    if (!selectedId || !filtered.find((m) => m.id === selectedId)) {
-      setSelectedId(filtered[0].id);
-    }
-  }, [deepLinkedMessageID, filtered, selectedId]);
+    if (!selectedId || !messages.find((m) => m.id === selectedId)) setSelectedId(messages[0].id);
+  }, [deepLinkedMessageID, messages, selectedId]);
 
-  const selected = filtered.find((m) => m.id === selectedId) ?? filtered[0];
+  const selected = messages.find((m) => m.id === selectedId) ?? messages[0];
   const selectedBody = selectedMessageQuery.data?.body_text;
-  const selAccount = selected ? accounts.find((a) => a.id === selected.account_id) : undefined;
-  const selectedFromLines = selected ? senderLines(selected.from_json) : null;
 
+  const forwardMutation = useMutation({
+    mutationFn: async () => {
+      if (!accessToken || !selected) throw new Error("Not authenticated");
+      const trimmed = forwardTo.trim().toLowerCase();
+      if (!trimmed) throw new Error("Choose a destination");
+      await forwardMessage(accessToken, selected.id, { to_email: trimmed, comment: forwardComment.trim() || undefined });
+    },
+    onSuccess: () => {
+      toast({ title: "Message forwarded" });
+      setForwardDialogOpen(false);
+      setForwardComment("");
+    },
+    onError: (err) => {
+      toast({
+        title: "Could not forward the message",
+        description: err instanceof Error ? err.message : "Please try again.",
+        variant: "destructive",
+      });
+    },
+  });
+
+  // A plain-text body carrying bracketed links is HTML mail that was
+  // flattened on an earlier sync; re-sync once to fetch the formatted version.
   useEffect(() => {
-    if (!accessToken || !selectedBody || !looksLikeTextConvertedHtml(selectedBody)) {
-      return;
-    }
-    if (htmlRefreshAttempts.has(selected.id)) {
-      return;
-    }
+    if (!accessToken || !selected || !selectedBody || !looksLikeTextConvertedHtml(selectedBody)) return;
+    if (htmlRefreshAttempts.has(selected.id)) return;
 
     setHtmlRefreshAttempts((prev) => new Set(prev).add(selected.id));
     setRefreshingHtmlMessageIds((prev) => new Set(prev).add(selected.id));
@@ -347,8 +237,8 @@ export default function InboxPage({ accountFilter }: Props) {
       })
       .catch((err) => {
         toast({
-          title: "Could not refresh HTML email",
-          description: err instanceof Error ? err.message : "Please try syncing this account again.",
+          title: "Could not fetch the formatted email",
+          description: err instanceof Error ? err.message : "Try syncing this account again.",
           variant: "destructive",
         });
       })
@@ -361,7 +251,6 @@ export default function InboxPage({ accountFilter }: Props) {
       });
   }, [accessToken, htmlRefreshAttempts, queryClient, selected, selectedBody]);
 
-  const isRefreshingSelectedHtml = selected ? refreshingHtmlMessageIds.has(selected.id) : false;
   const draftByMessageKey = useMemo(() => {
     const map = new Map<string, string>();
     for (const d of draftsQuery.data ?? []) {
@@ -389,8 +278,6 @@ export default function InboxPage({ accountFilter }: Props) {
   }, [forwardDialogOpen, forwardAllowlistQuery.data?.emails]);
 
   const selectedMessageKey = selected ? `${selected.account_id}:${selected.id}` : "";
-  const selectedDraftID = selectedMessageKey ? draftByMessageKey.get(selectedMessageKey) : undefined;
-  const selectedDraftPending = selectedMessageKey !== "" && pendingDraftMessageKeys.has(selectedMessageKey);
 
   const openForwardDialog = () => {
     setForwardComment("");
@@ -399,369 +286,174 @@ export default function InboxPage({ accountFilter }: Props) {
     setForwardDialogOpen(true);
   };
 
-  const showMessageList = !isStackedInbox || narrowInboxPane === "list";
-  const showMessageDetail = Boolean(selected && (!isStackedInbox || narrowInboxPane === "detail"));
+  const filtersActive = cat !== "all" || projectFilter !== "all";
+  const showList = !isStackedInbox || narrowInboxPane === "list";
+  const showDetail = Boolean(selected && (!isStackedInbox || narrowInboxPane === "detail"));
+  const oneAccount = accountFilter !== "all";
 
   return (
     <div className="space-y-6">
       <PageHeader
-        eyebrow="Mailbox"
+        eyebrow="Correspondence"
         title="Inbox"
-        description="Per-account messages with LLM-assigned categories. Provenance preserved on every row."
+        description="Mail from your connected accounts, sorted into categories. File a message to a project, draft a reply or forward it from here."
         actions={
-          <div className="flex items-center gap-2">
-            <Button
-              size="sm"
-              variant="outline"
-              disabled={accountFilter === "all" || categorizeMutation.isPending}
-              onClick={() => categorizeMutation.mutate({ recategorize: false })}
-            >
-              {categorizeMutation.isPending ? (
+          <DropdownMenu>
+            <DropdownMenuTrigger asChild>
+              <Button size="sm" variant="outline" disabled={categorizeMutation.isPending}>
+                {categorizeMutation.isPending ? (
+                  <Loader2 aria-hidden="true" className="mr-1.5 h-3.5 w-3.5 animate-spin" />
+                ) : (
+                  <Tags aria-hidden="true" className="mr-1.5 h-3.5 w-3.5" />
+                )}
+                Categorise
+                <ChevronDown aria-hidden="true" className="ml-1 h-3.5 w-3.5 opacity-70" />
+              </Button>
+            </DropdownMenuTrigger>
+            <DropdownMenuContent align="end" className="w-64">
+              {!oneAccount && (
                 <>
-                  <Loader2 className="mr-1.5 h-3.5 w-3.5 animate-spin" />
-                  Categorizing...
+                  <DropdownMenuLabel className="text-xs font-normal text-muted-foreground">
+                    Choose one account in the top bar to categorise its mail.
+                  </DropdownMenuLabel>
+                  <DropdownMenuSeparator />
                 </>
-              ) : (
-                "Categorize new"
               )}
-            </Button>
-            <Button
-              size="sm"
-              variant="outline"
-              disabled={accountFilter === "all" || categorizeMutation.isPending || !hasCategorizedMessages}
-              onClick={() => categorizeMutation.mutate({ recategorize: true })}
-            >
-              Re-categorize all
-            </Button>
-          </div>
+              <DropdownMenuItem disabled={!oneAccount} onClick={() => categorizeMutation.mutate({ recategorize: false })}>
+                Categorise new mail
+              </DropdownMenuItem>
+              <DropdownMenuItem
+                disabled={!oneAccount || !hasCategorizedMessages}
+                onClick={() => categorizeMutation.mutate({ recategorize: true })}
+              >
+                Re-categorise everything
+              </DropdownMenuItem>
+            </DropdownMenuContent>
+          </DropdownMenu>
         }
       />
 
-      {/* Filters */}
-      <div className="flex flex-wrap items-center gap-2">
-        {categoryFilters.map((c) => (
-          <button
-            key={c}
-            onClick={() => setCat(c)}
-            className={cn(
-              "rounded-full border px-3 py-1 text-xs font-medium transition",
-              cat === c
-                ? "border-foreground bg-foreground text-background"
-                : "border-border bg-card text-muted-foreground hover:border-foreground/40 hover:text-foreground"
-            )}
-          >
-            {c}
-          </button>
-        ))}
-        <select
-          aria-label="Filter by project"
-          className="h-7 rounded-full border border-border bg-card px-3 text-xs text-muted-foreground"
-          value={projectFilter}
-          onChange={(e) => setProjectFilter(e.target.value)}
-        >
-          <option value="all">All projects</option>
-          {(projectsQuery.data ?? []).map((p) => (
-            <option key={p.id} value={p.id}>
-              {p.code} — {p.name}
-            </option>
-          ))}
-        </select>
-        <span className="ml-auto text-xs text-muted-foreground">
-          {filtered.length} {filtered.length === 1 ? "message" : "messages"}
-        </span>
-      </div>
-
-      {messagesQuery.isLoading && (
-        <div className="surface-card px-4 py-3 text-sm text-muted-foreground">Loading messages...</div>
-      )}
-      {messagesQuery.isError && !messagesQuery.data && (
-        <div className="surface-card px-4 py-3 text-sm text-destructive">
-          Could not load messages: {messagesQuery.error instanceof Error ? messagesQuery.error.message : "unknown error"}
-        </div>
-      )}
-
-      <div
-        className={cn(
-          "grid gap-6",
-          !isStackedInbox && "lg:grid-cols-[minmax(0,1fr)_minmax(0,1.2fr)]",
-        )}
-      >
-        {/* List — full width on narrow when browsing messages */}
-        {showMessageList && (
-        <div className="space-y-3">
-        <ul className="surface-card divide-y divide-border/70 overflow-hidden">
-          {filtered.map((m) => {
-            const acct = accounts.find((a) => a.id === m.account_id);
-            const isSel = selected?.id === m.id;
-            const from = senderLines(m.from_json);
-            return (
-              <li
-                key={m.id}
-                onClick={() => {
-                  setSelectedId(m.id);
-                  if (isStackedInbox) setNarrowInboxPane("detail");
-                }}
-                className={cn(
-                  "cursor-pointer px-4 py-3 transition",
-                  isSel ? "bg-secondary/70" : "hover:bg-secondary/40"
-                )}
-              >
-                <div className="flex items-center justify-between gap-2">
-                  <div className="flex flex-wrap items-center gap-1.5">
-                    <AccountBadge account={acct} />
-                    {m.project_id && projectById.get(m.project_id) ? (
-                      <span className="font-mono text-[10px] text-muted-foreground">
-                        {projectById.get(m.project_id)}
-                      </span>
-                    ) : null}
-                  </div>
-                  <span className="text-[11px] text-muted-foreground">
-                    {relativeTime(m.received_at)}
-                  </span>
-                </div>
-                <p
+      {showList && (
+        <div className="flex min-w-0 flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
+          <div role="radiogroup" aria-label="Category" className="flex min-w-0 flex-wrap gap-1.5">
+            {[{ slug: "all", name: "All" }, ...(categoriesQuery.data ?? []).map((c) => ({ slug: c.slug, name: c.display_name }))].map(
+              (c) => (
+                <button
+                  key={c.slug}
+                  type="button"
+                  role="radio"
+                  aria-checked={cat === c.slug}
+                  onClick={() => setCat(c.slug)}
                   className={cn(
-                    "mt-1.5 truncate text-sm",
-                    "text-foreground/90"
+                    "h-8 max-w-full truncate rounded-full border px-3 text-sm transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring",
+                    cat === c.slug
+                      ? "border-foreground bg-foreground text-background"
+                      : "border-border bg-card text-muted-foreground hover:border-foreground/40 hover:text-foreground",
                   )}
                 >
-                  {from.primary}
-                </p>
-                {from.secondary && (
-                  <p className="truncate text-xs text-muted-foreground">{from.secondary}</p>
-                )}
-                <p className="truncate text-sm text-foreground/85">{m.subject}</p>
-                <p className="mt-0.5 truncate text-xs text-muted-foreground">{m.preview}</p>
-                <div className="mt-2 flex items-center gap-2">
-                  <CategoryPill category={m.category_slug ?? "uncategorized"} />
-                  {m.has_attachments && (
-                    <Paperclip className="h-3 w-3 text-muted-foreground" />
-                  )}
-                </div>
-              </li>
-            );
-          })}
-        </ul>
-        {(messagesQuery.hasNextPage || messagesQuery.isFetchingNextPage || messagesQuery.isFetchNextPageError) && (
-          <div className="flex flex-col items-center gap-2">
-            <Button
-              type="button"
-              size="sm"
-              variant="outline"
-              disabled={!messagesQuery.hasNextPage || messagesQuery.isFetchingNextPage}
-              onClick={() => void messagesQuery.fetchNextPage()}
-            >
-              {messagesQuery.isFetchingNextPage && <Loader2 aria-hidden="true" className="mr-1.5 h-3.5 w-3.5 animate-spin" />}
-              {messagesQuery.isFetchingNextPage ? "Loading…" : "Load more"}
-            </Button>
-            {messagesQuery.isFetchNextPageError && (
-              <p role="alert" className="text-xs text-destructive">Could not load more messages. Try again.</p>
+                  {c.name}
+                </button>
+              ),
             )}
           </div>
-        )}
+          <div className="flex min-w-0 items-center gap-3">
+            <label htmlFor="inbox-project" className="sr-only">
+              Project
+            </label>
+            <select
+              id="inbox-project"
+              className="h-9 min-w-0 flex-1 rounded-md border border-input bg-background px-3 text-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring lg:w-56 lg:flex-none"
+              value={projectFilter}
+              onChange={(e) => setProjectFilter(e.target.value)}
+            >
+              <option value="all">All projects</option>
+              {(projectsQuery.data ?? []).map((p) => (
+                <option key={p.id} value={p.id}>
+                  {p.code} — {p.name}
+                </option>
+              ))}
+            </select>
+            {!messagesQuery.isLoading && messages.length > 0 && (
+              <p className="shrink-0 text-sm text-muted-foreground" aria-live="polite">
+                {messages.length}
+                {messagesQuery.hasNextPage ? "+" : ""} {messages.length === 1 ? "message" : "messages"}
+              </p>
+            )}
+          </div>
         </div>
+      )}
+
+      <div className={cn("grid min-w-0 gap-6", !isStackedInbox && "lg:grid-cols-[minmax(0,2fr)_minmax(0,3fr)]")}>
+        {showList && (
+          <MessageList
+            messages={messages}
+            selectedID={isStackedInbox ? undefined : selected?.id}
+            onSelect={(id) => {
+              setSelectedId(id);
+              if (isStackedInbox) setNarrowInboxPane("detail");
+            }}
+            accountFor={(id) => accounts.find((a) => a.id === id)}
+            showAccount={!oneAccount && accounts.length > 1}
+            projectCode={(id) => (id ? projectCodeByID.get(id) : undefined)}
+            categoryName={(slug) => (slug ? categoryNameBySlug.get(slug) : undefined)}
+            loading={messagesQuery.isLoading}
+            error={
+              messagesQuery.isError && !messagesQuery.data
+                ? messagesQuery.error instanceof Error
+                  ? messagesQuery.error.message
+                  : "unknown error"
+                : undefined
+            }
+            filtered={filtersActive}
+            hasAccounts={accounts.length > 0}
+            onClearFilters={() => {
+              setCat("all");
+              setProjectFilter("all");
+            }}
+            hasMore={Boolean(messagesQuery.hasNextPage)}
+            loadingMore={messagesQuery.isFetchingNextPage}
+            loadMoreFailed={messagesQuery.isFetchNextPageError}
+            onLoadMore={() => void messagesQuery.fetchNextPage()}
+          />
         )}
 
-        {/* Detail — on narrow widths, replaces the list until user goes back */}
-        {showMessageDetail && selected && (
-          <article className="surface-card flex flex-col">
-            {isStackedInbox && (
-              <nav
-                aria-label="Inbox navigation"
-                className="flex border-b border-border/70 px-3 py-2"
-              >
-                <Button
-                  type="button"
-                  variant="ghost"
-                  size="sm"
-                  className="-ml-1 h-8 gap-1 px-2 text-muted-foreground hover:text-foreground"
-                  onClick={() => setNarrowInboxPane("list")}
-                >
-                  <ChevronLeft className="h-4 w-4" />
-                  Messages
-                </Button>
-              </nav>
-            )}
-            <div className="flex min-w-0 items-center justify-between gap-3 border-b border-border/70 px-5 py-3">
-              <div className="min-w-0 flex-1">
-                <AccountBadge account={selAccount} showEmail className="max-w-full" />
-              </div>
-              <DropdownMenu>
-                <DropdownMenuTrigger asChild>
-                  <Button size="sm" variant="outline" className="shrink-0 gap-1">
-                    Actions
-                    <ChevronDown className="h-3.5 w-3.5 opacity-70" />
-                  </Button>
-                </DropdownMenuTrigger>
-                <DropdownMenuContent align="end" className="w-52">
-                  {selectedDraftID ? (
-                    <DropdownMenuItem asChild>
-                      <Link
-                        to={`/drafts?draft_id=${encodeURIComponent(selectedDraftID)}`}
-                        className="flex cursor-pointer items-center"
-                      >
-                        <Reply className="mr-2 h-3.5 w-3.5" />
-                        Open draft
-                      </Link>
-                    </DropdownMenuItem>
-                  ) : (
-                    <DropdownMenuItem
-                      disabled={selectedDraftPending || createDraftMutation.isPending}
-                      onClick={() => {
-                        if (!selected) return;
-                        const key = `${selected.account_id}:${selected.id}`;
-                        setPendingDraftMessageKeys((prev) => new Set(prev).add(key));
-                        createDraftMutation.mutate({ accountID: selected.account_id, messageID: selected.id });
-                      }}
-                    >
-                      <Reply className="mr-2 h-3.5 w-3.5" />
-                      {selectedDraftPending ? "Draft queued…" : "Create draft"}
-                    </DropdownMenuItem>
-                  )}
-                  <DropdownMenuItem disabled={!selected} onClick={() => openForwardDialog()}>
-                    <Forward className="mr-2 h-3.5 w-3.5" />
-                    Forward…
-                  </DropdownMenuItem>
-                </DropdownMenuContent>
-              </DropdownMenu>
-            </div>
-            <div className="px-6 py-5">
-              <div className="flex items-start justify-between gap-3">
-                <h2 className="font-display text-2xl font-medium leading-snug">
-                  {selected.subject}
-                </h2>
-                <CategoryPill category={selected.category_slug ?? "uncategorized"} />
-              </div>
-              <ProjectAssignControl
-                messageID={selected.id}
-                hasConversation={Boolean(selected.conversation_id)}
-              />
-              <p className="mt-2 flex flex-wrap items-baseline gap-x-1 text-sm text-muted-foreground">
-                <span>From</span>
-                <span className="font-medium text-foreground/90">{selectedFromLines?.primary}</span>
-                {selectedFromLines?.secondary && (
-                  <>
-                    <span className="text-muted-foreground">·</span>
-                    <span className="font-mono text-xs text-foreground/85">{selectedFromLines.secondary}</span>
-                  </>
-                )}
-                <span className="text-muted-foreground">·</span>
-                <span>{relativeTime(selected.received_at)}</span>
-              </p>
-            </div>
-            <div className="hairline" />
-            {isRefreshingSelectedHtml && (
-              <div className="border-b border-border/70 bg-secondary/40 px-6 py-2 text-xs text-muted-foreground">
-                Refreshing the HTML version of this email...
-              </div>
-            )}
-            {selectedMessageQuery.isLoading ? (
-              <div className="flex items-center gap-2 px-6 py-5 text-sm text-muted-foreground">
-                <Loader2 className="h-4 w-4 animate-spin" />
-                Loading message...
-              </div>
-            ) : (
-              <EmailBody body={selectedBody ?? ""} />
-            )}
-          </article>
+        {showDetail && selected && (
+          <div className="min-w-0 lg:sticky lg:top-6 lg:max-h-[calc(100vh-3rem)] lg:self-start lg:overflow-y-auto">
+            <MessageDetail
+              message={selected}
+              account={accounts.find((a) => a.id === selected.account_id)}
+              categoryName={selected.category_slug ? categoryNameBySlug.get(selected.category_slug) : undefined}
+              body={selectedBody}
+              bodyLoading={selectedMessageQuery.isLoading}
+              refreshingHtml={refreshingHtmlMessageIds.has(selected.id)}
+              draftID={draftByMessageKey.get(selectedMessageKey)}
+              draftPending={pendingDraftMessageKeys.has(selectedMessageKey) || createDraftMutation.isPending}
+              onCreateDraft={() => {
+                setPendingDraftMessageKeys((prev) => new Set(prev).add(selectedMessageKey));
+                createDraftMutation.mutate({ accountID: selected.account_id, messageID: selected.id });
+              }}
+              onForward={openForwardDialog}
+              onBack={isStackedInbox ? () => setNarrowInboxPane("list") : undefined}
+            />
+          </div>
         )}
       </div>
 
-      <Dialog
+      <ForwardDialog
         open={forwardDialogOpen}
         onOpenChange={(open) => {
           setForwardDialogOpen(open);
-          if (!open) {
-            setForwardComment("");
-          }
+          if (!open) setForwardComment("");
         }}
-      >
-        <DialogContent className="sm:max-w-md">
-          <DialogHeader>
-            <DialogTitle>Forward message</DialogTitle>
-            <DialogDescription>
-              Only addresses on your forwarding allowlist can receive this message. The original is forwarded via Microsoft Graph
-              (including attachments when supported).
-            </DialogDescription>
-          </DialogHeader>
-          {forwardAllowlistQuery.isLoading ? (
-            <p className="text-sm text-muted-foreground">Loading allowlist…</p>
-          ) : (forwardAllowlistQuery.data?.emails?.length ?? 0) === 0 ? (
-            <p className="text-sm text-muted-foreground">
-              Add at least one destination under{" "}
-              <Link
-                to="/rules"
-                className="font-medium text-foreground underline-offset-4 hover:underline"
-                onClick={() => setForwardDialogOpen(false)}
-              >
-                Forwarding rules
-              </Link>{" "}
-              before forwarding.
-            </p>
-          ) : (
-            <div className="space-y-3">
-              <div className="space-y-1.5">
-                <label className="text-xs text-muted-foreground" htmlFor="forward-to-select">
-                  Destination
-                </label>
-                <Select
-                  value={forwardTo}
-                  onValueChange={(v) => {
-                    setForwardTo(v);
-                  }}
-                >
-                  <SelectTrigger id="forward-to-select">
-                    <SelectValue placeholder="Select allowlisted email" />
-                  </SelectTrigger>
-                  <SelectContent>
-                    {(forwardAllowlistQuery.data?.emails ?? []).map((email) => (
-                      <SelectItem key={email} value={email}>
-                        {email}
-                      </SelectItem>
-                    ))}
-                  </SelectContent>
-                </Select>
-              </div>
-              <div className="space-y-1.5">
-                <label className="text-xs text-muted-foreground" htmlFor="forward-comment">
-                  Comment to recipients (optional)
-                </label>
-                <Textarea
-                  id="forward-comment"
-                  value={forwardComment}
-                  onChange={(e) => setForwardComment(e.target.value)}
-                  placeholder="Shown above the forwarded message in Outlook"
-                  rows={3}
-                />
-              </div>
-            </div>
-          )}
-          <DialogFooter className="gap-2 sm:gap-0">
-            <Button type="button" variant="outline" onClick={() => setForwardDialogOpen(false)}>
-              Cancel
-            </Button>
-            <Button
-              type="button"
-              disabled={
-                forwardMutation.isPending ||
-                forwardAllowlistQuery.isLoading ||
-                (forwardAllowlistQuery.data?.emails?.length ?? 0) === 0 ||
-                !forwardTo.trim()
-              }
-              onClick={() => forwardMutation.mutate()}
-            >
-              {forwardMutation.isPending ? (
-                <>
-                  <Loader2 className="mr-1.5 h-3.5 w-3.5 animate-spin" />
-                  Forwarding…
-                </>
-              ) : (
-                "Confirm forward"
-              )}
-            </Button>
-          </DialogFooter>
-        </DialogContent>
-      </Dialog>
+        loading={forwardAllowlistQuery.isLoading}
+        allowlist={forwardAllowlistQuery.data?.emails ?? []}
+        to={forwardTo}
+        onToChange={setForwardTo}
+        comment={forwardComment}
+        onCommentChange={setForwardComment}
+        pending={forwardMutation.isPending}
+        onConfirm={() => forwardMutation.mutate()}
+      />
     </div>
   );
 }

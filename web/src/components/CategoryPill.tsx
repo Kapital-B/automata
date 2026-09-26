@@ -10,17 +10,26 @@ const styles: Record<string, string> = {
   other: "bg-muted text-muted-foreground border-border",
 };
 
-export function CategoryPill({ category, className }: { category: string; className?: string }) {
+export function CategoryPill({
+  category,
+  label,
+  className,
+}: {
+  category: string;
+  /** The category's display name; the slug is shown when there is none. */
+  label?: string;
+  className?: string;
+}) {
   const normalized = (category || "uncategorized").toLowerCase();
   return (
     <span
       className={cn(
-        "inline-flex items-center rounded-full border px-2 py-0.5 text-[10px] font-medium uppercase tracking-wider",
+        "inline-flex max-w-full items-center truncate rounded-full border px-2 py-0.5 text-[10px] font-medium uppercase tracking-wider",
         styles[normalized] ?? styles.other,
         className
       )}
     >
-      {normalized}
+      {label || normalized}
     </span>
   );
 }
