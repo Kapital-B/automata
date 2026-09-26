@@ -2,7 +2,7 @@ import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { MemoryRouter } from "react-router-dom";
 import { beforeEach, describe, expect, it, vi } from "vitest";
-import RunsPage from "@/pages/Runs";
+import { RunsSettings } from "@/components/settings/RunsSettings";
 import * as auth from "@/lib/auth";
 
 const toastMock = vi.fn();
@@ -53,13 +53,13 @@ function renderPage(accountFilter: "all" | string = "all") {
   return render(
     <QueryClientProvider client={client}>
       <MemoryRouter>
-        <RunsPage accountFilter={accountFilter} />
+        <RunsSettings accountFilter={accountFilter} />
       </MemoryRouter>
     </QueryClientProvider>,
   );
 }
 
-describe("RunsPage", () => {
+describe("RunsSettings", () => {
   beforeEach(() => {
     toastMock.mockReset();
     listRuns.mockReset();

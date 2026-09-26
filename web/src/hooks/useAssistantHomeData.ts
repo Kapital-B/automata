@@ -110,7 +110,7 @@ export function buildAssistantSuggestions(state: AssistantHomeState): AssistantS
       id: "inspect-failed-runs",
       title: "Inspect failed runs",
       description: "Check run errors and retry from Runs.",
-      href: "/runs",
+      href: "/settings?tab=runs",
     });
   }
 

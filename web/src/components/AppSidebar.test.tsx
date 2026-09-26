@@ -82,7 +82,6 @@ describe("AppSidebar U1 IA", () => {
       [/^Drafts/i, "/drafts"],
       [/^Rules/i, "/rules"],
       [/^Connectors/i, "/accounts"],
-      [/^Runs/i, "/runs"],
       [/^Settings/i, "/settings"],
     ];
     for (const [name, href] of expected) {
@@ -92,6 +91,8 @@ describe("AppSidebar U1 IA", () => {
     expect(screen.queryByRole("link", { name: /^Today$/i })).not.toBeInTheDocument();
     expect(screen.queryByRole("link", { name: /^Assistant$/i })).not.toBeInTheDocument();
     expect(screen.queryByRole("link", { name: /^Unassigned$/i })).not.toBeInTheDocument();
+    // Runs lives in Settings now.
+    expect(screen.queryByRole("link", { name: /^Runs$/i })).not.toBeInTheDocument();
   });
 
   it("badges the queues that have work waiting", async () => {

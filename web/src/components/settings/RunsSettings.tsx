@@ -2,7 +2,6 @@ import { useState } from "react";
 import { Link } from "react-router-dom";
 import { useInfiniteQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { Ban, CheckCircle2, ChevronDown, Clock, History, Loader2, XCircle } from "lucide-react";
-import { PageHeader } from "@/components/PageHeader";
 import { AccountBadge } from "@/components/AccountBadge";
 import { ListSkeleton } from "@/components/ListSkeleton";
 import { Button } from "@/components/ui/button";
@@ -44,7 +43,8 @@ function StatusPill({ status }: { status: JobRun["status"] }) {
 const selectClass =
   "h-10 w-full rounded-md border border-input bg-background px-3 text-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring sm:w-56";
 
-export default function RunsPage({ accountFilter }: Props) {
+/** The Runs tab in Settings: the audit trail of background jobs. */
+export function RunsSettings({ accountFilter }: Props) {
   const { accessToken } = useAuth();
   const { accounts } = useAccountsData();
   const queryClient = useQueryClient();
@@ -91,12 +91,16 @@ export default function RunsPage({ accountFilter }: Props) {
   const getAccount = (id?: string) => accounts.find((a) => a.id === id);
 
   return (
-    <div className="space-y-6">
-      <PageHeader
-        eyebrow="Audit"
-        title="Job runs"
-        description="Everything Automata did in the background: syncs, categorising, summaries, forwarding and drafts, with what each run found."
-      />
+    <section aria-labelledby="runs-heading" className="space-y-4">
+      <div className="space-y-1">
+        <h2 id="runs-heading" className="font-display text-2xl font-medium">
+          Job runs
+        </h2>
+        <p className="max-w-2xl text-sm text-muted-foreground">
+          Everything Automata did in the background: syncs, categorising, summaries, forwarding and drafts, with what
+          each run found.
+        </p>
+      </div>
 
       <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
         <div className="flex items-center gap-2">
@@ -113,9 +117,9 @@ export default function RunsPage({ accountFilter }: Props) {
           </select>
         </div>
         <p className="text-sm text-muted-foreground">
-          Schedules are set up in{" "}
+          When jobs run on their own is set under{" "}
           <Link to="/settings?tab=schedules" className="font-medium text-primary underline-offset-4 hover:underline">
-            Settings
+            Schedules
           </Link>
           .
         </p>
@@ -168,7 +172,7 @@ export default function RunsPage({ accountFilter }: Props) {
           )}
         </div>
       )}
-    </div>
+    </section>
   );
 }
 
