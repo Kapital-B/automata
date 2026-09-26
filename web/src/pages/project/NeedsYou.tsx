@@ -4,8 +4,6 @@ import { Button } from "@/components/ui/button";
 import { Skeleton } from "@/components/ui/skeleton";
 import type { ConfirmationRow } from "@/hooks/useProjectDetailData";
 import type { AttentionItem } from "@/lib/auth";
-import { TodoItem } from "@/components/TodoItem";
-import { inboxHref } from "@/lib/todos";
 import { Provenance } from "./shared";
 import { SECTION } from "./format";
 
@@ -19,8 +17,6 @@ export type ConfirmationActions = {
     resolution: "supersede" | "reject_a" | "reject_b" | "note",
     keepFactVersionID?: string,
   ) => void;
-  /** Marks one of the caller's to-dos from mail done. */
-  completeTodo: (actionItemID: string) => void;
   busy: boolean;
 };
 
@@ -31,8 +27,9 @@ const KIND: Record<ConfirmationRow["kind"], { label: string; icon: typeof Scale 
 };
 
 // These attention reasons are the confirmation rows themselves; listing them
-// twice would make the queue look longer than it is.
-const CONFIRMATION_REASONS = new Set(["provisional_fact", "provisional_decision", "open_contradiction"]);
+// twice would make the queue look longer than it is. To-dos from mail have
+// their own section, shared with the whole project.
+const CONFIRMATION_REASONS = new Set(["provisional_fact", "provisional_decision", "open_contradiction", "mail_action_item"]);
 
 function attentionLabel(why: string): string {
   switch (why) {
@@ -40,8 +37,6 @@ function attentionLabel(why: string): string {
       return "Assigned to you";
     case "member_role":
       return "In your role";
-    case "mail_action_item":
-      return "To-do";
     default:
       return why.replace(/_/g, " ");
   }
@@ -74,10 +69,8 @@ export function NeedsYou({
   projectID: string;
   actions: ConfirmationActions;
 }) {
-  const isTodo = (a: AttentionItem) => a.why_me === "mail_action_item" && Boolean(a.message_id && a.account_id);
-  const todos = attention.filter(isTodo);
-  const other = attention.filter((a) => !CONFIRMATION_REASONS.has(a.why_me) && !isTodo(a));
-  const total = rows.length + other.length + todos.length;
+  const other = attention.filter((a) => !CONFIRMATION_REASONS.has(a.why_me));
+  const total = rows.length + other.length;
 
   return (
     <section id={SECTION.needsYou} aria-labelledby="needs-you-heading" className="scroll-mt-20 space-y-3">
@@ -120,19 +113,6 @@ export function NeedsYou({
               </li>
             );
           })}
-          {todos.map((item) => (
-            <TodoItem
-              key={item.id}
-              text={item.title}
-              href={inboxHref(item.message_id!, item.account_id!)}
-              label="To-do"
-              issueTitle={item.issue_title}
-              issueHref={item.issue_id ? `/projects/${projectID}/issues/${item.issue_id}` : undefined}
-              dueAt={item.due_at}
-              pending={actions.busy}
-              onDone={() => actions.completeTodo(item.ref_id)}
-            />
-          ))}
           {other.map((item) => {
             const href = attentionHref(item, projectID);
             const body = (

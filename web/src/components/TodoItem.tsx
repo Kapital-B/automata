@@ -6,12 +6,14 @@ import { cn } from "@/lib/utils";
 
 /**
  * One to-do from mail, rendered the same on Home, a project and an issue. The
- * text opens the message it came from; where it sits (project, issue) and when
+ * text opens the message it came from when it is yours; a teammate's mail
+ * stays private, so theirs is plain text. Whose it is, where it sits and when
  * it is due read underneath; Done closes it.
  */
 export function TodoItem({
   text,
   href,
+  owner,
   label,
   projectLabel,
   issueTitle,
@@ -21,7 +23,10 @@ export function TodoItem({
   onDone,
 }: {
   text: string;
-  href: string;
+  /** Opens the message. Absent for a teammate's to-do, whose mail is private. */
+  href?: string;
+  /** Whose to-do it is, on shared lists. */
+  owner?: string;
   /** Leading word in the meta line, e.g. "To-do" where rows of other kinds sit alongside. */
   label?: string;
   projectLabel?: string;
@@ -34,6 +39,11 @@ export function TodoItem({
   const due = dueLabel(dueAt);
   const meta = [
     label && <span key="label">{label}</span>,
+    owner && (
+      <span key="owner" className="truncate font-medium text-foreground/80">
+        {owner}
+      </span>
+    ),
     projectLabel && (
       <span key="project" className="truncate">
         {projectLabel}
@@ -65,12 +75,16 @@ export function TodoItem({
         <ListTodo className="h-4 w-4 text-muted-foreground" />
       </span>
       <div className="min-w-0 flex-1 space-y-1">
-        <Link
-          to={href}
-          className="block rounded-sm font-medium hover:underline focus-visible:underline focus-visible:outline-none"
-        >
-          {text}
-        </Link>
+        {href ? (
+          <Link
+            to={href}
+            className="block rounded-sm font-medium hover:underline focus-visible:underline focus-visible:outline-none"
+          >
+            {text}
+          </Link>
+        ) : (
+          <p className="font-medium">{text}</p>
+        )}
         {meta.length > 0 && (
           <div className="flex flex-wrap items-center gap-x-2 gap-y-1 text-xs text-muted-foreground">
             {meta.map((m, i) => (

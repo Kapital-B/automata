@@ -22,9 +22,9 @@ import { useAuth } from "@/components/auth/AuthProvider";
 import { TodoItem } from "@/components/TodoItem";
 import {
   ApiError,
+  completeProjectTodo,
   getIssue,
   listContacts,
-  markActionItemDone,
   removeIssueItem,
   updateIssue,
 } from "@/lib/auth";
@@ -76,7 +76,7 @@ export default function IssueDetailPage() {
   // To-dos, the project's Needs you and Home all read the same items.
   const refreshTodos = () =>
     Promise.all(
-      ["attention", "project-attention", "overview", "summary"].map((key) =>
+      ["attention", "project-attention", "project-todos", "overview", "summary"].map((key) =>
         queryClient.invalidateQueries({ queryKey: [key] }),
       ),
     );
@@ -119,9 +119,9 @@ export default function IssueDetailPage() {
   });
 
   const todoMutation = useMutation({
-    mutationFn: async (actionItemID: string) => {
-      if (!accessToken) throw new Error("Not authenticated");
-      return markActionItemDone(accessToken, actionItemID);
+    mutationFn: async (todoID: string) => {
+      if (!accessToken || !projectID) throw new Error("Not authenticated");
+      return completeProjectTodo(accessToken, projectID, todoID);
     },
     onSuccess: async () => {
       toast({ title: "To-do done" });
@@ -196,18 +196,19 @@ export default function IssueDetailPage() {
         <section aria-labelledby="issue-todos-heading" className="max-w-3xl space-y-3">
           <div>
             <h2 id="issue-todos-heading" className="font-display text-xl font-medium">
-              Your to-dos
+              To-dos
             </h2>
             <p className="text-sm text-muted-foreground">
-              What this issue&apos;s mail asks you to do. Only you see these.
+              What this issue&apos;s mail asks the team to do. Anyone on the project can mark one done.
             </p>
           </div>
-          <ul aria-label="Your to-dos" className="surface-card divide-y divide-border/70 overflow-hidden">
+          <ul aria-label="To-dos" className="surface-card divide-y divide-border/70 overflow-hidden">
             {todos.map((t) => (
               <TodoItem
                 key={t.id}
                 text={t.text}
-                href={inboxHref(t.message_id, t.account_id)}
+                href={t.is_mine && t.message_id && t.account_id ? inboxHref(t.message_id, t.account_id) : undefined}
+                owner={t.owner_label}
                 dueAt={t.due_at}
                 pending={todoMutation.isPending}
                 onDone={() => todoMutation.mutate(t.id)}
@@ -274,8 +275,9 @@ export default function IssueDetailPage() {
           <AlertDialogHeader>
             <AlertDialogTitle>Resolve this issue?</AlertDialogTitle>
             <AlertDialogDescription>
-              You still have {todos.length} open {todos.length === 1 ? "to-do" : "to-dos"} from this issue&apos;s mail. Mark{" "}
-              {todos.length === 1 ? "it" : "them"} done as well?
+              This issue still has {todos.length} open {todos.length === 1 ? "to-do" : "to-dos"} from its mail. Mark{" "}
+              {todos.length === 1 ? "it" : "them"} done as well? That closes {todos.length === 1 ? "it" : "them"} for everyone on
+              the project.
             </AlertDialogDescription>
           </AlertDialogHeader>
           <AlertDialogFooter>

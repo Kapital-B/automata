@@ -718,20 +718,29 @@ export type IssueTrailItem = {
   account_id?: string;
 };
 
-/** One of the caller's open to-dos from mail on an issue's trail. */
-export type IssueTodo = {
+/**
+ * An open to-do from mail on a project, as one member sees it. Everyone on
+ * the project sees it; only its owner gets the ids that open the mail.
+ */
+export type ProjectTodo = {
   id: string;
   text: string;
-  account_id: string;
-  message_id: string;
+  owner_user_id: string;
+  /** "You", or the owner's email. */
+  owner_label: string;
+  is_mine: boolean;
   created_at: string;
   due_at?: string;
+  issue_id?: string;
+  issue_title?: string;
+  account_id?: string;
+  message_id?: string;
 };
 
 export type IssueDetail = IssueListItem & {
   items: IssueTrailItem[];
-  /** The caller's open to-dos on this trail. Personal, so absent from lists. */
-  todos?: IssueTodo[];
+  /** The project's open to-dos on this trail. Only a single issue carries them. */
+  todos?: ProjectTodo[];
 };
 
 export type FactEvidence = {
@@ -1306,6 +1315,20 @@ export async function withdrawDecision(accessToken: string, decisionID: string) 
 
 export async function getAttention(accessToken: string) {
   return apiRequest<AttentionResult>(`/api/attention`, {
+    headers: toAuthHeader(accessToken),
+  });
+}
+
+export async function listProjectTodos(accessToken: string, projectID: string) {
+  return apiRequest<ProjectTodo[]>(`/api/projects/${projectID}/todos`, {
+    headers: toAuthHeader(accessToken),
+  });
+}
+
+/** Closes a to-do on the project, whoever's mailbox it came from. */
+export async function completeProjectTodo(accessToken: string, projectID: string, todoID: string) {
+  return apiRequest<{ status: string }>(`/api/projects/${projectID}/todos/${todoID}/done`, {
+    method: "POST",
     headers: toAuthHeader(accessToken),
   });
 }

@@ -10,7 +10,7 @@ export const DEFINITIONS = {
   decisions:
     "Decisions are choices this project has committed to. A new one waits for you to accept it, because asserting the project decided something is harder to walk back than a value being wrong.",
   issues:
-    "Issues are open questions or work someone has to act on, shared with everyone on the project. They are raised from correspondence automatically — discard one that should not have been raised. What an issue's mail asks you personally to do shows on it as your to-dos.",
+    "Issues are open questions or work someone has to act on, shared with everyone on the project. They are raised from correspondence automatically — discard one that should not have been raised. What an issue's mail asks people to do shows on it as to-dos, which anyone on the project can close.",
   contradictions:
     "Contradictions are two sources disagreeing about the same value. Nothing is applied until you pick a side.",
   confirmation:

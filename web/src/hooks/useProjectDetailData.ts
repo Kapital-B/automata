@@ -9,6 +9,7 @@ import {
   getCurrentPosition,
   getProject,
   getProjectAttention,
+  listProjectTodos,
   getProjectTimeline,
   listProjectContradictions,
   listProjectDecisions,
@@ -175,6 +176,11 @@ export function useProjectDetailData(projectID: string | undefined, filters: Tim
     queryFn: () => getProjectAttention(accessToken!, projectID!),
     enabled,
   });
+  const todosQuery = useQuery({
+    queryKey: ["project-todos", accessToken, projectID],
+    queryFn: () => listProjectTodos(accessToken!, projectID!),
+    enabled,
+  });
   const healthQuery = useQuery({
     queryKey: ["api-health"],
     queryFn: () => getApiHealth(),
@@ -202,6 +208,7 @@ export function useProjectDetailData(projectID: string | undefined, filters: Tim
         "project-current-position",
         "project-issues",
         "project-attention",
+        "project-todos",
       ]) {
         void queryClient.invalidateQueries({ queryKey: [key] });
       }
@@ -269,6 +276,8 @@ export function useProjectDetailData(projectID: string | undefined, filters: Tim
     decisionsQuery,
     attention: attentionQuery.data,
     attentionQuery,
+    todos: todosQuery.data ?? [],
+    todosQuery,
     confirmationRows,
     llmEnabled: healthQuery.data?.llm === true,
     extraction: {

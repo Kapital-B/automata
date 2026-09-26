@@ -16,14 +16,14 @@ vi.mock("@/lib/auth", async () => {
     getIssue: vi.fn(),
     updateIssue: vi.fn(),
     listContacts: vi.fn(),
-    markActionItemDone: vi.fn(),
+    completeProjectTodo: vi.fn(),
     removeIssueItem: vi.fn(),
   };
 });
 
 const getIssue = vi.mocked(auth.getIssue);
 const updateIssue = vi.mocked(auth.updateIssue);
-const markActionItemDone = vi.mocked(auth.markActionItemDone);
+const completeProjectTodo = vi.mocked(auth.completeProjectTodo);
 
 // Radix Select reaches for pointer capture and scrolling, which jsdom lacks.
 beforeAll(() => {
@@ -48,7 +48,14 @@ function issue(overrides: Partial<auth.IssueDetail> = {}): auth.IssueDetail {
     updated_at: "2026-09-20T00:00:00Z",
     items: [],
     todos: [
-      { id: "t1", text: "Send the datasheet", account_id: "a1", message_id: "m1", created_at: "2026-09-21T00:00:00Z" },
+      {
+        id: "t1", text: "Send the datasheet", owner_user_id: "u1", owner_label: "You", is_mine: true,
+        account_id: "a1", message_id: "m1", created_at: "2026-09-21T00:00:00Z",
+      },
+      {
+        id: "t2", text: "Chase the drawing", owner_user_id: "u2", owner_label: "sam@example.com", is_mine: false,
+        created_at: "2026-09-22T00:00:00Z",
+      },
     ],
     ...overrides,
   } as auth.IssueDetail;
@@ -76,39 +83,43 @@ describe("IssueDetailPage to-dos", () => {
   beforeEach(() => {
     getIssue.mockReset();
     updateIssue.mockReset();
-    markActionItemDone.mockReset();
+    completeProjectTodo.mockReset();
     vi.mocked(auth.listContacts).mockResolvedValue([]);
     getIssue.mockResolvedValue(issue());
     updateIssue.mockResolvedValue(issue({ status: "resolved", todos: [] }));
-    markActionItemDone.mockResolvedValue({ status: "ok" });
+    completeProjectTodo.mockResolvedValue({ status: "done" });
   });
 
-  it("lists your to-dos from the trail and marks one done", async () => {
+  it("lists the team's to-dos from the trail, and anyone can mark one done", async () => {
     renderPage();
-    const list = await screen.findByRole("list", { name: "Your to-dos" });
+    const list = await screen.findByRole("list", { name: "To-dos" });
     expect(within(list).getByRole("link", { name: "Send the datasheet" })).toHaveAttribute(
       "href",
       "/inbox?message_id=m1&account_id=a1",
     );
-    fireEvent.click(within(list).getByRole("button", { name: "Mark “Send the datasheet” done" }));
-    await waitFor(() => expect(markActionItemDone).toHaveBeenCalledWith("token", "t1"));
+    // A teammate's is named, and their mail is not linked.
+    expect(within(list).getByText("sam@example.com")).toBeInTheDocument();
+    expect(within(list).queryByRole("link", { name: "Chase the drawing" })).not.toBeInTheDocument();
+    fireEvent.click(within(list).getByRole("button", { name: "Mark “Chase the drawing” done" }));
+    await waitFor(() => expect(completeProjectTodo).toHaveBeenCalledWith("token", "p1", "t2"));
   });
 
   it("hides the section when there are no to-dos", async () => {
     getIssue.mockResolvedValue(issue({ todos: [] }));
     renderPage();
     await screen.findByRole("heading", { name: "Pump P-03 duty" });
-    expect(screen.queryByRole("heading", { name: "Your to-dos" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("heading", { name: "To-dos" })).not.toBeInTheDocument();
   });
 
   it("asks before resolving with open to-dos, and can close them in the same step", async () => {
     renderPage();
-    await screen.findByRole("list", { name: "Your to-dos" });
+    await screen.findByRole("list", { name: "To-dos" });
     chooseStatus("Resolved");
     fireEvent.click(screen.getByRole("button", { name: "Save" }));
 
     const dialog = await screen.findByRole("alertdialog", { name: "Resolve this issue?" });
-    expect(dialog).toHaveTextContent("1 open to-do");
+    expect(dialog).toHaveTextContent("2 open to-dos");
+    expect(dialog).toHaveTextContent("for everyone on the project");
     expect(updateIssue).not.toHaveBeenCalled();
     fireEvent.click(within(dialog).getByRole("button", { name: "Resolve and mark done" }));
     await waitFor(() =>
@@ -122,7 +133,7 @@ describe("IssueDetailPage to-dos", () => {
 
   it("can resolve without touching the to-dos", async () => {
     renderPage();
-    await screen.findByRole("list", { name: "Your to-dos" });
+    await screen.findByRole("list", { name: "To-dos" });
     chooseStatus("Resolved");
     fireEvent.click(screen.getByRole("button", { name: "Save" }));
     fireEvent.click(await screen.findByRole("button", { name: "Resolve only" }));
@@ -132,7 +143,7 @@ describe("IssueDetailPage to-dos", () => {
 
   it("saves other changes without asking", async () => {
     renderPage();
-    await screen.findByRole("list", { name: "Your to-dos" });
+    await screen.findByRole("list", { name: "To-dos" });
     fireEvent.click(screen.getByRole("button", { name: "Save" }));
     await waitFor(() => expect(updateIssue).toHaveBeenCalled());
     expect(screen.queryByRole("alertdialog")).not.toBeInTheDocument();
