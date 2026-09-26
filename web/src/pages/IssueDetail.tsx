@@ -321,7 +321,8 @@ export default function IssueDetailPage() {
                 ) : (
                   <p className="font-medium">{item.title || "(untitled)"}</p>
                 )}
-                {item.snippet ? (
+                {/* Mail bodies are often raw HTML; an email is read in the inbox. */}
+                {item.source !== "mail" && item.snippet ? (
                   <p className="text-sm text-foreground/85">{item.snippet}</p>
                 ) : null}
                 <Button

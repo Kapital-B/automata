@@ -201,7 +201,11 @@ function CorrespondenceRow({
               </Link>
             )}
           </div>
-          {item.snippet && <p className="line-clamp-2 text-sm text-foreground/85">{item.snippet}</p>}
+          {/* Mail bodies are often raw HTML, so an email shows its subject and
+              people only; open it in the inbox to read it. */}
+          {item.source !== "mail" && item.snippet && (
+            <p className="line-clamp-2 text-sm text-foreground/85">{item.snippet}</p>
+          )}
           {showBody && item.body_text && (
             <pre className="whitespace-pre-wrap rounded-md bg-muted/40 p-3 font-sans text-sm">{item.body_text}</pre>
           )}
