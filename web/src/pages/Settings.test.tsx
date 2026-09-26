@@ -31,6 +31,7 @@ vi.mock("@/lib/auth", async () => {
     updateSummarySettings: vi.fn(),
     getScheduleSettings: vi.fn(),
     updateScheduleSettings: vi.fn(),
+    listRuns: vi.fn(),
   };
 });
 
@@ -220,5 +221,15 @@ describe("Schedules", () => {
     const dialog = await screen.findByRole("alertdialog");
     fireEvent.click(within(dialog).getByRole("button", { name: "Cancel" }));
     expect(screen.getByDisplayValue("Nightly")).toBeInTheDocument();
+  });
+});
+
+describe("Runs tab", () => {
+  it("shows job runs inside Settings, linked from the URL", async () => {
+    vi.mocked(auth.listRuns).mockResolvedValue({ runs: [] });
+    renderPage("runs");
+    expect(screen.getByRole("tab", { name: "Runs" })).toHaveAttribute("aria-selected", "true");
+    expect(await screen.findByRole("heading", { name: "Job runs" })).toBeInTheDocument();
+    await waitFor(() => expect(auth.listRuns).toHaveBeenCalled());
   });
 });

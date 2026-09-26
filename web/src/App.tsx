@@ -18,7 +18,6 @@ import IssueDetailPage from "./pages/IssueDetail";
 import TriagePage from "./pages/Triage";
 import RulesPage from "./pages/Rules";
 import DraftsPage from "./pages/Drafts";
-import RunsPage from "./pages/Runs";
 import SettingsPage from "./pages/Settings";
 import LoginPage from "./pages/Login";
 import RegisterPage from "./pages/Register";
@@ -138,19 +137,13 @@ const App = () => (
                 </ProtectedRoute>
               }
             />
-            <Route
-              path="/runs"
-              element={
-                <ProtectedRoute>
-                  <AppShell>{(ctx) => <RunsPage {...ctx} />}</AppShell>
-                </ProtectedRoute>
-              }
-            />
+            {/* Runs moved into Settings; old links and bookmarks land there. */}
+            <Route path="/runs" element={<Navigate to="/settings?tab=runs" replace />} />
             <Route
               path="/settings"
               element={
                 <ProtectedRoute>
-                  <AppShell>{() => <SettingsPage />}</AppShell>
+                  <AppShell>{(ctx) => <SettingsPage {...ctx} />}</AppShell>
                 </ProtectedRoute>
               }
             />

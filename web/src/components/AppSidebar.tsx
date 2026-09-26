@@ -5,7 +5,6 @@ import {
   Forward,
   PenLine,
   Plug,
-  History,
   Settings as SettingsIcon,
   Home,
   Users,
@@ -78,7 +77,6 @@ const navGroups: NavGroup[] = [
   {
     label: "System",
     items: [
-      { title: "Runs", url: "/runs", icon: History },
       { title: "Settings", url: "/settings", icon: SettingsIcon },
     ],
   },
