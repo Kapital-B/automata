@@ -718,8 +718,20 @@ export type IssueTrailItem = {
   account_id?: string;
 };
 
+/** One of the caller's open to-dos from mail on an issue's trail. */
+export type IssueTodo = {
+  id: string;
+  text: string;
+  account_id: string;
+  message_id: string;
+  created_at: string;
+  due_at?: string;
+};
+
 export type IssueDetail = IssueListItem & {
   items: IssueTrailItem[];
+  /** The caller's open to-dos on this trail. Personal, so absent from lists. */
+  todos?: IssueTodo[];
 };
 
 export type FactEvidence = {
@@ -1230,6 +1242,11 @@ export type AttentionItem = {
   ref_id: string;
   account_id?: string;
   message_id?: string;
+  /** For a mail to-do: the issue whose trail carries its message. */
+  issue_id?: string;
+  issue_title?: string;
+  due_at?: string;
+  occurred_at?: string;
 };
 
 export type AttentionResult = {
