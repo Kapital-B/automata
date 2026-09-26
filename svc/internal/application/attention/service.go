@@ -33,6 +33,11 @@ type Item struct {
 	RefID       string `json:"ref_id"`
 	AccountID   string `json:"account_id,omitempty"`
 	MessageID   string `json:"message_id,omitempty"`
+	// IssueID and IssueTitle name the issue a mail to-do's message is on, so
+	// the to-do reads as part of that piece of project work.
+	IssueID    string     `json:"issue_id,omitempty"`
+	IssueTitle string     `json:"issue_title,omitempty"`
+	DueAt      *time.Time `json:"due_at,omitempty"`
 	// OccurredAt dates the underlying row, so the list can be ordered by
 	// recency within a why_me group.
 	OccurredAt time.Time `json:"occurred_at"`
@@ -61,7 +66,13 @@ type Service struct {
 	Decisions      driven.DecisionRepository
 	Contradictions driven.ContradictionRepository
 	Summaries      driven.SummaryRepository
+	// Assignments places mail to-dos on the project their message is filed
+	// to. Optional: without it they stay unplaced.
+	Assignments driven.AssignmentRepository
 }
+
+// lookupChunk bounds the IN lists sent to the database.
+const lookupChunk = 500
 
 func (s *Service) homeOrg(ctx context.Context, userID uuid.UUID) (uuid.UUID, error) {
 	return s.Users.GetHomeOrganisationID(ctx, userID)
@@ -87,9 +98,11 @@ func (s *Service) ForUser(ctx context.Context, userID uuid.UUID) (*Result, error
 		}
 		out.Items = append(out.Items, item)
 	}
-	if err := s.appendMailItems(ctx, userID, out); err != nil {
+	mail, err := s.mailItems(ctx, userID, orgID)
+	if err != nil {
 		return nil, err
 	}
+	out.Items = append(out.Items, mail...)
 	sortItems(out.Items)
 	out.Counts = countItems(out.Items)
 	return out, nil
@@ -180,35 +193,145 @@ func (s *Service) ForProject(ctx context.Context, userID, projectID uuid.UUID) (
 	if err != nil {
 		return nil, err
 	}
+	mail, err := s.mailItems(ctx, userID, orgID)
+	if err != nil {
+		return nil, err
+	}
+	for _, it := range mail {
+		if it.ProjectID == projectID.String() {
+			out.Items = append(out.Items, it)
+		}
+	}
 	sortItems(out.Items)
 	out.Counts = countItems(out.Items)
 	return out, nil
 }
 
-func (s *Service) appendMailItems(ctx context.Context, userID uuid.UUID, out *Result) error {
-	if s == nil || s.Summaries == nil || out == nil {
-		return nil
+// mailItems returns the caller's open to-dos from mail. Each is placed on the
+// project its message is filed to, and on the issue whose trail carries the
+// message, when the caller can see that project. Nothing is stored: filing
+// mail elsewhere moves its to-dos with it.
+func (s *Service) mailItems(ctx context.Context, userID, orgID uuid.UUID) ([]Item, error) {
+	if s == nil || s.Summaries == nil {
+		return nil, nil
 	}
-	items, err := s.Summaries.ListOpenActionItems(ctx, userID, nil)
+	rows, err := s.Summaries.ListOpenActionItems(ctx, userID, nil)
 	if err != nil {
-		return err
+		return nil, err
 	}
-	for _, it := range items {
+	if len(rows) == 0 {
+		return nil, nil
+	}
+	messageIDs := make([]uuid.UUID, 0, len(rows))
+	seen := make(map[uuid.UUID]struct{}, len(rows))
+	for _, it := range rows {
+		if _, ok := seen[it.MessageID]; ok {
+			continue
+		}
+		seen[it.MessageID] = struct{}{}
+		messageIDs = append(messageIDs, it.MessageID)
+	}
+	projectOf, issueOf, err := s.placeMessages(ctx, userID, orgID, messageIDs)
+	if err != nil {
+		return nil, err
+	}
+	names := map[uuid.UUID]string{}
+	visible := func(projectID uuid.UUID) (string, bool, error) {
+		if name, ok := names[projectID]; ok {
+			return name, name != "", nil
+		}
+		names[projectID] = ""
+		p, err := s.Projects.GetProject(ctx, orgID, projectID)
+		if err != nil || p == nil {
+			return "", false, err
+		}
+		m, err := s.Projects.GetProjectMember(ctx, projectID, userID)
+		if err != nil || m == nil {
+			return "", false, err
+		}
+		names[projectID] = p.Name
+		return p.Name, true, nil
+	}
+
+	out := make([]Item, 0, len(rows))
+	for _, it := range rows {
 		title := strings.TrimSpace(it.Text)
 		if title == "" {
 			title = "Open mail action"
 		}
-		out.Items = append(out.Items, Item{
-			ID:        "mail:" + it.ID.String(),
-			WhyMe:     WhyMailActionItem,
-			Title:     title,
-			RefType:   "action_item",
-			RefID:     it.ID.String(),
-			AccountID: it.AccountID.String(),
-			MessageID: it.MessageID.String(),
-		})
+		item := Item{
+			ID:         "mail:" + it.ID.String(),
+			WhyMe:      WhyMailActionItem,
+			Title:      title,
+			RefType:    "action_item",
+			RefID:      it.ID.String(),
+			AccountID:  it.AccountID.String(),
+			MessageID:  it.MessageID.String(),
+			OccurredAt: it.CreatedAt,
+			DueAt:      it.DueAt,
+		}
+		link, onIssue := issueOf[it.MessageID]
+		projectID, filed := projectOf[it.MessageID]
+		// Mail filed to one project but still on an issue in another has
+		// moved on; the filing wins. Unfiled mail on an issue takes the
+		// issue's project.
+		if !filed && onIssue {
+			projectID, filed = link.ProjectID, true
+		}
+		if onIssue && link.ProjectID != projectID {
+			onIssue = false
+		}
+		if filed {
+			name, ok, err := visible(projectID)
+			if err != nil {
+				return nil, err
+			}
+			if ok {
+				item.ProjectID = projectID.String()
+				item.ProjectName = name
+				if onIssue {
+					item.IssueID = link.IssueID.String()
+					item.IssueTitle = link.Title
+				}
+			}
+		}
+		out = append(out, item)
 	}
-	return nil
+	return out, nil
+}
+
+// placeMessages resolves the project and issue for many messages, in chunks.
+func (s *Service) placeMessages(ctx context.Context, userID, orgID uuid.UUID, messageIDs []uuid.UUID) (map[uuid.UUID]uuid.UUID, map[uuid.UUID]driven.IssueLink, error) {
+	projectOf := make(map[uuid.UUID]uuid.UUID, len(messageIDs))
+	issueOf := make(map[uuid.UUID]driven.IssueLink)
+	for start := 0; start < len(messageIDs); start += lookupChunk {
+		chunk := messageIDs[start:min(start+lookupChunk, len(messageIDs))]
+		if s.Assignments != nil {
+			msgs := make([]driven.MessageRow, len(chunk))
+			for i, id := range chunk {
+				msgs[i] = driven.MessageRow{ID: id}
+			}
+			projects, err := s.Assignments.EffectiveProjectIDsForMessages(ctx, userID, msgs)
+			if err != nil {
+				return nil, nil, err
+			}
+			for mid, pid := range projects {
+				if pid != nil {
+					projectOf[mid] = *pid
+				}
+			}
+		}
+		if s.Issues != nil {
+			links, err := s.Issues.ListIssueLinksForMessages(ctx, orgID, chunk)
+			if err != nil {
+				return nil, nil, err
+			}
+			for mid, link := range links {
+				issueOf[mid] = link
+			}
+		}
+	}
+	return projectOf, issueOf, nil
 }
 
 func (s *Service) forProject(ctx context.Context, userID, orgID uuid.UUID, p driven.ProjectRow, m *driven.ProjectMemberRow) (*Result, error) {
@@ -362,8 +485,8 @@ func countItems(items []Item) Counts {
 // CountsForUser returns the total attention count and a per-project breakdown,
 // for the Home metric cards and project badges.
 //
-// Mail action items have no project, so they count toward the total but not
-// toward any project's badge.
+// Mail to-dos count toward the badge of the project their message is filed
+// to; unfiled ones count toward the total only.
 func (s *Service) CountsForUser(ctx context.Context, userID uuid.UUID) (int, map[uuid.UUID]int, error) {
 	res, err := s.ForUser(ctx, userID)
 	if err != nil {

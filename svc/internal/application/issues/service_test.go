@@ -241,3 +241,91 @@ func TestTimelineUnassignedToIssue(t *testing.T) {
 	}
 	t.Fatal("linked item not found")
 }
+
+// An issue shows the caller's to-dos from mail on its trail, and resolving it
+// can mark them done in the same step. It never touches to-dos elsewhere.
+func TestIssueTodosFromTrailAndCompleteOnResolve(t *testing.T) {
+	_, repo, issueSvc, projectSvc, userID, projectID, accountID := setupIssues(t, "issuetodos")
+	issueSvc.Summaries = repo
+	ctx := context.Background()
+	now := time.Now().UTC()
+	newMsg := func(subject, conv string) uuid.UUID {
+		id := uuid.New()
+		if err := repo.UpsertMessage(ctx, driven.MessageRow{
+			ID: id, AccountID: accountID, ProviderMessageID: id.String(),
+			ReceivedAt: now, Subject: subject, FromJSON: `{}`, ConversationID: &conv,
+		}); err != nil {
+			t.Fatal(err)
+		}
+		return id
+	}
+	onTrail := newMsg("Pump duty", "c-1")
+	elsewhere := newMsg("Invoice", "c-2")
+	if _, err := projectSvc.AssignMessage(ctx, userID, onTrail, appprojects.AssignInput{
+		ProjectID: &projectID, Scope: domainprojects.ScopeThread, Status: domainprojects.StatusCommitted,
+	}); err != nil {
+		t.Fatal(err)
+	}
+	runID := uuid.New()
+	if err := repo.InsertJobRun(ctx, runID, accountID, "summarize", "api", "success", now, now, nil, `{}`); err != nil {
+		t.Fatal(err)
+	}
+	trailTodo, otherTodo := uuid.New(), uuid.New()
+	if err := repo.InsertActionItems(ctx, []driven.ActionItemRow{
+		{ID: trailTodo, UserID: userID, AccountID: accountID, MessageID: onTrail, RunID: runID, Text: "Reply to Jan", Status: "open", CreatedAt: now, UpdatedAt: now},
+		{ID: otherTodo, UserID: userID, AccountID: accountID, MessageID: elsewhere, RunID: runID, Text: "Pay invoice", Status: "open", CreatedAt: now, UpdatedAt: now},
+	}); err != nil {
+		t.Fatal(err)
+	}
+
+	view, err := issueSvc.Create(ctx, userID, projectID, appissues.CreateInput{Title: "Pump P-03"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	view, err = issueSvc.AddItem(ctx, userID, view.Issue.ID, appissues.ItemRef{MessageID: &onTrail})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(view.Todos) != 1 || view.Todos[0].ID != trailTodo {
+		t.Fatalf("want the trail's one to-do, got %+v", view.Todos)
+	}
+
+	openCount := func() int {
+		items, err := repo.ListOpenActionItems(ctx, userID, nil)
+		if err != nil {
+			t.Fatal(err)
+		}
+		return len(items)
+	}
+	resolved, reopened := "resolved", "open"
+
+	// Resolving without asking leaves the to-dos alone.
+	if _, err := issueSvc.Update(ctx, userID, view.Issue.ID, appissues.UpdateInput{Status: &resolved}); err != nil {
+		t.Fatal(err)
+	}
+	if n := openCount(); n != 2 {
+		t.Fatalf("resolve alone closed to-dos: %d open, want 2", n)
+	}
+	// Asking to complete them on an update that does not resolve does nothing.
+	if _, err := issueSvc.Update(ctx, userID, view.Issue.ID, appissues.UpdateInput{Status: &reopened, CompleteTodos: true}); err != nil {
+		t.Fatal(err)
+	}
+	if n := openCount(); n != 2 {
+		t.Fatalf("reopening closed to-dos: %d open, want 2", n)
+	}
+
+	view, err = issueSvc.Update(ctx, userID, view.Issue.ID, appissues.UpdateInput{Status: &resolved, CompleteTodos: true})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(view.Todos) != 0 {
+		t.Fatalf("resolved issue still lists to-dos: %+v", view.Todos)
+	}
+	left, err := repo.ListOpenActionItems(ctx, userID, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(left) != 1 || left[0].ID != otherTodo {
+		t.Fatalf("want only the unrelated to-do open, got %+v", left)
+	}
+}

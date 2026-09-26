@@ -226,6 +226,9 @@ func (h *Handlers) updateIssue(w http.ResponseWriter, r *http.Request) {
 		_ = json.Unmarshal(raw, &status)
 		in.Status = &status
 	}
+	if raw, ok := body["complete_todos"]; ok {
+		_ = json.Unmarshal(raw, &in.CompleteTodos)
+	}
 	_, hasUser := body["assignee_user_id"]
 	_, hasContact := body["assignee_contact_id"]
 	if hasUser || hasContact {
@@ -436,6 +439,21 @@ func issueJSON(v appissues.IssueView, withItems bool) map[string]any {
 			items = append(items, row)
 		}
 		out["items"] = items
+		todos := make([]map[string]any, 0, len(v.Todos))
+		for _, t := range v.Todos {
+			row := map[string]any{
+				"id":         t.ID.String(),
+				"text":       t.Text,
+				"account_id": t.AccountID.String(),
+				"message_id": t.MessageID.String(),
+				"created_at": t.CreatedAt.UTC().Format(time.RFC3339Nano),
+			}
+			if t.DueAt != nil {
+				row["due_at"] = t.DueAt.UTC().Format(time.RFC3339Nano)
+			}
+			todos = append(todos, row)
+		}
+		out["todos"] = todos
 	}
 	return out
 }

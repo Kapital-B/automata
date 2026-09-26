@@ -1157,6 +1157,67 @@ func runHomeOverviewTimestampTests(t *testing.T, factory Factory) {
 			t.Error("counts must not reach outside the project")
 		}
 	})
+
+	t.Run("issue_links_for_messages_skip_discarded_and_other_orgs", func(t *testing.T) {
+		h := factory(t)
+		ctx := context.Background()
+		now := time.Now().UTC()
+		userID, orgID, accountID := seedUserAccount(t, h.Repo, uuid.New(), now)
+		projectID := createProject(t, h.Repo, orgID, userID, "DC15", "Links")
+		_, otherOrgID, _ := seedUserAccount(t, h.Repo, uuid.New(), now)
+
+		onIssue := insertMsg(t, h.Repo, accountID, "On issue", "c1", "b", now)
+		onDiscarded := insertMsg(t, h.Repo, accountID, "On discarded", "c2", "b", now)
+		loose := insertMsg(t, h.Repo, accountID, "Loose", "c3", "b", now)
+
+		openIssue, discarded := uuid.New(), uuid.New()
+		discardedAt := now
+		for _, row := range []driven.IssueRow{
+			{ID: openIssue, OrganisationID: orgID, ProjectID: projectID, Title: "Pump duty", Status: "open", CreatedAt: now, UpdatedAt: now},
+			{ID: discarded, OrganisationID: orgID, ProjectID: projectID, Title: "Noise", Status: "open", CreatedAt: now, UpdatedAt: now, DiscardedAt: &discardedAt},
+		} {
+			if err := h.Repo.CreateIssue(ctx, row); err != nil {
+				t.Fatal(err)
+			}
+		}
+		for msg, issue := range map[uuid.UUID]uuid.UUID{onIssue: openIssue, onDiscarded: discarded} {
+			m := msg
+			if err := h.Repo.AddIssueItem(ctx, driven.IssueItemRow{ID: uuid.New(), IssueID: issue, MessageID: &m, AddedAt: now}); err != nil {
+				t.Fatal(err)
+			}
+		}
+
+		links, err := h.Repo.ListIssueLinksForMessages(ctx, orgID, []uuid.UUID{onIssue, onDiscarded, loose})
+		if err != nil {
+			t.Fatal(err)
+		}
+		got, ok := links[onIssue]
+		if !ok || got.IssueID != openIssue || got.ProjectID != projectID || got.Title != "Pump duty" || got.Status != "open" {
+			t.Errorf("link for the issue's message = %+v (found %v)", got, ok)
+		}
+		if _, ok := links[onDiscarded]; ok {
+			t.Error("a discarded issue should not claim its messages")
+		}
+		if _, ok := links[loose]; ok {
+			t.Error("a message on no issue should have no link")
+		}
+		if len(links) != 1 {
+			t.Errorf("got %d links, want 1", len(links))
+		}
+
+		// Another organisation cannot see this organisation's issues.
+		other, err := h.Repo.ListIssueLinksForMessages(ctx, otherOrgID, []uuid.UUID{onIssue})
+		if err != nil {
+			t.Fatal(err)
+		}
+		if len(other) != 0 {
+			t.Errorf("links leaked across organisations: %+v", other)
+		}
+		empty, err := h.Repo.ListIssueLinksForMessages(ctx, orgID, nil)
+		if err != nil || len(empty) != 0 {
+			t.Errorf("empty input = %+v, %v", empty, err)
+		}
+	})
 }
 
 // runActivityFeedTests covers the cross-project Home feed.
