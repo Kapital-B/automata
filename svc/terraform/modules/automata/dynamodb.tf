@@ -106,8 +106,11 @@ resource "aws_dynamodb_table" "jobs" {
     enabled        = true
   }
 
+  # Encrypted at rest with the AWS-owned key. enabled = true would switch to the
+  # aws/dynamodb managed key, and this table's constant scheduler, worker and
+  # stream traffic then turns into a steady stream of billable KMS requests.
   server_side_encryption {
-    enabled = true
+    enabled = false
   }
 
   tags = local.common_tags
