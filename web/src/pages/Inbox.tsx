@@ -78,10 +78,15 @@ export default function InboxPage({ accountFilter }: Props) {
         category: cat === "all" ? undefined : cat,
         projectId: projectFilter === "all" ? undefined : projectFilter,
         limit: INBOX_PAGE_SIZE,
-        offset: pageParam,
+        before: pageParam,
       }),
-    initialPageParam: 0,
-    getNextPageParam: (lastPage, pages) => (lastPage.length === INBOX_PAGE_SIZE ? pages.length * INBOX_PAGE_SIZE : undefined),
+    // Page from the last message seen rather than by offset: mail that syncs
+    // or gets filed between pages would otherwise repeat or skip messages.
+    initialPageParam: undefined as { receivedAt: string; id: string } | undefined,
+    getNextPageParam: (lastPage) => {
+      const last = lastPage[lastPage.length - 1];
+      return lastPage.length === INBOX_PAGE_SIZE && last ? { receivedAt: last.received_at, id: last.id } : undefined;
+    },
     enabled: Boolean(accessToken),
   });
   const selectedMessageQuery = useQuery({

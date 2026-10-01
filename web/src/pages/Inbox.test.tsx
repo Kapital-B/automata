@@ -120,6 +120,22 @@ describe("InboxPage", () => {
     );
   });
 
+  it("loads the next page from the last message shown, not by offset", async () => {
+    const firstPage = Array.from({ length: 50 }, (_, i) =>
+      message({ id: `m${i}`, received_at: new Date(Date.UTC(2026, 8, 30, 12, 0, 0, 0) - i * 1000).toISOString() }),
+    );
+    listMessages.mockResolvedValueOnce(firstPage).mockResolvedValueOnce([message({ id: "older" })]);
+    renderPage();
+    fireEvent.click(await screen.findByRole("button", { name: "Load more" }));
+    await waitFor(() => expect(listMessages).toHaveBeenCalledTimes(2));
+    const last = firstPage[firstPage.length - 1];
+    expect(listMessages.mock.calls[0][1]).toEqual(expect.objectContaining({ before: undefined }));
+    expect(listMessages.mock.calls[1][1]).toEqual(
+      expect.objectContaining({ before: { receivedAt: last.received_at, id: last.id } }),
+    );
+    expect(listMessages.mock.calls[1][1]).not.toHaveProperty("offset");
+  });
+
   it("offers to clear filters when nothing matches", async () => {
     renderPage();
     await screen.findByRole("list", { name: "Messages" });

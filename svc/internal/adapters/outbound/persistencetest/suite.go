@@ -806,6 +806,55 @@ func Run(t *testing.T, factory Factory) {
 		}
 	})
 
+	t.Run("message_list_keyset_survives_arrivals_between_pages", func(t *testing.T) {
+		h := factory(t)
+		ctx := context.Background()
+		now := time.Now().UTC().Truncate(time.Microsecond)
+		userID, _, accountID := seedUserAccount(t, h.Repo, uuid.New(), now)
+
+		// Several messages share a timestamp, so a timestamp-only cursor would
+		// drop or repeat them at a page boundary.
+		shared := now.Add(-time.Hour)
+		const total = 12
+		want := map[uuid.UUID]bool{}
+		for i := 0; i < total; i++ {
+			at := shared
+			if i%3 == 0 {
+				at = now.Add(-time.Duration(i+1) * time.Minute)
+			}
+			want[insertMsg(t, h.Repo, accountID, fmt.Sprintf("m%d", i), fmt.Sprintf("c%d", i), "", at)] = true
+		}
+
+		seen := map[uuid.UUID]int{}
+		filter := driven.MessageListFilter{AccountID: &accountID, Limit: 5, OmitBody: true}
+		for page := 0; page < 10; page++ {
+			got, err := h.Repo.ListMessages(ctx, userID, filter)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if len(got) == 0 {
+				break
+			}
+			for _, m := range got {
+				seen[m.ID]++
+			}
+			// New mail lands at the top between every page. With offset paging
+			// this pushes an already-seen row onto the next page.
+			insertMsg(t, h.Repo, accountID, fmt.Sprintf("new%d", page), fmt.Sprintf("n%d", page), "", now.Add(time.Duration(page+1)*time.Minute))
+			last := got[len(got)-1]
+			at, id := last.ReceivedAt, last.ID
+			filter.BeforeReceivedAt, filter.BeforeID = &at, &id
+		}
+		for id := range want {
+			if seen[id] != 1 {
+				t.Errorf("message %s returned %d times across pages, want 1", id, seen[id])
+			}
+		}
+		if len(seen) != total {
+			t.Fatalf("paged through %d distinct messages, want %d (arrivals after the first page must not appear)", len(seen), total)
+		}
+	})
+
 	t.Run("triage_messages_needing_assign_excludes_assigned", func(t *testing.T) {
 		h := factory(t)
 		ctx := context.Background()
