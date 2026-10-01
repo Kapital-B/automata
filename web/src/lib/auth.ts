@@ -288,6 +288,8 @@ export type ListMessagesFilter = {
   since?: string;
   limit?: number;
   offset?: number;
+  /** The last message of the previous page; returns messages strictly older. */
+  before?: { receivedAt: string; id: string };
 };
 
 export class ApiError extends Error {
@@ -1702,6 +1704,10 @@ export async function listMessages(accessToken: string, filter: ListMessagesFilt
   }
   if (typeof filter.offset === "number") {
     params.set("offset", String(filter.offset));
+  }
+  if (filter.before) {
+    params.set("before_received_at", filter.before.receivedAt);
+    params.set("before_id", filter.before.id);
   }
   const query = params.toString();
   const suffix = query ? `?${query}` : "";

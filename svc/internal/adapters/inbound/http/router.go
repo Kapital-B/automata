@@ -619,7 +619,34 @@ func (h *Handlers) listMessages(w http.ResponseWriter, r *http.Request) {
 			writeJSON(w, http.StatusBadRequest, map[string]string{"error": "bad offset"})
 			return
 		}
+		if n < 0 {
+			writeJSON(w, http.StatusBadRequest, map[string]string{"error": "bad offset"})
+			return
+		}
 		filter.Offset = n
+	}
+	// before_received_at/before_id name the last row of the previous page.
+	// Offset paging shifts when mail arrives or is filed between pages, which
+	// repeats or skips messages; the keyset does not.
+	beforeAt, beforeID := r.URL.Query().Get("before_received_at"), r.URL.Query().Get("before_id")
+	if beforeAt != "" || beforeID != "" {
+		ts, err := time.Parse(time.RFC3339Nano, beforeAt)
+		if err != nil {
+			writeJSON(w, http.StatusBadRequest, map[string]string{"error": "bad before_received_at"})
+			return
+		}
+		id, err := uuid.Parse(beforeID)
+		if err != nil {
+			writeJSON(w, http.StatusBadRequest, map[string]string{"error": "bad before_id"})
+			return
+		}
+		if filter.Offset != 0 {
+			writeJSON(w, http.StatusBadRequest, map[string]string{"error": "offset cannot be combined with before_received_at/before_id"})
+			return
+		}
+		ts = ts.UTC()
+		filter.BeforeReceivedAt = &ts
+		filter.BeforeID = &id
 	}
 	filter.OmitBody = true
 	uid := userIDOrEmpty(r)
