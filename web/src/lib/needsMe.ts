@@ -42,7 +42,7 @@ const POSITION_WHY = new Set([
 const POSITION_REF = new Set(["contradiction", "fact_version", "decision"]);
 
 export function whyMeLabel(whyMe: string): string {
-  return WHY_ME_LABELS[whyMe] ?? whyMe.replaceAll("_", " ");
+  return WHY_ME_LABELS[whyMe] ?? whyMe.replace(/_/g, " ");
 }
 
 function mailHref(item: AttentionItem): string {

@@ -40,7 +40,7 @@ describe("buildAssistantSuggestions", () => {
       },
     ];
     state.actionItems = [
-      { id: "i1", account_id: "a1", message_id: "m1", text: "Reply", is_overdue: false },
+      { id: "i1", account_id: "a1", message_id: "m1", text: "Reply", created_at: "2026-09-30T09:00:00Z", is_overdue: false },
     ];
     const out = buildAssistantSuggestions(state);
     expect(out[0]?.id).toBe("review-action-items");
