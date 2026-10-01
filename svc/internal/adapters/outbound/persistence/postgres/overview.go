@@ -128,8 +128,8 @@ func (r *Repository) ListActivity(ctx context.Context, userID, organisationID uu
 		// Keyset, with ref_id breaking ties so events sharing a timestamp
 		// cannot loop or be skipped across pages.
 		if filter.BeforeID != nil {
-			where.WriteString(" AND (e.occurred_at, e.ref_id) < (?, ?)")
-			args = append(args, filter.Before.UTC(), filter.BeforeID.String())
+			where.WriteString(" AND (e.occurred_at < ? OR (e.occurred_at = ? AND e.ref_id < ?))")
+			args = append(args, filter.Before.UTC(), filter.Before.UTC(), filter.BeforeID.String())
 		} else {
 			where.WriteString(" AND e.occurred_at < ?")
 			args = append(args, filter.Before.UTC())

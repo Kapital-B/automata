@@ -1269,8 +1269,8 @@ func (r *Repository) ListMessagesNeedingAssign(ctx context.Context, userID, acco
 	keyset := ""
 	if filter.BeforeReceivedAt != nil && filter.BeforeID != nil {
 		keyset = `
-		  AND (m.received_at, m.id) < (?, ?)`
-		args = append(args, filter.BeforeReceivedAt.UTC(), filter.BeforeID.String())
+		  AND (m.received_at < ? OR (m.received_at = ? AND m.id < ?))`
+		args = append(args, filter.BeforeReceivedAt.UTC(), filter.BeforeReceivedAt.UTC(), filter.BeforeID.String())
 	}
 	args = append(args, limit)
 	rows, err := r.queryContext(ctx, `

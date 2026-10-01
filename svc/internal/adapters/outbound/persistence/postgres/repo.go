@@ -694,8 +694,10 @@ func (r *Repository) ListMessages(ctx context.Context, userID uuid.UUID, filter 
 		args = append(args, filter.ProjectID.String(), filter.ProjectID.String())
 	}
 	if filter.BeforeReceivedAt != nil && filter.BeforeID != nil {
-		b.WriteString(` AND (m.received_at, m.id) < (?, ?)`)
-		args = append(args, filter.BeforeReceivedAt.UTC(), filter.BeforeID.String())
+		// Expanded rather than a row-value comparison: Aurora DSQL does not
+		// document row-value comparison, and this runs on every inbox page.
+		b.WriteString(` AND (m.received_at < ? OR (m.received_at = ? AND m.id < ?))`)
+		args = append(args, filter.BeforeReceivedAt.UTC(), filter.BeforeReceivedAt.UTC(), filter.BeforeID.String())
 	}
 	b.WriteString(` ORDER BY m.received_at DESC, m.id DESC LIMIT ? OFFSET ?`)
 	args = append(args, limit, offset)
@@ -1767,8 +1769,8 @@ func (r *Repository) ListForwardCandidates(ctx context.Context, userID, accountI
 	keyset := ""
 	if after != nil {
 		keyset = `
-		  AND (m.received_at, m.id) > (?, ?)`
-		args = append(args, after.ReceivedAt.UTC(), after.MessageID.String())
+		  AND (m.received_at > ? OR (m.received_at = ? AND m.id > ?))`
+		args = append(args, after.ReceivedAt.UTC(), after.ReceivedAt.UTC(), after.MessageID.String())
 	}
 	args = append(args, limit)
 	rows, err := r.queryContext(ctx, `

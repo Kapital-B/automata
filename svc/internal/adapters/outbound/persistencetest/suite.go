@@ -855,6 +855,83 @@ func Run(t *testing.T, factory Factory) {
 		}
 	})
 
+	t.Run("job_keyset_cursors_break_timestamp_ties", func(t *testing.T) {
+		h := factory(t)
+		ctx := context.Background()
+		now := time.Now().UTC().Truncate(time.Microsecond)
+		userID, _, accountID := seedUserAccount(t, h.Repo, uuid.New(), now)
+
+		// Every message shares one timestamp, so only the id tie-break keeps
+		// the cursor moving. A wrong comparison loops or drops rows here.
+		shared := now.Add(-time.Hour)
+		const total = 7
+		want := map[uuid.UUID]bool{}
+		for i := 0; i < total; i++ {
+			want[insertMsg(t, h.Repo, accountID, fmt.Sprintf("x%d", i), fmt.Sprintf("c%d", i), "b", shared)] = true
+		}
+		check := func(name string, seen map[uuid.UUID]int) {
+			t.Helper()
+			for id := range want {
+				if seen[id] != 1 {
+					t.Errorf("%s: message %s returned %d times, want 1", name, id, seen[id])
+				}
+			}
+			if len(seen) != total {
+				t.Errorf("%s: paged through %d messages, want %d", name, len(seen), total)
+			}
+		}
+
+		// Assignment pages newest first, before the cursor.
+		seen := map[uuid.UUID]int{}
+		filter := driven.AssignCandidateFilter{Limit: 2}
+		for page := 0; page < 10; page++ {
+			got, err := h.Repo.ListMessagesNeedingAssign(ctx, userID, accountID, filter)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if len(got) == 0 {
+				break
+			}
+			for _, m := range got {
+				seen[m.ID]++
+			}
+			at, id := got[len(got)-1].ReceivedAt, got[len(got)-1].ID
+			filter.BeforeReceivedAt, filter.BeforeID = &at, &id
+		}
+		check("assign", seen)
+
+		// Forwarding pages oldest first, after the cursor.
+		if err := h.Repo.ReplaceForwardAllowlist(ctx, userID, []string{"dest@example.com"}); err != nil {
+			t.Fatal(err)
+		}
+		epoch := time.Unix(0, 0).UTC()
+		ruleID := uuid.New()
+		if err := h.Repo.CreateForwardRule(ctx, driven.ForwardRuleRow{
+			ID: ruleID, UserID: userID, AccountID: accountID, Name: "r", Mode: "logic",
+			ConditionJSON: `{"all":[{"field":"subject","op":"contains","value":"x"}]}`, ForwardTo: "dest@example.com",
+			Enabled: true, ApplyFrom: &epoch, CreatedAt: now, UpdatedAt: now,
+		}); err != nil {
+			t.Fatal(err)
+		}
+		seen = map[uuid.UUID]int{}
+		var after *driven.ForwardCandidateCursor
+		for page := 0; page < 10; page++ {
+			got, err := h.Repo.ListForwardCandidates(ctx, userID, accountID, []uuid.UUID{ruleID}, after, 2)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if len(got) == 0 {
+				break
+			}
+			for _, m := range got {
+				seen[m.ID]++
+			}
+			last := got[len(got)-1]
+			after = &driven.ForwardCandidateCursor{ReceivedAt: last.ReceivedAt, MessageID: last.ID}
+		}
+		check("forward", seen)
+	})
+
 	t.Run("triage_messages_needing_assign_excludes_assigned", func(t *testing.T) {
 		h := factory(t)
 		ctx := context.Background()
