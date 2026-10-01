@@ -726,7 +726,7 @@ both needed fixing, but neither was the reason the deploy failed.
 | Construct | Status |
 | --------- | ------ |
 | Window functions (§6 thread dedupe) | Documented as supported in [addendum-aurora-dsql.md §2](addendum-aurora-dsql.md); not yet executed against DSQL |
-| Row-value comparison `(received_at, id) < (?, ?)` (§12 keyset) | Not documented either way; not yet executed against DSQL |
+| Row-value comparison `(received_at, id) < (?, ?)` (§12 keyset) | No longer used. Every keyset predicate in the postgres adapter is written as `a < ? OR (a = ? AND b < ?)`, and `TestNoRowValueComparisons` fails if a row-value comparison is reintroduced |
 | `UNION ALL` with casts in branches (§5.1) | `UNION` documented as supported; this exact shape not executed |
 | The §5.1 query plan | Unknown — needs `EXPLAIN` on dev once the deploy is green |
 
