@@ -2,7 +2,7 @@
 
 **Status:** Proposal, not started
 **Related:** [AI-first assistant PRD](../prds/addendum-ai-first-assistant.md) (§8.1 conversation persistence still applies), [Aurora DSQL](addendum-aurora-dsql.md) (no extensions), [Triage efficiency](addendum-triage-efficiency.md) §17 (batched hydration)
-**Last updated:** 2026-10-02
+**Last updated:** 2026-10-04 (decisions recorded in §6)
 
 The assistant on the home page already answers questions through `POST /api/ask` (`projectai.AskAcross`). This RFC asks three questions about it. What would make it useful? How does it get the context to answer? How do we keep it cheap? It then proposes an order to build in.
 
@@ -91,7 +91,7 @@ Tool results carry IDs, so citations keep working as they do now. They're checke
 
 ### 4.3 Search on DSQL
 
-Aurora DSQL supports no extensions ([addendum-aurora-dsql.md](addendum-aurora-dsql.md) §97), so `pgvector` and `pg_trgm` are out. Whether `tsvector` and GIN indexes work isn't documented there and needs testing. The options:
+Aurora DSQL supports no extensions ([addendum-aurora-dsql.md](addendum-aurora-dsql.md), "No extensions"), so `pgvector` and `pg_trgm` are out. Whether `tsvector` and GIN indexes work isn't documented there and needs testing. The options:
 
 | Option | Quality | Cost to build and run | When |
 | ------ | ------- | --------------------- | ---- |
@@ -99,7 +99,7 @@ Aurora DSQL supports no extensions ([addendum-aurora-dsql.md](addendum-aurora-ds
 | b. Rank in Go over the rows from (a) | Basic relevance ranking | Small | With (a) |
 | c. A separate index (OpenSearch Serverless or S3 Vectors) fed by the sync job | Keyword plus semantic | A new service, an ingestion path and a deletion path | Only once evals show search quality is the bottleneck |
 
-Start with (a)+(b). Scoping by project and contact keeps the scanned set small, and one organisation's mail is modest. Option (c) can come later behind the same `search_messages` tool, so nothing above it changes.
+**Decided: stay on DSQL.** Build (a)+(b). Scoping by project and contact keeps the scanned set small, and one organisation's mail is modest. A separate service (c) is acceptable later, if evals show search quality is the bottleneck. It would sit behind the same `search_messages` tool, so nothing above it changes.
 
 ### 4.4 Project briefs
 
@@ -118,6 +118,41 @@ Additions:
 
 ## 5. Proposal: keeping it cheap
 
+### 5.0 The target: $10 per user per month
+
+The cheapest subscription should cost at most **$10 of LLM spend per user per month**. The usage data we collect will also feed into setting subscription prices. That has three consequences.
+
+**The assistant is not the main cost.** The app calls the LLM from nine places, and seven of them run on incoming mail, not on questions:
+
+| Call site | Runs when | Cost driven by |
+| --------- | --------- | -------------- |
+| `messages/categorize.go` | Mail syncs | Mail volume |
+| `projects/llm_assign.go` | Mail syncs, rules can't place it | Mail volume |
+| `messages/summarize.go` | Scheduled summaries | Mail volume |
+| `messages/auto_draft.go` | Draft generation | Mail volume |
+| `messages/forward_rules.go` | LLM-mode forward rules | Mail volume × LLM rules |
+| `issues/suggest.go` | Issue suggestions | Project activity |
+| `interpret/service.go` | Interpretation runs | Project activity |
+| `messages/executors.go` | Merging partial summaries into one | Mail volume |
+| `projectai/service.go` | Questions | **Questions asked** |
+
+A user's mail volume fixes most of their cost before they ask a single question.
+
+**Illustrative numbers.** These use first-party list prices for Claude Sonnet 5 ($2 / $10 per million input / output tokens) and assumed token counts. Bedrock prices differ, and slice 1 replaces all of this with measurements.
+
+| Item | Assumption | Cost |
+| ---- | ---------- | ---- |
+| One message ingested (categorise + assign) | ~1.5k tokens in, ~100 out | ~$0.004 |
+| A busy user's month of ingestion | 50 messages a day × 22 working days | ~$4.40 |
+| One assistant answer, uncached | 3 model calls × (6.5k in + 400 out) | ~$0.05 |
+| One assistant answer, cached | Same, with 5k of each call read from cache | ~$0.02 |
+
+So for a busy user, ingestion could take about half the budget, leaving about $5.60: roughly 110–230 answers a month, or 5–10 per working day. For ingestion, the model choice and batching (below) matter more than anything done on the assistant.
+
+**Two kinds of cost need two kinds of control.** Ingestion is fixed per user and grows with mail volume. It's controlled by model choice, skipping work rules can already do, and running non-urgent jobs (summaries, extraction) through Bedrock batch inference at a discount. The assistant is variable and grows with use. It's controlled by the per-user cap in §5.6. Both come out of the same $10.
+
+**Pricing needs data per user and per feature.** That's more than run metadata gives us (`job_runs` is keyed by account, not user, and `meta_json` can't be aggregated). See §5.1.
+
 ### 5.1 Measure first
 
 Add usage to the port:
@@ -133,7 +168,19 @@ type LLMResponse struct {
 }
 ```
 
-Converse returns these counts, so the Bedrock adapter only needs to copy them across. Record them in each run's `meta_json`, which `project_ai` runs already write. Nothing else in this section can be judged without these numbers.
+Converse returns these counts (`TokenUsage`, including cache reads and writes), so the Bedrock adapter only needs to copy them across.
+
+**Meter every call, not just the assistant.** Wrap the `LLMClient` in a metering decorator so all nine call sites (§5.0) are covered without editing each one. Callers put the user, account and feature on the `context.Context`. The decorator writes one row per call:
+
+```
+llm_usage(id, user_id, account_id NULL, feature, model,
+          input_tokens, output_tokens, cache_read_tokens, cache_write_tokens,
+          created_at)
+```
+
+`feature` uses the call site's name (`categorize`, `assign`, `summarize`, `ask`, …). Cost is **not** stored: it's computed at read time from a price table per model, so price changes and Bedrock-versus-list comparisons don't need a backfill. A call with no user on its context is recorded with a null user and counted, so gaps show up rather than disappearing.
+
+This answers the pricing questions directly: cost per user per month, split by feature, and how that varies with mail volume. Nothing else in this section can be judged without these numbers.
 
 ### 5.2 Answer fixed questions without the LLM
 
@@ -148,7 +195,7 @@ Order each request so the parts that don't change come first: tool definitions, 
 - The minimum cacheable prefix depends on the model: 512 tokens on the newest Opus, 1024 on Sonnet 5, **4096 on Haiku 4.5**. A short routing prompt on Haiku won't be cached at all.
 - Confirm caching works by checking that cache-read tokens (§5.1) are non-zero on follow-ups.
 
-Bedrock supports prompt caching. Whether the Converse adapter or a move to the Bedrock Messages endpoint (Anthropic's Mantle client) is the better path should be settled in slice 3. Note that tool search, for example, is InvokeModel-only on Bedrock, not Converse.
+Bedrock supports prompt caching, and the Converse API exposes it as cache-point blocks (`CachePointBlock` in the SDK version we use). Whether to stay on Converse or move to the Bedrock Messages endpoint is deferred (§6.3).
 
 ### 5.4 Structured output instead of "JSON only"
 
@@ -167,24 +214,55 @@ So: build the eval set (§8) first, then compare (i) one model at low/medium eff
 
 - At most 6 tool calls per answer, and a context token cap per answer.
 - `get_message` bodies capped and HTML stripped.
-- A daily token budget per user. Once it's spent, the assistant falls back to deterministic cards ("here's what matched; detailed answers resume tomorrow") instead of erroring.
+- **An assistant allowance per user**, read from `llm_usage`. It's whatever is left of the plan's monthly figure after projected ingestion, spread over the month so one heavy day can't use it all. Once it's spent, the assistant falls back to deterministic cards ("here's what matched; detailed answers resume tomorrow") instead of erroring. The allowance is a per-plan setting, so higher tiers can raise it without code changes.
+- Ingestion isn't cut off when the budget runs out. Mail must still be filed. Users whose ingestion alone exceeds the plan are a pricing signal, not something the app should silently degrade for.
 
 ### 5.7 Pay at ingestion, not per question
 
 Facts, decisions, issues and briefs are extracted once and read many times. Each improvement to extraction makes questions cheaper too. When an eval question fails because a fact was never extracted, fix the extraction, not the assistant's prompt.
 
-## 6. Decisions needed
+## 6. Decisions
 
-1. **Search service.** Is a service outside DSQL and DynamoDB acceptable (§4.3c)? This RFC doesn't need it to start, but it caps search quality later.
-2. **A monthly LLM budget.** It sets the daily per-user cap (§5.6) and decides §5.5.
-3. **Converse or the Bedrock Messages endpoint.** Converse is already wired. The Messages endpoint gives the full Anthropic request shape (caching controls, structured outputs, tool search). Decide in slice 3, using the slice 1 numbers.
-4. **Where suggestions come from.** PRD open question 5. This RFC proposes the server (§2, briefing), so it can use permissions and project briefs.
+### 6.1 Search service: stay on DSQL (decided 2026-10-04)
+
+A separate search service is acceptable in principle, but not now. Build §4.3 (a)+(b) on DSQL.
+
+### 6.2 Budget: $10 per user per month on the cheapest plan (decided 2026-10-04)
+
+See §5.0. This covers all LLM spend, ingestion included, which is the reading that makes the number useful for pricing. The metering in §5.1 is what subscription pricing will be based on.
+
+### 6.3 Converse or the Bedrock Messages endpoint (deferred)
+
+Decide with slice 1's numbers, before slice 3.
+
+**For the Messages endpoint** (Anthropic's request format on Bedrock, through the official Anthropic Go SDK's Bedrock client):
+- **The full Claude API.** It's the same request shape as Anthropic's own API, so caching TTLs and automatic caching, structured outputs, effort and thinking settings, and tool search are all available as documented. Converse is AWS's model-neutral layer, and Anthropic-specific features reach it later or not at all (tool search, for example, isn't available through Converse).
+- **SDK support for the tool loop.** Typed tool definitions, a tool runner, and usage types, instead of hand-mapping Converse content blocks.
+- **Portable.** The same code can call Anthropic's first-party API or Claude Platform on AWS by swapping the client. That lets us compare real costs per provider, which matters for pricing.
+
+**For staying on Converse:**
+- **Already wired and working.** No migration.
+- **Model-neutral.** Non-Claude Bedrock models can be tried with the same code. Under a $10 budget, that's a real option for high-volume ingestion jobs such as categorisation, where a cheaper model may be good enough.
+
+A split is possible too: Converse for ingestion, where model choice is about price, and the Messages endpoint for the assistant, where Claude-specific features matter most.
+
+### 6.4 Where suggestions come from (proposed: the server)
+
+Today `buildAssistantSuggestions` (`web/src/hooks/useAssistantHomeData.ts`) builds them in the browser from data the page has already fetched. That's fine for simple rules. It stops working once suggestions use the briefs and the LLM:
+
+- **Budget.** An LLM-written briefing has to count against the user's allowance (§5.6). Only the server can enforce that. A browser can't be trusted to hold a budget.
+- **Computed once, not on every page load.** The server can build the briefing when extraction runs (§4.4) and store it, so opening the home page costs no tokens. Built in the browser, every visit on every device would pay again.
+- **One place for rules and permissions.** Attention, briefs and membership checks already live in Go. Duplicating them in TypeScript means two copies to keep consistent, and a permissions bug in the browser copy would be a leak.
+- **Usable beyond the web app.** The same suggestions could go into an email digest or a notification later.
+- **Measurable.** Recording which suggestions are shown and acted on tells us which features users value, which feeds pricing as well.
+
+The cost is one new endpoint. The existing rules move to Go and stay deterministic.
 
 ## 7. Slices
 
 | # | Slice | Changes behaviour? | Depends on |
 | - | ----- | ------------------ | ---------- |
-| 1 | **Foundations.** Usage in `LLMResponse` and run meta; batch `buildContext`; eval set (§8) | No | none |
+| 1 | **Foundations.** Usage in `LLMResponse`; metering decorator and `llm_usage` covering all nine call sites (§5.1); batch `buildContext`; eval set (§8) | No | none |
 | 2 | **Retrieval.** `resolve`; `search_messages` (ILIKE + ranking); `AskAcross` picks projects from what `resolve` finds in the question, falling back to attention | Yes: better project choice, older mail reachable | 1 |
 | 3 | **Tool loop.** Converse tool use; strict final answer; prompt caching; conversations persisted and encrypted | Yes: follow-ups, lower cost per turn | 1, 2 |
 | 4 | **Fixed questions.** Deterministic routes for the common intents (§5.2) | Yes: instant, no LLM | 3 |
@@ -199,6 +277,7 @@ Slice 1 is safe to ship on its own and makes every later slice measurable. Slice
 - **Contract tests.** Each new repository query (search, batched brief) goes in the shared persistence suite, so sqlite and postgres agree. Search scoping must be tested: no results from another user's accounts or another organisation's projects.
 - **Tool scope tests.** Each tool is called directly with an ID the user can't access, and must return not found.
 - **Statement-count assertion.** `project_brief` must stay within a bounded number of statements, as `timeline_hydration_is_batched_and_correct` does for the timeline.
+- **Metering.** A test with a fake LLM client checks that each call writes one `llm_usage` row with the user and feature from the context, and that a call without a user is recorded with a null user, not dropped.
 - **Caching check.** One integration test confirms a second turn reports non-zero cache-read tokens. It's skipped without credentials, like the postgres suite.
 
 ## 9. Risks
