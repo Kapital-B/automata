@@ -229,7 +229,7 @@ A separate search service is acceptable in principle, but not now. Build §4.3 (
 
 ### 6.2 Budget: $10 per user per month on the cheapest plan (decided 2026-10-04)
 
-See §5.0. This covers all LLM spend, ingestion included, which is the reading that makes the number useful for pricing. The metering in §5.1 is what subscription pricing will be based on.
+See §5.0. The $10 covers **all** LLM spend: mail processing as well as the assistant (confirmed 2026-10-04). The metering in §5.1 is what subscription pricing will be based on.
 
 ### 6.3 Converse or the Bedrock Messages endpoint (deferred)
 
