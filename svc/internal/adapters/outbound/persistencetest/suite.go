@@ -33,6 +33,7 @@ type Repository interface {
 	driven.SummaryRepository
 	driven.ScheduleRepository
 	driven.ForwardRepository
+	driven.LLMUsageRepository
 	MarkScheduleExecutedIfDue(ctx context.Context, id uuid.UUID, scheduledFor, lastRunAt, nextRunAt time.Time) (bool, error)
 }
 
@@ -930,6 +931,164 @@ func Run(t *testing.T, factory Factory) {
 			after = &driven.ForwardCandidateCursor{ReceivedAt: last.ReceivedAt, MessageID: last.ID}
 		}
 		check("forward", seen)
+	})
+
+	t.Run("llm_usage_sums_per_user_feature_and_model_within_range", func(t *testing.T) {
+		h := factory(t)
+		ctx := context.Background()
+		userA, userB, accountID := uuid.New(), uuid.New(), uuid.New()
+		from := time.Date(2026, 10, 1, 0, 0, 0, 0, time.UTC)
+		to := time.Date(2026, 11, 1, 0, 0, 0, 0, time.UTC)
+		insert := func(user *uuid.UUID, feature, model string, at time.Time, in, out, read, write int) {
+			t.Helper()
+			if err := h.Repo.InsertLLMUsage(ctx, driven.LLMUsageRow{
+				ID: uuid.New(), UserID: user, AccountID: &accountID, Feature: feature, Model: model,
+				InputTokens: in, OutputTokens: out, CacheReadTokens: read, CacheWriteTokens: write, CreatedAt: at,
+			}); err != nil {
+				t.Fatal(err)
+			}
+		}
+		insert(&userA, "categorize", "m1", from, 100, 10, 0, 0)                           // exactly at from: in
+		insert(&userA, "categorize", "m1", from.Add(500*time.Millisecond), 200, 20, 5, 0) // sub-second after from: in
+		insert(&userA, "categorize", "m2", from.Add(time.Hour), 7, 1, 0, 0)               // other model: own row
+		insert(&userA, "ask", "m1", to.Add(-time.Nanosecond), 1000, 300, 4000, 500)       // last instant: in
+		insert(&userA, "ask", "m1", to, 9999, 9999, 0, 0)                                 // at to: out
+		insert(&userA, "ask", "m1", from.Add(-time.Nanosecond), 9999, 9999, 0, 0)         // before from: out
+		insert(&userB, "ask", "m1", from.Add(time.Hour), 9999, 9999, 0, 0)                // other user: out
+		insert(nil, "ask", "m1", from.Add(time.Hour), 9999, 9999, 0, 0)                   // unscoped: out
+
+		got, err := h.Repo.SumLLMUsageByUser(ctx, userA, from, to)
+		if err != nil {
+			t.Fatal(err)
+		}
+		want := []driven.LLMUsageTotal{
+			{Feature: "ask", Model: "m1", Calls: 1, InputTokens: 1000, OutputTokens: 300, CacheReadTokens: 4000, CacheWriteTokens: 500},
+			{Feature: "categorize", Model: "m1", Calls: 2, InputTokens: 300, OutputTokens: 30, CacheReadTokens: 5},
+			{Feature: "categorize", Model: "m2", Calls: 1, InputTokens: 7, OutputTokens: 1},
+		}
+		if fmt.Sprint(got) != fmt.Sprint(want) {
+			t.Fatalf("totals =\n %+v\nwant\n %+v", got, want)
+		}
+
+		var unscoped int
+		if err := h.DB.QueryRowContext(ctx, `SELECT COUNT(*) FROM llm_usage WHERE user_id IS NULL`).Scan(&unscoped); err != nil {
+			t.Fatal(err)
+		}
+		if unscoped != 1 {
+			t.Fatalf("unscoped rows = %d, want 1: calls without a user must still be stored", unscoped)
+		}
+	})
+
+	t.Run("project_list_member_filter", func(t *testing.T) {
+		h := factory(t)
+		ctx := context.Background()
+		now := time.Now().UTC()
+		ownerID, orgID, _ := seedUserAccount(t, h.Repo, uuid.New(), now)
+		mateID, _, _ := seedUserAccount(t, h.Repo, uuid.New(), now)
+		shared := createProject(t, h.Repo, orgID, ownerID, "DC30", "Shared")
+		createProject(t, h.Repo, orgID, ownerID, "DC31", "Owner only")
+		addProjectMember(t, h.DB, shared, mateID, now)
+
+		codes := func(member *uuid.UUID) string {
+			t.Helper()
+			rows, err := h.Repo.ListProjects(ctx, orgID, driven.ProjectListFilter{MemberUserID: member, Limit: 50})
+			if err != nil {
+				t.Fatal(err)
+			}
+			out := []string{}
+			for _, p := range rows {
+				out = append(out, p.Code)
+			}
+			return strings.Join(out, ",")
+		}
+		if got := codes(nil); got != "DC30,DC31" {
+			t.Errorf("no filter = %s, want DC30,DC31", got)
+		}
+		if got := codes(&ownerID); got != "DC30,DC31" {
+			t.Errorf("owner = %s, want DC30,DC31", got)
+		}
+		if got := codes(&mateID); got != "DC30" {
+			t.Errorf("mate = %s, want DC30 only", got)
+		}
+	})
+
+	t.Run("fact_batch_reads_match_single_reads", func(t *testing.T) {
+		h := factory(t)
+		ctx := context.Background()
+		now := time.Now().UTC().Truncate(time.Millisecond)
+		userID, orgID, accountID := seedUserAccount(t, h.Repo, uuid.New(), now)
+		projectID := createProject(t, h.Repo, orgID, userID, "DC32", "Facts")
+		msgA := insertMsg(t, h.Repo, accountID, "a", "ca", "b", now)
+		msgB := insertMsg(t, h.Repo, accountID, "b", "cb", "b", now)
+
+		newFact := func(key string) uuid.UUID {
+			t.Helper()
+			id := uuid.New()
+			if err := h.Repo.CreateFact(ctx, driven.FactRow{
+				ID: id, OrganisationID: orgID, ProjectID: projectID,
+				SubjectKey: key, Label: key, CreatedAt: now, UpdatedAt: now,
+			}); err != nil {
+				t.Fatal(err)
+			}
+			return id
+		}
+		newVersion := func(factID uuid.UUID, status string, evidence ...uuid.UUID) uuid.UUID {
+			t.Helper()
+			id := uuid.New()
+			if err := h.Repo.CreateFactVersion(ctx, driven.FactVersionRow{
+				ID: id, FactID: factID, Status: status, ValueJSON: `{}`, ValueText: status, Source: "user", CreatedAt: now,
+			}); err != nil {
+				t.Fatal(err)
+			}
+			for i, m := range evidence {
+				m := m
+				if err := h.Repo.AddFactEvidence(ctx, driven.FactEvidenceRow{
+					ID: uuid.New(), FactVersionID: id, MessageID: &m, AddedAt: now.Add(time.Duration(i) * time.Second),
+				}); err != nil {
+					t.Fatal(err)
+				}
+			}
+			return id
+		}
+		withActive := newFact("with.active")
+		activeVer := newVersion(withActive, "active", msgA, msgB)
+		supersededVer := newVersion(withActive, "superseded", msgA)
+		proposedOnly := newFact("proposed.only")
+		newVersion(proposedOnly, "proposed", msgB)
+		noVersions := newFact("no.versions")
+
+		got, err := h.Repo.ListActiveFactVersionsForFacts(ctx, []uuid.UUID{withActive, proposedOnly, noVersions, withActive})
+		if err != nil {
+			t.Fatal(err)
+		}
+		if len(got) != 1 || got[0].ID != activeVer || got[0].FactID != withActive {
+			t.Fatalf("active versions = %+v, want only %s", got, activeVer)
+		}
+		single, err := h.Repo.GetActiveFactVersion(ctx, withActive)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if single == nil || single.ID != got[0].ID || single.ValueText != got[0].ValueText {
+			t.Fatalf("batch %+v disagrees with single read %+v", got[0], single)
+		}
+		if none, err := h.Repo.ListActiveFactVersionsForFacts(ctx, nil); err != nil || len(none) != 0 {
+			t.Fatalf("empty input = %v, %v; want nothing and no error", none, err)
+		}
+
+		ev, err := h.Repo.ListFactEvidenceForVersions(ctx, []uuid.UUID{activeVer, supersededVer})
+		if err != nil {
+			t.Fatal(err)
+		}
+		byVersion := map[uuid.UUID][]uuid.UUID{}
+		for _, e := range ev {
+			byVersion[e.FactVersionID] = append(byVersion[e.FactVersionID], *e.MessageID)
+		}
+		if fmt.Sprint(byVersion[activeVer]) != fmt.Sprint([]uuid.UUID{msgA, msgB}) {
+			t.Errorf("active evidence = %v, want msgA then msgB", byVersion[activeVer])
+		}
+		if fmt.Sprint(byVersion[supersededVer]) != fmt.Sprint([]uuid.UUID{msgA}) {
+			t.Errorf("superseded evidence = %v, want msgA", byVersion[supersededVer])
+		}
 	})
 
 	t.Run("triage_messages_needing_assign_excludes_assigned", func(t *testing.T) {

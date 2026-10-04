@@ -577,6 +577,10 @@ func (r *Repository) ListProjects(ctx context.Context, organisationID uuid.UUID,
 	if !filter.IncludeArchived {
 		q += ` AND archived_at IS NULL`
 	}
+	if filter.MemberUserID != nil {
+		q += ` AND EXISTS (SELECT 1 FROM project_members pm WHERE pm.project_id = projects.id AND pm.user_id = ?)`
+		args = append(args, filter.MemberUserID.String())
+	}
 	q += ` ORDER BY code ASC LIMIT ? OFFSET ?`
 	args = append(args, limit, offset)
 	rows, err := r.queryContext(ctx, q, args...)

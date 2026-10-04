@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/Kapital-B/automata/svc/internal/adapters/outbound/security"
+	"github.com/Kapital-B/automata/svc/internal/application/ports/driven"
 	"github.com/google/uuid"
 )
 
@@ -132,5 +133,20 @@ func TestCORSPreflightDoesNotRequireBearerToken(t *testing.T) {
 	h.Routes().ServeHTTP(res, req)
 	if res.Code != http.StatusOK || res.Header().Get("Access-Control-Allow-Origin") != "https://example.com" {
 		t.Fatalf("preflight status %d, allow origin %q", res.Code, res.Header().Get("Access-Control-Allow-Origin"))
+	}
+}
+
+// Model calls made while serving a request are metered against the caller.
+func TestAuthMiddlewareSetsUsageScope(t *testing.T) {
+	userID := uuid.New()
+	var got *uuid.UUID
+	h := authMiddleware(testJWTSecret)(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		got, _ = driven.UsageScopeFrom(r.Context())
+	}))
+	req := httptest.NewRequest(http.MethodGet, "/api/messages", nil)
+	req.Header.Set("Authorization", "Bearer "+testBearerToken(t, userID))
+	h.ServeHTTP(httptest.NewRecorder(), req)
+	if got == nil || *got != userID {
+		t.Fatalf("usage scope user = %v, want %s", got, userID)
 	}
 }

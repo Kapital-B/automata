@@ -189,17 +189,10 @@ func (s *Service) AskAcross(ctx context.Context, userID uuid.UUID, question stri
 	if err != nil {
 		return nil, err
 	}
-	projects, err := s.Projects.ListProjects(ctx, orgID, driven.ProjectListFilter{Limit: 200})
+	// Membership is filtered in the query, not with a lookup per project.
+	accessible, err := s.Projects.ListProjects(ctx, orgID, driven.ProjectListFilter{MemberUserID: &userID, Limit: 200})
 	if err != nil {
 		return nil, err
-	}
-	accessible := make([]driven.ProjectRow, 0, len(projects))
-	for _, p := range projects {
-		m, err := s.Projects.GetProjectMember(ctx, p.ID, userID)
-		if err != nil || m == nil {
-			continue
-		}
-		accessible = append(accessible, p)
 	}
 	prefer := map[uuid.UUID]struct{}{}
 	if s.Attention != nil {
@@ -315,19 +308,49 @@ func (s *Service) buildContext(ctx context.Context, userID, orgID uuid.UUID, pro
 	if err != nil {
 		return nil, err
 	}
-	factCount := 0
+	// Active versions and their evidence are loaded in batches, not two
+	// lookups per fact.
+	factIDs := make([]uuid.UUID, 0, len(facts))
 	for _, f := range facts {
-		active, err := s.Facts.GetActiveFactVersion(ctx, f.ID)
-		if err != nil {
-			return nil, err
-		}
-		if active == nil {
+		factIDs = append(factIDs, f.ID)
+	}
+	versions, err := s.Facts.ListActiveFactVersionsForFacts(ctx, factIDs)
+	if err != nil {
+		return nil, err
+	}
+	activeByFact := make(map[uuid.UUID]driven.FactVersionRow, len(versions))
+	for _, v := range versions {
+		activeByFact[v.FactID] = v
+	}
+	type activeFact struct {
+		fact    driven.FactRow
+		version driven.FactVersionRow
+	}
+	selected := make([]activeFact, 0, len(facts))
+	for _, f := range facts {
+		v, ok := activeByFact[f.ID]
+		if !ok {
 			continue
 		}
-		if limits.Facts > 0 && factCount >= limits.Facts {
+		if limits.Facts > 0 && len(selected) >= limits.Facts {
 			break
 		}
-		factCount++
+		selected = append(selected, activeFact{fact: f, version: v})
+	}
+	versionIDs := make([]uuid.UUID, 0, len(selected))
+	for _, a := range selected {
+		versionIDs = append(versionIDs, a.version.ID)
+	}
+	evidence, err := s.Facts.ListFactEvidenceForVersions(ctx, versionIDs)
+	if err != nil {
+		return nil, err
+	}
+	evidenceByVersion := make(map[uuid.UUID][]driven.FactEvidenceRow, len(selected))
+	for _, e := range evidence {
+		evidenceByVersion[e.FactVersionID] = append(evidenceByVersion[e.FactVersionID], e)
+	}
+	for _, a := range selected {
+		f, active := a.fact, a.version
 		pack.noteCite("fact_version", active.ID.String(), project)
 		unit := ""
 		if active.Unit != nil {
@@ -335,8 +358,7 @@ func (s *Service) buildContext(ctx context.Context, userID, orgID uuid.UUID, pro
 		}
 		fmt.Fprintf(&b, "- fact_version_id=%s subject=%s label=%q value=%s%s\n",
 			active.ID.String(), f.SubjectKey, f.Label, active.ValueText, unit)
-		ev, _ := s.Facts.ListFactEvidence(ctx, active.ID)
-		for _, e := range ev {
+		for _, e := range evidenceByVersion[active.ID] {
 			if e.MessageID != nil {
 				pack.noteCite("message", e.MessageID.String(), project)
 				fmt.Fprintf(&b, "  evidence message_id=%s\n", e.MessageID.String())

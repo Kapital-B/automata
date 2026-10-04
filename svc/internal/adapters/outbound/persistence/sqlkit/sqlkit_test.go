@@ -63,3 +63,14 @@ func TestChunkUUIDsEmptyYieldsNoChunks(t *testing.T) {
 		t.Fatalf("chunks = %d, want 0", len(got))
 	}
 }
+
+func TestUUIDArgsKeepsOrder(t *testing.T) {
+	a, b := uuid.New(), uuid.New()
+	got := UUIDArgs([]uuid.UUID{a, b})
+	if len(got) != 2 || got[0] != a.String() || got[1] != b.String() {
+		t.Fatalf("UUIDArgs = %v", got)
+	}
+	if len(UUIDArgs(nil)) != 0 {
+		t.Fatal("nil ids must give no args")
+	}
+}

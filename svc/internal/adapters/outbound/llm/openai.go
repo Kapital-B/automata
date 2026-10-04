@@ -74,11 +74,19 @@ func (c *OpenAIClient) ChatCompletionWithOptions(ctx context.Context, messages [
 		return nil, fmt.Errorf("llm status %d", res.StatusCode)
 	}
 	var out struct {
+		Model   string `json:"model"`
 		Choices []struct {
 			Message struct {
 				Content string `json:"content"`
 			} `json:"message"`
 		} `json:"choices"`
+		Usage *struct {
+			PromptTokens        int `json:"prompt_tokens"`
+			CompletionTokens    int `json:"completion_tokens"`
+			PromptTokensDetails *struct {
+				CachedTokens int `json:"cached_tokens"`
+			} `json:"prompt_tokens_details"`
+		} `json:"usage"`
 	}
 	if err := json.NewDecoder(res.Body).Decode(&out); err != nil {
 		return nil, err
@@ -86,5 +94,21 @@ func (c *OpenAIClient) ChatCompletionWithOptions(ctx context.Context, messages [
 	if len(out.Choices) == 0 {
 		return nil, fmt.Errorf("llm empty choices")
 	}
-	return &driven.LLMResponse{Content: out.Choices[0].Message.Content}, nil
+	resp := &driven.LLMResponse{Content: out.Choices[0].Message.Content}
+	resp.Usage.Model = out.Model
+	if u := out.Usage; u != nil {
+		// OpenAI counts cached prompt tokens inside prompt_tokens; split them
+		// out so InputTokens is only what was billed at the full rate.
+		cached := 0
+		if u.PromptTokensDetails != nil {
+			cached = u.PromptTokensDetails.CachedTokens
+		}
+		if cached > u.PromptTokens {
+			cached = u.PromptTokens
+		}
+		resp.Usage.InputTokens = u.PromptTokens - cached
+		resp.Usage.CacheReadTokens = cached
+		resp.Usage.OutputTokens = u.CompletionTokens
+	}
+	return resp, nil
 }

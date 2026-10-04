@@ -118,7 +118,9 @@ func (s *ExecutionService) runChunk(ctx context.Context, job *driven.JobRecord, 
 			deadline = now.Add(5 * time.Second)
 		}
 	}
-	result, err := exec.ExecuteChunk(ctx, driven.RunContext{
+	// Model calls made by the executor are metered against the job's owner.
+	execCtx := driven.WithUsageScope(ctx, &job.UserID, job.AccountID)
+	result, err := exec.ExecuteChunk(execCtx, driven.RunContext{
 		RunID:     job.ID,
 		AttemptID: attemptID,
 		UserID:    job.UserID,

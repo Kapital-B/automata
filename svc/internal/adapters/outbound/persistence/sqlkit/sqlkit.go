@@ -50,3 +50,13 @@ func ChunkUUIDs(ids []uuid.UUID, size int) [][]uuid.UUID {
 	}
 	return out
 }
+
+// UUIDArgs converts ids to query arguments in the same order, for use with
+// PlaceholderList.
+func UUIDArgs(ids []uuid.UUID) []any {
+	out := make([]any, len(ids))
+	for i, id := range ids {
+		out[i] = id.String()
+	}
+	return out
+}
