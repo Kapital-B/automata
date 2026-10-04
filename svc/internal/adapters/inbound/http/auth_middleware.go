@@ -6,6 +6,7 @@ import (
 	"strings"
 
 	"github.com/Kapital-B/automata/svc/internal/adapters/outbound/security"
+	"github.com/Kapital-B/automata/svc/internal/application/ports/driven"
 	"github.com/google/uuid"
 )
 
@@ -37,7 +38,11 @@ func authMiddleware(secret []byte) func(http.Handler) http.Handler {
 				writeJSON(w, http.StatusUnauthorized, map[string]string{"error": "unauthorized"})
 				return
 			}
-			next.ServeHTTP(w, r.WithContext(context.WithValue(r.Context(), userIDKey, uid)))
+			ctx := context.WithValue(r.Context(), userIDKey, uid)
+			// Model calls made while serving the request are metered against
+			// the caller.
+			ctx = driven.WithUsageScope(ctx, &uid, nil)
+			next.ServeHTTP(w, r.WithContext(ctx))
 		})
 	}
 }

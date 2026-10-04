@@ -123,7 +123,32 @@ func (c *BedrockClient) ChatCompletionWithOptions(ctx context.Context, messages 
 	if strings.TrimSpace(b.String()) == "" {
 		return nil, fmt.Errorf("bedrock returned empty text")
 	}
-	return &driven.LLMResponse{Content: b.String()}, nil
+	return &driven.LLMResponse{Content: b.String(), Usage: usageFromBedrock(out.Usage)}, nil
+}
+
+// usageFromBedrock maps Converse token counts onto driven.LLMUsage, whose
+// InputTokens excludes cached input.
+//
+// The SDK does not document whether InputTokens already excludes cache reads
+// and writes, so TotalTokens decides: when it equals input plus output alone,
+// the cached tokens are inside InputTokens and are subtracted here, so they
+// are never billed twice in our accounting.
+func usageFromBedrock(u *bedrocktypes.TokenUsage) driven.LLMUsage {
+	if u == nil {
+		return driven.LLMUsage{}
+	}
+	n := func(p *int32) int {
+		if p == nil {
+			return 0
+		}
+		return int(*p)
+	}
+	in, out := n(u.InputTokens), n(u.OutputTokens)
+	read, write := n(u.CacheReadInputTokens), n(u.CacheWriteInputTokens)
+	if cached := read + write; cached > 0 && u.TotalTokens != nil && n(u.TotalTokens) == in+out && in >= cached {
+		in -= cached
+	}
+	return driven.LLMUsage{InputTokens: in, OutputTokens: out, CacheReadTokens: read, CacheWriteTokens: write}
 }
 
 var _ driven.LLMClientWithOptions = (*BedrockClient)(nil)

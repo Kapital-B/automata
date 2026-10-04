@@ -1,8 +1,8 @@
 # RFC: A Grounded Assistant
 
-**Status:** Proposal, not started
+**Status:** Slice 1 items 1–3 built (§11); eval set not started
 **Related:** [AI-first assistant PRD](../prds/addendum-ai-first-assistant.md) (§8.1 conversation persistence still applies), [Aurora DSQL](addendum-aurora-dsql.md) (no extensions), [Triage efficiency](addendum-triage-efficiency.md) §17 (batched hydration)
-**Last updated:** 2026-10-04 (decisions recorded in §6)
+**Last updated:** 2026-10-04 (decisions recorded in §6; slice 1 as built in §11)
 
 The assistant on the home page already answers questions through `POST /api/ask` (`projectai.AskAcross`). This RFC asks three questions about it. What would make it useful? How does it get the context to answer? How do we keep it cheap? It then proposes an order to build in.
 
@@ -297,3 +297,40 @@ Slice 1 is safe to ship on its own and makes every later slice measurable. Slice
 - Which questions does the operator actually ask most? The eval set should start from real usage, not guesses.
 - Should conversation retention (90 days) be configurable in the UI? Carried over from PRD §11.
 - Should project briefs be shown to users (e.g. at the top of the project page), or stay assistant-only? Showing them makes their quality visible and gives users a way to correct them.
+
+## 11. As built: slice 1 (usage, metering, batching)
+
+Built on 2026-10-04. The eval set (§8) is still to do. It needs real questions.
+
+**Usage on the port.** `driven.LLMUsage` carries input, output, cache-read and cache-write tokens and the serving model. `InputTokens` means input billed at the full rate, so cached tokens are never counted twice:
+- **OpenAI-compatible adapter.** It subtracts `prompt_tokens_details.cached_tokens` from `prompt_tokens`.
+- **Bedrock adapter.** The SDK doesn't document whether `InputTokens` includes cached tokens, so `TotalTokens` decides. If it equals input plus output alone, the cached tokens are inside `InputTokens` and are subtracted. **To confirm:** check one real Converse response with caching on, to see which case Bedrock actually returns.
+
+**Metering.** `llm.MeteredClient` wraps the shared client once per service in `composition/app.go`, so no call site changed. Feature names:
+
+| Feature | Service |
+| ------- | ------- |
+| `categorize` | `CategorizeService` |
+| `assign` | `AssignService` (LLM scoring tier) |
+| `summarize` | `SummarizeService`, including the executor's merge of partial summaries |
+| `auto_draft` | `AutoDraftService` |
+| `forward_rules` | `ForwardRulesService` (LLM-mode rules) |
+| `issue_suggest` | `issues.Service` |
+| `interpret` | `interpret.Service` |
+| `ask` | `projectai.Service` (`Ask` and `AskAcross`) |
+
+User and account come from `driven.WithUsageScope`, set in two places:
+- **The auth middleware** sets the user on every authenticated request.
+- **The job runner (`runChunk`)** sets the job's user and account. `RunSynchronous` also goes through `runChunk`, so synchronous jobs are covered too.
+
+Calls outside both scopes are still recorded, with a null user. A usage write that fails is logged and doesn't fail the call. The write ignores the caller's cancellation, because a call that completed has already been paid for.
+
+**Storage.** `llm_usage` is created in `common/009`. Its `(user_id, created_at)` index is in `postgres/005` and `dsql/005` (`ASYNC`). The sqlite copy is `025_llm_usage.sql`. In sqlite, `created_at` is written in a fixed-width format, because RFC3339Nano text misorders times near a second boundary. `SumLLMUsageByUser` totals a user's usage per feature and model over a time range. There's no API or UI over it yet; for pricing analysis, query the table directly.
+
+**Batched context build.**
+- `AskAcross` filters membership in the query: `ProjectListFilter.MemberUserID`.
+- `buildContext` loads active fact versions and evidence with `ListActiveFactVersionsForFacts` and `ListFactEvidenceForVersions`, in chunks of 200.
+- Statements per question no longer grow with the number of facts: `Ask` 11 and `AskAcross` 10, with 2 facts or 12. Before, it was 13→33 and 14→34. `TestAskContextStatementsDoNotGrowWithFacts` holds this in place.
+- Two behaviour changes. `AskAcross` now considers the user's first 200 member projects, not the organisation's first 200 filtered afterwards. Evidence lookup errors are now returned instead of silently dropped.
+
+**Found along the way, not changed.** `ExecutionService.RunSynchronous` takes an executor argument but `runChunk` looks the executor up in the registry, so the argument only sets the job type. An unregistered executor passed directly fails as "unregistered job type".

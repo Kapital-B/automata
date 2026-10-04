@@ -47,3 +47,13 @@ func TestOpenAIClientNon2xx(t *testing.T) {
 		t.Fatal("expected non-2xx error")
 	}
 }
+
+func newJSONServer(t *testing.T, body string) string {
+	t.Helper()
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(body))
+	}))
+	t.Cleanup(srv.Close)
+	return srv.URL
+}

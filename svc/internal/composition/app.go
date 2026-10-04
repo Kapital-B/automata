@@ -70,6 +70,7 @@ type repository interface {
 	driven.SummaryRepository
 	driven.ScheduleRepository
 	driven.ForwardRepository
+	driven.LLMUsageRepository
 }
 
 type Options struct {
@@ -477,26 +478,31 @@ func (r *Runtime) buildServices(ctx context.Context) error {
 		return err
 	}
 	if llmClient != nil {
-		issueSvc.LLM = llmClient
-		interpretSvc.LLM = llmClient
-		projectAISvc.LLM = llmClient
+		// Each service gets a client that meters its calls under its own
+		// feature name, so spend can be broken down per user and feature.
+		metered := func(feature string) driven.LLMClient {
+			return &llmadapter.MeteredClient{Inner: llmClient, Usage: repo, Feature: feature, Model: llmLabel, Log: r.Log}
+		}
+		issueSvc.LLM = metered("issue_suggest")
+		interpretSvc.LLM = metered("interpret")
+		projectAISvc.LLM = metered("ask")
 		// Triage scoring falls back to deterministic tiers when this is nil.
-		assignSvc.LLM = llmClient
+		assignSvc.LLM = metered("assign")
 		categorizeSvc = &appmessages.CategorizeService{
 			Messages: repo,
-			LLM:      llmClient,
+			LLM:      metered("categorize"),
 			JobRuns:  jobRuns,
 		}
 		summarizeSvc = &appmessages.SummarizeService{
 			Messages:  repo,
 			Summaries: repo,
-			LLM:       llmClient,
+			LLM:       metered("summarize"),
 			JobRuns:   jobRuns,
 		}
 		autoDraftSvc = &appmessages.AutoDraftService{
 			Messages:   repo,
 			Summaries:  repo,
-			LLM:        llmClient,
+			LLM:        metered("auto_draft"),
 			JobRuns:    jobRuns,
 			ModelLabel: llmLabel,
 		}
@@ -504,7 +510,7 @@ func (r *Runtime) buildServices(ctx context.Context) error {
 			Messages:  repo,
 			Forwards:  repo,
 			Mailboxes: mailboxes,
-			LLM:       llmClient,
+			LLM:       metered("forward_rules"),
 			JobRuns:   jobRuns,
 			ModelName: llmLabel,
 			Effects:   forwardEffects,

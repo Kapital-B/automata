@@ -608,8 +608,10 @@ type OverviewProject struct {
 // ProjectListFilter narrows project listing.
 type ProjectListFilter struct {
 	IncludeArchived bool
-	Limit           int
-	Offset          int
+	// MemberUserID, when set, keeps only projects that user is a member of.
+	MemberUserID *uuid.UUID
+	Limit        int
+	Offset       int
 }
 
 // ProjectRepository persists org-scoped projects and membership.
@@ -892,6 +894,12 @@ type FactRepository interface {
 	RemoveFactEvidence(ctx context.Context, organisationID, versionID, evidenceID uuid.UUID) error
 	ListFactEvidence(ctx context.Context, versionID uuid.UUID) ([]FactEvidenceRow, error)
 	ListFactEvidenceForFact(ctx context.Context, factID uuid.UUID) ([]FactEvidenceRow, error)
+	// ListActiveFactVersionsForFacts returns the active version of each fact
+	// that has one, in batched statements rather than one per fact.
+	ListActiveFactVersionsForFacts(ctx context.Context, factIDs []uuid.UUID) ([]FactVersionRow, error)
+	// ListFactEvidenceForVersions returns the evidence of every listed
+	// version, oldest first within a version, in batched statements.
+	ListFactEvidenceForVersions(ctx context.Context, versionIDs []uuid.UUID) ([]FactEvidenceRow, error)
 }
 
 // InterpretationRow is one LLM interpret run (candidates in payload).
