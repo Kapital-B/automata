@@ -39,6 +39,7 @@ import (
 	appprojectai "github.com/Kapital-B/automata/svc/internal/application/projectai"
 	appprojects "github.com/Kapital-B/automata/svc/internal/application/projects"
 	appreconcile "github.com/Kapital-B/automata/svc/internal/application/reconcile"
+	appretrieval "github.com/Kapital-B/automata/svc/internal/application/retrieval"
 	apptodos "github.com/Kapital-B/automata/svc/internal/application/todos"
 	"github.com/Kapital-B/automata/svc/internal/configuration"
 	"github.com/aws/aws-sdk-go-v2/aws"
@@ -71,6 +72,7 @@ type repository interface {
 	driven.ScheduleRepository
 	driven.ForwardRepository
 	driven.LLMUsageRepository
+	driven.MessageSearchRepository
 }
 
 type Options struct {
@@ -437,6 +439,10 @@ func (r *Runtime) buildServices(ctx context.Context) error {
 		Timeline:  repo,
 		JobRuns:   jobRuns,
 		Attention: attentionSvc,
+		// Deterministic retrieval: no model calls, so no AI spend.
+		Resolver:    &appretrieval.Resolver{Projects: repo, Contacts: repo},
+		Search:      repo,
+		Assignments: repo,
 	}
 	assignSvc := &appprojects.AssignService{
 		Users:       repo,

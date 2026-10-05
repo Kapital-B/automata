@@ -10,6 +10,7 @@ import (
 
 	"github.com/Kapital-B/automata/svc/internal/application/jobkit"
 	"github.com/Kapital-B/automata/svc/internal/application/ports/driven"
+	"github.com/Kapital-B/automata/svc/internal/domain/mailtext"
 	"github.com/google/uuid"
 )
 
@@ -159,8 +160,8 @@ func (s *CategorizeService) classifyMessage(ctx context.Context, m driven.Messag
 		maxBodyChars    = 1200
 	)
 	body := derefStr(m.BodyText)
-	if looksLikeHTML(body) {
-		body = stripHTML(body)
+	if mailtext.LooksLikeHTML(body) {
+		body = mailtext.StripHTML(body)
 	}
 	prompt := "Classify this email into one category slug from: " + strings.Join(categorySlugList(categories), ", ") + ". " +
 		"Respond with a single JSON object only: {\"schema_version\":1,\"category_slug\":\"...\",\"confidence\":0..1}. " +

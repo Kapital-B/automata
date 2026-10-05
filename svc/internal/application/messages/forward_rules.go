@@ -11,6 +11,7 @@ import (
 
 	appaccounts "github.com/Kapital-B/automata/svc/internal/application/accounts"
 	"github.com/Kapital-B/automata/svc/internal/application/ports/driven"
+	"github.com/Kapital-B/automata/svc/internal/domain/mailtext"
 	"github.com/google/uuid"
 )
 
@@ -364,8 +365,8 @@ func (s *ForwardRulesService) evaluateLLM(ctx context.Context, conditionJSON str
 		return ruleVerdict{}, err
 	}
 	body := deref(msg.BodyText)
-	if looksLikeHTML(body) {
-		body = stripHTML(body)
+	if mailtext.LooksLikeHTML(body) {
+		body = mailtext.StripHTML(body)
 	}
 	name, addr := senderOf(msg.FromJSON)
 	resp, err := s.LLM.ChatCompletion(ctx, []driven.LLMMessage{

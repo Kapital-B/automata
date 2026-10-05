@@ -9,6 +9,7 @@ import (
 
 	"github.com/Kapital-B/automata/svc/internal/application/jobkit"
 	"github.com/Kapital-B/automata/svc/internal/application/ports/driven"
+	"github.com/Kapital-B/automata/svc/internal/domain/mailtext"
 	"github.com/google/uuid"
 )
 
@@ -192,8 +193,8 @@ func (s *AutoDraftService) GenerateChunk(ctx context.Context, run driven.RunCont
 
 func (s *AutoDraftService) generateDraft(ctx context.Context, item driven.ActionItemRow, msg driven.MessageRow) (*autoDraftPayload, error) {
 	body := derefStr(msg.BodyText)
-	if looksLikeHTML(body) {
-		body = stripHTML(body)
+	if mailtext.LooksLikeHTML(body) {
+		body = mailtext.StripHTML(body)
 	}
 	prompt := "Draft a concise professional email reply in JSON only: {\"subject\":\"...\",\"body\":\"...\"}. " +
 		"Use the action item and email context.\n" +

@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/Kapital-B/automata/svc/internal/application/ports/driven"
+	"github.com/Kapital-B/automata/svc/internal/application/retrieval"
 	domaindec "github.com/Kapital-B/automata/svc/internal/domain/decisions"
 	domainfacts "github.com/Kapital-B/automata/svc/internal/domain/facts"
 	"github.com/google/uuid"
@@ -30,7 +31,19 @@ type Service struct {
 	JobRuns   driven.JobRunRepository
 	LLM       driven.LLMClient
 	Attention AttentionProjects
+	// Resolver finds the projects, contacts and keywords a question names.
+	// Search finds matching mail. Assignments tags hits with their project.
+	// All three are optional; without them answers use the project
+	// snapshots alone.
+	Resolver    *retrieval.Resolver
+	Search      driven.MessageSearchRepository
+	Assignments driven.AssignmentRepository
 }
+
+const (
+	maxSearchHits      = 8
+	searchSnippetRunes = 240
+)
 
 // AttentionProjects reports home-org projects that currently need operator input.
 type AttentionProjects interface {
@@ -101,13 +114,15 @@ func (p *contextPack) noteCite(typ, id string, project driven.ProjectRow) {
 		return
 	}
 	key := typ + ":" + id
-	p.CiteMeta[key] = Citation{
-		Type:        typ,
-		ID:          id,
-		ProjectID:   project.ID.String(),
-		ProjectCode: project.Code,
-		ProjectName: project.Name,
+	cite := Citation{Type: typ, ID: id}
+	// Mail that is not filed to a project is cited without one, rather than
+	// with the nil project ID.
+	if project.ID != uuid.Nil {
+		cite.ProjectID = project.ID.String()
+		cite.ProjectCode = project.Code
+		cite.ProjectName = project.Name
 	}
+	p.CiteMeta[key] = cite
 	switch typ {
 	case "fact_version":
 		p.FactVersions[id] = struct{}{}
@@ -175,8 +190,24 @@ func (s *Service) Ask(ctx context.Context, userID, projectID uuid.UUID, question
 	if err != nil {
 		return nil, err
 	}
+	meta := map[string]any{"project_id": projectID.String()}
 
-	return s.runAsk(ctx, q, pack, map[string]any{"project_id": projectID.String()}, false)
+	// Older mail on this project is reachable through search; the snapshot
+	// only carries the most recent items.
+	res, err := s.resolve(ctx, orgID, []driven.ProjectRow{*p}, q)
+	if err != nil {
+		return nil, err
+	}
+	section, hits, err := s.matchingCorrespondence(ctx, userID, res, []uuid.UUID{p.ID}, map[uuid.UUID]driven.ProjectRow{p.ID: *p}, pack)
+	if err != nil {
+		return nil, err
+	}
+	if section != "" {
+		pack.Prompt += "\n## Correspondence matching the question\n" + section
+	}
+	addRetrievalMeta(meta, res, hits)
+
+	return s.runAsk(ctx, q, pack, meta, false)
 }
 
 // AskAcross answers a question over the caller's accessible home-org projects.
@@ -202,7 +233,17 @@ func (s *Service) AskAcross(ctx context.Context, userID uuid.UUID, question stri
 		}
 		prefer = ids
 	}
-	selected := SelectAskAcrossProjects(accessible, prefer, maxAskAcrossProjects)
+	res, err := s.resolve(ctx, orgID, accessible, q)
+	if err != nil {
+		return nil, err
+	}
+	var named []driven.ProjectRow
+	if res != nil {
+		named = res.Projects
+	}
+	// Projects the question names come first; attention and recency fill the
+	// places left.
+	selected := PutNamedFirst(named, SelectAskAcrossProjects(accessible, prefer, 0), maxAskAcrossProjects)
 
 	combined := newContextPack()
 	var b strings.Builder
@@ -221,14 +262,108 @@ func (s *Service) AskAcross(ctx context.Context, userID uuid.UUID, question stri
 		fmt.Fprintf(&b, "==== PROJECT code=%s id=%s name=%q ====\n%s\n", p.Code, p.ID.String(), p.Name, pack.Prompt)
 		projectIDs = append(projectIDs, p.ID.String())
 	}
+	// Search the named projects if there are any, otherwise all the user's
+	// mail, so a thread outside the selected projects can still be found.
+	var scope []uuid.UUID
+	if res != nil {
+		scope = res.ProjectIDs()
+	}
+	byID := make(map[uuid.UUID]driven.ProjectRow, len(accessible))
+	for _, p := range accessible {
+		byID[p.ID] = p
+	}
+	section, hits, err := s.matchingCorrespondence(ctx, userID, res, scope, byID, combined)
+	if err != nil {
+		return nil, err
+	}
+	if section != "" {
+		b.WriteString("==== CORRESPONDENCE MATCHING THE QUESTION (each line names its project; project=none is not filed) ====\n")
+		b.WriteString(section)
+	}
 	combined.Prompt = b.String()
 
-	return s.runAsk(ctx, q, combined, map[string]any{
+	meta := map[string]any{
 		"scope":         "across",
 		"project_count": len(selected),
 		"project_ids":   projectIDs,
 		"capped":        len(accessible) > len(selected),
-	}, true)
+	}
+	addRetrievalMeta(meta, res, hits)
+	return s.runAsk(ctx, q, combined, meta, true)
+}
+
+func (s *Service) resolve(ctx context.Context, orgID uuid.UUID, projects []driven.ProjectRow, question string) (*retrieval.Resolution, error) {
+	if s.Resolver == nil {
+		return nil, nil
+	}
+	return s.Resolver.ResolveAmong(ctx, orgID, projects, question)
+}
+
+// matchingCorrespondence searches the user's mail for what the question
+// names and renders the hits as context lines, noting each as citable. Hits
+// already in the pack are skipped. projects maps the projects a hit may be
+// cited under; a hit filed elsewhere, or nowhere, is cited without one.
+func (s *Service) matchingCorrespondence(ctx context.Context, userID uuid.UUID, res *retrieval.Resolution, scope []uuid.UUID, projects map[uuid.UUID]driven.ProjectRow, pack *contextPack) (string, int, error) {
+	if s.Search == nil || !res.HasSearch() {
+		return "", 0, nil
+	}
+	hits, err := s.Search.SearchMessages(ctx, userID, driven.MessageSearchFilter{
+		Terms: res.Terms, ProjectIDs: scope, ContactIDs: res.ContactIDs(), Limit: maxSearchHits,
+	})
+	if err != nil {
+		return "", 0, err
+	}
+	fresh := hits[:0]
+	for _, h := range hits {
+		if _, ok := pack.Messages[h.ID.String()]; !ok {
+			fresh = append(fresh, h)
+		}
+	}
+	if len(fresh) == 0 {
+		return "", 0, nil
+	}
+	var effective map[uuid.UUID]*uuid.UUID
+	if s.Assignments != nil {
+		rows := make([]driven.MessageRow, 0, len(fresh))
+		for _, h := range fresh {
+			rows = append(rows, driven.MessageRow{ID: h.ID, AccountID: h.AccountID, ConversationID: h.ConversationID})
+		}
+		if effective, err = s.Assignments.EffectiveProjectIDsForMessages(ctx, userID, rows); err != nil {
+			return "", 0, err
+		}
+	}
+	var b strings.Builder
+	for _, h := range fresh {
+		var project driven.ProjectRow
+		if pid := effective[h.ID]; pid != nil {
+			project = projects[*pid]
+		}
+		code := "none"
+		if project.ID != uuid.Nil {
+			code = project.Code
+		}
+		body := ""
+		if h.BodyText != nil {
+			body = *h.BodyText
+		}
+		pack.noteCite("message", h.ID.String(), project)
+		fmt.Fprintf(&b, "- message_id=%s project=%s received=%s subject=%q %q\n",
+			h.ID.String(), code, h.ReceivedAt.Format("2006-01-02"), h.Subject,
+			retrieval.Snippet(body, res.Terms, searchSnippetRunes))
+	}
+	return b.String(), len(fresh), nil
+}
+
+// addRetrievalMeta records how a question was resolved, as counts only:
+// run metadata must not carry what the user asked.
+func addRetrievalMeta(meta map[string]any, res *retrieval.Resolution, hits int) {
+	if res == nil {
+		return
+	}
+	meta["named_projects"] = len(res.Projects)
+	meta["named_contacts"] = len(res.Contacts)
+	meta["search_terms"] = len(res.Terms)
+	meta["search_hits"] = hits
 }
 
 func (s *Service) runAsk(ctx context.Context, question string, pack *contextPack, jobMeta map[string]any, multi bool) (*Answer, error) {
