@@ -27,3 +27,25 @@ func SelectAskAcrossProjects(projects []driven.ProjectRow, prefer map[uuid.UUID]
 	}
 	return ranked
 }
+
+// PutNamedFirst puts the projects a question names ahead of the ranked
+// selection, then fills the remaining places from it, capped at max. Named
+// projects are not exclusive: a name match can be a false positive, so the
+// usual candidates still get the places that are left.
+func PutNamedFirst(named, ranked []driven.ProjectRow, max int) []driven.ProjectRow {
+	out := make([]driven.ProjectRow, 0, len(named)+len(ranked))
+	seen := map[uuid.UUID]bool{}
+	for _, group := range [][]driven.ProjectRow{named, ranked} {
+		for _, p := range group {
+			if seen[p.ID] {
+				continue
+			}
+			seen[p.ID] = true
+			out = append(out, p)
+		}
+	}
+	if max > 0 && len(out) > max {
+		out = out[:max]
+	}
+	return out
+}

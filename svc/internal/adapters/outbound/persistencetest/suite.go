@@ -34,6 +34,7 @@ type Repository interface {
 	driven.ScheduleRepository
 	driven.ForwardRepository
 	driven.LLMUsageRepository
+	driven.MessageSearchRepository
 	MarkScheduleExecutedIfDue(ctx context.Context, id uuid.UUID, scheduledFor, lastRunAt, nextRunAt time.Time) (bool, error)
 }
 
@@ -1088,6 +1089,96 @@ func Run(t *testing.T, factory Factory) {
 		}
 		if fmt.Sprint(byVersion[supersededVer]) != fmt.Sprint([]uuid.UUID{msgA}) {
 			t.Errorf("superseded evidence = %v, want msgA", byVersion[supersededVer])
+		}
+	})
+
+	t.Run("message_search_scores_scopes_and_isolates", func(t *testing.T) {
+		h := factory(t)
+		ctx := context.Background()
+		now := time.Now().UTC().Truncate(time.Millisecond)
+		userID, orgID, accountID := seedUserAccount(t, h.Repo, uuid.New(), now)
+		_, _, otherAccount := seedUserAccount(t, h.Repo, uuid.New(), now)
+		dc40 := createProject(t, h.Repo, orgID, userID, "DC40", "Pumps")
+		dc41 := createProject(t, h.Repo, orgID, userID, "DC41", "Valves")
+		assign := func(conv string, project uuid.UUID) {
+			t.Helper()
+			if err := h.Repo.UpsertThreadAssignment(ctx, driven.AssignmentRow{
+				ID: uuid.New(), OrganisationID: orgID, AccountID: accountID, ConversationID: conv, ProjectID: &project,
+				Status: "committed", Reason: "seed", Source: string(domainprojects.SourceRule), CreatedAt: now, UpdatedAt: now,
+			}); err != nil {
+				t.Fatal(err)
+			}
+		}
+		m1 := insertMsg(t, h.Repo, accountID, "P-03 seal leaking", "s1", "The seal on P-03 is weeping.", now.Add(-time.Hour))
+		m2 := insertMsg(t, h.Repo, accountID, "Weekly update", "s2", "Seal replacement is booked.", now.Add(-2*time.Hour))
+		insertMsg(t, h.Repo, accountID, "Lunch", "s3", "Nothing relevant.", now.Add(-3*time.Hour))
+		m4 := insertMsg(t, h.Repo, accountID, "Commissioning 100% complete", "s4", "Done.", now.Add(-4*time.Hour))
+		m5 := insertMsg(t, h.Repo, accountID, "Seal", "s5", "Old thread.", now.AddDate(-2, 0, 0))
+		insertMsg(t, h.Repo, otherAccount, "P-03 seal", "x1", "Someone else's seal.", now)
+		assign("s1", dc40)
+		assign("s2", dc41)
+
+		jan, err := h.Repo.ResolveEmailContact(ctx, orgID, "jan@example.com", "Jan de Vries", now)
+		if err != nil {
+			t.Fatal(err)
+		}
+		for _, m := range []uuid.UUID{m2, m5} {
+			m := m
+			if err := h.Repo.UpsertParticipant(ctx, driven.CorrespondenceParticipantRow{
+				ID: uuid.New(), OrganisationID: orgID, ContactID: jan, Role: "from", MessageID: &m,
+			}); err != nil {
+				t.Fatal(err)
+			}
+		}
+
+		search := func(f driven.MessageSearchFilter) []uuid.UUID {
+			t.Helper()
+			hits, err := h.Repo.SearchMessages(ctx, userID, f)
+			if err != nil {
+				t.Fatal(err)
+			}
+			out := []uuid.UUID{}
+			for _, hit := range hits {
+				out = append(out, hit.ID)
+			}
+			return out
+		}
+		yesterday := now.Add(-24 * time.Hour)
+		for name, tc := range map[string]struct {
+			f    driven.MessageSearchFilter
+			want []uuid.UUID
+		}{
+			// m1: seal and p-03 in subject (2+2) and body (1+1) = 6;
+			// m5: seal in subject = 2; m2: seal in body = 1.
+			"ranked by score":        {driven.MessageSearchFilter{Terms: []string{"seal", "p-03"}}, []uuid.UUID{m1, m5, m2}},
+			"project scope":          {driven.MessageSearchFilter{Terms: []string{"seal"}, ProjectIDs: []uuid.UUID{dc41}}, []uuid.UUID{m2}},
+			"contact scope":          {driven.MessageSearchFilter{Terms: []string{"seal"}, ContactIDs: []uuid.UUID{jan}}, []uuid.UUID{m5, m2}},
+			"since":                  {driven.MessageSearchFilter{Terms: []string{"seal"}, Since: &yesterday}, []uuid.UUID{m1, m2}},
+			"wildcards are literal":  {driven.MessageSearchFilter{Terms: []string{"100%"}}, []uuid.UUID{m4}},
+			"no terms, newest first": {driven.MessageSearchFilter{ContactIDs: []uuid.UUID{jan}}, []uuid.UUID{m2, m5}},
+			"limit":                  {driven.MessageSearchFilter{Terms: []string{"seal", "p-03"}, Limit: 1}, []uuid.UUID{m1}},
+			"nothing to search by":   {driven.MessageSearchFilter{}, []uuid.UUID{}},
+		} {
+			if got := search(tc.f); fmt.Sprint(got) != fmt.Sprint(tc.want) {
+				t.Errorf("%s: got %v, want %v", name, got, tc.want)
+			}
+		}
+
+		hits, err := h.Repo.SearchMessages(ctx, userID, driven.MessageSearchFilter{Terms: []string{"weeping"}})
+		if err != nil {
+			t.Fatal(err)
+		}
+		if len(hits) != 1 || hits[0].Subject != "P-03 seal leaking" || hits[0].BodyText == nil ||
+			hits[0].ConversationID == nil || *hits[0].ConversationID != "s1" || !hits[0].ReceivedAt.Equal(now.Add(-time.Hour)) {
+			t.Fatalf("hit fields = %+v", hits)
+		}
+
+		if h.Counter != nil {
+			h.Counter.Reset()
+			search(driven.MessageSearchFilter{Terms: []string{"seal", "p-03"}, ProjectIDs: []uuid.UUID{dc40, dc41}, ContactIDs: []uuid.UUID{jan}})
+			if n := h.Counter.Count(); n != 1 {
+				t.Errorf("SearchMessages issued %d statements, want 1", n)
+			}
 		}
 	})
 

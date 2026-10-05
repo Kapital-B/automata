@@ -1,8 +1,11 @@
 package sqlkit
 
 import (
+	"strings"
 	"testing"
+	"time"
 
+	"github.com/Kapital-B/automata/svc/internal/application/ports/driven"
 	"github.com/google/uuid"
 )
 
@@ -72,5 +75,42 @@ func TestUUIDArgsKeepsOrder(t *testing.T) {
 	}
 	if len(UUIDArgs(nil)) != 0 {
 		t.Fatal("nil ids must give no args")
+	}
+}
+
+func TestLikeContainsEscapesWildcards(t *testing.T) {
+	for in, want := range map[string]string{
+		"p-03":   "%p-03%",
+		"100%":   `%100\%%`,
+		"a_b":    `%a\_b%`,
+		`c:\tmp`: `%c:\\tmp%`,
+	} {
+		if got := LikeContains(in); got != want {
+			t.Errorf("LikeContains(%q) = %q, want %q", in, got, want)
+		}
+	}
+}
+
+func TestMessageSearchQueryNeedsSomethingToSearchBy(t *testing.T) {
+	q, args := MessageSearchQuery(uuid.New(), driven.MessageSearchFilter{Terms: []string{" ", ""}}, func(t time.Time) any { return t })
+	if q != "" || args != nil {
+		t.Fatalf("empty filter built a query: %q %v", q, args)
+	}
+}
+
+func TestMessageSearchQueryArgsMatchPlaceholders(t *testing.T) {
+	since := time.Now()
+	q, args := MessageSearchQuery(uuid.New(), driven.MessageSearchFilter{
+		Terms:      []string{"Seal", "seal", "p-03"},
+		ProjectIDs: []uuid.UUID{uuid.New(), uuid.New()},
+		ContactIDs: []uuid.UUID{uuid.New()},
+		Since:      &since,
+	}, func(t time.Time) any { return t })
+	if got, want := strings.Count(q, "?"), len(args); got != want {
+		t.Fatalf("%d placeholders, %d args", got, want)
+	}
+	// Two distinct terms after lowercasing and dedupe, each matched twice.
+	if args[0] != "%seal%" || args[2] != "%p-03%" {
+		t.Fatalf("term args = %v", args[:4])
 	}
 }

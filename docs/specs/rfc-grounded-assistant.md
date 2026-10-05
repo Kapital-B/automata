@@ -1,8 +1,8 @@
 # RFC: A Grounded Assistant
 
-**Status:** Slice 1 items 1–3 built (§11); eval set not started
+**Status:** Slice 1 items 1–3 built (§11); slice 2 built (§12); eval set not started
 **Related:** [AI-first assistant PRD](../prds/addendum-ai-first-assistant.md) (§8.1 conversation persistence still applies), [Aurora DSQL](addendum-aurora-dsql.md) (no extensions), [Triage efficiency](addendum-triage-efficiency.md) §17 (batched hydration)
-**Last updated:** 2026-10-04 (decisions recorded in §6; slice 1 as built in §11)
+**Last updated:** 2026-10-05 (decisions in §6; slice 1 as built in §11; slice 2 in §12)
 
 The assistant on the home page already answers questions through `POST /api/ask` (`projectai.AskAcross`). This RFC asks three questions about it. What would make it useful? How does it get the context to answer? How do we keep it cheap? It then proposes an order to build in.
 
@@ -334,3 +334,32 @@ Calls outside both scopes are still recorded, with a null user. A usage write th
 - Two behaviour changes. `AskAcross` now considers the user's first 200 member projects, not the organisation's first 200 filtered afterwards. Evidence lookup errors are now returned instead of silently dropped.
 
 **Found along the way, not changed.** `ExecutionService.RunSynchronous` takes an executor argument but `runChunk` looks the executor up in the registry, so the argument only sets the job type. An unregistered executor passed directly fails as "unregistered job type".
+
+## 12. As built: slice 2 (retrieval)
+
+Built on 2026-10-05. It makes no model calls, so it adds no AI spend beyond the extra context it puts in the prompt (below).
+
+**Resolver (`application/retrieval`).** Deterministic:
+- **Projects.** It matches project codes ("DC07", "dc-07" and "dc07" all match `DC07`) and whole-phrase names of 4 or more characters. It only considers the user's member projects, so naming a project can't widen what they see.
+- **Contacts.** Capitalised words, other than the first, are looked up as names. If a question has none (typed all in lowercase), any plain word is tried. That's at most 4 small contact lookups. A contact matches only if a whole word of its name equals the word asked, so "jan" finds "Jan de Vries" but not "Janet".
+- **Search terms.** The remaining words, with stopwords dropped. Words that named a project or contact are scopes, not keywords, so they're dropped too.
+
+**Search (`SearchMessages`).** One statement, built in `sqlkit` so both adapters run identical SQL:
+- **Matching.** A case-insensitive substring match on subject and body. The score counts 2 per term in the subject and 1 per term in the body.
+- **Scope.** By project (through effective assignment, as `ListMessages` does), contact (through `correspondence_participants`) and date. Only the user's own accounts are searched.
+- **Escaping.** LIKE wildcards in a term are escaped, so "100%" matches literally.
+- **Empty filter.** With nothing to search by, it returns nothing rather than all mail.
+
+**In the ask flow.**
+- **`AskAcross`.** Named projects come first. Attention and recency fill the rest of the 8 places, so a false name match never pushes out the usual candidates. Search covers the named projects, or all the user's mail if none are named. Hits are cited under their project, or under no project if they aren't filed.
+- **`Ask`.** It searches within the project, which reaches mail older than the 12 most recent timeline items.
+- **Prompt impact.** Up to 8 hits, with snippets of up to 240 characters centred on the first matching term, and skipping messages already in the context. That's roughly 500–800 extra input tokens per question.
+- **Run metadata.** It records counts only (`named_projects`, `named_contacts`, `search_terms`, `search_hits`), never the question text.
+
+**Shared helper.** The HTML-to-text helpers from `messages/sync.go` moved to `domain/mailtext`. `messages` and search snippets now use them. Two other private copies remain, in `projects/llm_assign.go` and `inbound/http/router.go`, and should move later.
+
+**To verify on dev:**
+- **`LIKE … ESCAPE '\'` on DSQL.** It's standard Postgres but hasn't been run on DSQL.
+- **The cost of an unscoped search.** When a question names no project or contact, search scans the subject and body of all the user's mail. Time it against a large mailbox. If it's slow, the first fix is a default date window, such as the last two years.
+
+**Not done in this slice.** Issue titles aren't resolved. Matching "the pump" to an issue needs fuzzier matching than this slice set out to do.
