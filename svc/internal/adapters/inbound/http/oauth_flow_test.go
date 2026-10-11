@@ -121,13 +121,12 @@ func TestOAuthStartConnectAndCallbackCreatesAccount(t *testing.T) {
 	}
 	devUser := uuid.MustParse("a0000001-0000-4000-8000-000000000001")
 	jwtSecret := []byte("abcdefghijklmnopqrstuvwxyz123456")
-	authSvc := auth.NewService(repo, repo, repo, nil, nil, jwtSecret, time.Hour, 30*24*time.Hour)
+	authSvc := auth.NewService(repo, repo, repo, nil, nil, security.JWT{Secret: jwtSecret, TTL: time.Hour}, security.BcryptHasher{}, 30*24*time.Hour)
 	h := &Handlers{
 		Log:        slog.New(slog.NewTextHandler(io.Discard, nil)),
 		AccountSvc: accountSvc, SyncSvc: syncSvc, AuthSvc: authSvc,
 		Accounts: repo, Messages: repo, JobRuns: repo, OAuthStates: repo, Users: repo,
-		Dashboard: "http://dashboard.test", SuccessPath: "/connected", ErrorPath: "/error",
-		JWTSecret: jwtSecret, JWTTTL: time.Hour,
+		Dashboard: "http://dashboard.test", SuccessPath: "/connected", ErrorPath: "/error", TokenVerifier: security.JWT{Secret: jwtSecret},
 	}
 	api := httptest.NewServer(h.Routes())
 	defer api.Close()
@@ -227,13 +226,12 @@ func TestOAuthCallbackInvalidStateRedirectsError(t *testing.T) {
 	})
 	syncSvc := &appmessages.SyncService{Accounts: repo, Messages: repo, Mailboxes: mailboxes, JobRuns: repo}
 	jwtSecret := []byte("abcdefghijklmnopqrstuvwxyz123456")
-	authSvc := auth.NewService(repo, repo, repo, nil, nil, jwtSecret, time.Hour, 30*24*time.Hour)
+	authSvc := auth.NewService(repo, repo, repo, nil, nil, security.JWT{Secret: jwtSecret, TTL: time.Hour}, security.BcryptHasher{}, 30*24*time.Hour)
 	h := &Handlers{
 		Log:        slog.New(slog.NewTextHandler(io.Discard, nil)),
 		AccountSvc: accountSvc, SyncSvc: syncSvc, AuthSvc: authSvc,
 		Accounts: repo, Messages: repo, JobRuns: repo, OAuthStates: repo, Users: repo,
-		Dashboard: "http://dashboard.test", SuccessPath: "/ok", ErrorPath: "/err",
-		JWTSecret: jwtSecret, JWTTTL: time.Hour,
+		Dashboard: "http://dashboard.test", SuccessPath: "/ok", ErrorPath: "/err", TokenVerifier: security.JWT{Secret: jwtSecret},
 	}
 	api := httptest.NewServer(h.Routes())
 	defer api.Close()
@@ -254,8 +252,7 @@ func TestOAuthCallbackInvalidStateRedirectsError(t *testing.T) {
 func TestOAuthCallbackAccessDeniedRedirects(t *testing.T) {
 	jwtSecret := []byte("abcdefghijklmnopqrstuvwxyz123456")
 	h := &Handlers{
-		Dashboard: "http://d.test", ErrorPath: "/err",
-		JWTSecret: jwtSecret,
+		Dashboard: "http://d.test", ErrorPath: "/err", TokenVerifier: security.JWT{Secret: jwtSecret},
 	}
 	req, _ := http.NewRequest(http.MethodGet, "/cb?error=access_denied", nil)
 	rr := httptest.NewRecorder()

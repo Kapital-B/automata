@@ -3,19 +3,16 @@ package auth
 import (
 	"context"
 	"crypto/rand"
-	"database/sql"
+	domainshared "github.com/Kapital-B/automata/svc/internal/domain/shared"
+
 	"encoding/base64"
 	"errors"
 	"fmt"
 	"strings"
 	"time"
 
-	"github.com/Kapital-B/automata/svc/internal/adapters/outbound/security"
-	domainacc "github.com/Kapital-B/automata/svc/internal/domain/accounts"
-	domainaccounts "github.com/Kapital-B/automata/svc/internal/domain/accounts"
 	domainauth "github.com/Kapital-B/automata/svc/internal/domain/auth"
 	"github.com/google/uuid"
-	"golang.org/x/crypto/bcrypt"
 )
 
 const (
@@ -28,23 +25,23 @@ type Service struct {
 	Users      domainauth.UserRepository
 	Sessions   domainauth.AuthSessionRepository
 	OAuthState domainauth.OAuthStateRepository
-	MSAuth     domainaccounts.MicrosoftOAuth
+	MSAuth     domainauth.IdentityProvider
 	Google     domainauth.GoogleOAuth
-	JWTSecret  []byte
-	JWTTTL     time.Duration
+	Tokens     domainauth.AccessTokenIssuer
+	Passwords  domainauth.PasswordHasher
 	RefreshTTL time.Duration
 }
 
 // NewService constructs the auth service.
-func NewService(users domainauth.UserRepository, sessions domainauth.AuthSessionRepository, states domainauth.OAuthStateRepository, msAuth domainaccounts.MicrosoftOAuth, google domainauth.GoogleOAuth, jwtSecret []byte, jwtTTL, refreshTTL time.Duration) *Service {
+func NewService(users domainauth.UserRepository, sessions domainauth.AuthSessionRepository, states domainauth.OAuthStateRepository, msAuth domainauth.IdentityProvider, google domainauth.GoogleOAuth, tokens domainauth.AccessTokenIssuer, passwords domainauth.PasswordHasher, refreshTTL time.Duration) *Service {
 	return &Service{
 		Users:      users,
 		Sessions:   sessions,
 		OAuthState: states,
 		MSAuth:     msAuth,
 		Google:     google,
-		JWTSecret:  jwtSecret,
-		JWTTTL:     jwtTTL,
+		Tokens:     tokens,
+		Passwords:  passwords,
 		RefreshTTL: refreshTTL,
 	}
 }
@@ -60,7 +57,7 @@ func (s *Service) IssueTokens(ctx context.Context, userID uuid.UUID) (TokenPair,
 }
 
 func (s *Service) issueTokenPair(ctx context.Context, userID uuid.UUID) (TokenPair, error) {
-	access, err := security.SignJWT(s.JWTSecret, userID, s.JWTTTL)
+	access, err := s.Tokens.Issue(userID)
 	if err != nil {
 		return TokenPair{}, err
 	}
@@ -100,18 +97,18 @@ func (s *Service) Register(ctx context.Context, email, password string) (uuid.UU
 	if email == "" || len(password) < 8 {
 		return uuid.Nil, fmt.Errorf("invalid email or password")
 	}
-	hash, err := bcrypt.GenerateFromPassword([]byte(password), bcrypt.DefaultCost)
+	hash, err := s.Passwords.Hash(password)
 	if err != nil {
 		return uuid.Nil, err
 	}
 	if _, _, err := s.Users.GetUserByEmail(ctx, email); err == nil {
 		return uuid.Nil, ErrEmailTaken
-	} else if !errors.Is(err, sql.ErrNoRows) {
+	} else if !errors.Is(err, domainshared.ErrNotFound) {
 		return uuid.Nil, err
 	}
 	id := uuid.New()
 	now := time.Now().UTC()
-	h := string(hash)
+	h := hash
 	if _, err := s.Users.CreateUserWithHomeOrg(ctx, id, email, &h, now, "password", id.String(), email); err != nil {
 		return uuid.Nil, err
 	}
@@ -122,7 +119,7 @@ func (s *Service) LoginPassword(ctx context.Context, email, password string) (To
 	email = strings.TrimSpace(strings.ToLower(email))
 	id, ph, err := s.Users.GetUserByEmail(ctx, email)
 	if err != nil {
-		if errors.Is(err, sql.ErrNoRows) {
+		if errors.Is(err, domainshared.ErrNotFound) {
 			return TokenPair{}, ErrInvalidCredentials
 		}
 		return TokenPair{}, err
@@ -130,7 +127,7 @@ func (s *Service) LoginPassword(ctx context.Context, email, password string) (To
 	if ph == nil {
 		return TokenPair{}, ErrInvalidCredentials
 	}
-	if bcrypt.CompareHashAndPassword([]byte(*ph), []byte(password)) != nil {
+	if s.Passwords.Verify(*ph, password) != nil {
 		return TokenPair{}, ErrInvalidCredentials
 	}
 	return s.issueTokenPair(ctx, id)
@@ -147,7 +144,7 @@ func (s *Service) StartMicrosoftLogin(ctx context.Context) (authURL, state strin
 	if err := s.OAuthState.InsertOAuthState(ctx, st, flowAuthMicrosoft, nil, "{}", time.Now().UTC()); err != nil {
 		return "", "", err
 	}
-	u, err := s.MSAuth.AuthorizationURL(ctx, domainacc.KindCommon, st)
+	u, err := s.MSAuth.AuthorizationURL(ctx, st)
 	if err != nil {
 		return "", "", err
 	}
@@ -162,15 +159,11 @@ func (s *Service) CompleteMicrosoftLogin(ctx context.Context, code, state string
 	if !ok || flow != flowAuthMicrosoft {
 		return TokenPair{}, ErrInvalidOAuthState
 	}
-	tok, err := s.MSAuth.ExchangeCode(ctx, domainacc.KindCommon, code)
+	identity, err := s.MSAuth.ExchangeIdentity(ctx, code)
 	if err != nil {
 		return TokenPair{}, err
 	}
-	sub, email, err := parseMSAccessTokenClaims(tok.AccessToken)
-	if err != nil {
-		return TokenPair{}, err
-	}
-	return s.finishExternalLogin(ctx, "microsoft", sub, email)
+	return s.finishExternalLogin(ctx, "microsoft", identity.Subject, identity.Email)
 }
 
 func (s *Service) StartGoogleLogin(ctx context.Context) (authURL, state string, err error) {
@@ -227,7 +220,7 @@ func (s *Service) finishExternalLogin(ctx context.Context, provider, subject, em
 		}
 		return s.issueTokenPair(ctx, existingID)
 	}
-	if !errors.Is(err, sql.ErrNoRows) {
+	if !errors.Is(err, domainshared.ErrNotFound) {
 		return TokenPair{}, err
 	}
 	id := uuid.New()

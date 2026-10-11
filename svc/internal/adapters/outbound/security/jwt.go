@@ -2,13 +2,14 @@ package security
 
 import (
 	"errors"
+	domainauth "github.com/Kapital-B/automata/svc/internal/domain/auth"
 	"time"
 
 	"github.com/golang-jwt/jwt/v5"
 	"github.com/google/uuid"
 )
 
-var ErrInvalidToken = errors.New("invalid token")
+var ErrInvalidToken = domainauth.ErrInvalidToken
 
 type Claims struct {
 	UserID uuid.UUID `json:"uid"`
@@ -44,3 +45,15 @@ func ParseJWT(secret []byte, tokenStr string) (uuid.UUID, error) {
 	}
 	return c.UserID, nil
 }
+
+// JWT implements the access-token ports with the existing signing and parsing behavior.
+type JWT struct {
+	Secret []byte
+	TTL    time.Duration
+}
+
+func (j JWT) Issue(userID uuid.UUID) (string, error) { return SignJWT(j.Secret, userID, j.TTL) }
+func (j JWT) Verify(token string) (uuid.UUID, error) { return ParseJWT(j.Secret, token) }
+
+var _ domainauth.AccessTokenIssuer = JWT{}
+var _ domainauth.AccessTokenVerifier = JWT{}

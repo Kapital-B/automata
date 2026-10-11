@@ -5,11 +5,16 @@ import (
 	"database/sql"
 	"errors"
 
+	sqlkit "github.com/Kapital-B/automata/svc/internal/adapters/outbound/persistence/sqlkit"
 	domaincontradictions "github.com/Kapital-B/automata/svc/internal/domain/contradictions"
 	"github.com/google/uuid"
 )
 
-func (r *Repository) CreateContradiction(ctx context.Context, row domaincontradictions.ContradictionRow) error {
+func (r *Repository) CreateContradiction(ctx context.Context, row domaincontradictions.ContradictionRow) (portResult0 error) {
+	defer func() {
+		portResult0 = sqlkit.DomainError(portResult0)
+	}()
+
 	var note, resolvedAt, resolvedBy any
 	if row.ResolutionNote != nil {
 		note = *row.ResolutionNote
@@ -31,7 +36,11 @@ func (r *Repository) CreateContradiction(ctx context.Context, row domaincontradi
 	return err
 }
 
-func (r *Repository) AddContradictionSide(ctx context.Context, row domaincontradictions.ContradictionSideRow) error {
+func (r *Repository) AddContradictionSide(ctx context.Context, row domaincontradictions.ContradictionSideRow) (portResult0 error) {
+	defer func() {
+		portResult0 = sqlkit.DomainError(portResult0)
+	}()
+
 	var fv, dec any
 	if row.FactVersionID != nil {
 		fv = row.FactVersionID.String()
@@ -46,7 +55,11 @@ func (r *Repository) AddContradictionSide(ctx context.Context, row domaincontrad
 	return err
 }
 
-func (r *Repository) GetContradiction(ctx context.Context, organisationID, id uuid.UUID) (*domaincontradictions.ContradictionRow, error) {
+func (r *Repository) GetContradiction(ctx context.Context, organisationID, id uuid.UUID) (portResult0 *domaincontradictions.ContradictionRow, portResult1 error) {
+	defer func() {
+		portResult1 = sqlkit.DomainError(portResult1)
+	}()
+
 	row := r.db.QueryRowContext(ctx, `
 		SELECT id, organisation_id, project_id, status, summary, resolution_note,
 			resolved_at, resolved_by_user_id, created_at, updated_at
@@ -59,7 +72,11 @@ func (r *Repository) GetContradiction(ctx context.Context, organisationID, id uu
 	return out, err
 }
 
-func (r *Repository) ListContradictionsByProject(ctx context.Context, organisationID, projectID uuid.UUID, status string) ([]domaincontradictions.ContradictionRow, error) {
+func (r *Repository) ListContradictionsByProject(ctx context.Context, organisationID, projectID uuid.UUID, status string) (portResult0 []domaincontradictions.ContradictionRow, portResult1 error) {
+	defer func() {
+		portResult1 = sqlkit.DomainError(portResult1)
+	}()
+
 	q := `
 		SELECT id, organisation_id, project_id, status, summary, resolution_note,
 			resolved_at, resolved_by_user_id, created_at, updated_at
@@ -86,7 +103,11 @@ func (r *Repository) ListContradictionsByProject(ctx context.Context, organisati
 	return out, rows.Err()
 }
 
-func (r *Repository) UpdateContradiction(ctx context.Context, row domaincontradictions.ContradictionRow) error {
+func (r *Repository) UpdateContradiction(ctx context.Context, row domaincontradictions.ContradictionRow) (portResult0 error) {
+	defer func() {
+		portResult0 = sqlkit.DomainError(portResult0)
+	}()
+
 	var note, resolvedAt, resolvedBy any
 	if row.ResolutionNote != nil {
 		note = *row.ResolutionNote
@@ -113,7 +134,11 @@ func (r *Repository) UpdateContradiction(ctx context.Context, row domaincontradi
 	return nil
 }
 
-func (r *Repository) ListContradictionSides(ctx context.Context, contradictionID uuid.UUID) ([]domaincontradictions.ContradictionSideRow, error) {
+func (r *Repository) ListContradictionSides(ctx context.Context, contradictionID uuid.UUID) (portResult0 []domaincontradictions.ContradictionSideRow, portResult1 error) {
+	defer func() {
+		portResult1 = sqlkit.DomainError(portResult1)
+	}()
+
 	rows, err := r.db.QueryContext(ctx, `
 		SELECT id, contradiction_id, fact_version_id, decision_id
 		FROM contradiction_sides WHERE contradiction_id = ?

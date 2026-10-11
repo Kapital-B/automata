@@ -51,8 +51,7 @@ func TestConnectIMAPStoresAVerifiedAccountAndReportsRejections(t *testing.T) {
 				appaccounts.ProviderIMAP: &imapmail.Provider{},
 			}},
 		}),
-		Accounts: repo, Users: repo,
-		JWTSecret: []byte("abcdefghijklmnopqrstuvwxyz123456"), JWTTTL: time.Hour,
+		Accounts: repo, Users: repo, TokenVerifier: security.JWT{Secret: []byte("abcdefghijklmnopqrstuvwxyz123456")},
 	}
 	api := httptest.NewServer(h.Routes())
 	defer api.Close()

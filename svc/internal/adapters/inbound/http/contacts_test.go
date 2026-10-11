@@ -12,6 +12,7 @@ import (
 	"time"
 
 	"github.com/Kapital-B/automata/svc/internal/adapters/outbound/persistence/sqlite"
+	security "github.com/Kapital-B/automata/svc/internal/adapters/outbound/security"
 	"github.com/Kapital-B/automata/svc/internal/application/auth"
 	appcontacts "github.com/Kapital-B/automata/svc/internal/application/contacts"
 	"github.com/google/uuid"
@@ -29,12 +30,11 @@ func TestContactsIsolationAndMergeHTTP(t *testing.T) {
 	}
 	repo := sqlite.NewRepository(db, 15*time.Minute)
 	jwtSecret := []byte("abcdefghijklmnopqrstuvwxyz123456")
-	authSvc := auth.NewService(repo, repo, repo, nil, nil, jwtSecret, time.Hour, 30*24*time.Hour)
+	authSvc := auth.NewService(repo, repo, repo, nil, nil, security.JWT{Secret: jwtSecret, TTL: time.Hour}, security.BcryptHasher{}, 30*24*time.Hour)
 	contactSvc := &appcontacts.Service{Users: repo, Contacts: repo, Messages: repo}
 	h := &Handlers{
 		Log: slog.Default(), AuthSvc: authSvc, ContactSvc: contactSvc,
-		Users: repo, Contacts: repo, Messages: repo,
-		JWTSecret: jwtSecret, JWTTTL: time.Hour,
+		Users: repo, Contacts: repo, Messages: repo, TokenVerifier: security.JWT{Secret: jwtSecret},
 	}
 	srv := httptest.NewServer(h.Routes())
 	defer srv.Close()

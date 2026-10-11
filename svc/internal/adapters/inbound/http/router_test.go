@@ -38,12 +38,11 @@ func TestHealth(t *testing.T) {
 	})
 	syncSvc := &appmessages.SyncService{Accounts: repo, Messages: repo, Mailboxes: mailboxes, JobRuns: repo}
 	jwtSecret := []byte("abcdefghijklmnopqrstuvwxyz123456")
-	authSvc := auth.NewService(repo, repo, repo, nil, nil, jwtSecret, time.Hour, 30*24*time.Hour)
+	authSvc := auth.NewService(repo, repo, repo, nil, nil, security.JWT{Secret: jwtSecret, TTL: time.Hour}, security.BcryptHasher{}, 30*24*time.Hour)
 	h := &Handlers{
 		Log: slog.Default(), AccountSvc: accountSvc, SyncSvc: syncSvc, AuthSvc: authSvc,
 		Accounts: repo, Messages: repo, JobRuns: repo, OAuthStates: repo, Users: repo,
-		Dashboard: "http://localhost:5173", SuccessPath: "/ok", ErrorPath: "/err",
-		JWTSecret: jwtSecret, JWTTTL: time.Hour,
+		Dashboard: "http://localhost:5173", SuccessPath: "/ok", ErrorPath: "/err", TokenVerifier: security.JWT{Secret: jwtSecret},
 	}
 	srv := httptest.NewServer(h.Routes())
 	defer srv.Close()

@@ -7,11 +7,16 @@ import (
 	"errors"
 	"time"
 
+	sqlkit "github.com/Kapital-B/automata/svc/internal/adapters/outbound/persistence/sqlkit"
 	domainconnectors "github.com/Kapital-B/automata/svc/internal/domain/connectors"
 	"github.com/google/uuid"
 )
 
-func (r *Repository) InsertConnectorAccount(ctx context.Context, row domainconnectors.ConnectorAccountRow, tokenCiphertext []byte) error {
+func (r *Repository) InsertConnectorAccount(ctx context.Context, row domainconnectors.ConnectorAccountRow, tokenCiphertext []byte) (portResult0 error) {
+	defer func() {
+		portResult0 = sqlkit.DomainError(portResult0)
+	}()
+
 	scopes, _ := json.Marshal(row.Scopes)
 	if row.Scopes == nil {
 		scopes = []byte("[]")
@@ -27,7 +32,11 @@ func (r *Repository) InsertConnectorAccount(ctx context.Context, row domainconne
 	return err
 }
 
-func (r *Repository) GetConnectorAccount(ctx context.Context, userID, id uuid.UUID) (*domainconnectors.ConnectorAccountRow, error) {
+func (r *Repository) GetConnectorAccount(ctx context.Context, userID, id uuid.UUID) (portResult0 *domainconnectors.ConnectorAccountRow, portResult1 error) {
+	defer func() {
+		portResult1 = sqlkit.DomainError(portResult1)
+	}()
+
 	row := r.db.QueryRowContext(ctx, `
 		SELECT id, user_id, provider, label, external_tenant_id, connection_status,
 			last_error, scopes_json, last_synced_at, created_at, updated_at
@@ -40,7 +49,11 @@ func (r *Repository) GetConnectorAccount(ctx context.Context, userID, id uuid.UU
 	return out, err
 }
 
-func (r *Repository) ListConnectorAccounts(ctx context.Context, userID uuid.UUID) ([]domainconnectors.ConnectorAccountRow, error) {
+func (r *Repository) ListConnectorAccounts(ctx context.Context, userID uuid.UUID) (portResult0 []domainconnectors.ConnectorAccountRow, portResult1 error) {
+	defer func() {
+		portResult1 = sqlkit.DomainError(portResult1)
+	}()
+
 	rows, err := r.db.QueryContext(ctx, `
 		SELECT id, user_id, provider, label, external_tenant_id, connection_status,
 			last_error, scopes_json, last_synced_at, created_at, updated_at
@@ -61,12 +74,20 @@ func (r *Repository) ListConnectorAccounts(ctx context.Context, userID uuid.UUID
 	return out, rows.Err()
 }
 
-func (r *Repository) DeleteConnectorAccount(ctx context.Context, userID, id uuid.UUID) error {
+func (r *Repository) DeleteConnectorAccount(ctx context.Context, userID, id uuid.UUID) (portResult0 error) {
+	defer func() {
+		portResult0 = sqlkit.DomainError(portResult0)
+	}()
+
 	_, err := r.db.ExecContext(ctx, `DELETE FROM connector_accounts WHERE id = ? AND user_id = ?`, id.String(), userID.String())
 	return err
 }
 
-func (r *Repository) GetConnectorTokenCipher(ctx context.Context, userID, id uuid.UUID) ([]byte, error) {
+func (r *Repository) GetConnectorTokenCipher(ctx context.Context, userID, id uuid.UUID) (portResult0 []byte, portResult1 error) {
+	defer func() {
+		portResult1 = sqlkit.DomainError(portResult1)
+	}()
+
 	var cipher []byte
 	err := r.db.QueryRowContext(ctx, `
 		SELECT token_ciphertext FROM connector_accounts WHERE id = ? AND user_id = ?
@@ -88,7 +109,11 @@ func (r *Repository) UpdateConnectorToken(
 	status string,
 	lastError *string,
 	lastSyncedAt *time.Time,
-) error {
+) (portResult0 error) {
+	defer func() {
+		portResult0 = sqlkit.DomainError(portResult0)
+	}()
+
 	scopesJSON, _ := json.Marshal(scopes)
 	if scopes == nil {
 		scopesJSON = []byte("[]")
@@ -103,7 +128,11 @@ func (r *Repository) UpdateConnectorToken(
 	return err
 }
 
-func (r *Repository) CreateConnectorBinding(ctx context.Context, row domainconnectors.ConnectorBindingRow) error {
+func (r *Repository) CreateConnectorBinding(ctx context.Context, row domainconnectors.ConnectorBindingRow) (portResult0 error) {
+	defer func() {
+		portResult0 = sqlkit.DomainError(portResult0)
+	}()
+
 	_, err := r.db.ExecContext(ctx, `
 		INSERT INTO connector_bindings (
 			id, connector_account_id, organisation_id, external_channel_id,
@@ -118,7 +147,11 @@ func (r *Repository) CreateConnectorBinding(ctx context.Context, row domainconne
 	return err
 }
 
-func (r *Repository) GetConnectorBinding(ctx context.Context, userID, id uuid.UUID) (*domainconnectors.ConnectorBindingRow, error) {
+func (r *Repository) GetConnectorBinding(ctx context.Context, userID, id uuid.UUID) (portResult0 *domainconnectors.ConnectorBindingRow, portResult1 error) {
+	defer func() {
+		portResult1 = sqlkit.DomainError(portResult1)
+	}()
+
 	row := r.db.QueryRowContext(ctx, `
 		SELECT b.id, b.connector_account_id, b.organisation_id, b.external_channel_id,
 			b.project_id, b.label, b.sync_cursor, b.created_at, b.updated_at
@@ -133,7 +166,11 @@ func (r *Repository) GetConnectorBinding(ctx context.Context, userID, id uuid.UU
 	return out, err
 }
 
-func (r *Repository) ListConnectorBindings(ctx context.Context, userID, connectorAccountID uuid.UUID) ([]domainconnectors.ConnectorBindingRow, error) {
+func (r *Repository) ListConnectorBindings(ctx context.Context, userID, connectorAccountID uuid.UUID) (portResult0 []domainconnectors.ConnectorBindingRow, portResult1 error) {
+	defer func() {
+		portResult1 = sqlkit.DomainError(portResult1)
+	}()
+
 	rows, err := r.db.QueryContext(ctx, `
 		SELECT b.id, b.connector_account_id, b.organisation_id, b.external_channel_id,
 			b.project_id, b.label, b.sync_cursor, b.created_at, b.updated_at
@@ -157,7 +194,11 @@ func (r *Repository) ListConnectorBindings(ctx context.Context, userID, connecto
 	return out, rows.Err()
 }
 
-func (r *Repository) DeleteConnectorBinding(ctx context.Context, userID, id uuid.UUID) error {
+func (r *Repository) DeleteConnectorBinding(ctx context.Context, userID, id uuid.UUID) (portResult0 error) {
+	defer func() {
+		portResult0 = sqlkit.DomainError(portResult0)
+	}()
+
 	_, err := r.db.ExecContext(ctx, `
 		DELETE FROM connector_bindings
 		WHERE id = ? AND connector_account_id IN (
@@ -167,7 +208,11 @@ func (r *Repository) DeleteConnectorBinding(ctx context.Context, userID, id uuid
 	return err
 }
 
-func (r *Repository) UpdateConnectorBindingCursor(ctx context.Context, userID, id uuid.UUID, cursor *string, updatedAt time.Time) error {
+func (r *Repository) UpdateConnectorBindingCursor(ctx context.Context, userID, id uuid.UUID, cursor *string, updatedAt time.Time) (portResult0 error) {
+	defer func() {
+		portResult0 = sqlkit.DomainError(portResult0)
+	}()
+
 	_, err := r.db.ExecContext(ctx, `
 		UPDATE connector_bindings
 		SET sync_cursor = ?, updated_at = ?
@@ -178,7 +223,11 @@ func (r *Repository) UpdateConnectorBindingCursor(ctx context.Context, userID, i
 	return err
 }
 
-func (r *Repository) UpsertConnectorMessage(ctx context.Context, row domainconnectors.ConnectorMessageRow) error {
+func (r *Repository) UpsertConnectorMessage(ctx context.Context, row domainconnectors.ConnectorMessageRow) (portResult0 error) {
+	defer func() {
+		portResult0 = sqlkit.DomainError(portResult0)
+	}()
+
 	meta := row.MetaJSON
 	if meta == "" {
 		meta = "{}"
@@ -205,7 +254,11 @@ func (r *Repository) UpsertConnectorMessage(ctx context.Context, row domainconne
 	return err
 }
 
-func (r *Repository) ListConnectorMessagesForProject(ctx context.Context, userID, organisationID, projectID uuid.UUID) ([]domainconnectors.ConnectorMessageRow, error) {
+func (r *Repository) ListConnectorMessagesForProject(ctx context.Context, userID, organisationID, projectID uuid.UUID) (portResult0 []domainconnectors.ConnectorMessageRow, portResult1 error) {
+	defer func() {
+		portResult1 = sqlkit.DomainError(portResult1)
+	}()
+
 	rows, err := r.db.QueryContext(ctx, `
 		SELECT m.id, m.connector_account_id, m.organisation_id, m.project_id, m.provider_event_id,
 			m.external_channel_id, m.title, m.body_text, m.author_label, m.occurred_at,
@@ -230,7 +283,11 @@ func (r *Repository) ListConnectorMessagesForProject(ctx context.Context, userID
 	return out, rows.Err()
 }
 
-func (r *Repository) GetConnectorMessage(ctx context.Context, userID, id uuid.UUID) (*domainconnectors.ConnectorMessageRow, error) {
+func (r *Repository) GetConnectorMessage(ctx context.Context, userID, id uuid.UUID) (portResult0 *domainconnectors.ConnectorMessageRow, portResult1 error) {
+	defer func() {
+		portResult1 = sqlkit.DomainError(portResult1)
+	}()
+
 	row := r.db.QueryRowContext(ctx, `
 		SELECT m.id, m.connector_account_id, m.organisation_id, m.project_id, m.provider_event_id,
 			m.external_channel_id, m.title, m.body_text, m.author_label, m.occurred_at,

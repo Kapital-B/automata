@@ -14,6 +14,7 @@ import (
 	domainjobs "github.com/Kapital-B/automata/svc/internal/domain/jobs"
 	domainmessages "github.com/Kapital-B/automata/svc/internal/domain/messages"
 
+	sqlkit "github.com/Kapital-B/automata/svc/internal/adapters/outbound/persistence/sqlkit"
 	"github.com/google/uuid"
 )
 
@@ -40,7 +41,11 @@ func parseTime(s string) (time.Time, error) {
 
 // --- accounts.AccountRepository ---
 
-func (r *Repository) InsertAccount(ctx context.Context, a domainaccounts.AccountRow, tokenCiphertext []byte) error {
+func (r *Repository) InsertAccount(ctx context.Context, a domainaccounts.AccountRow, tokenCiphertext []byte) (portResult0 error) {
+	defer func() {
+		portResult0 = sqlkit.DomainError(portResult0)
+	}()
+
 	now := formatRFC3339(time.Now().UTC())
 	_, err := r.db.ExecContext(ctx, `
 		INSERT INTO accounts (id, user_id, label, provider, ms_account_kind, graph_tenant_id, primary_email, msal_home_account_id,
@@ -59,7 +64,11 @@ func (r *Repository) InsertAccount(ctx context.Context, a domainaccounts.Account
 	return err
 }
 
-func (r *Repository) UpdateAccountTokens(ctx context.Context, userID uuid.UUID, id uuid.UUID, tokenCiphertext []byte, primaryEmail string, graphTenantID *string, msalHome *string, status string, lastErr *string) error {
+func (r *Repository) UpdateAccountTokens(ctx context.Context, userID uuid.UUID, id uuid.UUID, tokenCiphertext []byte, primaryEmail string, graphTenantID *string, msalHome *string, status string, lastErr *string) (portResult0 error) {
+	defer func() {
+		portResult0 = sqlkit.DomainError(portResult0)
+	}()
+
 	now := formatRFC3339(time.Now().UTC())
 	_, err := r.db.ExecContext(ctx, `
 		UPDATE accounts SET token_ciphertext = ?, primary_email = ?, graph_tenant_id = ?, msal_home_account_id = ?,
@@ -70,7 +79,11 @@ func (r *Repository) UpdateAccountTokens(ctx context.Context, userID uuid.UUID, 
 	return err
 }
 
-func (r *Repository) GetAccount(ctx context.Context, userID uuid.UUID, id uuid.UUID) (*domainaccounts.AccountRow, []byte, error) {
+func (r *Repository) GetAccount(ctx context.Context, userID uuid.UUID, id uuid.UUID) (portResult0 *domainaccounts.AccountRow, portResult1 []byte, portResult2 error) {
+	defer func() {
+		portResult2 = sqlkit.DomainError(portResult2)
+	}()
+
 	var a domainaccounts.AccountRow
 	var idStr string
 	var kindStr string
@@ -133,7 +146,11 @@ func (r *Repository) GetAccount(ctx context.Context, userID uuid.UUID, id uuid.U
 	return &a, tokenBytes, nil
 }
 
-func (r *Repository) ListAccounts(ctx context.Context, userID uuid.UUID) ([]domainaccounts.AccountRow, error) {
+func (r *Repository) ListAccounts(ctx context.Context, userID uuid.UUID) (portResult0 []domainaccounts.AccountRow, portResult1 error) {
+	defer func() {
+		portResult1 = sqlkit.DomainError(portResult1)
+	}()
+
 	rows, err := r.db.QueryContext(ctx, `
 		SELECT a.user_id, a.id, a.label, a.provider, a.ms_account_kind, a.graph_tenant_id, a.primary_email, a.msal_home_account_id,
 			a.connection_status, a.last_error, a.created_at, a.updated_at, s.last_synced_at
@@ -194,7 +211,11 @@ func (r *Repository) ListAccounts(ctx context.Context, userID uuid.UUID) ([]doma
 	return out, rows.Err()
 }
 
-func (r *Repository) DeleteAccount(ctx context.Context, userID uuid.UUID, id uuid.UUID) error {
+func (r *Repository) DeleteAccount(ctx context.Context, userID uuid.UUID, id uuid.UUID) (portResult0 error) {
+	defer func() {
+		portResult0 = sqlkit.DomainError(portResult0)
+	}()
+
 	tx, err := r.db.BeginTx(ctx, nil)
 	if err != nil {
 		return err
@@ -212,7 +233,11 @@ func (r *Repository) DeleteAccount(ctx context.Context, userID uuid.UUID, id uui
 	return tx.Commit()
 }
 
-func (r *Repository) GetSyncDeltaLink(ctx context.Context, userID uuid.UUID, accountID uuid.UUID) (*string, error) {
+func (r *Repository) GetSyncDeltaLink(ctx context.Context, userID uuid.UUID, accountID uuid.UUID) (portResult0 *string, portResult1 error) {
+	defer func() {
+		portResult1 = sqlkit.DomainError(portResult1)
+	}()
+
 	var delta sql.NullString
 	err := r.db.QueryRowContext(ctx, `
 		SELECT s.delta_link
@@ -234,7 +259,11 @@ func (r *Repository) GetSyncDeltaLink(ctx context.Context, userID uuid.UUID, acc
 	return &v, nil
 }
 
-func (r *Repository) UpsertSyncState(ctx context.Context, userID uuid.UUID, accountID uuid.UUID, deltaLink *string, at time.Time) error {
+func (r *Repository) UpsertSyncState(ctx context.Context, userID uuid.UUID, accountID uuid.UUID, deltaLink *string, at time.Time) (portResult0 error) {
+	defer func() {
+		portResult0 = sqlkit.DomainError(portResult0)
+	}()
+
 	now := formatRFC3339(at.UTC())
 	var link any
 	if deltaLink != nil && strings.TrimSpace(*deltaLink) != "" {
@@ -249,7 +278,11 @@ func (r *Repository) UpsertSyncState(ctx context.Context, userID uuid.UUID, acco
 	return err
 }
 
-func (r *Repository) UpsertSyncStateTime(ctx context.Context, userID uuid.UUID, accountID uuid.UUID, at time.Time) error {
+func (r *Repository) UpsertSyncStateTime(ctx context.Context, userID uuid.UUID, accountID uuid.UUID, at time.Time) (portResult0 error) {
+	defer func() {
+		portResult0 = sqlkit.DomainError(portResult0)
+	}()
+
 	now := formatRFC3339(at.UTC())
 	_, err := r.db.ExecContext(ctx, `
 		UPDATE account_sync_state SET last_synced_at = ?
@@ -261,7 +294,11 @@ func (r *Repository) UpsertSyncStateTime(ctx context.Context, userID uuid.UUID, 
 
 // --- messages ---
 
-func (r *Repository) UpsertMessage(ctx context.Context, m domainmessages.MessageRow) error {
+func (r *Repository) UpsertMessage(ctx context.Context, m domainmessages.MessageRow) (portResult0 error) {
+	defer func() {
+		portResult0 = sqlkit.DomainError(portResult0)
+	}()
+
 	now := formatRFC3339(time.Now().UTC())
 	fromJSON := m.FromJSON
 	if fromJSON == "" {
@@ -309,7 +346,11 @@ func (r *Repository) UpsertMessage(ctx context.Context, m domainmessages.Message
 	return err
 }
 
-func (r *Repository) GetMessageIDByProvider(ctx context.Context, accountID uuid.UUID, providerMessageID string) (uuid.UUID, error) {
+func (r *Repository) GetMessageIDByProvider(ctx context.Context, accountID uuid.UUID, providerMessageID string) (portResult0 uuid.UUID, portResult1 error) {
+	defer func() {
+		portResult1 = sqlkit.DomainError(portResult1)
+	}()
+
 	var idStr string
 	err := r.db.QueryRowContext(ctx, `
 		SELECT id FROM messages WHERE account_id = ? AND provider_message_id = ?
@@ -323,7 +364,11 @@ func (r *Repository) GetMessageIDByProvider(ctx context.Context, accountID uuid.
 	return uuid.Parse(idStr)
 }
 
-func (r *Repository) ListMessagesByAccount(ctx context.Context, userID uuid.UUID, accountID uuid.UUID, limit, offset int) ([]domainmessages.MessageRow, error) {
+func (r *Repository) ListMessagesByAccount(ctx context.Context, userID uuid.UUID, accountID uuid.UUID, limit, offset int) (portResult0 []domainmessages.MessageRow, portResult1 error) {
+	defer func() {
+		portResult1 = sqlkit.DomainError(portResult1)
+	}()
+
 	filter := domainmessages.MessageListFilter{
 		AccountID: &accountID,
 		Limit:     limit,
@@ -332,7 +377,11 @@ func (r *Repository) ListMessagesByAccount(ctx context.Context, userID uuid.UUID
 	return r.ListMessages(ctx, userID, filter)
 }
 
-func (r *Repository) GetMessage(ctx context.Context, userID uuid.UUID, id uuid.UUID) (*domainmessages.MessageRow, error) {
+func (r *Repository) GetMessage(ctx context.Context, userID uuid.UUID, id uuid.UUID) (portResult0 *domainmessages.MessageRow, portResult1 error) {
+	defer func() {
+		portResult1 = sqlkit.DomainError(portResult1)
+	}()
+
 	row := r.db.QueryRowContext(ctx, `
 		SELECT m.id, m.account_id, m.provider_message_id, m.conversation_id, m.received_at, m.subject, m.from_json,
 			m.to_json, m.cc_json, m.to_cc_preview, m.body_text, m.body_fetched_at, m.has_attachments, m.raw_etag,
@@ -353,7 +402,11 @@ func (r *Repository) GetMessage(ctx context.Context, userID uuid.UUID, id uuid.U
 	return m, nil
 }
 
-func (r *Repository) ListMessages(ctx context.Context, userID uuid.UUID, filter domainmessages.MessageListFilter) ([]domainmessages.MessageRow, error) {
+func (r *Repository) ListMessages(ctx context.Context, userID uuid.UUID, filter domainmessages.MessageListFilter) (portResult0 []domainmessages.MessageRow, portResult1 error) {
+	defer func() {
+		portResult1 = sqlkit.DomainError(portResult1)
+	}()
+
 	limit := filter.Limit
 	if limit <= 0 {
 		limit = 50
@@ -432,7 +485,11 @@ func (r *Repository) ListMessages(ctx context.Context, userID uuid.UUID, filter 
 	return scanMessageRows(rows)
 }
 
-func (r *Repository) MarkMessagesSummarySeen(ctx context.Context, userID uuid.UUID, messageIDs []uuid.UUID, at time.Time) error {
+func (r *Repository) MarkMessagesSummarySeen(ctx context.Context, userID uuid.UUID, messageIDs []uuid.UUID, at time.Time) (portResult0 error) {
+	defer func() {
+		portResult0 = sqlkit.DomainError(portResult0)
+	}()
+
 	if len(messageIDs) == 0 {
 		return nil
 	}
@@ -462,7 +519,11 @@ func (r *Repository) MarkMessagesSummarySeen(ctx context.Context, userID uuid.UU
 	return nil
 }
 
-func (r *Repository) UpsertMessageCategory(ctx context.Context, row domainmessages.MessageCategoryRow) error {
+func (r *Repository) UpsertMessageCategory(ctx context.Context, row domainmessages.MessageCategoryRow) (portResult0 error) {
+	defer func() {
+		portResult0 = sqlkit.DomainError(portResult0)
+	}()
+
 	_, err := r.db.ExecContext(ctx, `
 		INSERT INTO message_categories (id, message_id, account_id, category_id, source, confidence, run_id, created_at, updated_at)
 		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
@@ -478,7 +539,11 @@ func (r *Repository) UpsertMessageCategory(ctx context.Context, row domainmessag
 	return err
 }
 
-func (r *Repository) ListCategoryDefinitions(ctx context.Context, userID uuid.UUID) ([]domainmessages.CategoryDefinitionRow, error) {
+func (r *Repository) ListCategoryDefinitions(ctx context.Context, userID uuid.UUID) (portResult0 []domainmessages.CategoryDefinitionRow, portResult1 error) {
+	defer func() {
+		portResult1 = sqlkit.DomainError(portResult1)
+	}()
+
 	rows, err := r.db.QueryContext(ctx, `
 		SELECT id, user_id, slug, display_name, definition, sort_order, created_at, updated_at
 		FROM category_definitions
@@ -519,11 +584,19 @@ func (r *Repository) ListCategoryDefinitions(ctx context.Context, userID uuid.UU
 	return out, rows.Err()
 }
 
-func (r *Repository) GetCategoryDefinitionBySlug(ctx context.Context, userID uuid.UUID, slug string) (*domainmessages.CategoryDefinitionRow, error) {
+func (r *Repository) GetCategoryDefinitionBySlug(ctx context.Context, userID uuid.UUID, slug string) (portResult0 *domainmessages.CategoryDefinitionRow, portResult1 error) {
+	defer func() {
+		portResult1 = sqlkit.DomainError(portResult1)
+	}()
+
 	return r.getCategoryDefinition(ctx, `SELECT id, user_id, slug, display_name, definition, sort_order, created_at, updated_at FROM category_definitions WHERE user_id = ? AND slug = ?`, userID.String(), slug)
 }
 
-func (r *Repository) GetCategoryDefinitionByID(ctx context.Context, userID uuid.UUID, id uuid.UUID) (*domainmessages.CategoryDefinitionRow, error) {
+func (r *Repository) GetCategoryDefinitionByID(ctx context.Context, userID uuid.UUID, id uuid.UUID) (portResult0 *domainmessages.CategoryDefinitionRow, portResult1 error) {
+	defer func() {
+		portResult1 = sqlkit.DomainError(portResult1)
+	}()
+
 	return r.getCategoryDefinition(ctx, `SELECT id, user_id, slug, display_name, definition, sort_order, created_at, updated_at FROM category_definitions WHERE user_id = ? AND id = ?`, userID.String(), id.String())
 }
 
@@ -559,7 +632,11 @@ func (r *Repository) getCategoryDefinition(ctx context.Context, query string, ar
 	return &row, nil
 }
 
-func (r *Repository) CreateCategoryDefinition(ctx context.Context, row domainmessages.CategoryDefinitionRow) error {
+func (r *Repository) CreateCategoryDefinition(ctx context.Context, row domainmessages.CategoryDefinitionRow) (portResult0 error) {
+	defer func() {
+		portResult0 = sqlkit.DomainError(portResult0)
+	}()
+
 	_, err := r.db.ExecContext(ctx, `
 		INSERT INTO category_definitions (id, user_id, slug, display_name, definition, sort_order, created_at, updated_at)
 		VALUES (?, ?, ?, ?, ?, ?, ?, ?)
@@ -570,7 +647,11 @@ func (r *Repository) CreateCategoryDefinition(ctx context.Context, row domainmes
 	return err
 }
 
-func (r *Repository) UpdateCategoryDefinition(ctx context.Context, row domainmessages.CategoryDefinitionRow) error {
+func (r *Repository) UpdateCategoryDefinition(ctx context.Context, row domainmessages.CategoryDefinitionRow) (portResult0 error) {
+	defer func() {
+		portResult0 = sqlkit.DomainError(portResult0)
+	}()
+
 	_, err := r.db.ExecContext(ctx, `
 		UPDATE category_definitions
 		SET slug = ?, display_name = ?, definition = ?, sort_order = ?, updated_at = ?
@@ -581,7 +662,11 @@ func (r *Repository) UpdateCategoryDefinition(ctx context.Context, row domainmes
 	return err
 }
 
-func (r *Repository) ReassignMessageCategories(ctx context.Context, userID uuid.UUID, fromCategoryID, toCategoryID uuid.UUID) (int, error) {
+func (r *Repository) ReassignMessageCategories(ctx context.Context, userID uuid.UUID, fromCategoryID, toCategoryID uuid.UUID) (portResult0 int, portResult1 error) {
+	defer func() {
+		portResult1 = sqlkit.DomainError(portResult1)
+	}()
+
 	res, err := r.db.ExecContext(ctx, `
 		UPDATE message_categories
 		SET category_id = ?, updated_at = ?
@@ -600,7 +685,11 @@ func (r *Repository) ReassignMessageCategories(ctx context.Context, userID uuid.
 	return int(n), nil
 }
 
-func (r *Repository) CountMessageCategoriesByCategory(ctx context.Context, userID uuid.UUID, categoryID uuid.UUID) (int, error) {
+func (r *Repository) CountMessageCategoriesByCategory(ctx context.Context, userID uuid.UUID, categoryID uuid.UUID) (portResult0 int, portResult1 error) {
+	defer func() {
+		portResult1 = sqlkit.DomainError(portResult1)
+	}()
+
 	var n int
 	err := r.db.QueryRowContext(ctx, `
 		SELECT COUNT(1)
@@ -611,7 +700,11 @@ func (r *Repository) CountMessageCategoriesByCategory(ctx context.Context, userI
 	return n, err
 }
 
-func (r *Repository) DeleteCategoryDefinition(ctx context.Context, userID uuid.UUID, id uuid.UUID) error {
+func (r *Repository) DeleteCategoryDefinition(ctx context.Context, userID uuid.UUID, id uuid.UUID) (portResult0 error) {
+	defer func() {
+		portResult0 = sqlkit.DomainError(portResult0)
+	}()
+
 	_, err := r.db.ExecContext(ctx, `DELETE FROM category_definitions WHERE id = ? AND user_id = ?`, id.String(), userID.String())
 	return err
 }
@@ -712,7 +805,11 @@ func scanMessageScanner(s rowScanner) (*domainmessages.MessageRow, error) {
 
 // --- oauth state ---
 
-func (r *Repository) InsertOAuthState(ctx context.Context, state, flow string, userID *uuid.UUID, payloadJSON string, createdAt time.Time) error {
+func (r *Repository) InsertOAuthState(ctx context.Context, state, flow string, userID *uuid.UUID, payloadJSON string, createdAt time.Time) (portResult0 error) {
+	defer func() {
+		portResult0 = sqlkit.DomainError(portResult0)
+	}()
+
 	var uid any
 	if userID != nil {
 		uid = userID.String()
@@ -725,6 +822,10 @@ func (r *Repository) InsertOAuthState(ctx context.Context, state, flow string, u
 }
 
 func (r *Repository) TakeOAuthState(ctx context.Context, state string) (flow string, userID *uuid.UUID, payloadJSON string, ok bool, err error) {
+	defer func() {
+		err = sqlkit.DomainError(err)
+	}()
+
 	tx, err := r.db.BeginTx(ctx, nil)
 	if err != nil {
 		return "", nil, "", false, err
@@ -767,14 +868,22 @@ func (r *Repository) TakeOAuthState(ctx context.Context, state string) (flow str
 	return f, u, payload, true, nil
 }
 
-func (r *Repository) DeleteExpiredStates(ctx context.Context, before time.Time) error {
+func (r *Repository) DeleteExpiredStates(ctx context.Context, before time.Time) (portResult0 error) {
+	defer func() {
+		portResult0 = sqlkit.DomainError(portResult0)
+	}()
+
 	_, err := r.db.ExecContext(ctx, `DELETE FROM oauth_states WHERE created_at < ?`, formatRFC3339(before.UTC()))
 	return err
 }
 
 // PromoteJobRunToRunning marks a previously enqueued pending run as running without wiping meta_json
 // or changing started_at (enqueue time stays authoritative).
-func (r *Repository) PromoteJobRunToRunning(ctx context.Context, id uuid.UUID, startedAt time.Time) error {
+func (r *Repository) PromoteJobRunToRunning(ctx context.Context, id uuid.UUID, startedAt time.Time) (portResult0 error) {
+	defer func() {
+		portResult0 = sqlkit.DomainError(portResult0)
+	}()
+
 	_ = startedAt
 	res, err := r.db.ExecContext(ctx, `
 		UPDATE job_runs
@@ -798,7 +907,11 @@ func (r *Repository) PromoteJobRunToRunning(ctx context.Context, id uuid.UUID, s
 }
 
 // InsertJobRun inserts or updates a job run row (same id: final status update).
-func (r *Repository) InsertJobRun(ctx context.Context, id uuid.UUID, accountID uuid.UUID, jobType string, trigger string, status string, startedAt, finishedAt time.Time, errMsg *string, metaJSON string) error {
+func (r *Repository) InsertJobRun(ctx context.Context, id uuid.UUID, accountID uuid.UUID, jobType string, trigger string, status string, startedAt, finishedAt time.Time, errMsg *string, metaJSON string) (portResult0 error) {
+	defer func() {
+		portResult0 = sqlkit.DomainError(portResult0)
+	}()
+
 	var fin any
 	if !finishedAt.IsZero() {
 		fin = formatRFC3339(finishedAt.UTC())
@@ -823,12 +936,20 @@ func (r *Repository) InsertJobRun(ctx context.Context, id uuid.UUID, accountID u
 	return err
 }
 
-func (r *Repository) UpdateJobRunMeta(ctx context.Context, id uuid.UUID, metaJSON string) error {
+func (r *Repository) UpdateJobRunMeta(ctx context.Context, id uuid.UUID, metaJSON string) (portResult0 error) {
+	defer func() {
+		portResult0 = sqlkit.DomainError(portResult0)
+	}()
+
 	_, err := r.db.ExecContext(ctx, `UPDATE job_runs SET meta_json = ? WHERE id = ?`, metaJSON, id.String())
 	return err
 }
 
-func (r *Repository) UpdateJobRunStatus(ctx context.Context, id uuid.UUID, status string, finishedAt *time.Time, errMsg *string, metaJSON string) error {
+func (r *Repository) UpdateJobRunStatus(ctx context.Context, id uuid.UUID, status string, finishedAt *time.Time, errMsg *string, metaJSON string) (portResult0 error) {
+	defer func() {
+		portResult0 = sqlkit.DomainError(portResult0)
+	}()
+
 	_, err := r.db.ExecContext(ctx, `
 		UPDATE job_runs
 		SET status = ?, finished_at = ?, error_message = ?, meta_json = ?
@@ -837,7 +958,11 @@ func (r *Repository) UpdateJobRunStatus(ctx context.Context, id uuid.UUID, statu
 	return err
 }
 
-func (r *Repository) ListJobRuns(ctx context.Context, userID uuid.UUID, filter domainjobs.JobRunListFilter) ([]domainjobs.JobRunRow, error) {
+func (r *Repository) ListJobRuns(ctx context.Context, userID uuid.UUID, filter domainjobs.JobRunListFilter) (portResult0 []domainjobs.JobRunRow, portResult1 error) {
+	defer func() {
+		portResult1 = sqlkit.DomainError(portResult1)
+	}()
+
 	limit := filter.Limit
 	if limit <= 0 {
 		limit = 50
@@ -890,7 +1015,11 @@ func (r *Repository) ListJobRuns(ctx context.Context, userID uuid.UUID, filter d
 	return out, rows.Err()
 }
 
-func (r *Repository) GetJobRun(ctx context.Context, userID uuid.UUID, id uuid.UUID) (*domainjobs.JobRunRow, error) {
+func (r *Repository) GetJobRun(ctx context.Context, userID uuid.UUID, id uuid.UUID) (portResult0 *domainjobs.JobRunRow, portResult1 error) {
+	defer func() {
+		portResult1 = sqlkit.DomainError(portResult1)
+	}()
+
 	row := r.db.QueryRowContext(ctx, `
 		SELECT j.id, j.account_id, COALESCE(a.label, ca.label), j.job_type, j.trigger_kind, j.status,
 			j.time_window_start, j.time_window_end, j.started_at, j.finished_at, j.error_message, j.meta_json
@@ -913,7 +1042,11 @@ func (r *Repository) GetJobRun(ctx context.Context, userID uuid.UUID, id uuid.UU
 	return item, nil
 }
 
-func (r *Repository) GetSummarySettings(ctx context.Context, userID uuid.UUID) (*domainmessages.SummarySettingsRow, error) {
+func (r *Repository) GetSummarySettings(ctx context.Context, userID uuid.UUID) (portResult0 *domainmessages.SummarySettingsRow, portResult1 error) {
+	defer func() {
+		portResult1 = sqlkit.DomainError(portResult1)
+	}()
+
 	var includeJSON, excludeJSON, updatedAt string
 	var chunkSize int
 	err := r.db.QueryRowContext(ctx, `
@@ -943,7 +1076,11 @@ func (r *Repository) GetSummarySettings(ctx context.Context, userID uuid.UUID) (
 	return row, nil
 }
 
-func (r *Repository) UpsertSummarySettings(ctx context.Context, row domainmessages.SummarySettingsRow) error {
+func (r *Repository) UpsertSummarySettings(ctx context.Context, row domainmessages.SummarySettingsRow) (portResult0 error) {
+	defer func() {
+		portResult0 = sqlkit.DomainError(portResult0)
+	}()
+
 	includeJSON, _ := json.Marshal(row.IncludeCategorySlugs)
 	excludeJSON, _ := json.Marshal(row.ExcludeCategorySlugs)
 	_, err := r.db.ExecContext(ctx, `
@@ -958,7 +1095,11 @@ func (r *Repository) UpsertSummarySettings(ctx context.Context, row domainmessag
 	return err
 }
 
-func (r *Repository) InsertSummarySnapshot(ctx context.Context, row domainmessages.SummarySnapshotRow) error {
+func (r *Repository) InsertSummarySnapshot(ctx context.Context, row domainmessages.SummarySnapshotRow) (portResult0 error) {
+	defer func() {
+		portResult0 = sqlkit.DomainError(portResult0)
+	}()
+
 	_, err := r.db.ExecContext(ctx, `
 		INSERT INTO summary_snapshots (id, user_id, account_id, run_id, window_start, window_end, general_summary, created_at)
 		VALUES (?, ?, ?, ?, ?, ?, ?, ?)
@@ -970,7 +1111,11 @@ func (r *Repository) InsertSummarySnapshot(ctx context.Context, row domainmessag
 	return err
 }
 
-func (r *Repository) ListSummarySnapshots(ctx context.Context, userID uuid.UUID, accountID *uuid.UUID, limit int) ([]domainmessages.SummarySnapshotRow, error) {
+func (r *Repository) ListSummarySnapshots(ctx context.Context, userID uuid.UUID, accountID *uuid.UUID, limit int) (portResult0 []domainmessages.SummarySnapshotRow, portResult1 error) {
+	defer func() {
+		portResult1 = sqlkit.DomainError(portResult1)
+	}()
+
 	if limit <= 0 {
 		limit = 1
 	}
@@ -1011,7 +1156,11 @@ func (r *Repository) ListSummarySnapshots(ctx context.Context, userID uuid.UUID,
 	return out, rows.Err()
 }
 
-func (r *Repository) InsertActionItems(ctx context.Context, rows []domainmessages.ActionItemRow) error {
+func (r *Repository) InsertActionItems(ctx context.Context, rows []domainmessages.ActionItemRow) (portResult0 error) {
+	defer func() {
+		portResult0 = sqlkit.DomainError(portResult0)
+	}()
+
 	tx, err := r.db.BeginTx(ctx, nil)
 	if err != nil {
 		return err
@@ -1036,7 +1185,11 @@ func (r *Repository) InsertActionItems(ctx context.Context, rows []domainmessage
 	return tx.Commit()
 }
 
-func (r *Repository) ListOpenActionItems(ctx context.Context, userID uuid.UUID, accountID *uuid.UUID) ([]domainmessages.ActionItemRow, error) {
+func (r *Repository) ListOpenActionItems(ctx context.Context, userID uuid.UUID, accountID *uuid.UUID) (portResult0 []domainmessages.ActionItemRow, portResult1 error) {
+	defer func() {
+		portResult1 = sqlkit.DomainError(portResult1)
+	}()
+
 	var b strings.Builder
 	b.WriteString(`SELECT id, user_id, account_id, message_id, run_id, text, due_at, status, actioned_at, auto_draft_seen_at, created_at, updated_at FROM action_items WHERE user_id = ? AND status = 'open'`)
 	args := []any{userID.String()}
@@ -1082,7 +1235,11 @@ func (r *Repository) ListOpenActionItems(ctx context.Context, userID uuid.UUID, 
 	return out, rows.Err()
 }
 
-func (r *Repository) MarkActionItemDone(ctx context.Context, userID uuid.UUID, itemID uuid.UUID, at time.Time) error {
+func (r *Repository) MarkActionItemDone(ctx context.Context, userID uuid.UUID, itemID uuid.UUID, at time.Time) (portResult0 error) {
+	defer func() {
+		portResult0 = sqlkit.DomainError(portResult0)
+	}()
+
 	_, err := r.db.ExecContext(ctx, `
 		UPDATE action_items SET status = 'done', actioned_at = ?, updated_at = ?, actioned_by_user_id = ?
 		WHERE id = ? AND user_id = ?
@@ -1090,7 +1247,11 @@ func (r *Repository) MarkActionItemDone(ctx context.Context, userID uuid.UUID, i
 	return err
 }
 
-func (r *Repository) CompleteActionItem(ctx context.Context, itemID, byUserID uuid.UUID, at time.Time) error {
+func (r *Repository) CompleteActionItem(ctx context.Context, itemID, byUserID uuid.UUID, at time.Time) (portResult0 error) {
+	defer func() {
+		portResult0 = sqlkit.DomainError(portResult0)
+	}()
+
 	_, err := r.db.ExecContext(ctx, `
 		UPDATE action_items SET status = 'done', actioned_at = ?, updated_at = ?, actioned_by_user_id = ?
 		WHERE id = ? AND status = 'open'
@@ -1123,7 +1284,11 @@ const projectTodosSQL = `
 	ORDER BY ai.created_at DESC
 	LIMIT 500`
 
-func (r *Repository) ListOpenActionItemsForProject(ctx context.Context, organisationID, projectID uuid.UUID) ([]domainmessages.ProjectTodoRow, error) {
+func (r *Repository) ListOpenActionItemsForProject(ctx context.Context, organisationID, projectID uuid.UUID) (portResult0 []domainmessages.ProjectTodoRow, portResult1 error) {
+	defer func() {
+		portResult1 = sqlkit.DomainError(portResult1)
+	}()
+
 	rows, err := r.db.QueryContext(ctx, projectTodosSQL, projectID.String(), organisationID.String())
 	if err != nil {
 		return nil, err
@@ -1170,7 +1335,11 @@ func (r *Repository) ListOpenActionItemsForProject(ctx context.Context, organisa
 	return out, rows.Err()
 }
 
-func (r *Repository) InsertFYI(ctx context.Context, rows []domainmessages.FYIRow) error {
+func (r *Repository) InsertFYI(ctx context.Context, rows []domainmessages.FYIRow) (portResult0 error) {
+	defer func() {
+		portResult0 = sqlkit.DomainError(portResult0)
+	}()
+
 	tx, err := r.db.BeginTx(ctx, nil)
 	if err != nil {
 		return err
@@ -1191,7 +1360,11 @@ func (r *Repository) InsertFYI(ctx context.Context, rows []domainmessages.FYIRow
 	return tx.Commit()
 }
 
-func (r *Repository) ListFYIByRun(ctx context.Context, userID uuid.UUID, runID uuid.UUID) ([]domainmessages.FYIRow, error) {
+func (r *Repository) ListFYIByRun(ctx context.Context, userID uuid.UUID, runID uuid.UUID) (portResult0 []domainmessages.FYIRow, portResult1 error) {
+	defer func() {
+		portResult1 = sqlkit.DomainError(portResult1)
+	}()
+
 	rows, err := r.db.QueryContext(ctx, `
 		SELECT id, user_id, account_id, message_id, run_id, text, created_at
 		FROM fyi_items WHERE user_id = ? AND run_id = ? ORDER BY created_at DESC
@@ -1217,7 +1390,11 @@ func (r *Repository) ListFYIByRun(ctx context.Context, userID uuid.UUID, runID u
 	return out, rows.Err()
 }
 
-func (r *Repository) ListOpenFYI(ctx context.Context, userID uuid.UUID, accountID *uuid.UUID, limit int) ([]domainmessages.FYIRow, error) {
+func (r *Repository) ListOpenFYI(ctx context.Context, userID uuid.UUID, accountID *uuid.UUID, limit int) (portResult0 []domainmessages.FYIRow, portResult1 error) {
+	defer func() {
+		portResult1 = sqlkit.DomainError(portResult1)
+	}()
+
 	if limit <= 0 {
 		limit = 200
 	}
@@ -1259,7 +1436,11 @@ func (r *Repository) ListOpenFYI(ctx context.Context, userID uuid.UUID, accountI
 	return out, rows.Err()
 }
 
-func (r *Repository) DeleteFYI(ctx context.Context, userID uuid.UUID, id uuid.UUID) error {
+func (r *Repository) DeleteFYI(ctx context.Context, userID uuid.UUID, id uuid.UUID) (portResult0 error) {
+	defer func() {
+		portResult0 = sqlkit.DomainError(portResult0)
+	}()
+
 	_, err := r.db.ExecContext(ctx, `
 		DELETE FROM fyi_items
 		WHERE id = ? AND user_id = ?
@@ -1267,7 +1448,11 @@ func (r *Repository) DeleteFYI(ctx context.Context, userID uuid.UUID, id uuid.UU
 	return err
 }
 
-func (r *Repository) ListActionItemsForAutoDraft(ctx context.Context, userID uuid.UUID, accountID uuid.UUID, onlyUnseen bool, limit int) ([]domainmessages.ActionItemRow, error) {
+func (r *Repository) ListActionItemsForAutoDraft(ctx context.Context, userID uuid.UUID, accountID uuid.UUID, onlyUnseen bool, limit int) (portResult0 []domainmessages.ActionItemRow, portResult1 error) {
+	defer func() {
+		portResult1 = sqlkit.DomainError(portResult1)
+	}()
+
 	if limit <= 0 {
 		limit = 50
 	}
@@ -1316,7 +1501,11 @@ func (r *Repository) ListActionItemsForAutoDraft(ctx context.Context, userID uui
 	return out, rows.Err()
 }
 
-func (r *Repository) MarkActionItemsAutoDraftSeen(ctx context.Context, userID uuid.UUID, itemIDs []uuid.UUID, at time.Time) error {
+func (r *Repository) MarkActionItemsAutoDraftSeen(ctx context.Context, userID uuid.UUID, itemIDs []uuid.UUID, at time.Time) (portResult0 error) {
+	defer func() {
+		portResult0 = sqlkit.DomainError(portResult0)
+	}()
+
 	if len(itemIDs) == 0 {
 		return nil
 	}
@@ -1338,7 +1527,11 @@ func (r *Repository) MarkActionItemsAutoDraftSeen(ctx context.Context, userID uu
 	return tx.Commit()
 }
 
-func (r *Repository) InsertDraftSuggestions(ctx context.Context, rows []domainmessages.DraftSuggestionRow) error {
+func (r *Repository) InsertDraftSuggestions(ctx context.Context, rows []domainmessages.DraftSuggestionRow) (portResult0 error) {
+	defer func() {
+		portResult0 = sqlkit.DomainError(portResult0)
+	}()
+
 	if len(rows) == 0 {
 		return nil
 	}
@@ -1371,7 +1564,11 @@ func (r *Repository) InsertDraftSuggestions(ctx context.Context, rows []domainme
 	return tx.Commit()
 }
 
-func (r *Repository) UpsertSummaryJobChunk(ctx context.Context, row domainmessages.SummaryJobChunkRow) error {
+func (r *Repository) UpsertSummaryJobChunk(ctx context.Context, row domainmessages.SummaryJobChunkRow) (portResult0 error) {
+	defer func() {
+		portResult0 = sqlkit.DomainError(portResult0)
+	}()
+
 	messageIDsJSON, _ := json.Marshal(uuidStrings(row.MessageIDs))
 	_, err := r.db.ExecContext(ctx, `
 		INSERT INTO summary_job_chunks (id, run_id, account_id, chunk_index, phase, message_ids_json, payload_json, created_at, updated_at)
@@ -1384,7 +1581,11 @@ func (r *Repository) UpsertSummaryJobChunk(ctx context.Context, row domainmessag
 	return err
 }
 
-func (r *Repository) ListSummaryJobChunks(ctx context.Context, runID uuid.UUID) ([]domainmessages.SummaryJobChunkRow, error) {
+func (r *Repository) ListSummaryJobChunks(ctx context.Context, runID uuid.UUID) (portResult0 []domainmessages.SummaryJobChunkRow, portResult1 error) {
+	defer func() {
+		portResult1 = sqlkit.DomainError(portResult1)
+	}()
+
 	rows, err := r.db.QueryContext(ctx, `
 		SELECT id, run_id, account_id, chunk_index, phase, message_ids_json, payload_json, created_at, updated_at
 		FROM summary_job_chunks
@@ -1415,7 +1616,11 @@ func (r *Repository) ListSummaryJobChunks(ctx context.Context, runID uuid.UUID) 
 	return out, rows.Err()
 }
 
-func (r *Repository) ListDraftSuggestions(ctx context.Context, userID uuid.UUID, accountID *uuid.UUID, limit int) ([]domainmessages.DraftSuggestionRow, error) {
+func (r *Repository) ListDraftSuggestions(ctx context.Context, userID uuid.UUID, accountID *uuid.UUID, limit int) (portResult0 []domainmessages.DraftSuggestionRow, portResult1 error) {
+	defer func() {
+		portResult1 = sqlkit.DomainError(portResult1)
+	}()
+
 	if limit <= 0 {
 		limit = 100
 	}
@@ -1483,7 +1688,11 @@ func (r *Repository) ListDraftSuggestions(ctx context.Context, userID uuid.UUID,
 	return out, rows.Err()
 }
 
-func (r *Repository) GetDraftSuggestion(ctx context.Context, userID uuid.UUID, draftID uuid.UUID) (*domainmessages.DraftSuggestionRow, error) {
+func (r *Repository) GetDraftSuggestion(ctx context.Context, userID uuid.UUID, draftID uuid.UUID) (portResult0 *domainmessages.DraftSuggestionRow, portResult1 error) {
+	defer func() {
+		portResult1 = sqlkit.DomainError(portResult1)
+	}()
+
 	row := r.db.QueryRowContext(ctx, `
 		SELECT ds.id, ds.user_id, ds.account_id, ds.message_id, ds.action_item_id, ds.run_id, ds.subject, ds.body, ds.model, m.from_json, ds.status, ds.sent_at, ds.discarded_at, ds.updated_at, ds.created_at
 		FROM draft_suggestions ds
@@ -1534,7 +1743,11 @@ func (r *Repository) GetDraftSuggestion(ctx context.Context, userID uuid.UUID, d
 	return item, nil
 }
 
-func (r *Repository) UpdateDraftSuggestion(ctx context.Context, userID uuid.UUID, draftID uuid.UUID, subject, body string, at time.Time) error {
+func (r *Repository) UpdateDraftSuggestion(ctx context.Context, userID uuid.UUID, draftID uuid.UUID, subject, body string, at time.Time) (portResult0 error) {
+	defer func() {
+		portResult0 = sqlkit.DomainError(portResult0)
+	}()
+
 	_, err := r.db.ExecContext(ctx, `
 		UPDATE draft_suggestions
 		SET subject = ?, body = ?, updated_at = ?
@@ -1543,7 +1756,11 @@ func (r *Repository) UpdateDraftSuggestion(ctx context.Context, userID uuid.UUID
 	return err
 }
 
-func (r *Repository) MarkDraftSuggestionStatus(ctx context.Context, userID uuid.UUID, draftID uuid.UUID, status string, at time.Time) error {
+func (r *Repository) MarkDraftSuggestionStatus(ctx context.Context, userID uuid.UUID, draftID uuid.UUID, status string, at time.Time) (portResult0 error) {
+	defer func() {
+		portResult0 = sqlkit.DomainError(portResult0)
+	}()
+
 	var sentAt any
 	var discardedAt any
 	if status == "sent" {
@@ -1560,7 +1777,11 @@ func (r *Repository) MarkDraftSuggestionStatus(ctx context.Context, userID uuid.
 	return err
 }
 
-func (r *Repository) InsertSendAttempt(ctx context.Context, row domainmessages.SendAttemptRow) error {
+func (r *Repository) InsertSendAttempt(ctx context.Context, row domainmessages.SendAttemptRow) (portResult0 error) {
+	defer func() {
+		portResult0 = sqlkit.DomainError(portResult0)
+	}()
+
 	_, err := r.db.ExecContext(ctx, `
 		INSERT INTO send_attempts (id, user_id, account_id, draft_id, message_id, status, provider_message_id, error_message, created_at)
 		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
@@ -1569,7 +1790,11 @@ func (r *Repository) InsertSendAttempt(ctx context.Context, row domainmessages.S
 	return err
 }
 
-func (r *Repository) ListSendAttemptsByDraft(ctx context.Context, userID uuid.UUID, draftID uuid.UUID, limit int) ([]domainmessages.SendAttemptRow, error) {
+func (r *Repository) ListSendAttemptsByDraft(ctx context.Context, userID uuid.UUID, draftID uuid.UUID, limit int) (portResult0 []domainmessages.SendAttemptRow, portResult1 error) {
+	defer func() {
+		portResult1 = sqlkit.DomainError(portResult1)
+	}()
+
 	if limit <= 0 {
 		limit = 20
 	}
@@ -1616,7 +1841,11 @@ func (r *Repository) ListSendAttemptsByDraft(ctx context.Context, userID uuid.UU
 	return out, rows.Err()
 }
 
-func (r *Repository) ListForwardAllowlist(ctx context.Context, userID uuid.UUID) ([]domainmessages.ForwardAllowlistRow, error) {
+func (r *Repository) ListForwardAllowlist(ctx context.Context, userID uuid.UUID) (portResult0 []domainmessages.ForwardAllowlistRow, portResult1 error) {
+	defer func() {
+		portResult1 = sqlkit.DomainError(portResult1)
+	}()
+
 	rows, err := r.db.QueryContext(ctx, `
 		SELECT id, user_id, email, created_at
 		FROM forward_allowlist
@@ -1641,7 +1870,11 @@ func (r *Repository) ListForwardAllowlist(ctx context.Context, userID uuid.UUID)
 	return out, rows.Err()
 }
 
-func (r *Repository) ReplaceForwardAllowlist(ctx context.Context, userID uuid.UUID, emails []string) error {
+func (r *Repository) ReplaceForwardAllowlist(ctx context.Context, userID uuid.UUID, emails []string) (portResult0 error) {
+	defer func() {
+		portResult0 = sqlkit.DomainError(portResult0)
+	}()
+
 	tx, err := r.db.BeginTx(ctx, nil)
 	if err != nil {
 		return err
@@ -1667,7 +1900,11 @@ func (r *Repository) ReplaceForwardAllowlist(ctx context.Context, userID uuid.UU
 	return tx.Commit()
 }
 
-func (r *Repository) ListForwardRules(ctx context.Context, userID, accountID uuid.UUID) ([]domainmessages.ForwardRuleRow, error) {
+func (r *Repository) ListForwardRules(ctx context.Context, userID, accountID uuid.UUID) (portResult0 []domainmessages.ForwardRuleRow, portResult1 error) {
+	defer func() {
+		portResult1 = sqlkit.DomainError(portResult1)
+	}()
+
 	rows, err := r.db.QueryContext(ctx, `
 		SELECT id, user_id, account_id, name, mode, condition_json, forward_to, enabled, apply_from, created_at, updated_at
 		FROM forward_rules
@@ -1705,7 +1942,11 @@ func (r *Repository) ListForwardRules(ctx context.Context, userID, accountID uui
 	return out, rows.Err()
 }
 
-func (r *Repository) CreateForwardRule(ctx context.Context, row domainmessages.ForwardRuleRow) error {
+func (r *Repository) CreateForwardRule(ctx context.Context, row domainmessages.ForwardRuleRow) (portResult0 error) {
+	defer func() {
+		portResult0 = sqlkit.DomainError(portResult0)
+	}()
+
 	_, err := r.db.ExecContext(ctx, `
 		INSERT INTO forward_rules (id, user_id, account_id, name, mode, condition_json, forward_to, enabled, apply_from, created_at, updated_at)
 		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
@@ -1713,7 +1954,11 @@ func (r *Repository) CreateForwardRule(ctx context.Context, row domainmessages.F
 	return err
 }
 
-func (r *Repository) UpdateForwardRule(ctx context.Context, row domainmessages.ForwardRuleRow) error {
+func (r *Repository) UpdateForwardRule(ctx context.Context, row domainmessages.ForwardRuleRow) (portResult0 error) {
+	defer func() {
+		portResult0 = sqlkit.DomainError(portResult0)
+	}()
+
 	_, err := r.db.ExecContext(ctx, `
 		UPDATE forward_rules
 		SET name = ?, mode = ?, condition_json = ?, forward_to = ?, enabled = ?, apply_from = COALESCE(?, apply_from), updated_at = ?
@@ -1722,12 +1967,20 @@ func (r *Repository) UpdateForwardRule(ctx context.Context, row domainmessages.F
 	return err
 }
 
-func (r *Repository) DeleteForwardRule(ctx context.Context, userID, ruleID uuid.UUID) error {
+func (r *Repository) DeleteForwardRule(ctx context.Context, userID, ruleID uuid.UUID) (portResult0 error) {
+	defer func() {
+		portResult0 = sqlkit.DomainError(portResult0)
+	}()
+
 	_, err := r.db.ExecContext(ctx, `DELETE FROM forward_rules WHERE id = ? AND user_id = ?`, ruleID.String(), userID.String())
 	return err
 }
 
-func (r *Repository) ListForwardAuditByRun(ctx context.Context, userID, runID uuid.UUID) ([]domainmessages.ForwardAuditRow, error) {
+func (r *Repository) ListForwardAuditByRun(ctx context.Context, userID, runID uuid.UUID) (portResult0 []domainmessages.ForwardAuditRow, portResult1 error) {
+	defer func() {
+		portResult1 = sqlkit.DomainError(portResult1)
+	}()
+
 	rows, err := r.db.QueryContext(ctx, `
 		SELECT id, user_id, account_id, message_id, rule_id, run_id, status, reason, created_at
 		FROM forward_audit
@@ -1760,7 +2013,11 @@ func (r *Repository) ListForwardAuditByRun(ctx context.Context, userID, runID uu
 	return out, rows.Err()
 }
 
-func (r *Repository) InsertForwardAudit(ctx context.Context, row domainmessages.ForwardAuditRow) error {
+func (r *Repository) InsertForwardAudit(ctx context.Context, row domainmessages.ForwardAuditRow) (portResult0 error) {
+	defer func() {
+		portResult0 = sqlkit.DomainError(portResult0)
+	}()
+
 	_, err := r.db.ExecContext(ctx, `
 		INSERT INTO forward_audit (id, user_id, account_id, message_id, rule_id, run_id, status, reason, pending, attempts, created_at)
 		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
@@ -1781,7 +2038,11 @@ func forwardPlaceholders(n int) string {
 
 // Timestamps here are RFC3339Nano text, which drops trailing zeros and so
 // does not sort as text; comparisons go through julianday().
-func (r *Repository) ListForwardCandidates(ctx context.Context, userID, accountID uuid.UUID, ruleIDs []uuid.UUID, after *domainmessages.ForwardCandidateCursor, limit int) ([]domainmessages.MessageRow, error) {
+func (r *Repository) ListForwardCandidates(ctx context.Context, userID, accountID uuid.UUID, ruleIDs []uuid.UUID, after *domainmessages.ForwardCandidateCursor, limit int) (portResult0 []domainmessages.MessageRow, portResult1 error) {
+	defer func() {
+		portResult1 = sqlkit.DomainError(portResult1)
+	}()
+
 	if len(ruleIDs) == 0 {
 		return nil, nil
 	}
@@ -1854,7 +2115,11 @@ func scanForwardAudit(s rowScanner, extra ...any) (domainmessages.ForwardAuditRo
 
 const forwardAuditColumns = `fa.id, fa.user_id, fa.account_id, fa.message_id, fa.rule_id, fa.run_id, fa.status, fa.reason, fa.pending, fa.attempts, fa.created_at`
 
-func (r *Repository) ListForwardAuditForMessages(ctx context.Context, userID uuid.UUID, messageIDs []uuid.UUID) ([]domainmessages.ForwardAuditRow, error) {
+func (r *Repository) ListForwardAuditForMessages(ctx context.Context, userID uuid.UUID, messageIDs []uuid.UUID) (portResult0 []domainmessages.ForwardAuditRow, portResult1 error) {
+	defer func() {
+		portResult1 = sqlkit.DomainError(portResult1)
+	}()
+
 	if len(messageIDs) == 0 {
 		return nil, nil
 	}
@@ -1882,7 +2147,11 @@ func (r *Repository) ListForwardAuditForMessages(ctx context.Context, userID uui
 	return out, rows.Err()
 }
 
-func (r *Repository) ForwardRuleStats(ctx context.Context, userID, accountID uuid.UUID) ([]domainmessages.ForwardRuleStats, error) {
+func (r *Repository) ForwardRuleStats(ctx context.Context, userID, accountID uuid.UUID) (portResult0 []domainmessages.ForwardRuleStats, portResult1 error) {
+	defer func() {
+		portResult1 = sqlkit.DomainError(portResult1)
+	}()
+
 	rows, err := r.db.QueryContext(ctx, `
 		SELECT fa.rule_id,
 			SUM(CASE WHEN fa.status = 'forwarded' THEN 1 ELSE 0 END),
@@ -1923,7 +2192,11 @@ func (r *Repository) ForwardRuleStats(ctx context.Context, userID, accountID uui
 	return out, rows.Err()
 }
 
-func (r *Repository) ListForwardActivity(ctx context.Context, userID, ruleID uuid.UUID, limit int) ([]domainmessages.ForwardActivityRow, error) {
+func (r *Repository) ListForwardActivity(ctx context.Context, userID, ruleID uuid.UUID, limit int) (portResult0 []domainmessages.ForwardActivityRow, portResult1 error) {
+	defer func() {
+		portResult1 = sqlkit.DomainError(portResult1)
+	}()
+
 	if limit <= 0 || limit > 200 {
 		limit = 50
 	}
@@ -1953,7 +2226,11 @@ func (r *Repository) ListForwardActivity(ctx context.Context, userID, ruleID uui
 	return out, rows.Err()
 }
 
-func (r *Repository) InsertManualForwardAudit(ctx context.Context, row domainmessages.ManualForwardAuditRow) error {
+func (r *Repository) InsertManualForwardAudit(ctx context.Context, row domainmessages.ManualForwardAuditRow) (portResult0 error) {
+	defer func() {
+		portResult0 = sqlkit.DomainError(portResult0)
+	}()
+
 	_, err := r.db.ExecContext(ctx, `
 		INSERT INTO manual_forward_audit (id, user_id, account_id, message_id, to_email, comment, status, reason, created_at)
 		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
@@ -1961,7 +2238,11 @@ func (r *Repository) InsertManualForwardAudit(ctx context.Context, row domainmes
 	return err
 }
 
-func (r *Repository) ListSchedulesByUser(ctx context.Context, userID uuid.UUID) ([]domainjobs.ScheduleChainRow, error) {
+func (r *Repository) ListSchedulesByUser(ctx context.Context, userID uuid.UUID) (portResult0 []domainjobs.ScheduleChainRow, portResult1 error) {
+	defer func() {
+		portResult1 = sqlkit.DomainError(portResult1)
+	}()
+
 	rows, err := r.db.QueryContext(ctx, `
 		SELECT id, user_id, name, account_id, jobs_json, interval_minutes, enabled, last_run_at, next_run_at, created_at, updated_at
 		FROM schedule_chains
@@ -1983,7 +2264,11 @@ func (r *Repository) ListSchedulesByUser(ctx context.Context, userID uuid.UUID) 
 	return out, rows.Err()
 }
 
-func (r *Repository) ReplaceSchedulesByUser(ctx context.Context, userID uuid.UUID, rows []domainjobs.ScheduleChainRow) error {
+func (r *Repository) ReplaceSchedulesByUser(ctx context.Context, userID uuid.UUID, rows []domainjobs.ScheduleChainRow) (portResult0 error) {
+	defer func() {
+		portResult0 = sqlkit.DomainError(portResult0)
+	}()
+
 	tx, err := r.db.BeginTx(ctx, nil)
 	if err != nil {
 		return err
@@ -2008,7 +2293,11 @@ func (r *Repository) ReplaceSchedulesByUser(ctx context.Context, userID uuid.UUI
 	return tx.Commit()
 }
 
-func (r *Repository) ListDueSchedules(ctx context.Context, now time.Time, limit int) ([]domainjobs.ScheduleChainRow, error) {
+func (r *Repository) ListDueSchedules(ctx context.Context, now time.Time, limit int) (portResult0 []domainjobs.ScheduleChainRow, portResult1 error) {
+	defer func() {
+		portResult1 = sqlkit.DomainError(portResult1)
+	}()
+
 	if limit <= 0 {
 		limit = 20
 	}
@@ -2034,7 +2323,11 @@ func (r *Repository) ListDueSchedules(ctx context.Context, now time.Time, limit 
 	return out, rows.Err()
 }
 
-func (r *Repository) MarkScheduleExecuted(ctx context.Context, id uuid.UUID, lastRunAt, nextRunAt time.Time) error {
+func (r *Repository) MarkScheduleExecuted(ctx context.Context, id uuid.UUID, lastRunAt, nextRunAt time.Time) (portResult0 error) {
+	defer func() {
+		portResult0 = sqlkit.DomainError(portResult0)
+	}()
+
 	_, err := r.db.ExecContext(ctx, `
 		UPDATE schedule_chains
 		SET last_run_at = ?, next_run_at = ?, updated_at = ?
@@ -2043,7 +2336,11 @@ func (r *Repository) MarkScheduleExecuted(ctx context.Context, id uuid.UUID, las
 	return err
 }
 
-func (r *Repository) MarkScheduleExecutedIfDue(ctx context.Context, id uuid.UUID, scheduledFor, lastRunAt, nextRunAt time.Time) (bool, error) {
+func (r *Repository) MarkScheduleExecutedIfDue(ctx context.Context, id uuid.UUID, scheduledFor, lastRunAt, nextRunAt time.Time) (portResult0 bool, portResult1 error) {
+	defer func() {
+		portResult1 = sqlkit.DomainError(portResult1)
+	}()
+
 	res, err := r.db.ExecContext(ctx, `
 		UPDATE schedule_chains
 		SET last_run_at = ?, next_run_at = ?, updated_at = ?

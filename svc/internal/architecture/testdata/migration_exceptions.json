@@ -14,12 +14,6 @@
     },
     {
       "from": "internal/adapters/inbound/http",
-      "to": "internal/adapters/outbound/security",
-      "remove_by": "R2",
-      "reason": "Isolate security, SQL outcomes, and infrastructure helpers behind domain contracts."
-    },
-    {
-      "from": "internal/adapters/inbound/http",
       "to": "internal/application/accounts",
       "remove_by": "R3",
       "reason": "Replace concrete application dependencies with domain-owned use-case ports."
@@ -113,60 +107,6 @@
       "to": "internal/application/todos",
       "remove_by": "R3",
       "reason": "Replace concrete application dependencies with domain-owned use-case ports."
-    },
-    {
-      "from": "internal/adapters/outbound/dynamodbjobs",
-      "to": "internal/application/joblistcursor",
-      "remove_by": "R2",
-      "reason": "Isolate security, SQL outcomes, and infrastructure helpers behind domain contracts."
-    },
-    {
-      "from": "internal/adapters/outbound/memoryjobs",
-      "to": "internal/application/joblistcursor",
-      "remove_by": "R2",
-      "reason": "Isolate security, SQL outcomes, and infrastructure helpers behind domain contracts."
-    },
-    {
-      "from": "internal/application/auth",
-      "to": "database/sql",
-      "remove_by": "R2",
-      "reason": "Isolate security, SQL outcomes, and infrastructure helpers behind domain contracts."
-    },
-    {
-      "from": "internal/application/auth",
-      "to": "golang.org/x/crypto/bcrypt",
-      "remove_by": "R2",
-      "reason": "Isolate security, SQL outcomes, and infrastructure helpers behind domain contracts."
-    },
-    {
-      "from": "internal/application/auth",
-      "to": "internal/adapters/outbound/security",
-      "remove_by": "R2",
-      "reason": "Isolate security, SQL outcomes, and infrastructure helpers behind domain contracts."
-    },
-    {
-      "from": "internal/application/facts",
-      "to": "database/sql",
-      "remove_by": "R2",
-      "reason": "Isolate security, SQL outcomes, and infrastructure helpers behind domain contracts."
-    },
-    {
-      "from": "internal/application/interpret",
-      "to": "database/sql",
-      "remove_by": "R2",
-      "reason": "Isolate security, SQL outcomes, and infrastructure helpers behind domain contracts."
-    },
-    {
-      "from": "internal/application/jobs",
-      "to": "database/sql",
-      "remove_by": "R2",
-      "reason": "Isolate security, SQL outcomes, and infrastructure helpers behind domain contracts."
-    },
-    {
-      "from": "internal/application/reconcile",
-      "to": "database/sql",
-      "remove_by": "R2",
-      "reason": "Isolate security, SQL outcomes, and infrastructure helpers behind domain contracts."
     }
   ],
   "contracts": []

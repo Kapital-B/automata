@@ -17,6 +17,7 @@ import (
 	appprojects "github.com/Kapital-B/automata/svc/internal/application/projects"
 	domainaccounts "github.com/Kapital-B/automata/svc/internal/domain/accounts"
 
+	security "github.com/Kapital-B/automata/svc/internal/adapters/outbound/security"
 	"github.com/google/uuid"
 	_ "modernc.org/sqlite"
 )
@@ -32,14 +33,13 @@ func TestProjectsHTTPIsolation(t *testing.T) {
 	}
 	repo := sqlite.NewRepository(db, 15*time.Minute)
 	jwtSecret := []byte("abcdefghijklmnopqrstuvwxyz123456")
-	authSvc := auth.NewService(repo, repo, repo, nil, nil, jwtSecret, time.Hour, 30*24*time.Hour)
+	authSvc := auth.NewService(repo, repo, repo, nil, nil, security.JWT{Secret: jwtSecret, TTL: time.Hour}, security.BcryptHasher{}, 30*24*time.Hour)
 	projectSvc := &appprojects.Service{
 		Users: repo, Projects: repo, Assignments: repo, Contacts: repo, Messages: repo,
 	}
 	h := &Handlers{
 		Log: slog.Default(), AuthSvc: authSvc, ProjectSvc: projectSvc,
-		Users: repo, Contacts: repo, Messages: repo, Projects: repo, Assignments: repo,
-		JWTSecret: jwtSecret, JWTTTL: time.Hour,
+		Users: repo, Contacts: repo, Messages: repo, Projects: repo, Assignments: repo, TokenVerifier: security.JWT{Secret: jwtSecret},
 	}
 	srv := httptest.NewServer(h.Routes())
 	defer srv.Close()
@@ -96,14 +96,13 @@ func TestAssignMessageHTTP(t *testing.T) {
 	}
 	repo := sqlite.NewRepository(db, 15*time.Minute)
 	jwtSecret := []byte("abcdefghijklmnopqrstuvwxyz123456")
-	authSvc := auth.NewService(repo, repo, repo, nil, nil, jwtSecret, time.Hour, 30*24*time.Hour)
+	authSvc := auth.NewService(repo, repo, repo, nil, nil, security.JWT{Secret: jwtSecret, TTL: time.Hour}, security.BcryptHasher{}, 30*24*time.Hour)
 	projectSvc := &appprojects.Service{
 		Users: repo, Projects: repo, Assignments: repo, Contacts: repo, Messages: repo,
 	}
 	h := &Handlers{
 		Log: slog.Default(), AuthSvc: authSvc, ProjectSvc: projectSvc,
-		Users: repo, Messages: repo, Projects: repo, Assignments: repo,
-		JWTSecret: jwtSecret, JWTTTL: time.Hour,
+		Users: repo, Messages: repo, Projects: repo, Assignments: repo, TokenVerifier: security.JWT{Secret: jwtSecret},
 	}
 	srv := httptest.NewServer(h.Routes())
 	defer srv.Close()

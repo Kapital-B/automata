@@ -20,6 +20,7 @@ import (
 	domainaccounts "github.com/Kapital-B/automata/svc/internal/domain/accounts"
 	domainmessages "github.com/Kapital-B/automata/svc/internal/domain/messages"
 
+	security "github.com/Kapital-B/automata/svc/internal/adapters/outbound/security"
 	"github.com/google/uuid"
 )
 
@@ -55,8 +56,7 @@ func newForwardAPI(t *testing.T) *forwardAPI {
 	}
 	h := &Handlers{
 		Log: slog.New(slog.NewTextHandler(io.Discard, nil)), Accounts: repo, Forwards: repo, Messages: repo, Schedules: repo,
-		ForwardRulesSvc: &appmessages.ForwardRulesService{Messages: repo, Forwards: repo, JobRuns: repo, Effects: memoryjobs.NewStore()},
-		JWTSecret:       []byte("abcdefghijklmnopqrstuvwxyz123456"),
+		ForwardRulesSvc: &appmessages.ForwardRulesService{Messages: repo, Forwards: repo, JobRuns: repo, Effects: memoryjobs.NewStore()}, TokenVerifier: security.JWT{Secret: []byte("abcdefghijklmnopqrstuvwxyz123456")},
 	}
 	a.srv = httptest.NewServer(h.Routes())
 	t.Cleanup(a.srv.Close)

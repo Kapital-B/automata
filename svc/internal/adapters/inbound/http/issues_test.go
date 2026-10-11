@@ -12,6 +12,7 @@ import (
 	"time"
 
 	"github.com/Kapital-B/automata/svc/internal/adapters/outbound/persistence/sqlite"
+	security "github.com/Kapital-B/automata/svc/internal/adapters/outbound/security"
 	"github.com/Kapital-B/automata/svc/internal/application/auth"
 	appissues "github.com/Kapital-B/automata/svc/internal/application/issues"
 	appprojects "github.com/Kapital-B/automata/svc/internal/application/projects"
@@ -30,7 +31,7 @@ func TestIssuesHTTPOrgIsolation(t *testing.T) {
 	}
 	repo := sqlite.NewRepository(db, 15*time.Minute)
 	jwtSecret := []byte("abcdefghijklmnopqrstuvwxyz123456")
-	authSvc := auth.NewService(repo, repo, repo, nil, nil, jwtSecret, time.Hour, 30*24*time.Hour)
+	authSvc := auth.NewService(repo, repo, repo, nil, nil, security.JWT{Secret: jwtSecret, TTL: time.Hour}, security.BcryptHasher{}, 30*24*time.Hour)
 	projectSvc := &appprojects.Service{
 		Users: repo, Projects: repo, Assignments: repo, Manuals: repo, Timeline: repo, Contacts: repo, Messages: repo,
 	}
@@ -39,8 +40,7 @@ func TestIssuesHTTPOrgIsolation(t *testing.T) {
 	}
 	h := &Handlers{
 		Log: slog.Default(), AuthSvc: authSvc, ProjectSvc: projectSvc, IssueSvc: issueSvc,
-		Users: repo, Projects: repo, Assignments: repo, Issues: repo, Messages: repo,
-		JWTSecret: jwtSecret, JWTTTL: time.Hour,
+		Users: repo, Projects: repo, Assignments: repo, Issues: repo, Messages: repo, TokenVerifier: security.JWT{Secret: jwtSecret},
 	}
 	srv := httptest.NewServer(h.Routes())
 	defer srv.Close()

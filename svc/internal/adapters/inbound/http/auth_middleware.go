@@ -5,8 +5,8 @@ import (
 	"net/http"
 	"strings"
 
-	"github.com/Kapital-B/automata/svc/internal/adapters/outbound/security"
 	domainai "github.com/Kapital-B/automata/svc/internal/domain/ai"
+	domainauth "github.com/Kapital-B/automata/svc/internal/domain/auth"
 	"github.com/google/uuid"
 )
 
@@ -20,7 +20,7 @@ func UserIDFromContext(ctx context.Context) (uuid.UUID, bool) {
 	return v, ok
 }
 
-func authMiddleware(secret []byte) func(http.Handler) http.Handler {
+func authMiddleware(verifier domainauth.AccessTokenVerifier) func(http.Handler) http.Handler {
 	return func(next http.Handler) http.Handler {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			if publicRoute(r.Method, r.URL.Path) {
@@ -33,7 +33,7 @@ func authMiddleware(secret []byte) func(http.Handler) http.Handler {
 				writeJSON(w, http.StatusUnauthorized, map[string]string{"error": "unauthorized"})
 				return
 			}
-			uid, err := security.ParseJWT(secret, parts[1])
+			uid, err := verifyAccessToken(verifier, parts[1])
 			if err != nil || uid == uuid.Nil {
 				writeJSON(w, http.StatusUnauthorized, map[string]string{"error": "unauthorized"})
 				return
@@ -60,4 +60,11 @@ func publicRoute(method, path string) bool {
 	default:
 		return false
 	}
+}
+
+func verifyAccessToken(verifier domainauth.AccessTokenVerifier, token string) (uuid.UUID, error) {
+	if verifier == nil {
+		return uuid.Nil, domainauth.ErrInvalidToken
+	}
+	return verifier.Verify(token)
 }

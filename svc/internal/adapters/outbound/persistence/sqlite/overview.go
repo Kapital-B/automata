@@ -100,7 +100,11 @@ func activityUserArgs(userID uuid.UUID) []any {
 	return args
 }
 
-func (r *Repository) ListActivity(ctx context.Context, userID, organisationID uuid.UUID, filter domainprojects.ActivityFilter) ([]domainprojects.ActivityItem, error) {
+func (r *Repository) ListActivity(ctx context.Context, userID, organisationID uuid.UUID, filter domainprojects.ActivityFilter) (portResult0 []domainprojects.ActivityItem, portResult1 error) {
+	defer func() {
+		portResult1 = sqlkit.DomainError(portResult1)
+	}()
+
 	limit := filter.Limit
 	if limit <= 0 {
 		limit = 25
@@ -184,7 +188,11 @@ func scanActivityRows(rows *sql.Rows) ([]domainprojects.ActivityItem, error) {
 	return out, rows.Err()
 }
 
-func (r *Repository) CountOverview(ctx context.Context, userID, organisationID uuid.UUID) (domainprojects.OverviewCounts, error) {
+func (r *Repository) CountOverview(ctx context.Context, userID, organisationID uuid.UUID) (portResult0 domainprojects.OverviewCounts, portResult1 error) {
+	defer func() {
+		portResult1 = sqlkit.DomainError(portResult1)
+	}()
+
 	var out domainprojects.OverviewCounts
 	row := r.db.QueryRowContext(ctx, `
 		SELECT
@@ -221,7 +229,11 @@ func (r *Repository) CountOverview(ctx context.Context, userID, organisationID u
 // There is deliberately no projects.last_activity_at column: it would need a
 // write on every path that touches a fact, decision, contradiction or issue,
 // and would drift the moment one was missed.
-func (r *Repository) ListOverviewProjects(ctx context.Context, userID, organisationID uuid.UUID, limit int) ([]domainprojects.OverviewProject, error) {
+func (r *Repository) ListOverviewProjects(ctx context.Context, userID, organisationID uuid.UUID, limit int) (portResult0 []domainprojects.OverviewProject, portResult1 error) {
+	defer func() {
+		portResult1 = sqlkit.DomainError(portResult1)
+	}()
+
 	if limit <= 0 {
 		limit = 8
 	}
@@ -335,7 +347,11 @@ const attentionRowsSQL = `
 	WHERE c.status = 'open'
 `
 
-func (r *Repository) ListAttention(ctx context.Context, userID, organisationID uuid.UUID) ([]domainprojects.AttentionRow, error) {
+func (r *Repository) ListAttention(ctx context.Context, userID, organisationID uuid.UUID) (portResult0 []domainprojects.AttentionRow, portResult1 error) {
+	defer func() {
+		portResult1 = sqlkit.DomainError(portResult1)
+	}()
+
 	uid := userID.String()
 	args := []any{uid, uid, uid, uid, uid, uid, uid, organisationID.String()}
 	q := `
@@ -406,7 +422,11 @@ const projectAssignmentTimesSQL = `
 // from inside a job holding its own lock: ScheduledFor is not a claim-time gate
 // and RetryNotBefore is set only by retry backoff. Deriving on a tick is
 // idempotent and self-healing — a missed tick simply runs the next minute.
-func (r *Repository) ListProjectsDueForExtraction(ctx context.Context, now time.Time, quietFor, ceiling time.Duration, limit int) ([]domainprojects.DueProject, error) {
+func (r *Repository) ListProjectsDueForExtraction(ctx context.Context, now time.Time, quietFor, ceiling time.Duration, limit int) (portResult0 []domainprojects.DueProject, portResult1 error) {
+	defer func() {
+		portResult1 = sqlkit.DomainError(portResult1)
+	}()
+
 	if limit <= 0 {
 		limit = 50
 	}
@@ -466,7 +486,11 @@ func scanDueProjects(rows *sql.Rows) ([]domainprojects.DueProject, error) {
 	return out, rows.Err()
 }
 
-func (r *Repository) MarkProjectExtracted(ctx context.Context, projectID uuid.UUID, at time.Time) error {
+func (r *Repository) MarkProjectExtracted(ctx context.Context, projectID uuid.UUID, at time.Time) (portResult0 error) {
+	defer func() {
+		portResult0 = sqlkit.DomainError(portResult0)
+	}()
+
 	_, err := r.db.ExecContext(ctx, `UPDATE projects SET last_extracted_at = ? WHERE id = ?`,
 		formatRFC3339(at.UTC()), projectID.String())
 	return err

@@ -7,6 +7,7 @@ import (
 	"strings"
 	"time"
 
+	sqlkit "github.com/Kapital-B/automata/svc/internal/adapters/outbound/persistence/sqlkit"
 	"github.com/Kapital-B/automata/svc/internal/domain/organisations"
 	"github.com/google/uuid"
 )
@@ -15,7 +16,11 @@ func normalizeEmail(email string) string {
 	return strings.TrimSpace(strings.ToLower(email))
 }
 
-func (r *Repository) CreateUser(ctx context.Context, id uuid.UUID, email string, passwordHash *string, now time.Time) error {
+func (r *Repository) CreateUser(ctx context.Context, id uuid.UUID, email string, passwordHash *string, now time.Time) (portResult0 error) {
+	defer func() {
+		portResult0 = sqlkit.DomainError(portResult0)
+	}()
+
 	em := normalizeEmail(email)
 	var ph any
 	if passwordHash != nil {
@@ -28,7 +33,11 @@ func (r *Repository) CreateUser(ctx context.Context, id uuid.UUID, email string,
 	return err
 }
 
-func (r *Repository) CreateUserWithHomeOrg(ctx context.Context, id uuid.UUID, email string, passwordHash *string, now time.Time, identityProvider, identitySubject, identityEmail string) (uuid.UUID, error) {
+func (r *Repository) CreateUserWithHomeOrg(ctx context.Context, id uuid.UUID, email string, passwordHash *string, now time.Time, identityProvider, identitySubject, identityEmail string) (portResult0 uuid.UUID, portResult1 error) {
+	defer func() {
+		portResult1 = sqlkit.DomainError(portResult1)
+	}()
+
 	tx, err := r.db.BeginTx(ctx, nil)
 	if err != nil {
 		return uuid.Nil, err
@@ -79,7 +88,11 @@ func (r *Repository) CreateUserWithHomeOrg(ctx context.Context, id uuid.UUID, em
 	return orgID, nil
 }
 
-func (r *Repository) GetUserByEmail(ctx context.Context, email string) (uuid.UUID, *string, error) {
+func (r *Repository) GetUserByEmail(ctx context.Context, email string) (portResult0 uuid.UUID, portResult1 *string, portResult2 error) {
+	defer func() {
+		portResult2 = sqlkit.DomainError(portResult2)
+	}()
+
 	var idStr string
 	var ph sql.NullString
 	err := r.db.QueryRowContext(ctx, `SELECT id, password_hash FROM users WHERE email = ?`, normalizeEmail(email)).Scan(&idStr, &ph)
@@ -100,7 +113,11 @@ func (r *Repository) GetUserByEmail(ctx context.Context, email string) (uuid.UUI
 	return id, &s, nil
 }
 
-func (r *Repository) GetUserByID(ctx context.Context, id uuid.UUID) (string, error) {
+func (r *Repository) GetUserByID(ctx context.Context, id uuid.UUID) (portResult0 string, portResult1 error) {
+	defer func() {
+		portResult1 = sqlkit.DomainError(portResult1)
+	}()
+
 	var email string
 	err := r.db.QueryRowContext(ctx, `SELECT email FROM users WHERE id = ?`, id.String()).Scan(&email)
 	if err != nil {
@@ -109,7 +126,11 @@ func (r *Repository) GetUserByID(ctx context.Context, id uuid.UUID) (string, err
 	return email, nil
 }
 
-func (r *Repository) GetHomeOrganisationID(ctx context.Context, userID uuid.UUID) (uuid.UUID, error) {
+func (r *Repository) GetHomeOrganisationID(ctx context.Context, userID uuid.UUID) (portResult0 uuid.UUID, portResult1 error) {
+	defer func() {
+		portResult1 = sqlkit.DomainError(portResult1)
+	}()
+
 	var orgStr sql.NullString
 	err := r.db.QueryRowContext(ctx, `SELECT home_organisation_id FROM users WHERE id = ?`, userID.String()).Scan(&orgStr)
 	if errors.Is(err, sql.ErrNoRows) {
@@ -124,7 +145,11 @@ func (r *Repository) GetHomeOrganisationID(ctx context.Context, userID uuid.UUID
 	return uuid.Parse(orgStr.String)
 }
 
-func (r *Repository) FindIdentity(ctx context.Context, provider, providerSubject string) (uuid.UUID, bool, error) {
+func (r *Repository) FindIdentity(ctx context.Context, provider, providerSubject string) (portResult0 uuid.UUID, portResult1 bool, portResult2 error) {
+	defer func() {
+		portResult2 = sqlkit.DomainError(portResult2)
+	}()
+
 	var uidStr string
 	err := r.db.QueryRowContext(ctx, `SELECT user_id FROM user_identities WHERE provider = ? AND provider_subject = ?`,
 		provider, providerSubject).Scan(&uidStr)
@@ -141,7 +166,11 @@ func (r *Repository) FindIdentity(ctx context.Context, provider, providerSubject
 	return id, true, nil
 }
 
-func (r *Repository) AttachIdentity(ctx context.Context, id uuid.UUID, userID uuid.UUID, provider, providerSubject, emailAtLink string, now time.Time) error {
+func (r *Repository) AttachIdentity(ctx context.Context, id uuid.UUID, userID uuid.UUID, provider, providerSubject, emailAtLink string, now time.Time) (portResult0 error) {
+	defer func() {
+		portResult0 = sqlkit.DomainError(portResult0)
+	}()
+
 	_, err := r.db.ExecContext(ctx, `
 		INSERT OR IGNORE INTO user_identities (id, user_id, provider, provider_subject, email_at_link, created_at)
 		VALUES (?, ?, ?, ?, ?, ?)`,

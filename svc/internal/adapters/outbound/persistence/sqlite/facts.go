@@ -5,11 +5,16 @@ import (
 	"database/sql"
 	"errors"
 
+	sqlkit "github.com/Kapital-B/automata/svc/internal/adapters/outbound/persistence/sqlkit"
 	domainfacts "github.com/Kapital-B/automata/svc/internal/domain/facts"
 	"github.com/google/uuid"
 )
 
-func (r *Repository) CreateFact(ctx context.Context, row domainfacts.FactRow) error {
+func (r *Repository) CreateFact(ctx context.Context, row domainfacts.FactRow) (portResult0 error) {
+	defer func() {
+		portResult0 = sqlkit.DomainError(portResult0)
+	}()
+
 	var issueID any
 	if row.IssueID != nil {
 		issueID = row.IssueID.String()
@@ -23,7 +28,11 @@ func (r *Repository) CreateFact(ctx context.Context, row domainfacts.FactRow) er
 	return err
 }
 
-func (r *Repository) UpdateFact(ctx context.Context, row domainfacts.FactRow) error {
+func (r *Repository) UpdateFact(ctx context.Context, row domainfacts.FactRow) (portResult0 error) {
+	defer func() {
+		portResult0 = sqlkit.DomainError(portResult0)
+	}()
+
 	var issueID any
 	if row.IssueID != nil {
 		issueID = row.IssueID.String()
@@ -42,7 +51,11 @@ func (r *Repository) UpdateFact(ctx context.Context, row domainfacts.FactRow) er
 	return nil
 }
 
-func (r *Repository) GetFact(ctx context.Context, organisationID, factID uuid.UUID) (*domainfacts.FactRow, error) {
+func (r *Repository) GetFact(ctx context.Context, organisationID, factID uuid.UUID) (portResult0 *domainfacts.FactRow, portResult1 error) {
+	defer func() {
+		portResult1 = sqlkit.DomainError(portResult1)
+	}()
+
 	row := r.db.QueryRowContext(ctx, `
 		SELECT id, organisation_id, project_id, issue_id, subject_key, label, created_at, updated_at
 		FROM facts WHERE id = ? AND organisation_id = ?
@@ -54,7 +67,11 @@ func (r *Repository) GetFact(ctx context.Context, organisationID, factID uuid.UU
 	return fact, err
 }
 
-func (r *Repository) GetFactBySubject(ctx context.Context, organisationID, projectID uuid.UUID, subjectKey string) (*domainfacts.FactRow, error) {
+func (r *Repository) GetFactBySubject(ctx context.Context, organisationID, projectID uuid.UUID, subjectKey string) (portResult0 *domainfacts.FactRow, portResult1 error) {
+	defer func() {
+		portResult1 = sqlkit.DomainError(portResult1)
+	}()
+
 	row := r.db.QueryRowContext(ctx, `
 		SELECT id, organisation_id, project_id, issue_id, subject_key, label, created_at, updated_at
 		FROM facts WHERE organisation_id = ? AND project_id = ? AND subject_key = ?
@@ -66,7 +83,11 @@ func (r *Repository) GetFactBySubject(ctx context.Context, organisationID, proje
 	return fact, err
 }
 
-func (r *Repository) ListFactsByProject(ctx context.Context, organisationID, projectID uuid.UUID) ([]domainfacts.FactRow, error) {
+func (r *Repository) ListFactsByProject(ctx context.Context, organisationID, projectID uuid.UUID) (portResult0 []domainfacts.FactRow, portResult1 error) {
+	defer func() {
+		portResult1 = sqlkit.DomainError(portResult1)
+	}()
+
 	rows, err := r.db.QueryContext(ctx, `
 		SELECT id, organisation_id, project_id, issue_id, subject_key, label, created_at, updated_at
 		FROM facts WHERE organisation_id = ? AND project_id = ?
@@ -87,7 +108,11 @@ func (r *Repository) ListFactsByProject(ctx context.Context, organisationID, pro
 	return out, rows.Err()
 }
 
-func (r *Repository) CreateFactVersion(ctx context.Context, row domainfacts.FactVersionRow) error {
+func (r *Repository) CreateFactVersion(ctx context.Context, row domainfacts.FactVersionRow) (portResult0 error) {
+	defer func() {
+		portResult0 = sqlkit.DomainError(portResult0)
+	}()
+
 	var unit, conf, interp, supersedes, supersededBy, supersededAt, createdBy any
 	if row.Unit != nil {
 		unit = *row.Unit
@@ -122,7 +147,11 @@ func (r *Repository) CreateFactVersion(ctx context.Context, row domainfacts.Fact
 	return err
 }
 
-func (r *Repository) GetFactVersion(ctx context.Context, organisationID, versionID uuid.UUID) (*domainfacts.FactVersionRow, error) {
+func (r *Repository) GetFactVersion(ctx context.Context, organisationID, versionID uuid.UUID) (portResult0 *domainfacts.FactVersionRow, portResult1 error) {
+	defer func() {
+		portResult1 = sqlkit.DomainError(portResult1)
+	}()
+
 	row := r.db.QueryRowContext(ctx, `
 		SELECT fv.id, fv.fact_id, fv.status, fv.value_json, fv.value_text, fv.unit, fv.source,
 			fv.confidence, fv.interpretation_id, fv.supersedes_version_id, fv.superseded_by_version_id,
@@ -138,7 +167,11 @@ func (r *Repository) GetFactVersion(ctx context.Context, organisationID, version
 	return ver, err
 }
 
-func (r *Repository) ListFactVersions(ctx context.Context, factID uuid.UUID) ([]domainfacts.FactVersionRow, error) {
+func (r *Repository) ListFactVersions(ctx context.Context, factID uuid.UUID) (portResult0 []domainfacts.FactVersionRow, portResult1 error) {
+	defer func() {
+		portResult1 = sqlkit.DomainError(portResult1)
+	}()
+
 	rows, err := r.db.QueryContext(ctx, `
 		SELECT id, fact_id, status, value_json, value_text, unit, source,
 			confidence, interpretation_id, supersedes_version_id, superseded_by_version_id,
@@ -161,7 +194,11 @@ func (r *Repository) ListFactVersions(ctx context.Context, factID uuid.UUID) ([]
 	return out, rows.Err()
 }
 
-func (r *Repository) GetActiveFactVersion(ctx context.Context, factID uuid.UUID) (*domainfacts.FactVersionRow, error) {
+func (r *Repository) GetActiveFactVersion(ctx context.Context, factID uuid.UUID) (portResult0 *domainfacts.FactVersionRow, portResult1 error) {
+	defer func() {
+		portResult1 = sqlkit.DomainError(portResult1)
+	}()
+
 	row := r.db.QueryRowContext(ctx, `
 		SELECT id, fact_id, status, value_json, value_text, unit, source,
 			confidence, interpretation_id, supersedes_version_id, superseded_by_version_id,
@@ -175,7 +212,11 @@ func (r *Repository) GetActiveFactVersion(ctx context.Context, factID uuid.UUID)
 	return ver, err
 }
 
-func (r *Repository) UpdateFactVersion(ctx context.Context, row domainfacts.FactVersionRow) error {
+func (r *Repository) UpdateFactVersion(ctx context.Context, row domainfacts.FactVersionRow) (portResult0 error) {
+	defer func() {
+		portResult0 = sqlkit.DomainError(portResult0)
+	}()
+
 	var unit, conf, interp, supersedes, supersededBy, supersededAt, createdBy any
 	if row.Unit != nil {
 		unit = *row.Unit
@@ -216,7 +257,11 @@ func (r *Repository) UpdateFactVersion(ctx context.Context, row domainfacts.Fact
 	return nil
 }
 
-func (r *Repository) AddFactEvidence(ctx context.Context, row domainfacts.FactEvidenceRow) error {
+func (r *Repository) AddFactEvidence(ctx context.Context, row domainfacts.FactEvidenceRow) (portResult0 error) {
+	defer func() {
+		portResult0 = sqlkit.DomainError(portResult0)
+	}()
+
 	var msgID, manualID any
 	if row.MessageID != nil {
 		msgID = row.MessageID.String()
@@ -231,7 +276,11 @@ func (r *Repository) AddFactEvidence(ctx context.Context, row domainfacts.FactEv
 	return err
 }
 
-func (r *Repository) RemoveFactEvidence(ctx context.Context, organisationID, versionID, evidenceID uuid.UUID) error {
+func (r *Repository) RemoveFactEvidence(ctx context.Context, organisationID, versionID, evidenceID uuid.UUID) (portResult0 error) {
+	defer func() {
+		portResult0 = sqlkit.DomainError(portResult0)
+	}()
+
 	res, err := r.db.ExecContext(ctx, `
 		DELETE FROM fact_evidence
 		WHERE id = ? AND fact_version_id = ?
@@ -251,7 +300,11 @@ func (r *Repository) RemoveFactEvidence(ctx context.Context, organisationID, ver
 	return nil
 }
 
-func (r *Repository) ListFactEvidence(ctx context.Context, versionID uuid.UUID) ([]domainfacts.FactEvidenceRow, error) {
+func (r *Repository) ListFactEvidence(ctx context.Context, versionID uuid.UUID) (portResult0 []domainfacts.FactEvidenceRow, portResult1 error) {
+	defer func() {
+		portResult1 = sqlkit.DomainError(portResult1)
+	}()
+
 	rows, err := r.db.QueryContext(ctx, `
 		SELECT id, fact_version_id, message_id, manual_item_id, added_at
 		FROM fact_evidence WHERE fact_version_id = ?
@@ -264,7 +317,11 @@ func (r *Repository) ListFactEvidence(ctx context.Context, versionID uuid.UUID) 
 	return scanFactEvidenceRows(rows)
 }
 
-func (r *Repository) ListFactEvidenceForFact(ctx context.Context, factID uuid.UUID) ([]domainfacts.FactEvidenceRow, error) {
+func (r *Repository) ListFactEvidenceForFact(ctx context.Context, factID uuid.UUID) (portResult0 []domainfacts.FactEvidenceRow, portResult1 error) {
+	defer func() {
+		portResult1 = sqlkit.DomainError(portResult1)
+	}()
+
 	rows, err := r.db.QueryContext(ctx, `
 		SELECT fe.id, fe.fact_version_id, fe.message_id, fe.manual_item_id, fe.added_at
 		FROM fact_evidence fe

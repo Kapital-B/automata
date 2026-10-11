@@ -10,7 +10,11 @@ import (
 	"github.com/google/uuid"
 )
 
-func (r *Repository) SearchMessages(ctx context.Context, userID uuid.UUID, filter domainmessages.MessageSearchFilter) ([]domainmessages.MessageSearchHit, error) {
+func (r *Repository) SearchMessages(ctx context.Context, userID uuid.UUID, filter domainmessages.MessageSearchFilter) (portResult0 []domainmessages.MessageSearchHit, portResult1 error) {
+	defer func() {
+		portResult1 = sqlkit.DomainError(portResult1)
+	}()
+
 	q, args := sqlkit.MessageSearchQuery(userID, filter, func(t time.Time) any { return t })
 	if q == "" {
 		return nil, nil

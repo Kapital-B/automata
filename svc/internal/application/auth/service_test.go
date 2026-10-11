@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"github.com/Kapital-B/automata/svc/internal/adapters/outbound/persistence/sqlite"
+	security "github.com/Kapital-B/automata/svc/internal/adapters/outbound/security"
 	"github.com/Kapital-B/automata/svc/internal/application/auth"
 	_ "modernc.org/sqlite"
 )
@@ -21,7 +22,7 @@ func TestRegisterCreatesHomeOrganisation(t *testing.T) {
 		t.Fatal(err)
 	}
 	repo := sqlite.NewRepository(db, time.Minute)
-	svc := auth.NewService(repo, repo, repo, nil, nil, []byte("abcdefghijklmnopqrstuvwxyz123456"), time.Hour, 24*time.Hour)
+	svc := auth.NewService(repo, repo, repo, nil, nil, security.JWT{Secret: []byte("abcdefghijklmnopqrstuvwxyz123456"), TTL: time.Hour}, security.BcryptHasher{}, 24*time.Hour)
 	id, err := svc.Register(context.Background(), "newuser@example.com", "password123")
 	if err != nil {
 		t.Fatal(err)

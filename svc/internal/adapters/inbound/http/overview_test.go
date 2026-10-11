@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"github.com/Kapital-B/automata/svc/internal/adapters/outbound/persistence/sqlite"
+	security "github.com/Kapital-B/automata/svc/internal/adapters/outbound/security"
 	appattention "github.com/Kapital-B/automata/svc/internal/application/attention"
 	"github.com/Kapital-B/automata/svc/internal/application/auth"
 	appoverview "github.com/Kapital-B/automata/svc/internal/application/overview"
@@ -41,7 +42,7 @@ func newOverviewFixture(t *testing.T, dbName string) overviewFixture {
 	}
 	repo := sqlite.NewRepository(db, 15*time.Minute)
 	jwtSecret := []byte("abcdefghijklmnopqrstuvwxyz123456")
-	authSvc := auth.NewService(repo, repo, repo, nil, nil, jwtSecret, time.Hour, 30*24*time.Hour)
+	authSvc := auth.NewService(repo, repo, repo, nil, nil, security.JWT{Secret: jwtSecret, TTL: time.Hour}, security.BcryptHasher{}, 30*24*time.Hour)
 	projectSvc := &appprojects.Service{
 		Users: repo, Projects: repo, Assignments: repo, Contacts: repo, Messages: repo, Manuals: repo,
 	}
@@ -55,8 +56,7 @@ func newOverviewFixture(t *testing.T, dbName string) overviewFixture {
 		OverviewSvc: &appoverview.Service{
 			Users: repo, Projects: repo, Attention: attentionSvc, Triage: repo,
 		},
-		Users: repo, Messages: repo, Projects: repo, Assignments: repo, Contacts: repo,
-		JWTSecret: jwtSecret, JWTTTL: time.Hour,
+		Users: repo, Messages: repo, Projects: repo, Assignments: repo, Contacts: repo, TokenVerifier: security.JWT{Secret: jwtSecret},
 	}
 	srv := httptest.NewServer(h.Routes())
 	t.Cleanup(srv.Close)

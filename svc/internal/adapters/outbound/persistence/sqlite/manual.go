@@ -14,7 +14,11 @@ import (
 	"github.com/google/uuid"
 )
 
-func (r *Repository) ListContactIDsForManualItem(ctx context.Context, organisationID, manualItemID uuid.UUID) ([]uuid.UUID, error) {
+func (r *Repository) ListContactIDsForManualItem(ctx context.Context, organisationID, manualItemID uuid.UUID) (portResult0 []uuid.UUID, portResult1 error) {
+	defer func() {
+		portResult1 = sqlkit.DomainError(portResult1)
+	}()
+
 	rows, err := r.db.QueryContext(ctx, `
 		SELECT DISTINCT contact_id FROM correspondence_participants
 		WHERE organisation_id = ? AND manual_item_id = ?
@@ -26,7 +30,11 @@ func (r *Repository) ListContactIDsForManualItem(ctx context.Context, organisati
 	return scanUUIDColumn(rows)
 }
 
-func (r *Repository) CreateManualItem(ctx context.Context, row domainprojects.ManualItemRow) error {
+func (r *Repository) CreateManualItem(ctx context.Context, row domainprojects.ManualItemRow) (portResult0 error) {
+	defer func() {
+		portResult0 = sqlkit.DomainError(portResult0)
+	}()
+
 	var proj, reason, source any
 	if row.ProjectID != nil {
 		proj = row.ProjectID.String()
@@ -49,7 +57,11 @@ func (r *Repository) CreateManualItem(ctx context.Context, row domainprojects.Ma
 	return err
 }
 
-func (r *Repository) GetManualItem(ctx context.Context, organisationID, id uuid.UUID) (*domainprojects.ManualItemRow, error) {
+func (r *Repository) GetManualItem(ctx context.Context, organisationID, id uuid.UUID) (portResult0 *domainprojects.ManualItemRow, portResult1 error) {
+	defer func() {
+		portResult1 = sqlkit.DomainError(portResult1)
+	}()
+
 	row := r.db.QueryRowContext(ctx, `
 		SELECT id, organisation_id, channel, occurred_at, title, body_text, project_id,
 			assignment_status, assignment_reason, assignment_source, created_by_user_id, created_at, not_relevant_at
@@ -62,7 +74,11 @@ func (r *Repository) GetManualItem(ctx context.Context, organisationID, id uuid.
 	return m, err
 }
 
-func (r *Repository) UpdateManualItemAssignment(ctx context.Context, organisationID, id uuid.UUID, projectID *uuid.UUID, status, reason, source string, notRelevantAt *time.Time) error {
+func (r *Repository) UpdateManualItemAssignment(ctx context.Context, organisationID, id uuid.UUID, projectID *uuid.UUID, status, reason, source string, notRelevantAt *time.Time) (portResult0 error) {
+	defer func() {
+		portResult0 = sqlkit.DomainError(portResult0)
+	}()
+
 	var proj any
 	if projectID != nil {
 		proj = projectID.String()
@@ -82,7 +98,11 @@ func (r *Repository) UpdateManualItemAssignment(ctx context.Context, organisatio
 	return nil
 }
 
-func (r *Repository) ListManualItemsForProject(ctx context.Context, organisationID, projectID uuid.UUID) ([]domainprojects.ManualItemRow, error) {
+func (r *Repository) ListManualItemsForProject(ctx context.Context, organisationID, projectID uuid.UUID) (portResult0 []domainprojects.ManualItemRow, portResult1 error) {
+	defer func() {
+		portResult1 = sqlkit.DomainError(portResult1)
+	}()
+
 	rows, err := r.db.QueryContext(ctx, `
 		SELECT id, organisation_id, channel, occurred_at, title, body_text, project_id,
 			assignment_status, assignment_reason, assignment_source, created_by_user_id, created_at, not_relevant_at
@@ -97,7 +117,11 @@ func (r *Repository) ListManualItemsForProject(ctx context.Context, organisation
 	return scanManualItemRows(rows)
 }
 
-func (r *Repository) ListUnassignedManualItems(ctx context.Context, organisationID uuid.UUID, limit int) ([]domainprojects.ManualItemRow, error) {
+func (r *Repository) ListUnassignedManualItems(ctx context.Context, organisationID uuid.UUID, limit int) (portResult0 []domainprojects.ManualItemRow, portResult1 error) {
+	defer func() {
+		portResult1 = sqlkit.DomainError(portResult1)
+	}()
+
 	if limit <= 0 {
 		limit = 500
 	}
@@ -188,7 +212,11 @@ func scanManualItem(s rowScanner) (*domainprojects.ManualItemRow, error) {
 	return m, nil
 }
 
-func (r *Repository) ListProjectTimeline(ctx context.Context, userID, organisationID, projectID uuid.UUID, filter domainprojects.TimelineFilter) ([]domainprojects.TimelineItem, error) {
+func (r *Repository) ListProjectTimeline(ctx context.Context, userID, organisationID, projectID uuid.UUID, filter domainprojects.TimelineFilter) (portResult0 []domainprojects.TimelineItem, portResult1 error) {
+	defer func() {
+		portResult1 = sqlkit.DomainError(portResult1)
+	}()
+
 	limit := filter.Limit
 	if limit <= 0 {
 		limit = 100

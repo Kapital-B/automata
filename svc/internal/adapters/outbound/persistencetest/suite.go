@@ -16,6 +16,7 @@ import (
 	domaincontradictions "github.com/Kapital-B/automata/svc/internal/domain/contradictions"
 	domaindecisions "github.com/Kapital-B/automata/svc/internal/domain/decisions"
 	domainfacts "github.com/Kapital-B/automata/svc/internal/domain/facts"
+	domaininterpretations "github.com/Kapital-B/automata/svc/internal/domain/interpretations"
 	domainissues "github.com/Kapital-B/automata/svc/internal/domain/issues"
 	domainjobs "github.com/Kapital-B/automata/svc/internal/domain/jobs"
 	domainmessages "github.com/Kapital-B/automata/svc/internal/domain/messages"
@@ -36,6 +37,7 @@ type Repository interface {
 	domainprojects.ManualItemRepository
 	domainissues.IssueRepository
 	domainfacts.FactRepository
+	domaininterpretations.InterpretationRepository
 	domaindecisions.DecisionRepository
 	domaincontradictions.ContradictionRepository
 	domainprojects.TimelineRepository
@@ -60,6 +62,7 @@ type Factory func(t *testing.T) Handle
 
 func Run(t *testing.T, factory Factory) {
 	t.Helper()
+	RunAbsence(t, factory)
 
 	t.Run("auth_session_consume_once", func(t *testing.T) {
 		h := factory(t)

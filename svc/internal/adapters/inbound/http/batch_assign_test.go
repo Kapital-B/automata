@@ -14,6 +14,7 @@ import (
 	"time"
 
 	"github.com/Kapital-B/automata/svc/internal/adapters/outbound/persistence/sqlite"
+	security "github.com/Kapital-B/automata/svc/internal/adapters/outbound/security"
 	"github.com/Kapital-B/automata/svc/internal/application/auth"
 	appprojects "github.com/Kapital-B/automata/svc/internal/application/projects"
 	domainaccounts "github.com/Kapital-B/automata/svc/internal/domain/accounts"
@@ -45,7 +46,7 @@ func newBatchFixture(t *testing.T, dbName string) batchFixture {
 	}
 	repo := sqlite.NewRepository(db, 15*time.Minute)
 	jwtSecret := []byte("abcdefghijklmnopqrstuvwxyz123456")
-	authSvc := auth.NewService(repo, repo, repo, nil, nil, jwtSecret, time.Hour, 30*24*time.Hour)
+	authSvc := auth.NewService(repo, repo, repo, nil, nil, security.JWT{Secret: jwtSecret, TTL: time.Hour}, security.BcryptHasher{}, 30*24*time.Hour)
 
 	var mu sync.Mutex
 	calls := [][2]string{}
@@ -59,8 +60,7 @@ func newBatchFixture(t *testing.T, dbName string) batchFixture {
 	}
 	h := &Handlers{
 		Log: slog.Default(), AuthSvc: authSvc, ProjectSvc: projectSvc,
-		Users: repo, Messages: repo, Projects: repo, Assignments: repo, Contacts: repo,
-		JWTSecret: jwtSecret, JWTTTL: time.Hour,
+		Users: repo, Messages: repo, Projects: repo, Assignments: repo, Contacts: repo, TokenVerifier: security.JWT{Secret: jwtSecret},
 	}
 	srv := httptest.NewServer(h.Routes())
 	t.Cleanup(srv.Close)

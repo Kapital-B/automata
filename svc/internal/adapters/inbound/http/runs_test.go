@@ -49,13 +49,12 @@ func newRunsTestServer(t *testing.T) (*httptest.Server, *sqlite.Repository, uuid
 	syncSvc := &appmessages.SyncService{Accounts: repo, Messages: repo, Mailboxes: mailboxes, JobRuns: repo}
 	jwtSecret := []byte("abcdefghijklmnopqrstuvwxyz123456")
 	devUser := uuid.MustParse("a0000001-0000-4000-8000-000000000001")
-	authSvc := auth.NewService(repo, repo, repo, nil, nil, jwtSecret, time.Hour, 30*24*time.Hour)
+	authSvc := auth.NewService(repo, repo, repo, nil, nil, security.JWT{Secret: jwtSecret, TTL: time.Hour}, security.BcryptHasher{}, 30*24*time.Hour)
 	h := &Handlers{
 		Log:        slog.New(slog.NewTextHandler(io.Discard, nil)),
 		AccountSvc: accountSvc, SyncSvc: syncSvc, AuthSvc: authSvc,
 		Accounts: repo, Messages: repo, JobRuns: repo, OAuthStates: repo, Users: repo,
-		Dashboard: "http://localhost:5173", SuccessPath: "/ok", ErrorPath: "/err",
-		JWTSecret: jwtSecret, JWTTTL: time.Hour,
+		Dashboard: "http://localhost:5173", SuccessPath: "/ok", ErrorPath: "/err", TokenVerifier: security.JWT{Secret: jwtSecret},
 	}
 	srv := httptest.NewServer(h.Routes())
 	t.Cleanup(srv.Close)

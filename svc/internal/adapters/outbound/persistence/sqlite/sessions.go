@@ -6,10 +6,15 @@ import (
 	"errors"
 	"time"
 
+	sqlkit "github.com/Kapital-B/automata/svc/internal/adapters/outbound/persistence/sqlkit"
 	"github.com/google/uuid"
 )
 
-func (r *Repository) InsertAuthSession(ctx context.Context, sessionID, userID uuid.UUID, tokenHash string, createdAt, expiresAt time.Time) error {
+func (r *Repository) InsertAuthSession(ctx context.Context, sessionID, userID uuid.UUID, tokenHash string, createdAt, expiresAt time.Time) (portResult0 error) {
+	defer func() {
+		portResult0 = sqlkit.DomainError(portResult0)
+	}()
+
 	_, err := r.db.ExecContext(ctx, `
 		INSERT INTO auth_sessions (id, user_id, token_hash, created_at, expires_at)
 		VALUES (?, ?, ?, ?, ?)`,
@@ -19,7 +24,11 @@ func (r *Repository) InsertAuthSession(ctx context.Context, sessionID, userID uu
 	return err
 }
 
-func (r *Repository) ConsumeAuthSession(ctx context.Context, tokenHash string) (uuid.UUID, bool, error) {
+func (r *Repository) ConsumeAuthSession(ctx context.Context, tokenHash string) (portResult0 uuid.UUID, portResult1 bool, portResult2 error) {
+	defer func() {
+		portResult2 = sqlkit.DomainError(portResult2)
+	}()
+
 	tx, err := r.db.BeginTx(ctx, nil)
 	if err != nil {
 		return uuid.Nil, false, err

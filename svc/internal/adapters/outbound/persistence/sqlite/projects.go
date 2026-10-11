@@ -9,12 +9,17 @@ import (
 	"strings"
 	"time"
 
+	sqlkit "github.com/Kapital-B/automata/svc/internal/adapters/outbound/persistence/sqlkit"
 	domainmessages "github.com/Kapital-B/automata/svc/internal/domain/messages"
 	domainprojects "github.com/Kapital-B/automata/svc/internal/domain/projects"
 	"github.com/google/uuid"
 )
 
-func (r *Repository) ListContactIDsForMessage(ctx context.Context, organisationID, messageID uuid.UUID) ([]uuid.UUID, error) {
+func (r *Repository) ListContactIDsForMessage(ctx context.Context, organisationID, messageID uuid.UUID) (portResult0 []uuid.UUID, portResult1 error) {
+	defer func() {
+		portResult1 = sqlkit.DomainError(portResult1)
+	}()
+
 	rows, err := r.db.QueryContext(ctx, `
 		SELECT DISTINCT contact_id FROM correspondence_participants
 		WHERE organisation_id = ? AND message_id = ?
@@ -26,7 +31,11 @@ func (r *Repository) ListContactIDsForMessage(ctx context.Context, organisationI
 	return scanUUIDColumn(rows)
 }
 
-func (r *Repository) ListContactIDsForThread(ctx context.Context, organisationID, accountID uuid.UUID, conversationID string) ([]uuid.UUID, error) {
+func (r *Repository) ListContactIDsForThread(ctx context.Context, organisationID, accountID uuid.UUID, conversationID string) (portResult0 []uuid.UUID, portResult1 error) {
+	defer func() {
+		portResult1 = sqlkit.DomainError(portResult1)
+	}()
+
 	rows, err := r.db.QueryContext(ctx, `
 		SELECT DISTINCT cp.contact_id
 		FROM correspondence_participants cp
@@ -56,7 +65,11 @@ func scanUUIDColumn(rows *sql.Rows) ([]uuid.UUID, error) {
 	return out, rows.Err()
 }
 
-func (r *Repository) ListProjects(ctx context.Context, organisationID uuid.UUID, filter domainprojects.ProjectListFilter) ([]domainprojects.ProjectRow, error) {
+func (r *Repository) ListProjects(ctx context.Context, organisationID uuid.UUID, filter domainprojects.ProjectListFilter) (portResult0 []domainprojects.ProjectRow, portResult1 error) {
+	defer func() {
+		portResult1 = sqlkit.DomainError(portResult1)
+	}()
+
 	limit := filter.Limit
 	if limit <= 0 {
 		limit = 100
@@ -94,7 +107,11 @@ func (r *Repository) ListProjects(ctx context.Context, organisationID uuid.UUID,
 	return out, rows.Err()
 }
 
-func (r *Repository) GetProject(ctx context.Context, organisationID, projectID uuid.UUID) (*domainprojects.ProjectRow, error) {
+func (r *Repository) GetProject(ctx context.Context, organisationID, projectID uuid.UUID) (portResult0 *domainprojects.ProjectRow, portResult1 error) {
+	defer func() {
+		portResult1 = sqlkit.DomainError(portResult1)
+	}()
+
 	row := r.db.QueryRowContext(ctx, `
 		SELECT id, organisation_id, name, code, description, client, keywords_json, archived_at, created_at, updated_at, last_extracted_at
 		FROM projects WHERE id = ? AND organisation_id = ?
@@ -106,7 +123,11 @@ func (r *Repository) GetProject(ctx context.Context, organisationID, projectID u
 	return p, err
 }
 
-func (r *Repository) GetProjectByCode(ctx context.Context, organisationID uuid.UUID, code string) (*domainprojects.ProjectRow, error) {
+func (r *Repository) GetProjectByCode(ctx context.Context, organisationID uuid.UUID, code string) (portResult0 *domainprojects.ProjectRow, portResult1 error) {
+	defer func() {
+		portResult1 = sqlkit.DomainError(portResult1)
+	}()
+
 	row := r.db.QueryRowContext(ctx, `
 		SELECT id, organisation_id, name, code, description, client, keywords_json, archived_at, created_at, updated_at, last_extracted_at
 		FROM projects WHERE organisation_id = ? AND code = ?
@@ -118,7 +139,11 @@ func (r *Repository) GetProjectByCode(ctx context.Context, organisationID uuid.U
 	return p, err
 }
 
-func (r *Repository) CreateProject(ctx context.Context, project domainprojects.ProjectRow, member domainprojects.ProjectMemberRow) error {
+func (r *Repository) CreateProject(ctx context.Context, project domainprojects.ProjectRow, member domainprojects.ProjectMemberRow) (portResult0 error) {
+	defer func() {
+		portResult0 = sqlkit.DomainError(portResult0)
+	}()
+
 	tx, err := r.db.BeginTx(ctx, nil)
 	if err != nil {
 		return err
@@ -151,7 +176,11 @@ func (r *Repository) CreateProject(ctx context.Context, project domainprojects.P
 	return tx.Commit()
 }
 
-func (r *Repository) UpdateProject(ctx context.Context, project domainprojects.ProjectRow) error {
+func (r *Repository) UpdateProject(ctx context.Context, project domainprojects.ProjectRow) (portResult0 error) {
+	defer func() {
+		portResult0 = sqlkit.DomainError(portResult0)
+	}()
+
 	kw, _ := json.Marshal(project.Keywords)
 	if project.Keywords == nil {
 		kw = []byte("[]")
@@ -168,7 +197,11 @@ func (r *Repository) UpdateProject(ctx context.Context, project domainprojects.P
 	return err
 }
 
-func (r *Repository) GetProjectMember(ctx context.Context, projectID, userID uuid.UUID) (*domainprojects.ProjectMemberRow, error) {
+func (r *Repository) GetProjectMember(ctx context.Context, projectID, userID uuid.UUID) (portResult0 *domainprojects.ProjectMemberRow, portResult1 error) {
+	defer func() {
+		portResult1 = sqlkit.DomainError(portResult1)
+	}()
+
 	row := r.db.QueryRowContext(ctx, `
 		SELECT id, project_id, user_id, role, discipline, responsibilities, current_scope, approval_authority, out_of_scope, created_at, updated_at
 		FROM project_members WHERE project_id = ? AND user_id = ?
@@ -180,7 +213,11 @@ func (r *Repository) GetProjectMember(ctx context.Context, projectID, userID uui
 	return m, err
 }
 
-func (r *Repository) UpdateProjectMember(ctx context.Context, member domainprojects.ProjectMemberRow) error {
+func (r *Repository) UpdateProjectMember(ctx context.Context, member domainprojects.ProjectMemberRow) (portResult0 error) {
+	defer func() {
+		portResult0 = sqlkit.DomainError(portResult0)
+	}()
+
 	_, err := r.db.ExecContext(ctx, `
 		UPDATE project_members
 		SET role = ?, discipline = ?, responsibilities = ?, current_scope = ?, approval_authority = ?, out_of_scope = ?, updated_at = ?
@@ -191,7 +228,11 @@ func (r *Repository) UpdateProjectMember(ctx context.Context, member domainproje
 	return err
 }
 
-func (r *Repository) UpsertProjectParticipant(ctx context.Context, projectID, contactID uuid.UUID, firstSeenAt time.Time) error {
+func (r *Repository) UpsertProjectParticipant(ctx context.Context, projectID, contactID uuid.UUID, firstSeenAt time.Time) (portResult0 error) {
+	defer func() {
+		portResult0 = sqlkit.DomainError(portResult0)
+	}()
+
 	_, err := r.db.ExecContext(ctx, `
 		INSERT INTO project_participants (project_id, contact_id, first_seen_at)
 		VALUES (?, ?, ?)
@@ -200,7 +241,11 @@ func (r *Repository) UpsertProjectParticipant(ctx context.Context, projectID, co
 	return err
 }
 
-func (r *Repository) CountProjectMembers(ctx context.Context, projectID uuid.UUID) (int, error) {
+func (r *Repository) CountProjectMembers(ctx context.Context, projectID uuid.UUID) (portResult0 int, portResult1 error) {
+	defer func() {
+		portResult1 = sqlkit.DomainError(portResult1)
+	}()
+
 	var n int
 	err := r.db.QueryRowContext(ctx, `SELECT COUNT(1) FROM project_members WHERE project_id = ?`, projectID.String()).Scan(&n)
 	return n, err
@@ -339,12 +384,20 @@ func threadAssignmentArgs(row domainprojects.AssignmentRow) []any {
 		nullTimeStr(row.NotRelevantAt)}
 }
 
-func (r *Repository) UpsertThreadAssignment(ctx context.Context, row domainprojects.AssignmentRow) error {
+func (r *Repository) UpsertThreadAssignment(ctx context.Context, row domainprojects.AssignmentRow) (portResult0 error) {
+	defer func() {
+		portResult0 = sqlkit.DomainError(portResult0)
+	}()
+
 	_, err := r.db.ExecContext(ctx, upsertThreadAssignmentSQL, threadAssignmentArgs(row)...)
 	return err
 }
 
-func (r *Repository) UpsertThreadAssignments(ctx context.Context, rows []domainprojects.AssignmentRow) error {
+func (r *Repository) UpsertThreadAssignments(ctx context.Context, rows []domainprojects.AssignmentRow) (portResult0 error) {
+	defer func() {
+		portResult0 = sqlkit.DomainError(portResult0)
+	}()
+
 	return r.chunkedAssignmentTx(ctx, rows, upsertThreadAssignmentSQL, threadAssignmentArgs)
 }
 
@@ -374,7 +427,11 @@ func (r *Repository) chunkedAssignmentTx(ctx context.Context, rows []domainproje
 	return nil
 }
 
-func (r *Repository) GetThreadAssignment(ctx context.Context, accountID uuid.UUID, conversationID string) (*domainprojects.AssignmentRow, error) {
+func (r *Repository) GetThreadAssignment(ctx context.Context, accountID uuid.UUID, conversationID string) (portResult0 *domainprojects.AssignmentRow, portResult1 error) {
+	defer func() {
+		portResult1 = sqlkit.DomainError(portResult1)
+	}()
+
 	row := r.db.QueryRowContext(ctx, `
 		SELECT id, organisation_id, account_id, conversation_id, project_id, status, confidence, reason, source,
 			run_id, assigned_by_user_id, created_at, updated_at, not_relevant_at
@@ -387,7 +444,11 @@ func (r *Repository) GetThreadAssignment(ctx context.Context, accountID uuid.UUI
 	return a, err
 }
 
-func (r *Repository) DeleteThreadAssignment(ctx context.Context, accountID uuid.UUID, conversationID string) error {
+func (r *Repository) DeleteThreadAssignment(ctx context.Context, accountID uuid.UUID, conversationID string) (portResult0 error) {
+	defer func() {
+		portResult0 = sqlkit.DomainError(portResult0)
+	}()
+
 	_, err := r.db.ExecContext(ctx, `
 		DELETE FROM thread_assignments WHERE account_id = ? AND conversation_id = ?
 	`, accountID.String(), conversationID)
@@ -420,7 +481,11 @@ func messageOverrideArgs(row domainprojects.AssignmentRow) []any {
 		nullTimeStr(row.NotRelevantAt)}
 }
 
-func (r *Repository) UpsertMessageOverride(ctx context.Context, row domainprojects.AssignmentRow) error {
+func (r *Repository) UpsertMessageOverride(ctx context.Context, row domainprojects.AssignmentRow) (portResult0 error) {
+	defer func() {
+		portResult0 = sqlkit.DomainError(portResult0)
+	}()
+
 	if row.MessageID == nil {
 		return fmt.Errorf("message override requires message_id")
 	}
@@ -428,7 +493,11 @@ func (r *Repository) UpsertMessageOverride(ctx context.Context, row domainprojec
 	return err
 }
 
-func (r *Repository) UpsertMessageOverrides(ctx context.Context, rows []domainprojects.AssignmentRow) error {
+func (r *Repository) UpsertMessageOverrides(ctx context.Context, rows []domainprojects.AssignmentRow) (portResult0 error) {
+	defer func() {
+		portResult0 = sqlkit.DomainError(portResult0)
+	}()
+
 	for _, row := range rows {
 		if row.MessageID == nil {
 			return fmt.Errorf("message override requires message_id")
@@ -437,7 +506,11 @@ func (r *Repository) UpsertMessageOverrides(ctx context.Context, rows []domainpr
 	return r.chunkedAssignmentTx(ctx, rows, upsertMessageOverrideSQL, messageOverrideArgs)
 }
 
-func (r *Repository) GetMessageOverride(ctx context.Context, messageID uuid.UUID) (*domainprojects.AssignmentRow, error) {
+func (r *Repository) GetMessageOverride(ctx context.Context, messageID uuid.UUID) (portResult0 *domainprojects.AssignmentRow, portResult1 error) {
+	defer func() {
+		portResult1 = sqlkit.DomainError(portResult1)
+	}()
+
 	row := r.db.QueryRowContext(ctx, `
 		SELECT message_id, organisation_id, account_id, project_id, status, confidence, reason, source,
 			run_id, assigned_by_user_id, created_at, updated_at, not_relevant_at
@@ -450,12 +523,20 @@ func (r *Repository) GetMessageOverride(ctx context.Context, messageID uuid.UUID
 	return a, err
 }
 
-func (r *Repository) DeleteMessageOverride(ctx context.Context, messageID uuid.UUID) error {
+func (r *Repository) DeleteMessageOverride(ctx context.Context, messageID uuid.UUID) (portResult0 error) {
+	defer func() {
+		portResult0 = sqlkit.DomainError(portResult0)
+	}()
+
 	_, err := r.db.ExecContext(ctx, `DELETE FROM message_assignment_overrides WHERE message_id = ?`, messageID.String())
 	return err
 }
 
-func (r *Repository) EffectiveAssignment(ctx context.Context, userID, messageID uuid.UUID) (*domainprojects.EffectiveAssignment, error) {
+func (r *Repository) EffectiveAssignment(ctx context.Context, userID, messageID uuid.UUID) (portResult0 *domainprojects.EffectiveAssignment, portResult1 error) {
+	defer func() {
+		portResult1 = sqlkit.DomainError(portResult1)
+	}()
+
 	msg, err := r.GetMessage(ctx, userID, messageID)
 	if err != nil {
 		return nil, err
@@ -510,7 +591,11 @@ func (r *Repository) EffectiveAssignment(ctx context.Context, userID, messageID 
 }
 
 // EffectiveProjectIDsForMessages resolves projects for a page of messages in one query.
-func (r *Repository) EffectiveProjectIDsForMessages(ctx context.Context, userID uuid.UUID, messages []domainmessages.MessageRow) (map[uuid.UUID]*uuid.UUID, error) {
+func (r *Repository) EffectiveProjectIDsForMessages(ctx context.Context, userID uuid.UUID, messages []domainmessages.MessageRow) (portResult0 map[uuid.UUID]*uuid.UUID, portResult1 error) {
+	defer func() {
+		portResult1 = sqlkit.DomainError(portResult1)
+	}()
+
 	out := make(map[uuid.UUID]*uuid.UUID, len(messages))
 	if len(messages) == 0 {
 		return out, nil
@@ -640,7 +725,11 @@ func normalizeUnassignedStatus(status string) string {
 	return s
 }
 
-func (r *Repository) ListUnassigned(ctx context.Context, userID uuid.UUID, filter domainprojects.UnassignedListFilter) ([]domainprojects.UnassignedItem, error) {
+func (r *Repository) ListUnassigned(ctx context.Context, userID uuid.UUID, filter domainprojects.UnassignedListFilter) (portResult0 []domainprojects.UnassignedItem, portResult1 error) {
+	defer func() {
+		portResult1 = sqlkit.DomainError(portResult1)
+	}()
+
 	limit := filter.Limit
 	if limit <= 0 {
 		limit = 50
@@ -777,7 +866,11 @@ func scanUnassignedRows(rows *sql.Rows) ([]domainprojects.UnassignedItem, error)
 	return out, rows.Err()
 }
 
-func (r *Repository) CountUnassignedSummary(ctx context.Context, userID uuid.UUID) (domainprojects.UnassignedSummary, error) {
+func (r *Repository) CountUnassignedSummary(ctx context.Context, userID uuid.UUID) (portResult0 domainprojects.UnassignedSummary, portResult1 error) {
+	defer func() {
+		portResult1 = sqlkit.DomainError(portResult1)
+	}()
+
 	var sum domainprojects.UnassignedSummary
 	orgID, err := r.GetHomeOrganisationID(ctx, userID)
 	if err != nil {
@@ -817,7 +910,11 @@ func (r *Repository) CountUnassignedSummary(ctx context.Context, userID uuid.UUI
 	return sum, rows.Err()
 }
 
-func (r *Repository) ListMessagesNeedingContactResolution(ctx context.Context, userID, accountID uuid.UUID, limit int) ([]domainmessages.MessageRow, error) {
+func (r *Repository) ListMessagesNeedingContactResolution(ctx context.Context, userID, accountID uuid.UUID, limit int) (portResult0 []domainmessages.MessageRow, portResult1 error) {
+	defer func() {
+		portResult1 = sqlkit.DomainError(portResult1)
+	}()
+
 	if limit <= 0 {
 		limit = 100
 	}
@@ -841,7 +938,11 @@ func (r *Repository) ListMessagesNeedingContactResolution(ctx context.Context, u
 	return scanMessageRows(rows)
 }
 
-func (r *Repository) MarkContactsResolved(ctx context.Context, userID uuid.UUID, messageIDs []uuid.UUID, at time.Time) error {
+func (r *Repository) MarkContactsResolved(ctx context.Context, userID uuid.UUID, messageIDs []uuid.UUID, at time.Time) (portResult0 error) {
+	defer func() {
+		portResult0 = sqlkit.DomainError(portResult0)
+	}()
+
 	if len(messageIDs) == 0 {
 		return nil
 	}
@@ -873,7 +974,11 @@ func (r *Repository) MarkContactsResolved(ctx context.Context, userID uuid.UUID,
 // ListMessagesNeedingAssign returns what automatic assignment may place:
 // messages with no assignment, or only a machine's provisional suggestion.
 // Rows a user wrote are excluded, so a triage decision is never re-scored.
-func (r *Repository) ListMessagesNeedingAssign(ctx context.Context, userID, accountID uuid.UUID, filter domainprojects.AssignCandidateFilter) ([]domainmessages.MessageRow, error) {
+func (r *Repository) ListMessagesNeedingAssign(ctx context.Context, userID, accountID uuid.UUID, filter domainprojects.AssignCandidateFilter) (portResult0 []domainmessages.MessageRow, portResult1 error) {
+	defer func() {
+		portResult1 = sqlkit.DomainError(portResult1)
+	}()
+
 	limit := filter.Limit
 	if limit <= 0 {
 		limit = 500
@@ -915,7 +1020,11 @@ func (r *Repository) ListMessagesNeedingAssign(ctx context.Context, userID, acco
 	return scanMessageRows(rows)
 }
 
-func (r *Repository) FindCommittedSiblingProject(ctx context.Context, userID, accountID uuid.UUID, conversationID string, excludeMessageID uuid.UUID) (*uuid.UUID, error) {
+func (r *Repository) FindCommittedSiblingProject(ctx context.Context, userID, accountID uuid.UUID, conversationID string, excludeMessageID uuid.UUID) (portResult0 *uuid.UUID, portResult1 error) {
+	defer func() {
+		portResult1 = sqlkit.DomainError(portResult1)
+	}()
+
 	if strings.TrimSpace(conversationID) == "" {
 		return nil, nil
 	}

@@ -14,6 +14,7 @@ import (
 	"time"
 
 	"github.com/Kapital-B/automata/svc/internal/adapters/outbound/persistence/sqlite"
+	security "github.com/Kapital-B/automata/svc/internal/adapters/outbound/security"
 	"github.com/Kapital-B/automata/svc/internal/application/attention"
 	"github.com/Kapital-B/automata/svc/internal/application/auth"
 	appdecisions "github.com/Kapital-B/automata/svc/internal/application/decisions"
@@ -50,7 +51,7 @@ func setupWave2HTTP(t *testing.T) (*httptest.Server, *auth.Service, *sqlite.Repo
 	}
 	repo := sqlite.NewRepository(db, 15*time.Minute)
 	jwtSecret := []byte("abcdefghijklmnopqrstuvwxyz123456")
-	authSvc := auth.NewService(repo, repo, repo, nil, nil, jwtSecret, time.Hour, 30*24*time.Hour)
+	authSvc := auth.NewService(repo, repo, repo, nil, nil, security.JWT{Secret: jwtSecret, TTL: time.Hour}, security.BcryptHasher{}, 30*24*time.Hour)
 	projectSvc := &appprojects.Service{
 		Users: repo, Projects: repo, Assignments: repo, Manuals: repo, Timeline: repo, Contacts: repo, Messages: repo,
 	}
@@ -79,8 +80,7 @@ func setupWave2HTTP(t *testing.T) (*httptest.Server, *auth.Service, *sqlite.Repo
 		Log: slog.Default(), AuthSvc: authSvc, ProjectSvc: projectSvc,
 		FactSvc: factSvc, InterpretSvc: interpretSvc, ReconcileSvc: reconcileSvc,
 		DecisionSvc: decisionSvc, AttentionSvc: attentionSvc, ProjectAISvc: projectAISvc,
-		Users: repo, Projects: repo, Messages: repo, JobRuns: repo,
-		JWTSecret: jwtSecret, JWTTTL: time.Hour,
+		Users: repo, Projects: repo, Messages: repo, JobRuns: repo, TokenVerifier: security.JWT{Secret: jwtSecret},
 	}
 	srv := httptest.NewServer(h.Routes())
 	t.Cleanup(srv.Close)

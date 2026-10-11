@@ -8,7 +8,11 @@ import (
 	"github.com/google/uuid"
 )
 
-func (r *Repository) ListActiveFactVersionsForFacts(ctx context.Context, factIDs []uuid.UUID) ([]domainfacts.FactVersionRow, error) {
+func (r *Repository) ListActiveFactVersionsForFacts(ctx context.Context, factIDs []uuid.UUID) (portResult0 []domainfacts.FactVersionRow, portResult1 error) {
+	defer func() {
+		portResult1 = sqlkit.DomainError(portResult1)
+	}()
+
 	out := make([]domainfacts.FactVersionRow, 0, len(factIDs))
 	for _, chunk := range sqlkit.ChunkUUIDs(sqlkit.DedupeUUIDs(factIDs), timelineHydrateChunk) {
 		rows, err := r.db.QueryContext(ctx, `
@@ -36,7 +40,11 @@ func (r *Repository) ListActiveFactVersionsForFacts(ctx context.Context, factIDs
 	return out, nil
 }
 
-func (r *Repository) ListFactEvidenceForVersions(ctx context.Context, versionIDs []uuid.UUID) ([]domainfacts.FactEvidenceRow, error) {
+func (r *Repository) ListFactEvidenceForVersions(ctx context.Context, versionIDs []uuid.UUID) (portResult0 []domainfacts.FactEvidenceRow, portResult1 error) {
+	defer func() {
+		portResult1 = sqlkit.DomainError(portResult1)
+	}()
+
 	out := make([]domainfacts.FactEvidenceRow, 0)
 	for _, chunk := range sqlkit.ChunkUUIDs(sqlkit.DedupeUUIDs(versionIDs), timelineHydrateChunk) {
 		rows, err := r.db.QueryContext(ctx, `

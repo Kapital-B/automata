@@ -91,8 +91,7 @@ type Handlers struct {
 	AuthSuccessPath      string
 	AuthErrorPath        string
 	StateTTL             time.Duration
-	JWTSecret            []byte
-	JWTTTL               time.Duration
+	TokenVerifier        domainauth.AccessTokenVerifier
 	JobQueue             *asynqadapter.QueueClient
 	CORSOrigins          []string
 }
@@ -114,7 +113,7 @@ func (h *Handlers) Routes() http.Handler {
 	if h.Log != nil {
 		r.Use(requestLogMiddleware(h.Log))
 	}
-	r.Use(authMiddleware(h.JWTSecret))
+	r.Use(authMiddleware(h.TokenVerifier))
 	r.Get("/api/health", h.health)
 
 	r.Post("/api/auth/register", h.register)

@@ -2,7 +2,8 @@ package interpret
 
 import (
 	"context"
-	"database/sql"
+	domainshared "github.com/Kapital-B/automata/svc/internal/domain/shared"
+
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -180,7 +181,7 @@ func (s *Service) Dismiss(ctx context.Context, userID, interpretationID uuid.UUI
 	}
 	now := time.Now().UTC()
 	if err := s.Interpretations.UpdateInterpretationStatus(ctx, orgID, interpretationID, string(domaininterp.StatusDismissed), now); err != nil {
-		if errors.Is(err, sql.ErrNoRows) {
+		if errors.Is(err, domainshared.ErrNotFound) {
 			return nil, ErrNotFound
 		}
 		return nil, err

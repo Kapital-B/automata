@@ -47,7 +47,7 @@ func authedPost(t *testing.T, url, body string, userID uuid.UUID) (*http.Respons
 func TestAuthMiddlewareRejectsMissingAndInvalidTokens(t *testing.T) {
 	userID := uuid.New()
 	called := 0
-	handler := authMiddleware(testJWTSecret)(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	handler := authMiddleware(security.JWT{Secret: testJWTSecret})(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		called++
 		uid, ok := UserIDFromContext(r.Context())
 		if !ok || uid != userID {
@@ -92,7 +92,7 @@ func TestPublicRoutesStayAccessibleWithoutBearerToken(t *testing.T) {
 		{http.MethodGet, "/api/connectors/callback"},
 	} {
 		called := false
-		handler := authMiddleware(testJWTSecret)(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		handler := authMiddleware(security.JWT{Secret: testJWTSecret})(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			called = true
 			if _, ok := UserIDFromContext(r.Context()); ok {
 				t.Fatal("public route injected a user")
@@ -115,7 +115,7 @@ func TestPublicRouteMatchIsMethodSpecific(t *testing.T) {
 		{http.MethodPost, "/api/accounts/callback"},
 	} {
 		res := httptest.NewRecorder()
-		authMiddleware(testJWTSecret)(http.HandlerFunc(func(http.ResponseWriter, *http.Request) {
+		authMiddleware(security.JWT{Secret: testJWTSecret})(http.HandlerFunc(func(http.ResponseWriter, *http.Request) {
 			t.Fatal("protected route ran without a token")
 		})).ServeHTTP(res, httptest.NewRequest(route.method, route.path, nil))
 		if res.Code != http.StatusUnauthorized {
@@ -125,7 +125,7 @@ func TestPublicRouteMatchIsMethodSpecific(t *testing.T) {
 }
 
 func TestCORSPreflightDoesNotRequireBearerToken(t *testing.T) {
-	h := &Handlers{JWTSecret: testJWTSecret, CORSOrigins: []string{"https://example.com"}}
+	h := &Handlers{TokenVerifier: security.JWT{Secret: testJWTSecret}, CORSOrigins: []string{"https://example.com"}}
 	req := httptest.NewRequest(http.MethodOptions, "/api/accounts", nil)
 	req.Header.Set("Origin", "https://example.com")
 	req.Header.Set("Access-Control-Request-Method", http.MethodGet)
@@ -140,7 +140,7 @@ func TestCORSPreflightDoesNotRequireBearerToken(t *testing.T) {
 func TestAuthMiddlewareSetsUsageScope(t *testing.T) {
 	userID := uuid.New()
 	var got *uuid.UUID
-	h := authMiddleware(testJWTSecret)(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	h := authMiddleware(security.JWT{Secret: testJWTSecret})(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		got, _ = domainai.UsageScopeFrom(r.Context())
 	}))
 	req := httptest.NewRequest(http.MethodGet, "/api/messages", nil)

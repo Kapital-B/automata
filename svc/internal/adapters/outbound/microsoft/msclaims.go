@@ -1,4 +1,4 @@
-package auth
+package microsoft
 
 import (
 	"encoding/base64"

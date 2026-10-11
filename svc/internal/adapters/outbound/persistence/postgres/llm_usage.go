@@ -4,11 +4,16 @@ import (
 	"context"
 	"time"
 
+	sqlkit "github.com/Kapital-B/automata/svc/internal/adapters/outbound/persistence/sqlkit"
 	domainai "github.com/Kapital-B/automata/svc/internal/domain/ai"
 	"github.com/google/uuid"
 )
 
-func (r *Repository) InsertLLMUsage(ctx context.Context, row domainai.LLMUsageRow) error {
+func (r *Repository) InsertLLMUsage(ctx context.Context, row domainai.LLMUsageRow) (portResult0 error) {
+	defer func() {
+		portResult0 = sqlkit.DomainError(portResult0)
+	}()
+
 	_, err := r.execContext(ctx, `
 		INSERT INTO llm_usage (id, user_id, account_id, feature, model,
 			input_tokens, output_tokens, cache_read_tokens, cache_write_tokens, created_at)
@@ -18,7 +23,11 @@ func (r *Repository) InsertLLMUsage(ctx context.Context, row domainai.LLMUsageRo
 	return err
 }
 
-func (r *Repository) SumLLMUsageByUser(ctx context.Context, userID uuid.UUID, from, to time.Time) ([]domainai.LLMUsageTotal, error) {
+func (r *Repository) SumLLMUsageByUser(ctx context.Context, userID uuid.UUID, from, to time.Time) (portResult0 []domainai.LLMUsageTotal, portResult1 error) {
+	defer func() {
+		portResult1 = sqlkit.DomainError(portResult1)
+	}()
+
 	rows, err := r.queryContext(ctx, `
 		SELECT feature, model, COUNT(*),
 			COALESCE(SUM(input_tokens), 0), COALESCE(SUM(output_tokens), 0),

@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/Kapital-B/automata/svc/internal/adapters/outbound/persistence/sqlite"
+	security "github.com/Kapital-B/automata/svc/internal/adapters/outbound/security"
 	"github.com/Kapital-B/automata/svc/internal/application/auth"
 	appfacts "github.com/Kapital-B/automata/svc/internal/application/facts"
 	appprojectai "github.com/Kapital-B/automata/svc/internal/application/projectai"
@@ -38,7 +39,7 @@ func TestAskCitesActiveFact(t *testing.T) {
 		t.Fatal(err)
 	}
 	repo := sqlite.NewRepository(db, 15*time.Minute)
-	authSvc := auth.NewService(repo, repo, repo, nil, nil, []byte("abcdefghijklmnopqrstuvwxyz123456"), time.Hour, 30*24*time.Hour)
+	authSvc := auth.NewService(repo, repo, repo, nil, nil, security.JWT{Secret: []byte("abcdefghijklmnopqrstuvwxyz123456"), TTL: time.Hour}, security.BcryptHasher{}, 30*24*time.Hour)
 	projectSvc := &appprojects.Service{
 		Users: repo, Projects: repo, Assignments: repo, Manuals: repo, Timeline: repo, Contacts: repo, Messages: repo,
 	}
@@ -96,7 +97,7 @@ func TestAskAcrossCitesProjectFact(t *testing.T) {
 		t.Fatal(err)
 	}
 	repo := sqlite.NewRepository(db, 15*time.Minute)
-	authSvc := auth.NewService(repo, repo, repo, nil, nil, []byte("abcdefghijklmnopqrstuvwxyz123456"), time.Hour, 30*24*time.Hour)
+	authSvc := auth.NewService(repo, repo, repo, nil, nil, security.JWT{Secret: []byte("abcdefghijklmnopqrstuvwxyz123456"), TTL: time.Hour}, security.BcryptHasher{}, 30*24*time.Hour)
 	projectSvc := &appprojects.Service{
 		Users: repo, Projects: repo, Assignments: repo, Manuals: repo, Timeline: repo, Contacts: repo, Messages: repo,
 	}

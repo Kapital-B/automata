@@ -2,7 +2,8 @@ package facts
 
 import (
 	"context"
-	"database/sql"
+	domainshared "github.com/Kapital-B/automata/svc/internal/domain/shared"
+
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -495,7 +496,7 @@ func (s *Service) RemoveEvidence(ctx context.Context, userID, versionID, evidenc
 		return nil, err
 	}
 	if err := s.Facts.RemoveFactEvidence(ctx, orgID, versionID, evidenceID); err != nil {
-		if errors.Is(err, sql.ErrNoRows) {
+		if errors.Is(err, domainshared.ErrNotFound) {
 			return nil, ErrNotFound
 		}
 		return nil, err

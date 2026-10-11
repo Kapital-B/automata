@@ -6,11 +6,16 @@ import (
 	"errors"
 	"time"
 
+	sqlkit "github.com/Kapital-B/automata/svc/internal/adapters/outbound/persistence/sqlkit"
 	domaininterpretations "github.com/Kapital-B/automata/svc/internal/domain/interpretations"
 	"github.com/google/uuid"
 )
 
-func (r *Repository) CreateInterpretation(ctx context.Context, row domaininterpretations.InterpretationRow) error {
+func (r *Repository) CreateInterpretation(ctx context.Context, row domaininterpretations.InterpretationRow) (portResult0 error) {
+	defer func() {
+		portResult0 = sqlkit.DomainError(portResult0)
+	}()
+
 	var accountID, runID, conf any
 	if row.AccountID != nil {
 		accountID = row.AccountID.String()
@@ -32,7 +37,11 @@ func (r *Repository) CreateInterpretation(ctx context.Context, row domaininterpr
 	return err
 }
 
-func (r *Repository) AddInterpretationSource(ctx context.Context, row domaininterpretations.InterpretationSourceRow) error {
+func (r *Repository) AddInterpretationSource(ctx context.Context, row domaininterpretations.InterpretationSourceRow) (portResult0 error) {
+	defer func() {
+		portResult0 = sqlkit.DomainError(portResult0)
+	}()
+
 	var msgID, manualID, connectorMessageID any
 	if row.MessageID != nil {
 		msgID = row.MessageID.String()
@@ -50,7 +59,11 @@ func (r *Repository) AddInterpretationSource(ctx context.Context, row domaininte
 	return err
 }
 
-func (r *Repository) GetInterpretation(ctx context.Context, organisationID, id uuid.UUID) (*domaininterpretations.InterpretationRow, error) {
+func (r *Repository) GetInterpretation(ctx context.Context, organisationID, id uuid.UUID) (portResult0 *domaininterpretations.InterpretationRow, portResult1 error) {
+	defer func() {
+		portResult1 = sqlkit.DomainError(portResult1)
+	}()
+
 	row := r.db.QueryRowContext(ctx, `
 		SELECT id, organisation_id, project_id, account_id, run_id, status,
 			payload_json, confidence, reason, created_at, updated_at
@@ -63,7 +76,11 @@ func (r *Repository) GetInterpretation(ctx context.Context, organisationID, id u
 	return out, err
 }
 
-func (r *Repository) ListPendingInterpretations(ctx context.Context, organisationID, projectID uuid.UUID) ([]domaininterpretations.InterpretationRow, error) {
+func (r *Repository) ListPendingInterpretations(ctx context.Context, organisationID, projectID uuid.UUID) (portResult0 []domaininterpretations.InterpretationRow, portResult1 error) {
+	defer func() {
+		portResult1 = sqlkit.DomainError(portResult1)
+	}()
+
 	rows, err := r.db.QueryContext(ctx, `
 		SELECT id, organisation_id, project_id, account_id, run_id, status,
 			payload_json, confidence, reason, created_at, updated_at
@@ -86,7 +103,11 @@ func (r *Repository) ListPendingInterpretations(ctx context.Context, organisatio
 	return out, rows.Err()
 }
 
-func (r *Repository) UpdateInterpretationStatus(ctx context.Context, organisationID, id uuid.UUID, status string, updatedAt time.Time) error {
+func (r *Repository) UpdateInterpretationStatus(ctx context.Context, organisationID, id uuid.UUID, status string, updatedAt time.Time) (portResult0 error) {
+	defer func() {
+		portResult0 = sqlkit.DomainError(portResult0)
+	}()
+
 	res, err := r.db.ExecContext(ctx, `
 		UPDATE interpretations SET status = ?, updated_at = ?
 		WHERE id = ? AND organisation_id = ?
@@ -101,7 +122,11 @@ func (r *Repository) UpdateInterpretationStatus(ctx context.Context, organisatio
 	return nil
 }
 
-func (r *Repository) ListInterpretationSources(ctx context.Context, interpretationID uuid.UUID) ([]domaininterpretations.InterpretationSourceRow, error) {
+func (r *Repository) ListInterpretationSources(ctx context.Context, interpretationID uuid.UUID) (portResult0 []domaininterpretations.InterpretationSourceRow, portResult1 error) {
+	defer func() {
+		portResult1 = sqlkit.DomainError(portResult1)
+	}()
+
 	rows, err := r.db.QueryContext(ctx, `
 		SELECT id, interpretation_id, message_id, manual_item_id, connector_message_id
 		FROM interpretation_sources WHERE interpretation_id = ?

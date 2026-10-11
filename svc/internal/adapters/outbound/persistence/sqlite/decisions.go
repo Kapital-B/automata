@@ -5,11 +5,16 @@ import (
 	"database/sql"
 	"errors"
 
+	sqlkit "github.com/Kapital-B/automata/svc/internal/adapters/outbound/persistence/sqlkit"
 	domaindecisions "github.com/Kapital-B/automata/svc/internal/domain/decisions"
 	"github.com/google/uuid"
 )
 
-func (r *Repository) CreateDecision(ctx context.Context, row domaindecisions.DecisionRow) error {
+func (r *Repository) CreateDecision(ctx context.Context, row domaindecisions.DecisionRow) (portResult0 error) {
+	defer func() {
+		portResult0 = sqlkit.DomainError(portResult0)
+	}()
+
 	var issueID, decidedAt, assigneeUser, assigneeContact, conf, supersedes, createdBy any
 	if row.IssueID != nil {
 		issueID = row.IssueID.String()
@@ -44,7 +49,11 @@ func (r *Repository) CreateDecision(ctx context.Context, row domaindecisions.Dec
 	return err
 }
 
-func (r *Repository) GetDecision(ctx context.Context, organisationID, id uuid.UUID) (*domaindecisions.DecisionRow, error) {
+func (r *Repository) GetDecision(ctx context.Context, organisationID, id uuid.UUID) (portResult0 *domaindecisions.DecisionRow, portResult1 error) {
+	defer func() {
+		portResult1 = sqlkit.DomainError(portResult1)
+	}()
+
 	row := r.db.QueryRowContext(ctx, `
 		SELECT id, organisation_id, project_id, issue_id, statement, status, decided_at,
 			assignee_user_id, assignee_contact_id, source, confidence, supersedes_decision_id,
@@ -58,7 +67,11 @@ func (r *Repository) GetDecision(ctx context.Context, organisationID, id uuid.UU
 	return out, err
 }
 
-func (r *Repository) ListDecisionsByProject(ctx context.Context, organisationID, projectID uuid.UUID, status string) ([]domaindecisions.DecisionRow, error) {
+func (r *Repository) ListDecisionsByProject(ctx context.Context, organisationID, projectID uuid.UUID, status string) (portResult0 []domaindecisions.DecisionRow, portResult1 error) {
+	defer func() {
+		portResult1 = sqlkit.DomainError(portResult1)
+	}()
+
 	q := `
 		SELECT id, organisation_id, project_id, issue_id, statement, status, decided_at,
 			assignee_user_id, assignee_contact_id, source, confidence, supersedes_decision_id,
@@ -86,7 +99,11 @@ func (r *Repository) ListDecisionsByProject(ctx context.Context, organisationID,
 	return out, rows.Err()
 }
 
-func (r *Repository) UpdateDecision(ctx context.Context, row domaindecisions.DecisionRow) error {
+func (r *Repository) UpdateDecision(ctx context.Context, row domaindecisions.DecisionRow) (portResult0 error) {
+	defer func() {
+		portResult0 = sqlkit.DomainError(portResult0)
+	}()
+
 	var issueID, decidedAt, assigneeUser, assigneeContact, conf, supersedes, createdBy any
 	if row.IssueID != nil {
 		issueID = row.IssueID.String()
@@ -126,7 +143,11 @@ func (r *Repository) UpdateDecision(ctx context.Context, row domaindecisions.Dec
 	return nil
 }
 
-func (r *Repository) AddDecisionEvidence(ctx context.Context, row domaindecisions.DecisionEvidenceRow) error {
+func (r *Repository) AddDecisionEvidence(ctx context.Context, row domaindecisions.DecisionEvidenceRow) (portResult0 error) {
+	defer func() {
+		portResult0 = sqlkit.DomainError(portResult0)
+	}()
+
 	var msgID, manualID any
 	if row.MessageID != nil {
 		msgID = row.MessageID.String()
@@ -141,7 +162,11 @@ func (r *Repository) AddDecisionEvidence(ctx context.Context, row domaindecision
 	return err
 }
 
-func (r *Repository) RemoveDecisionEvidence(ctx context.Context, organisationID, decisionID, evidenceID uuid.UUID) error {
+func (r *Repository) RemoveDecisionEvidence(ctx context.Context, organisationID, decisionID, evidenceID uuid.UUID) (portResult0 error) {
+	defer func() {
+		portResult0 = sqlkit.DomainError(portResult0)
+	}()
+
 	res, err := r.db.ExecContext(ctx, `
 		DELETE FROM decision_evidence
 		WHERE id = ? AND decision_id = ?
@@ -157,7 +182,11 @@ func (r *Repository) RemoveDecisionEvidence(ctx context.Context, organisationID,
 	return nil
 }
 
-func (r *Repository) ListDecisionEvidence(ctx context.Context, decisionID uuid.UUID) ([]domaindecisions.DecisionEvidenceRow, error) {
+func (r *Repository) ListDecisionEvidence(ctx context.Context, decisionID uuid.UUID) (portResult0 []domaindecisions.DecisionEvidenceRow, portResult1 error) {
+	defer func() {
+		portResult1 = sqlkit.DomainError(portResult1)
+	}()
+
 	rows, err := r.db.QueryContext(ctx, `
 		SELECT id, decision_id, message_id, manual_item_id, added_at
 		FROM decision_evidence WHERE decision_id = ?

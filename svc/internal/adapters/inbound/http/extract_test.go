@@ -12,6 +12,7 @@ import (
 
 	"github.com/Kapital-B/automata/svc/internal/adapters/outbound/memoryjobs"
 	"github.com/Kapital-B/automata/svc/internal/adapters/outbound/persistence/sqlite"
+	security "github.com/Kapital-B/automata/svc/internal/adapters/outbound/security"
 	"github.com/Kapital-B/automata/svc/internal/application/auth"
 	appjobs "github.com/Kapital-B/automata/svc/internal/application/jobs"
 	appprojects "github.com/Kapital-B/automata/svc/internal/application/projects"
@@ -35,7 +36,7 @@ func TestExtractProjectQueuesChain(t *testing.T) {
 	repo := sqlite.NewRepository(db, 15*time.Minute)
 	store := memoryjobs.NewStore()
 	jwtSecret := []byte("abcdefghijklmnopqrstuvwxyz123456")
-	authSvc := auth.NewService(repo, repo, repo, nil, nil, jwtSecret, time.Hour, 30*24*time.Hour)
+	authSvc := auth.NewService(repo, repo, repo, nil, nil, security.JWT{Secret: jwtSecret, TTL: time.Hour}, security.BcryptHasher{}, 30*24*time.Hour)
 	projectSvc := &appprojects.Service{
 		Users: repo, Projects: repo, Assignments: repo, Manuals: repo, Timeline: repo, Contacts: repo, Messages: repo,
 	}
@@ -43,8 +44,7 @@ func TestExtractProjectQueuesChain(t *testing.T) {
 		Log: slog.Default(), AuthSvc: authSvc, ProjectSvc: projectSvc,
 		Users: repo, Projects: repo, Assignments: repo, Messages: repo,
 		JobEnqueuer: &appjobs.Enqueuer{Store: store, Registry: appjobs.DefaultRegistry()},
-		JobStore:    store,
-		JWTSecret:   jwtSecret, JWTTTL: time.Hour,
+		JobStore:    store, TokenVerifier: security.JWT{Secret: jwtSecret},
 	}
 	srv := httptest.NewServer(h.Routes())
 	defer srv.Close()

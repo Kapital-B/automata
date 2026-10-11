@@ -1,6 +1,6 @@
 # RFC: Domain-Owned Ports and Service Boundaries
 
-**Status:** R0–R1 complete; R2–R4 proposed
+**Status:** R0–R2 complete; R3–R4 proposed
 
 **Related:** [Initial specification §2.4](initial.md#24-backend-project-structure-ddd-hexagonal-ports-and-adapters), [AWS deployment](aws-deployment.md), [Multi-provider mail RFC](rfc-multi-provider-mail.md)
 
@@ -251,3 +251,5 @@ The [architecture check](../../svc/internal/architecture/README.md) enforces dom
 R1 relocated all 44 inventoried contracts and their supporting types into the domain contexts in §3. Every caller now imports the owning domain package; inward compatibility aliases remain for R4 cleanup. All 44 ownership and 13 R1 import exceptions were removed. Backend CI now provisions DynamoDB Local and rejects skipped tests alongside its existing Postgres fixture.
 
 Validation used Go 1.24.0 with both local databases enabled; the full fresh suite passed with 489 test cases and no skipped tests. [Phase results](domain-owned-ports-migration-results.json) record validation as subsequent phases complete. Live Aurora DSQL validation remains outside these local checks.
+
+R2 injected domain-owned token, password and Microsoft identity capabilities; moved the cursor codec into outbound adapters; translated SQL absence at every public repository boundary; and removed all ten R2 import exceptions, including transitive SQL paths. Cross-adapter tests enforce the R0 absence matrix, and compatibility tests cover JWTs, bcrypt and Microsoft identity claim selection. Full fresh validation on Go 1.24.0 passed 528 test cases with Postgres and DynamoDB Local enabled and no skips.

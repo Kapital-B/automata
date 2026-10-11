@@ -7,7 +7,7 @@ import (
 	"sync"
 	"time"
 
-	"github.com/Kapital-B/automata/svc/internal/application/joblistcursor"
+	"github.com/Kapital-B/automata/svc/internal/adapters/outbound/joblistcursor"
 	domainjobs "github.com/Kapital-B/automata/svc/internal/domain/jobs"
 	"github.com/google/uuid"
 )

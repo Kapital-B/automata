@@ -552,7 +552,7 @@ func (r *Runtime) buildServices(ctx context.Context) error {
 			RedirectURI:  r.Config.GoogleRedirectURI,
 		}
 	}
-	authSvc := auth.NewService(repo, repo, repo, msAuthOAuth, googleClient, r.Config.JWTSecret, r.Config.JWTTTL, r.Config.RefreshTTL)
+	authSvc := auth.NewService(repo, repo, repo, microsoft.SignIn{OAuth: msAuthOAuth}, googleClient, security.JWT{Secret: r.Config.JWTSecret, TTL: r.Config.JWTTTL}, security.BcryptHasher{}, r.Config.RefreshTTL)
 
 	if r.Execution != nil {
 		r.Execution.Executors = appjobs.NewExecutorRegistry(appjobs.ExecutorDeps{
@@ -629,11 +629,8 @@ func (r *Runtime) buildServices(ctx context.Context) error {
 		ErrorPath:            r.Config.OAuthErrorPath,
 		AuthSuccessPath:      r.Config.AuthSuccessPath,
 		AuthErrorPath:        r.Config.AuthErrorPath,
-		StateTTL:             r.Config.OAuthStateTTL,
-		JWTSecret:            r.Config.JWTSecret,
-		JWTTTL:               r.Config.JWTTTL,
-		JobQueue:             r.QueueClient,
-		CORSOrigins:          r.Config.CORSOrigins,
+		StateTTL:             r.Config.OAuthStateTTL, TokenVerifier: security.JWT{Secret: r.Config.JWTSecret}, JobQueue: r.QueueClient,
+		CORSOrigins: r.Config.CORSOrigins,
 	}
 	r.Handlers = h
 	router := h.Routes()

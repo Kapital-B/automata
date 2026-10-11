@@ -24,7 +24,11 @@ import (
 	"github.com/google/uuid"
 )
 
-func (r *Repository) ListContacts(ctx context.Context, organisationID uuid.UUID, filter domaincontacts.ContactListFilter) ([]domaincontacts.ContactRow, error) {
+func (r *Repository) ListContacts(ctx context.Context, organisationID uuid.UUID, filter domaincontacts.ContactListFilter) (portResult0 []domaincontacts.ContactRow, portResult1 error) {
+	defer func() {
+		portResult1 = sqlkit.DomainError(portResult1)
+	}()
+
 	limit := filter.Limit
 	if limit <= 0 {
 		limit = 50
@@ -125,7 +129,11 @@ func (r *Repository) attachPrimaryEmails(ctx context.Context, contacts []domainc
 	return rows.Err()
 }
 
-func (r *Repository) GetContact(ctx context.Context, organisationID, contactID uuid.UUID) (*domaincontacts.ContactRow, error) {
+func (r *Repository) GetContact(ctx context.Context, organisationID, contactID uuid.UUID) (portResult0 *domaincontacts.ContactRow, portResult1 error) {
+	defer func() {
+		portResult1 = sqlkit.DomainError(portResult1)
+	}()
+
 	row := r.queryRowContext(ctx, `
 		SELECT id, organisation_id, display_name, company, merged_into_contact_id, created_at, updated_at
 		FROM contacts
@@ -138,7 +146,11 @@ func (r *Repository) GetContact(ctx context.Context, organisationID, contactID u
 	return out, err
 }
 
-func (r *Repository) CreateContact(ctx context.Context, row domaincontacts.ContactRow) error {
+func (r *Repository) CreateContact(ctx context.Context, row domaincontacts.ContactRow) (portResult0 error) {
+	defer func() {
+		portResult0 = sqlkit.DomainError(portResult0)
+	}()
+
 	_, err := r.execContext(ctx, `
 		INSERT INTO contacts (id, organisation_id, display_name, company, merged_into_contact_id, created_at, updated_at)
 		VALUES (?, ?, ?, ?, NULL, ?, ?)
@@ -146,7 +158,11 @@ func (r *Repository) CreateContact(ctx context.Context, row domaincontacts.Conta
 	return err
 }
 
-func (r *Repository) UpdateContactDisplayNameIfEmpty(ctx context.Context, organisationID, contactID uuid.UUID, displayName string, at time.Time) error {
+func (r *Repository) UpdateContactDisplayNameIfEmpty(ctx context.Context, organisationID, contactID uuid.UUID, displayName string, at time.Time) (portResult0 error) {
+	defer func() {
+		portResult0 = sqlkit.DomainError(portResult0)
+	}()
+
 	name := strings.TrimSpace(displayName)
 	if name == "" {
 		return nil
@@ -159,7 +175,11 @@ func (r *Repository) UpdateContactDisplayNameIfEmpty(ctx context.Context, organi
 	return err
 }
 
-func (r *Repository) ListIdentities(ctx context.Context, organisationID, contactID uuid.UUID) ([]domaincontacts.ContactIdentityRow, error) {
+func (r *Repository) ListIdentities(ctx context.Context, organisationID, contactID uuid.UUID) (portResult0 []domaincontacts.ContactIdentityRow, portResult1 error) {
+	defer func() {
+		portResult1 = sqlkit.DomainError(portResult1)
+	}()
+
 	rows, err := r.queryContext(ctx, `
 		SELECT id, organisation_id, contact_id, kind, value_normalized, value_raw, created_at
 		FROM contact_identities
@@ -181,7 +201,11 @@ func (r *Repository) ListIdentities(ctx context.Context, organisationID, contact
 	return out, rows.Err()
 }
 
-func (r *Repository) FindContactIdentity(ctx context.Context, organisationID uuid.UUID, kind, valueNormalized string) (*domaincontacts.ContactIdentityRow, error) {
+func (r *Repository) FindContactIdentity(ctx context.Context, organisationID uuid.UUID, kind, valueNormalized string) (portResult0 *domaincontacts.ContactIdentityRow, portResult1 error) {
+	defer func() {
+		portResult1 = sqlkit.DomainError(portResult1)
+	}()
+
 	row := r.queryRowContext(ctx, `
 		SELECT id, organisation_id, contact_id, kind, value_normalized, value_raw, created_at
 		FROM contact_identities
@@ -194,7 +218,11 @@ func (r *Repository) FindContactIdentity(ctx context.Context, organisationID uui
 	return out, err
 }
 
-func (r *Repository) CreateIdentity(ctx context.Context, row domaincontacts.ContactIdentityRow) error {
+func (r *Repository) CreateIdentity(ctx context.Context, row domaincontacts.ContactIdentityRow) (portResult0 error) {
+	defer func() {
+		portResult0 = sqlkit.DomainError(portResult0)
+	}()
+
 	_, err := r.execContext(ctx, `
 		INSERT INTO contact_identities (id, organisation_id, contact_id, kind, value_normalized, value_raw, created_at)
 		VALUES (?, ?, ?, ?, ?, ?, ?)
@@ -202,7 +230,11 @@ func (r *Repository) CreateIdentity(ctx context.Context, row domaincontacts.Cont
 	return err
 }
 
-func (r *Repository) UpsertParticipant(ctx context.Context, row domaincontacts.CorrespondenceParticipantRow) error {
+func (r *Repository) UpsertParticipant(ctx context.Context, row domaincontacts.CorrespondenceParticipantRow) (portResult0 error) {
+	defer func() {
+		portResult0 = sqlkit.DomainError(portResult0)
+	}()
+
 	if row.MessageID == nil && row.ManualItemID == nil {
 		return fmt.Errorf("participant requires message_id or manual_item_id")
 	}
@@ -214,7 +246,11 @@ func (r *Repository) UpsertParticipant(ctx context.Context, row domaincontacts.C
 	return err
 }
 
-func (r *Repository) ListRecentMessageIDs(ctx context.Context, organisationID, contactID uuid.UUID, limit int) ([]uuid.UUID, error) {
+func (r *Repository) ListRecentMessageIDs(ctx context.Context, organisationID, contactID uuid.UUID, limit int) (portResult0 []uuid.UUID, portResult1 error) {
+	defer func() {
+		portResult1 = sqlkit.DomainError(portResult1)
+	}()
+
 	if limit <= 0 {
 		limit = 20
 	}
@@ -233,7 +269,11 @@ func (r *Repository) ListRecentMessageIDs(ctx context.Context, organisationID, c
 	return scanUUIDColumn(rows)
 }
 
-func (r *Repository) SuggestMerges(ctx context.Context, organisationID, contactID uuid.UUID) ([]domaincontacts.ContactRow, error) {
+func (r *Repository) SuggestMerges(ctx context.Context, organisationID, contactID uuid.UUID) (portResult0 []domaincontacts.ContactRow, portResult1 error) {
+	defer func() {
+		portResult1 = sqlkit.DomainError(portResult1)
+	}()
+
 	var displayName string
 	err := r.queryRowContext(ctx, `
 		SELECT display_name FROM contacts
@@ -280,7 +320,11 @@ func (r *Repository) SuggestMerges(ctx context.Context, organisationID, contactI
 	return out, rows.Err()
 }
 
-func (r *Repository) MergeContacts(ctx context.Context, organisationID, survivorID, sourceID uuid.UUID, at time.Time) error {
+func (r *Repository) MergeContacts(ctx context.Context, organisationID, survivorID, sourceID uuid.UUID, at time.Time) (portResult0 error) {
+	defer func() {
+		portResult0 = sqlkit.DomainError(portResult0)
+	}()
+
 	if survivorID == sourceID {
 		return fmt.Errorf("cannot merge a contact into itself")
 	}
@@ -420,7 +464,11 @@ func (r *Repository) MergeContacts(ctx context.Context, organisationID, survivor
 	})
 }
 
-func (r *Repository) ResolveEmailContact(ctx context.Context, organisationID uuid.UUID, email, displayName string, now time.Time) (uuid.UUID, error) {
+func (r *Repository) ResolveEmailContact(ctx context.Context, organisationID uuid.UUID, email, displayName string, now time.Time) (portResult0 uuid.UUID, portResult1 error) {
+	defer func() {
+		portResult1 = sqlkit.DomainError(portResult1)
+	}()
+
 	norm := domaincontacts.NormalizeEmail(email)
 	if norm == "" {
 		return uuid.Nil, fmt.Errorf("empty email")
@@ -468,7 +516,11 @@ func (r *Repository) ResolveEmailContact(ctx context.Context, organisationID uui
 	return contactID, nil
 }
 
-func (r *Repository) ListContactIDsForMessage(ctx context.Context, organisationID, messageID uuid.UUID) ([]uuid.UUID, error) {
+func (r *Repository) ListContactIDsForMessage(ctx context.Context, organisationID, messageID uuid.UUID) (portResult0 []uuid.UUID, portResult1 error) {
+	defer func() {
+		portResult1 = sqlkit.DomainError(portResult1)
+	}()
+
 	rows, err := r.queryContext(ctx, `
 		SELECT DISTINCT contact_id FROM correspondence_participants
 		WHERE organisation_id = ? AND message_id = ?
@@ -480,7 +532,11 @@ func (r *Repository) ListContactIDsForMessage(ctx context.Context, organisationI
 	return scanUUIDColumn(rows)
 }
 
-func (r *Repository) ListContactIDsForThread(ctx context.Context, organisationID, accountID uuid.UUID, conversationID string) ([]uuid.UUID, error) {
+func (r *Repository) ListContactIDsForThread(ctx context.Context, organisationID, accountID uuid.UUID, conversationID string) (portResult0 []uuid.UUID, portResult1 error) {
+	defer func() {
+		portResult1 = sqlkit.DomainError(portResult1)
+	}()
+
 	rows, err := r.queryContext(ctx, `
 		SELECT DISTINCT cp.contact_id
 		FROM correspondence_participants cp
@@ -494,7 +550,11 @@ func (r *Repository) ListContactIDsForThread(ctx context.Context, organisationID
 	return scanUUIDColumn(rows)
 }
 
-func (r *Repository) ListContactIDsForManualItem(ctx context.Context, organisationID, manualItemID uuid.UUID) ([]uuid.UUID, error) {
+func (r *Repository) ListContactIDsForManualItem(ctx context.Context, organisationID, manualItemID uuid.UUID) (portResult0 []uuid.UUID, portResult1 error) {
+	defer func() {
+		portResult1 = sqlkit.DomainError(portResult1)
+	}()
+
 	rows, err := r.queryContext(ctx, `
 		SELECT DISTINCT contact_id FROM correspondence_participants
 		WHERE organisation_id = ? AND manual_item_id = ?
@@ -568,7 +628,11 @@ func scanIdentityRow(s rowScanner) (*domaincontacts.ContactIdentityRow, error) {
 	}, nil
 }
 
-func (r *Repository) ListProjects(ctx context.Context, organisationID uuid.UUID, filter domainprojects.ProjectListFilter) ([]domainprojects.ProjectRow, error) {
+func (r *Repository) ListProjects(ctx context.Context, organisationID uuid.UUID, filter domainprojects.ProjectListFilter) (portResult0 []domainprojects.ProjectRow, portResult1 error) {
+	defer func() {
+		portResult1 = sqlkit.DomainError(portResult1)
+	}()
+
 	limit := filter.Limit
 	if limit <= 0 {
 		limit = 100
@@ -606,7 +670,11 @@ func (r *Repository) ListProjects(ctx context.Context, organisationID uuid.UUID,
 	return out, rows.Err()
 }
 
-func (r *Repository) GetProject(ctx context.Context, organisationID, projectID uuid.UUID) (*domainprojects.ProjectRow, error) {
+func (r *Repository) GetProject(ctx context.Context, organisationID, projectID uuid.UUID) (portResult0 *domainprojects.ProjectRow, portResult1 error) {
+	defer func() {
+		portResult1 = sqlkit.DomainError(portResult1)
+	}()
+
 	row := r.queryRowContext(ctx, `
 		SELECT id, organisation_id, name, code, description, client, keywords_json, archived_at, created_at, updated_at, last_extracted_at
 		FROM projects WHERE id = ? AND organisation_id = ?
@@ -618,7 +686,11 @@ func (r *Repository) GetProject(ctx context.Context, organisationID, projectID u
 	return p, err
 }
 
-func (r *Repository) GetProjectByCode(ctx context.Context, organisationID uuid.UUID, code string) (*domainprojects.ProjectRow, error) {
+func (r *Repository) GetProjectByCode(ctx context.Context, organisationID uuid.UUID, code string) (portResult0 *domainprojects.ProjectRow, portResult1 error) {
+	defer func() {
+		portResult1 = sqlkit.DomainError(portResult1)
+	}()
+
 	row := r.queryRowContext(ctx, `
 		SELECT id, organisation_id, name, code, description, client, keywords_json, archived_at, created_at, updated_at, last_extracted_at
 		FROM projects WHERE organisation_id = ? AND code = ?
@@ -630,7 +702,11 @@ func (r *Repository) GetProjectByCode(ctx context.Context, organisationID uuid.U
 	return p, err
 }
 
-func (r *Repository) CreateProject(ctx context.Context, project domainprojects.ProjectRow, member domainprojects.ProjectMemberRow) error {
+func (r *Repository) CreateProject(ctx context.Context, project domainprojects.ProjectRow, member domainprojects.ProjectMemberRow) (portResult0 error) {
+	defer func() {
+		portResult0 = sqlkit.DomainError(portResult0)
+	}()
+
 	return r.withTx(ctx, func(tx *sql.Tx) error {
 		kw, _ := json.Marshal(project.Keywords)
 		if project.Keywords == nil {
@@ -653,7 +729,11 @@ func (r *Repository) CreateProject(ctx context.Context, project domainprojects.P
 	})
 }
 
-func (r *Repository) UpdateProject(ctx context.Context, project domainprojects.ProjectRow) error {
+func (r *Repository) UpdateProject(ctx context.Context, project domainprojects.ProjectRow) (portResult0 error) {
+	defer func() {
+		portResult0 = sqlkit.DomainError(portResult0)
+	}()
+
 	kw, _ := json.Marshal(project.Keywords)
 	if project.Keywords == nil {
 		kw = []byte("[]")
@@ -665,7 +745,11 @@ func (r *Repository) UpdateProject(ctx context.Context, project domainprojects.P
 	return err
 }
 
-func (r *Repository) GetProjectMember(ctx context.Context, projectID, userID uuid.UUID) (*domainprojects.ProjectMemberRow, error) {
+func (r *Repository) GetProjectMember(ctx context.Context, projectID, userID uuid.UUID) (portResult0 *domainprojects.ProjectMemberRow, portResult1 error) {
+	defer func() {
+		portResult1 = sqlkit.DomainError(portResult1)
+	}()
+
 	row := r.queryRowContext(ctx, `
 		SELECT id, project_id, user_id, role, discipline, responsibilities, current_scope, approval_authority, out_of_scope, created_at, updated_at
 		FROM project_members WHERE project_id = ? AND user_id = ?
@@ -677,7 +761,11 @@ func (r *Repository) GetProjectMember(ctx context.Context, projectID, userID uui
 	return m, err
 }
 
-func (r *Repository) UpdateProjectMember(ctx context.Context, member domainprojects.ProjectMemberRow) error {
+func (r *Repository) UpdateProjectMember(ctx context.Context, member domainprojects.ProjectMemberRow) (portResult0 error) {
+	defer func() {
+		portResult0 = sqlkit.DomainError(portResult0)
+	}()
+
 	_, err := r.execContext(ctx, `
 		UPDATE project_members
 		SET role = ?, discipline = ?, responsibilities = ?, current_scope = ?, approval_authority = ?, out_of_scope = ?, updated_at = ?
@@ -686,7 +774,11 @@ func (r *Repository) UpdateProjectMember(ctx context.Context, member domainproje
 	return err
 }
 
-func (r *Repository) UpsertProjectParticipant(ctx context.Context, projectID, contactID uuid.UUID, firstSeenAt time.Time) error {
+func (r *Repository) UpsertProjectParticipant(ctx context.Context, projectID, contactID uuid.UUID, firstSeenAt time.Time) (portResult0 error) {
+	defer func() {
+		portResult0 = sqlkit.DomainError(portResult0)
+	}()
+
 	_, err := r.execContext(ctx, `
 		INSERT INTO project_participants (project_id, contact_id, first_seen_at)
 		VALUES (?, ?, ?)
@@ -695,7 +787,11 @@ func (r *Repository) UpsertProjectParticipant(ctx context.Context, projectID, co
 	return err
 }
 
-func (r *Repository) CountProjectMembers(ctx context.Context, projectID uuid.UUID) (int, error) {
+func (r *Repository) CountProjectMembers(ctx context.Context, projectID uuid.UUID) (portResult0 int, portResult1 error) {
+	defer func() {
+		portResult1 = sqlkit.DomainError(portResult1)
+	}()
+
 	var n int
 	err := r.queryRowContext(ctx, `SELECT COUNT(1) FROM project_members WHERE project_id = ?`, projectID.String()).Scan(&n)
 	return n, err
@@ -797,12 +893,20 @@ func threadAssignmentArgs(row domainprojects.AssignmentRow) []any {
 		nullTime(row.NotRelevantAt)}
 }
 
-func (r *Repository) UpsertThreadAssignment(ctx context.Context, row domainprojects.AssignmentRow) error {
+func (r *Repository) UpsertThreadAssignment(ctx context.Context, row domainprojects.AssignmentRow) (portResult0 error) {
+	defer func() {
+		portResult0 = sqlkit.DomainError(portResult0)
+	}()
+
 	_, err := r.execContext(ctx, upsertThreadAssignmentSQL, threadAssignmentArgs(row)...)
 	return err
 }
 
-func (r *Repository) UpsertThreadAssignments(ctx context.Context, rows []domainprojects.AssignmentRow) error {
+func (r *Repository) UpsertThreadAssignments(ctx context.Context, rows []domainprojects.AssignmentRow) (portResult0 error) {
+	defer func() {
+		portResult0 = sqlkit.DomainError(portResult0)
+	}()
+
 	return chunkedTx(ctx, r, rows, func(ctx context.Context, tx *sql.Tx, row domainprojects.AssignmentRow) error {
 		_, err := txExecContext(ctx, tx, upsertThreadAssignmentSQL, threadAssignmentArgs(row)...)
 		return err
@@ -831,7 +935,11 @@ func chunkedTx(ctx context.Context, r *Repository, rows []domainprojects.Assignm
 	return nil
 }
 
-func (r *Repository) GetThreadAssignment(ctx context.Context, accountID uuid.UUID, conversationID string) (*domainprojects.AssignmentRow, error) {
+func (r *Repository) GetThreadAssignment(ctx context.Context, accountID uuid.UUID, conversationID string) (portResult0 *domainprojects.AssignmentRow, portResult1 error) {
+	defer func() {
+		portResult1 = sqlkit.DomainError(portResult1)
+	}()
+
 	row := r.queryRowContext(ctx, `
 		SELECT id, organisation_id, account_id, conversation_id, project_id, status, confidence, reason, source,
 			run_id, assigned_by_user_id, created_at, updated_at, not_relevant_at
@@ -844,7 +952,11 @@ func (r *Repository) GetThreadAssignment(ctx context.Context, accountID uuid.UUI
 	return out, err
 }
 
-func (r *Repository) DeleteThreadAssignment(ctx context.Context, accountID uuid.UUID, conversationID string) error {
+func (r *Repository) DeleteThreadAssignment(ctx context.Context, accountID uuid.UUID, conversationID string) (portResult0 error) {
+	defer func() {
+		portResult0 = sqlkit.DomainError(portResult0)
+	}()
+
 	_, err := r.execContext(ctx, `DELETE FROM thread_assignments WHERE account_id = ? AND conversation_id = ?`, accountID.String(), conversationID)
 	return err
 }
@@ -874,7 +986,11 @@ func messageOverrideArgs(row domainprojects.AssignmentRow) []any {
 		nullTime(row.NotRelevantAt)}
 }
 
-func (r *Repository) UpsertMessageOverride(ctx context.Context, row domainprojects.AssignmentRow) error {
+func (r *Repository) UpsertMessageOverride(ctx context.Context, row domainprojects.AssignmentRow) (portResult0 error) {
+	defer func() {
+		portResult0 = sqlkit.DomainError(portResult0)
+	}()
+
 	if row.MessageID == nil {
 		return fmt.Errorf("message override requires message_id")
 	}
@@ -882,7 +998,11 @@ func (r *Repository) UpsertMessageOverride(ctx context.Context, row domainprojec
 	return err
 }
 
-func (r *Repository) UpsertMessageOverrides(ctx context.Context, rows []domainprojects.AssignmentRow) error {
+func (r *Repository) UpsertMessageOverrides(ctx context.Context, rows []domainprojects.AssignmentRow) (portResult0 error) {
+	defer func() {
+		portResult0 = sqlkit.DomainError(portResult0)
+	}()
+
 	for _, row := range rows {
 		if row.MessageID == nil {
 			return fmt.Errorf("message override requires message_id")
@@ -894,7 +1014,11 @@ func (r *Repository) UpsertMessageOverrides(ctx context.Context, rows []domainpr
 	})
 }
 
-func (r *Repository) GetMessageOverride(ctx context.Context, messageID uuid.UUID) (*domainprojects.AssignmentRow, error) {
+func (r *Repository) GetMessageOverride(ctx context.Context, messageID uuid.UUID) (portResult0 *domainprojects.AssignmentRow, portResult1 error) {
+	defer func() {
+		portResult1 = sqlkit.DomainError(portResult1)
+	}()
+
 	row := r.queryRowContext(ctx, `
 		SELECT message_id, organisation_id, account_id, project_id, status, confidence, reason, source,
 			run_id, assigned_by_user_id, created_at, updated_at, not_relevant_at
@@ -907,12 +1031,20 @@ func (r *Repository) GetMessageOverride(ctx context.Context, messageID uuid.UUID
 	return out, err
 }
 
-func (r *Repository) DeleteMessageOverride(ctx context.Context, messageID uuid.UUID) error {
+func (r *Repository) DeleteMessageOverride(ctx context.Context, messageID uuid.UUID) (portResult0 error) {
+	defer func() {
+		portResult0 = sqlkit.DomainError(portResult0)
+	}()
+
 	_, err := r.execContext(ctx, `DELETE FROM message_assignment_overrides WHERE message_id = ?`, messageID.String())
 	return err
 }
 
-func (r *Repository) EffectiveAssignment(ctx context.Context, userID, messageID uuid.UUID) (*domainprojects.EffectiveAssignment, error) {
+func (r *Repository) EffectiveAssignment(ctx context.Context, userID, messageID uuid.UUID) (portResult0 *domainprojects.EffectiveAssignment, portResult1 error) {
+	defer func() {
+		portResult1 = sqlkit.DomainError(portResult1)
+	}()
+
 	msg, err := r.GetMessage(ctx, userID, messageID)
 	if err != nil || msg == nil {
 		return msgEffectiveNil(msg, err)
@@ -968,7 +1100,11 @@ func msgEffectiveNil(msg *domainmessages.MessageRow, err error) (*domainprojects
 }
 
 // EffectiveProjectIDsForMessages resolves projects for a page of messages in one query.
-func (r *Repository) EffectiveProjectIDsForMessages(ctx context.Context, userID uuid.UUID, messages []domainmessages.MessageRow) (map[uuid.UUID]*uuid.UUID, error) {
+func (r *Repository) EffectiveProjectIDsForMessages(ctx context.Context, userID uuid.UUID, messages []domainmessages.MessageRow) (portResult0 map[uuid.UUID]*uuid.UUID, portResult1 error) {
+	defer func() {
+		portResult1 = sqlkit.DomainError(portResult1)
+	}()
+
 	out := make(map[uuid.UUID]*uuid.UUID, len(messages))
 	if len(messages) == 0 {
 		return out, nil
@@ -1101,7 +1237,11 @@ func normalizeUnassignedStatus(status string) string {
 	return s
 }
 
-func (r *Repository) ListUnassigned(ctx context.Context, userID uuid.UUID, filter domainprojects.UnassignedListFilter) ([]domainprojects.UnassignedItem, error) {
+func (r *Repository) ListUnassigned(ctx context.Context, userID uuid.UUID, filter domainprojects.UnassignedListFilter) (portResult0 []domainprojects.UnassignedItem, portResult1 error) {
+	defer func() {
+		portResult1 = sqlkit.DomainError(portResult1)
+	}()
+
 	limit := filter.Limit
 	if limit <= 0 {
 		limit = 50
@@ -1228,7 +1368,11 @@ func scanUnassignedRows(rows *sql.Rows) ([]domainprojects.UnassignedItem, error)
 	return out, rows.Err()
 }
 
-func (r *Repository) CountUnassignedSummary(ctx context.Context, userID uuid.UUID) (domainprojects.UnassignedSummary, error) {
+func (r *Repository) CountUnassignedSummary(ctx context.Context, userID uuid.UUID) (portResult0 domainprojects.UnassignedSummary, portResult1 error) {
+	defer func() {
+		portResult1 = sqlkit.DomainError(portResult1)
+	}()
+
 	var sum domainprojects.UnassignedSummary
 	orgID, err := r.GetHomeOrganisationID(ctx, userID)
 	if err != nil {
@@ -1271,7 +1415,11 @@ func (r *Repository) CountUnassignedSummary(ctx context.Context, userID uuid.UUI
 // ListMessagesNeedingAssign returns what automatic assignment may place:
 // messages with no assignment, or only a machine's provisional suggestion.
 // Rows a user wrote are excluded, so a triage decision is never re-scored.
-func (r *Repository) ListMessagesNeedingAssign(ctx context.Context, userID, accountID uuid.UUID, filter domainprojects.AssignCandidateFilter) ([]domainmessages.MessageRow, error) {
+func (r *Repository) ListMessagesNeedingAssign(ctx context.Context, userID, accountID uuid.UUID, filter domainprojects.AssignCandidateFilter) (portResult0 []domainmessages.MessageRow, portResult1 error) {
+	defer func() {
+		portResult1 = sqlkit.DomainError(portResult1)
+	}()
+
 	limit := filter.Limit
 	if limit <= 0 {
 		limit = 500
@@ -1313,7 +1461,11 @@ func (r *Repository) ListMessagesNeedingAssign(ctx context.Context, userID, acco
 	return scanMessageRows(rows)
 }
 
-func (r *Repository) ListMessagesNeedingContactResolution(ctx context.Context, userID, accountID uuid.UUID, limit int) ([]domainmessages.MessageRow, error) {
+func (r *Repository) ListMessagesNeedingContactResolution(ctx context.Context, userID, accountID uuid.UUID, limit int) (portResult0 []domainmessages.MessageRow, portResult1 error) {
+	defer func() {
+		portResult1 = sqlkit.DomainError(portResult1)
+	}()
+
 	if limit <= 0 {
 		limit = 100
 	}
@@ -1337,11 +1489,19 @@ func (r *Repository) ListMessagesNeedingContactResolution(ctx context.Context, u
 	return scanMessageRows(rows)
 }
 
-func (r *Repository) MarkContactsResolved(ctx context.Context, userID uuid.UUID, messageIDs []uuid.UUID, at time.Time) error {
+func (r *Repository) MarkContactsResolved(ctx context.Context, userID uuid.UUID, messageIDs []uuid.UUID, at time.Time) (portResult0 error) {
+	defer func() {
+		portResult0 = sqlkit.DomainError(portResult0)
+	}()
+
 	return r.markMessagesSeen(ctx, "contacts_resolved_at", userID, messageIDs, at)
 }
 
-func (r *Repository) FindCommittedSiblingProject(ctx context.Context, userID, accountID uuid.UUID, conversationID string, excludeMessageID uuid.UUID) (*uuid.UUID, error) {
+func (r *Repository) FindCommittedSiblingProject(ctx context.Context, userID, accountID uuid.UUID, conversationID string, excludeMessageID uuid.UUID) (portResult0 *uuid.UUID, portResult1 error) {
+	defer func() {
+		portResult1 = sqlkit.DomainError(portResult1)
+	}()
+
 	if strings.TrimSpace(conversationID) == "" {
 		return nil, nil
 	}
@@ -1453,7 +1613,11 @@ func buildAssignmentRow(idStr, orgStr, accountStr, conversationID string, messag
 	return row, nil
 }
 
-func (r *Repository) CreateManualItem(ctx context.Context, row domainprojects.ManualItemRow) error {
+func (r *Repository) CreateManualItem(ctx context.Context, row domainprojects.ManualItemRow) (portResult0 error) {
+	defer func() {
+		portResult0 = sqlkit.DomainError(portResult0)
+	}()
+
 	_, err := r.execContext(ctx, `
 		INSERT INTO manual_items (
 			id, organisation_id, channel, occurred_at, title, body_text, project_id,
@@ -1463,7 +1627,11 @@ func (r *Repository) CreateManualItem(ctx context.Context, row domainprojects.Ma
 	return err
 }
 
-func (r *Repository) GetManualItem(ctx context.Context, organisationID, id uuid.UUID) (*domainprojects.ManualItemRow, error) {
+func (r *Repository) GetManualItem(ctx context.Context, organisationID, id uuid.UUID) (portResult0 *domainprojects.ManualItemRow, portResult1 error) {
+	defer func() {
+		portResult1 = sqlkit.DomainError(portResult1)
+	}()
+
 	row := r.queryRowContext(ctx, `
 		SELECT id, organisation_id, channel, occurred_at, title, body_text, project_id,
 			assignment_status, assignment_reason, assignment_source, created_by_user_id, created_at, not_relevant_at
@@ -1476,7 +1644,11 @@ func (r *Repository) GetManualItem(ctx context.Context, organisationID, id uuid.
 	return item, err
 }
 
-func (r *Repository) UpdateManualItemAssignment(ctx context.Context, organisationID, id uuid.UUID, projectID *uuid.UUID, status, reason, source string, notRelevantAt *time.Time) error {
+func (r *Repository) UpdateManualItemAssignment(ctx context.Context, organisationID, id uuid.UUID, projectID *uuid.UUID, status, reason, source string, notRelevantAt *time.Time) (portResult0 error) {
+	defer func() {
+		portResult0 = sqlkit.DomainError(portResult0)
+	}()
+
 	res, err := r.execContext(ctx, `
 		UPDATE manual_items
 		SET project_id = ?, assignment_status = ?, assignment_reason = ?, assignment_source = ?, not_relevant_at = ?
@@ -1492,7 +1664,11 @@ func (r *Repository) UpdateManualItemAssignment(ctx context.Context, organisatio
 	return nil
 }
 
-func (r *Repository) ListManualItemsForProject(ctx context.Context, organisationID, projectID uuid.UUID) ([]domainprojects.ManualItemRow, error) {
+func (r *Repository) ListManualItemsForProject(ctx context.Context, organisationID, projectID uuid.UUID) (portResult0 []domainprojects.ManualItemRow, portResult1 error) {
+	defer func() {
+		portResult1 = sqlkit.DomainError(portResult1)
+	}()
+
 	rows, err := r.queryContext(ctx, `
 		SELECT id, organisation_id, channel, occurred_at, title, body_text, project_id,
 			assignment_status, assignment_reason, assignment_source, created_by_user_id, created_at, not_relevant_at
@@ -1507,7 +1683,11 @@ func (r *Repository) ListManualItemsForProject(ctx context.Context, organisation
 	return scanManualItemRows(rows)
 }
 
-func (r *Repository) ListUnassignedManualItems(ctx context.Context, organisationID uuid.UUID, limit int) ([]domainprojects.ManualItemRow, error) {
+func (r *Repository) ListUnassignedManualItems(ctx context.Context, organisationID uuid.UUID, limit int) (portResult0 []domainprojects.ManualItemRow, portResult1 error) {
+	defer func() {
+		portResult1 = sqlkit.DomainError(portResult1)
+	}()
+
 	if limit <= 0 {
 		limit = 500
 	}
@@ -1578,7 +1758,11 @@ func scanManualItem(s rowScanner) (*domainprojects.ManualItemRow, error) {
 	return row, nil
 }
 
-func (r *Repository) ListProjectTimeline(ctx context.Context, userID, organisationID, projectID uuid.UUID, filter domainprojects.TimelineFilter) ([]domainprojects.TimelineItem, error) {
+func (r *Repository) ListProjectTimeline(ctx context.Context, userID, organisationID, projectID uuid.UUID, filter domainprojects.TimelineFilter) (portResult0 []domainprojects.TimelineItem, portResult1 error) {
+	defer func() {
+		portResult1 = sqlkit.DomainError(portResult1)
+	}()
+
 	limit := filter.Limit
 	if limit <= 0 {
 		limit = 100
@@ -1720,7 +1904,11 @@ func snippetText(s string, max int) string {
 	return string(runes[:max]) + "..."
 }
 
-func (r *Repository) CreateIssue(ctx context.Context, row domainissues.IssueRow) error {
+func (r *Repository) CreateIssue(ctx context.Context, row domainissues.IssueRow) (portResult0 error) {
+	defer func() {
+		portResult0 = sqlkit.DomainError(portResult0)
+	}()
+
 	_, err := r.execContext(ctx, `
 		INSERT INTO issues (id, organisation_id, project_id, title, current_position_note, status, assignee_user_id, assignee_contact_id, created_at, updated_at, resolved_at, discarded_at, source)
 		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
@@ -1728,7 +1916,11 @@ func (r *Repository) CreateIssue(ctx context.Context, row domainissues.IssueRow)
 	return err
 }
 
-func (r *Repository) GetIssue(ctx context.Context, organisationID, issueID uuid.UUID) (*domainissues.IssueRow, error) {
+func (r *Repository) GetIssue(ctx context.Context, organisationID, issueID uuid.UUID) (portResult0 *domainissues.IssueRow, portResult1 error) {
+	defer func() {
+		portResult1 = sqlkit.DomainError(portResult1)
+	}()
+
 	row := r.queryRowContext(ctx, `
 		SELECT id, organisation_id, project_id, title, current_position_note, status, assignee_user_id, assignee_contact_id, created_at, updated_at, resolved_at, discarded_at, source
 		FROM issues WHERE id = ? AND organisation_id = ?
@@ -1740,7 +1932,11 @@ func (r *Repository) GetIssue(ctx context.Context, organisationID, issueID uuid.
 	return item, err
 }
 
-func (r *Repository) ListIssuesByProject(ctx context.Context, organisationID, projectID uuid.UUID) ([]domainissues.IssueRow, error) {
+func (r *Repository) ListIssuesByProject(ctx context.Context, organisationID, projectID uuid.UUID) (portResult0 []domainissues.IssueRow, portResult1 error) {
+	defer func() {
+		portResult1 = sqlkit.DomainError(portResult1)
+	}()
+
 	rows, err := r.queryContext(ctx, `
 		SELECT id, organisation_id, project_id, title, current_position_note, status, assignee_user_id, assignee_contact_id, created_at, updated_at, resolved_at, discarded_at, source
 		FROM issues WHERE organisation_id = ? AND project_id = ?
@@ -1761,7 +1957,11 @@ func (r *Repository) ListIssuesByProject(ctx context.Context, organisationID, pr
 	return out, rows.Err()
 }
 
-func (r *Repository) UpdateIssue(ctx context.Context, row domainissues.IssueRow) error {
+func (r *Repository) UpdateIssue(ctx context.Context, row domainissues.IssueRow) (portResult0 error) {
+	defer func() {
+		portResult0 = sqlkit.DomainError(portResult0)
+	}()
+
 	res, err := r.execContext(ctx, `
 		UPDATE issues SET title = ?, current_position_note = ?, status = ?, assignee_user_id = ?, assignee_contact_id = ?, updated_at = ?, resolved_at = ?, discarded_at = ?, source = ?
 		WHERE id = ? AND organisation_id = ?
@@ -1776,7 +1976,11 @@ func (r *Repository) UpdateIssue(ctx context.Context, row domainissues.IssueRow)
 	return nil
 }
 
-func (r *Repository) AddIssueItem(ctx context.Context, row domainissues.IssueItemRow) error {
+func (r *Repository) AddIssueItem(ctx context.Context, row domainissues.IssueItemRow) (portResult0 error) {
+	defer func() {
+		portResult0 = sqlkit.DomainError(portResult0)
+	}()
+
 	_, err := r.execContext(ctx, `
 		INSERT INTO issue_items (id, issue_id, message_id, manual_item_id, added_at)
 		VALUES (?, ?, ?, ?, ?)
@@ -1784,7 +1988,11 @@ func (r *Repository) AddIssueItem(ctx context.Context, row domainissues.IssueIte
 	return err
 }
 
-func (r *Repository) RemoveIssueItem(ctx context.Context, organisationID, issueID, itemID uuid.UUID) error {
+func (r *Repository) RemoveIssueItem(ctx context.Context, organisationID, issueID, itemID uuid.UUID) (portResult0 error) {
+	defer func() {
+		portResult0 = sqlkit.DomainError(portResult0)
+	}()
+
 	res, err := r.execContext(ctx, `
 		DELETE FROM issue_items
 		WHERE id = ? AND issue_id = ? AND issue_id IN (SELECT id FROM issues WHERE organisation_id = ?)
@@ -1799,7 +2007,11 @@ func (r *Repository) RemoveIssueItem(ctx context.Context, organisationID, issueI
 	return nil
 }
 
-func (r *Repository) GetIssueItem(ctx context.Context, organisationID, itemID uuid.UUID) (*domainissues.IssueItemRow, error) {
+func (r *Repository) GetIssueItem(ctx context.Context, organisationID, itemID uuid.UUID) (portResult0 *domainissues.IssueItemRow, portResult1 error) {
+	defer func() {
+		portResult1 = sqlkit.DomainError(portResult1)
+	}()
+
 	row := r.queryRowContext(ctx, `
 		SELECT ii.id, ii.issue_id, ii.message_id, ii.manual_item_id, ii.added_at
 		FROM issue_items ii
@@ -1813,7 +2025,11 @@ func (r *Repository) GetIssueItem(ctx context.Context, organisationID, itemID uu
 	return item, err
 }
 
-func (r *Repository) ListIssueItems(ctx context.Context, issueID uuid.UUID) ([]domainissues.IssueItemRow, error) {
+func (r *Repository) ListIssueItems(ctx context.Context, issueID uuid.UUID) (portResult0 []domainissues.IssueItemRow, portResult1 error) {
+	defer func() {
+		portResult1 = sqlkit.DomainError(portResult1)
+	}()
+
 	rows, err := r.queryContext(ctx, `
 		SELECT id, issue_id, message_id, manual_item_id, added_at
 		FROM issue_items WHERE issue_id = ?
@@ -1834,7 +2050,11 @@ func (r *Repository) ListIssueItems(ctx context.Context, issueID uuid.UUID) ([]d
 	return out, rows.Err()
 }
 
-func (r *Repository) CountIssueItemsByProject(ctx context.Context, organisationID, projectID uuid.UUID) (map[uuid.UUID]int, error) {
+func (r *Repository) CountIssueItemsByProject(ctx context.Context, organisationID, projectID uuid.UUID) (portResult0 map[uuid.UUID]int, portResult1 error) {
+	defer func() {
+		portResult1 = sqlkit.DomainError(portResult1)
+	}()
+
 	rows, err := r.queryContext(ctx, `
 		SELECT ii.issue_id, COUNT(*)
 		FROM issue_items ii
@@ -1862,7 +2082,11 @@ func (r *Repository) CountIssueItemsByProject(ctx context.Context, organisationI
 	return out, rows.Err()
 }
 
-func (r *Repository) FindIssueIDByMessage(ctx context.Context, messageID uuid.UUID) (*uuid.UUID, error) {
+func (r *Repository) FindIssueIDByMessage(ctx context.Context, messageID uuid.UUID) (portResult0 *uuid.UUID, portResult1 error) {
+	defer func() {
+		portResult1 = sqlkit.DomainError(portResult1)
+	}()
+
 	var idStr string
 	err := r.queryRowContext(ctx, `SELECT issue_id FROM issue_items WHERE message_id = ?`, messageID.String()).Scan(&idStr)
 	if errors.Is(err, sql.ErrNoRows) {
@@ -1879,7 +2103,11 @@ func (r *Repository) FindIssueIDByMessage(ctx context.Context, messageID uuid.UU
 }
 
 // ListIssueLinksForMessages resolves the issue for many messages in one query.
-func (r *Repository) ListIssueLinksForMessages(ctx context.Context, organisationID uuid.UUID, messageIDs []uuid.UUID) (map[uuid.UUID]domainissues.IssueLink, error) {
+func (r *Repository) ListIssueLinksForMessages(ctx context.Context, organisationID uuid.UUID, messageIDs []uuid.UUID) (portResult0 map[uuid.UUID]domainissues.IssueLink, portResult1 error) {
+	defer func() {
+		portResult1 = sqlkit.DomainError(portResult1)
+	}()
+
 	out := make(map[uuid.UUID]domainissues.IssueLink, len(messageIDs))
 	if len(messageIDs) == 0 {
 		return out, nil
@@ -1926,7 +2154,11 @@ func (r *Repository) ListIssueLinksForMessages(ctx context.Context, organisation
 	return out, rows.Err()
 }
 
-func (r *Repository) FindIssueIDByManualItem(ctx context.Context, manualItemID uuid.UUID) (*uuid.UUID, error) {
+func (r *Repository) FindIssueIDByManualItem(ctx context.Context, manualItemID uuid.UUID) (portResult0 *uuid.UUID, portResult1 error) {
+	defer func() {
+		portResult1 = sqlkit.DomainError(portResult1)
+	}()
+
 	var idStr string
 	err := r.queryRowContext(ctx, `SELECT issue_id FROM issue_items WHERE manual_item_id = ?`, manualItemID.String()).Scan(&idStr)
 	if errors.Is(err, sql.ErrNoRows) {
@@ -1984,7 +2216,11 @@ func scanIssueItem(s rowScanner) (*domainissues.IssueItemRow, error) {
 	return row, nil
 }
 
-func (r *Repository) CreateFact(ctx context.Context, row domainfacts.FactRow) error {
+func (r *Repository) CreateFact(ctx context.Context, row domainfacts.FactRow) (portResult0 error) {
+	defer func() {
+		portResult0 = sqlkit.DomainError(portResult0)
+	}()
+
 	_, err := r.execContext(ctx, `
 		INSERT INTO facts (id, organisation_id, project_id, issue_id, subject_key, label, created_at, updated_at)
 		VALUES (?, ?, ?, ?, ?, ?, ?, ?)
@@ -1992,7 +2228,11 @@ func (r *Repository) CreateFact(ctx context.Context, row domainfacts.FactRow) er
 	return err
 }
 
-func (r *Repository) UpdateFact(ctx context.Context, row domainfacts.FactRow) error {
+func (r *Repository) UpdateFact(ctx context.Context, row domainfacts.FactRow) (portResult0 error) {
+	defer func() {
+		portResult0 = sqlkit.DomainError(portResult0)
+	}()
+
 	res, err := r.execContext(ctx, `
 		UPDATE facts SET issue_id = ?, label = ?, updated_at = ?
 		WHERE id = ? AND organisation_id = ?
@@ -2007,7 +2247,11 @@ func (r *Repository) UpdateFact(ctx context.Context, row domainfacts.FactRow) er
 	return nil
 }
 
-func (r *Repository) GetFact(ctx context.Context, organisationID, factID uuid.UUID) (*domainfacts.FactRow, error) {
+func (r *Repository) GetFact(ctx context.Context, organisationID, factID uuid.UUID) (portResult0 *domainfacts.FactRow, portResult1 error) {
+	defer func() {
+		portResult1 = sqlkit.DomainError(portResult1)
+	}()
+
 	row := r.queryRowContext(ctx, `
 		SELECT id, organisation_id, project_id, issue_id, subject_key, label, created_at, updated_at
 		FROM facts WHERE id = ? AND organisation_id = ?
@@ -2019,7 +2263,11 @@ func (r *Repository) GetFact(ctx context.Context, organisationID, factID uuid.UU
 	return out, err
 }
 
-func (r *Repository) GetFactBySubject(ctx context.Context, organisationID, projectID uuid.UUID, subjectKey string) (*domainfacts.FactRow, error) {
+func (r *Repository) GetFactBySubject(ctx context.Context, organisationID, projectID uuid.UUID, subjectKey string) (portResult0 *domainfacts.FactRow, portResult1 error) {
+	defer func() {
+		portResult1 = sqlkit.DomainError(portResult1)
+	}()
+
 	row := r.queryRowContext(ctx, `
 		SELECT id, organisation_id, project_id, issue_id, subject_key, label, created_at, updated_at
 		FROM facts WHERE organisation_id = ? AND project_id = ? AND subject_key = ?
@@ -2031,7 +2279,11 @@ func (r *Repository) GetFactBySubject(ctx context.Context, organisationID, proje
 	return out, err
 }
 
-func (r *Repository) ListFactsByProject(ctx context.Context, organisationID, projectID uuid.UUID) ([]domainfacts.FactRow, error) {
+func (r *Repository) ListFactsByProject(ctx context.Context, organisationID, projectID uuid.UUID) (portResult0 []domainfacts.FactRow, portResult1 error) {
+	defer func() {
+		portResult1 = sqlkit.DomainError(portResult1)
+	}()
+
 	rows, err := r.queryContext(ctx, `
 		SELECT id, organisation_id, project_id, issue_id, subject_key, label, created_at, updated_at
 		FROM facts WHERE organisation_id = ? AND project_id = ?
@@ -2052,7 +2304,11 @@ func (r *Repository) ListFactsByProject(ctx context.Context, organisationID, pro
 	return out, rows.Err()
 }
 
-func (r *Repository) CreateFactVersion(ctx context.Context, row domainfacts.FactVersionRow) error {
+func (r *Repository) CreateFactVersion(ctx context.Context, row domainfacts.FactVersionRow) (portResult0 error) {
+	defer func() {
+		portResult0 = sqlkit.DomainError(portResult0)
+	}()
+
 	return withSerializableWrite(ctx, func() error {
 		_, err := r.execContext(ctx, `
 			INSERT INTO fact_versions (
@@ -2065,7 +2321,11 @@ func (r *Repository) CreateFactVersion(ctx context.Context, row domainfacts.Fact
 	})
 }
 
-func (r *Repository) GetFactVersion(ctx context.Context, organisationID, versionID uuid.UUID) (*domainfacts.FactVersionRow, error) {
+func (r *Repository) GetFactVersion(ctx context.Context, organisationID, versionID uuid.UUID) (portResult0 *domainfacts.FactVersionRow, portResult1 error) {
+	defer func() {
+		portResult1 = sqlkit.DomainError(portResult1)
+	}()
+
 	row := r.queryRowContext(ctx, `
 		SELECT fv.id, fv.fact_id, fv.status, fv.value_json, fv.value_text, fv.unit, fv.source, fv.confidence, fv.interpretation_id,
 			fv.supersedes_version_id, fv.superseded_by_version_id, fv.superseded_at, fv.created_by_user_id, fv.created_at, fv.activated_at
@@ -2080,7 +2340,11 @@ func (r *Repository) GetFactVersion(ctx context.Context, organisationID, version
 	return out, err
 }
 
-func (r *Repository) ListFactVersions(ctx context.Context, factID uuid.UUID) ([]domainfacts.FactVersionRow, error) {
+func (r *Repository) ListFactVersions(ctx context.Context, factID uuid.UUID) (portResult0 []domainfacts.FactVersionRow, portResult1 error) {
+	defer func() {
+		portResult1 = sqlkit.DomainError(portResult1)
+	}()
+
 	rows, err := r.queryContext(ctx, `
 		SELECT id, fact_id, status, value_json, value_text, unit, source, confidence, interpretation_id,
 			supersedes_version_id, superseded_by_version_id, superseded_at, created_by_user_id, created_at, activated_at
@@ -2102,7 +2366,11 @@ func (r *Repository) ListFactVersions(ctx context.Context, factID uuid.UUID) ([]
 	return out, rows.Err()
 }
 
-func (r *Repository) GetActiveFactVersion(ctx context.Context, factID uuid.UUID) (*domainfacts.FactVersionRow, error) {
+func (r *Repository) GetActiveFactVersion(ctx context.Context, factID uuid.UUID) (portResult0 *domainfacts.FactVersionRow, portResult1 error) {
+	defer func() {
+		portResult1 = sqlkit.DomainError(portResult1)
+	}()
+
 	row := r.queryRowContext(ctx, `
 		SELECT id, fact_id, status, value_json, value_text, unit, source, confidence, interpretation_id,
 			supersedes_version_id, superseded_by_version_id, superseded_at, created_by_user_id, created_at, activated_at
@@ -2115,7 +2383,11 @@ func (r *Repository) GetActiveFactVersion(ctx context.Context, factID uuid.UUID)
 	return out, err
 }
 
-func (r *Repository) UpdateFactVersion(ctx context.Context, row domainfacts.FactVersionRow) error {
+func (r *Repository) UpdateFactVersion(ctx context.Context, row domainfacts.FactVersionRow) (portResult0 error) {
+	defer func() {
+		portResult0 = sqlkit.DomainError(portResult0)
+	}()
+
 	return withSerializableWrite(ctx, func() error {
 		res, err := r.execContext(ctx, `
 			UPDATE fact_versions SET status = ?, value_json = ?, value_text = ?, unit = ?, source = ?, confidence = ?,
@@ -2143,7 +2415,11 @@ func withSerializableWrite(ctx context.Context, fn func() error) error {
 	return err
 }
 
-func (r *Repository) AddFactEvidence(ctx context.Context, row domainfacts.FactEvidenceRow) error {
+func (r *Repository) AddFactEvidence(ctx context.Context, row domainfacts.FactEvidenceRow) (portResult0 error) {
+	defer func() {
+		portResult0 = sqlkit.DomainError(portResult0)
+	}()
+
 	_, err := r.execContext(ctx, `
 		INSERT INTO fact_evidence (id, fact_version_id, message_id, manual_item_id, added_at)
 		VALUES (?, ?, ?, ?, ?)
@@ -2151,7 +2427,11 @@ func (r *Repository) AddFactEvidence(ctx context.Context, row domainfacts.FactEv
 	return err
 }
 
-func (r *Repository) RemoveFactEvidence(ctx context.Context, organisationID, versionID, evidenceID uuid.UUID) error {
+func (r *Repository) RemoveFactEvidence(ctx context.Context, organisationID, versionID, evidenceID uuid.UUID) (portResult0 error) {
+	defer func() {
+		portResult0 = sqlkit.DomainError(portResult0)
+	}()
+
 	res, err := r.execContext(ctx, `
 		DELETE FROM fact_evidence
 		WHERE id = ? AND fact_version_id = ?
@@ -2171,7 +2451,11 @@ func (r *Repository) RemoveFactEvidence(ctx context.Context, organisationID, ver
 	return nil
 }
 
-func (r *Repository) ListFactEvidence(ctx context.Context, versionID uuid.UUID) ([]domainfacts.FactEvidenceRow, error) {
+func (r *Repository) ListFactEvidence(ctx context.Context, versionID uuid.UUID) (portResult0 []domainfacts.FactEvidenceRow, portResult1 error) {
+	defer func() {
+		portResult1 = sqlkit.DomainError(portResult1)
+	}()
+
 	rows, err := r.queryContext(ctx, `
 		SELECT id, fact_version_id, message_id, manual_item_id, added_at
 		FROM fact_evidence WHERE fact_version_id = ?
@@ -2184,7 +2468,11 @@ func (r *Repository) ListFactEvidence(ctx context.Context, versionID uuid.UUID) 
 	return scanFactEvidenceRows(rows)
 }
 
-func (r *Repository) ListFactEvidenceForFact(ctx context.Context, factID uuid.UUID) ([]domainfacts.FactEvidenceRow, error) {
+func (r *Repository) ListFactEvidenceForFact(ctx context.Context, factID uuid.UUID) (portResult0 []domainfacts.FactEvidenceRow, portResult1 error) {
+	defer func() {
+		portResult1 = sqlkit.DomainError(portResult1)
+	}()
+
 	rows, err := r.queryContext(ctx, `
 		SELECT fe.id, fe.fact_version_id, fe.message_id, fe.manual_item_id, fe.added_at
 		FROM fact_evidence fe
@@ -2265,7 +2553,11 @@ func scanFactEvidenceRow(s rowScanner) (*domainfacts.FactEvidenceRow, error) {
 	return row, nil
 }
 
-func (r *Repository) CreateInterpretation(ctx context.Context, row domaininterpretations.InterpretationRow) error {
+func (r *Repository) CreateInterpretation(ctx context.Context, row domaininterpretations.InterpretationRow) (portResult0 error) {
+	defer func() {
+		portResult0 = sqlkit.DomainError(portResult0)
+	}()
+
 	_, err := r.execContext(ctx, `
 		INSERT INTO interpretations (id, organisation_id, project_id, account_id, run_id, status, payload_json, confidence, reason, created_at, updated_at)
 		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
@@ -2273,7 +2565,11 @@ func (r *Repository) CreateInterpretation(ctx context.Context, row domaininterpr
 	return err
 }
 
-func (r *Repository) AddInterpretationSource(ctx context.Context, row domaininterpretations.InterpretationSourceRow) error {
+func (r *Repository) AddInterpretationSource(ctx context.Context, row domaininterpretations.InterpretationSourceRow) (portResult0 error) {
+	defer func() {
+		portResult0 = sqlkit.DomainError(portResult0)
+	}()
+
 	_, err := r.execContext(ctx, `
 		INSERT INTO interpretation_sources (id, interpretation_id, message_id, manual_item_id, connector_message_id)
 		VALUES (?, ?, ?, ?, ?)
@@ -2281,7 +2577,11 @@ func (r *Repository) AddInterpretationSource(ctx context.Context, row domaininte
 	return err
 }
 
-func (r *Repository) GetInterpretation(ctx context.Context, organisationID, id uuid.UUID) (*domaininterpretations.InterpretationRow, error) {
+func (r *Repository) GetInterpretation(ctx context.Context, organisationID, id uuid.UUID) (portResult0 *domaininterpretations.InterpretationRow, portResult1 error) {
+	defer func() {
+		portResult1 = sqlkit.DomainError(portResult1)
+	}()
+
 	row := r.queryRowContext(ctx, `
 		SELECT id, organisation_id, project_id, account_id, run_id, status, payload_json, confidence, reason, created_at, updated_at
 		FROM interpretations WHERE id = ? AND organisation_id = ?
@@ -2293,7 +2593,11 @@ func (r *Repository) GetInterpretation(ctx context.Context, organisationID, id u
 	return item, err
 }
 
-func (r *Repository) ListPendingInterpretations(ctx context.Context, organisationID, projectID uuid.UUID) ([]domaininterpretations.InterpretationRow, error) {
+func (r *Repository) ListPendingInterpretations(ctx context.Context, organisationID, projectID uuid.UUID) (portResult0 []domaininterpretations.InterpretationRow, portResult1 error) {
+	defer func() {
+		portResult1 = sqlkit.DomainError(portResult1)
+	}()
+
 	rows, err := r.queryContext(ctx, `
 		SELECT id, organisation_id, project_id, account_id, run_id, status, payload_json, confidence, reason, created_at, updated_at
 		FROM interpretations
@@ -2315,7 +2619,11 @@ func (r *Repository) ListPendingInterpretations(ctx context.Context, organisatio
 	return out, rows.Err()
 }
 
-func (r *Repository) UpdateInterpretationStatus(ctx context.Context, organisationID, id uuid.UUID, status string, updatedAt time.Time) error {
+func (r *Repository) UpdateInterpretationStatus(ctx context.Context, organisationID, id uuid.UUID, status string, updatedAt time.Time) (portResult0 error) {
+	defer func() {
+		portResult0 = sqlkit.DomainError(portResult0)
+	}()
+
 	res, err := r.execContext(ctx, `
 		UPDATE interpretations SET status = ?, updated_at = ?
 		WHERE id = ? AND organisation_id = ?
@@ -2330,7 +2638,11 @@ func (r *Repository) UpdateInterpretationStatus(ctx context.Context, organisatio
 	return nil
 }
 
-func (r *Repository) ListInterpretationSources(ctx context.Context, interpretationID uuid.UUID) ([]domaininterpretations.InterpretationSourceRow, error) {
+func (r *Repository) ListInterpretationSources(ctx context.Context, interpretationID uuid.UUID) (portResult0 []domaininterpretations.InterpretationSourceRow, portResult1 error) {
+	defer func() {
+		portResult1 = sqlkit.DomainError(portResult1)
+	}()
+
 	rows, err := r.queryContext(ctx, `
 		SELECT id, interpretation_id, message_id, manual_item_id, connector_message_id
 		FROM interpretation_sources WHERE interpretation_id = ?
@@ -2386,7 +2698,11 @@ func scanInterpretationSource(s rowScanner) (*domaininterpretations.Interpretati
 	return row, nil
 }
 
-func (r *Repository) CreateContradiction(ctx context.Context, row domaincontradictions.ContradictionRow) error {
+func (r *Repository) CreateContradiction(ctx context.Context, row domaincontradictions.ContradictionRow) (portResult0 error) {
+	defer func() {
+		portResult0 = sqlkit.DomainError(portResult0)
+	}()
+
 	_, err := r.execContext(ctx, `
 		INSERT INTO contradictions (id, organisation_id, project_id, status, summary, resolution_note, resolved_at, resolved_by_user_id, created_at, updated_at)
 		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
@@ -2394,7 +2710,11 @@ func (r *Repository) CreateContradiction(ctx context.Context, row domaincontradi
 	return err
 }
 
-func (r *Repository) AddContradictionSide(ctx context.Context, row domaincontradictions.ContradictionSideRow) error {
+func (r *Repository) AddContradictionSide(ctx context.Context, row domaincontradictions.ContradictionSideRow) (portResult0 error) {
+	defer func() {
+		portResult0 = sqlkit.DomainError(portResult0)
+	}()
+
 	_, err := r.execContext(ctx, `
 		INSERT INTO contradiction_sides (id, contradiction_id, fact_version_id, decision_id)
 		VALUES (?, ?, ?, ?)
@@ -2402,7 +2722,11 @@ func (r *Repository) AddContradictionSide(ctx context.Context, row domaincontrad
 	return err
 }
 
-func (r *Repository) GetContradiction(ctx context.Context, organisationID, id uuid.UUID) (*domaincontradictions.ContradictionRow, error) {
+func (r *Repository) GetContradiction(ctx context.Context, organisationID, id uuid.UUID) (portResult0 *domaincontradictions.ContradictionRow, portResult1 error) {
+	defer func() {
+		portResult1 = sqlkit.DomainError(portResult1)
+	}()
+
 	row := r.queryRowContext(ctx, `
 		SELECT id, organisation_id, project_id, status, summary, resolution_note, resolved_at, resolved_by_user_id, created_at, updated_at
 		FROM contradictions WHERE id = ? AND organisation_id = ?
@@ -2414,7 +2738,11 @@ func (r *Repository) GetContradiction(ctx context.Context, organisationID, id uu
 	return item, err
 }
 
-func (r *Repository) ListContradictionsByProject(ctx context.Context, organisationID, projectID uuid.UUID, status string) ([]domaincontradictions.ContradictionRow, error) {
+func (r *Repository) ListContradictionsByProject(ctx context.Context, organisationID, projectID uuid.UUID, status string) (portResult0 []domaincontradictions.ContradictionRow, portResult1 error) {
+	defer func() {
+		portResult1 = sqlkit.DomainError(portResult1)
+	}()
+
 	q := `
 		SELECT id, organisation_id, project_id, status, summary, resolution_note, resolved_at, resolved_by_user_id, created_at, updated_at
 		FROM contradictions WHERE organisation_id = ? AND project_id = ?`
@@ -2440,7 +2768,11 @@ func (r *Repository) ListContradictionsByProject(ctx context.Context, organisati
 	return out, rows.Err()
 }
 
-func (r *Repository) UpdateContradiction(ctx context.Context, row domaincontradictions.ContradictionRow) error {
+func (r *Repository) UpdateContradiction(ctx context.Context, row domaincontradictions.ContradictionRow) (portResult0 error) {
+	defer func() {
+		portResult0 = sqlkit.DomainError(portResult0)
+	}()
+
 	res, err := r.execContext(ctx, `
 		UPDATE contradictions SET status = ?, summary = ?, resolution_note = ?, resolved_at = ?, resolved_by_user_id = ?, updated_at = ?
 		WHERE id = ? AND organisation_id = ?
@@ -2455,7 +2787,11 @@ func (r *Repository) UpdateContradiction(ctx context.Context, row domaincontradi
 	return nil
 }
 
-func (r *Repository) ListContradictionSides(ctx context.Context, contradictionID uuid.UUID) ([]domaincontradictions.ContradictionSideRow, error) {
+func (r *Repository) ListContradictionSides(ctx context.Context, contradictionID uuid.UUID) (portResult0 []domaincontradictions.ContradictionSideRow, portResult1 error) {
+	defer func() {
+		portResult1 = sqlkit.DomainError(portResult1)
+	}()
+
 	rows, err := r.queryContext(ctx, `
 		SELECT id, contradiction_id, fact_version_id, decision_id
 		FROM contradiction_sides WHERE contradiction_id = ?
@@ -2505,7 +2841,11 @@ func scanContradictionSide(s rowScanner) (*domaincontradictions.ContradictionSid
 	return row, nil
 }
 
-func (r *Repository) CreateDecision(ctx context.Context, row domaindecisions.DecisionRow) error {
+func (r *Repository) CreateDecision(ctx context.Context, row domaindecisions.DecisionRow) (portResult0 error) {
+	defer func() {
+		portResult0 = sqlkit.DomainError(portResult0)
+	}()
+
 	_, err := r.execContext(ctx, `
 		INSERT INTO decisions (
 			id, organisation_id, project_id, issue_id, statement, status, decided_at, assignee_user_id, assignee_contact_id,
@@ -2515,7 +2855,11 @@ func (r *Repository) CreateDecision(ctx context.Context, row domaindecisions.Dec
 	return err
 }
 
-func (r *Repository) GetDecision(ctx context.Context, organisationID, id uuid.UUID) (*domaindecisions.DecisionRow, error) {
+func (r *Repository) GetDecision(ctx context.Context, organisationID, id uuid.UUID) (portResult0 *domaindecisions.DecisionRow, portResult1 error) {
+	defer func() {
+		portResult1 = sqlkit.DomainError(portResult1)
+	}()
+
 	row := r.queryRowContext(ctx, `
 		SELECT id, organisation_id, project_id, issue_id, statement, status, decided_at, assignee_user_id, assignee_contact_id,
 			source, confidence, supersedes_decision_id, created_by_user_id, created_at, updated_at
@@ -2528,7 +2872,11 @@ func (r *Repository) GetDecision(ctx context.Context, organisationID, id uuid.UU
 	return item, err
 }
 
-func (r *Repository) ListDecisionsByProject(ctx context.Context, organisationID, projectID uuid.UUID, status string) ([]domaindecisions.DecisionRow, error) {
+func (r *Repository) ListDecisionsByProject(ctx context.Context, organisationID, projectID uuid.UUID, status string) (portResult0 []domaindecisions.DecisionRow, portResult1 error) {
+	defer func() {
+		portResult1 = sqlkit.DomainError(portResult1)
+	}()
+
 	q := `
 		SELECT id, organisation_id, project_id, issue_id, statement, status, decided_at, assignee_user_id, assignee_contact_id,
 			source, confidence, supersedes_decision_id, created_by_user_id, created_at, updated_at
@@ -2555,7 +2903,11 @@ func (r *Repository) ListDecisionsByProject(ctx context.Context, organisationID,
 	return out, rows.Err()
 }
 
-func (r *Repository) UpdateDecision(ctx context.Context, row domaindecisions.DecisionRow) error {
+func (r *Repository) UpdateDecision(ctx context.Context, row domaindecisions.DecisionRow) (portResult0 error) {
+	defer func() {
+		portResult0 = sqlkit.DomainError(portResult0)
+	}()
+
 	res, err := r.execContext(ctx, `
 		UPDATE decisions SET issue_id = ?, statement = ?, status = ?, decided_at = ?, assignee_user_id = ?, assignee_contact_id = ?,
 			source = ?, confidence = ?, supersedes_decision_id = ?, created_by_user_id = ?, updated_at = ?
@@ -2571,7 +2923,11 @@ func (r *Repository) UpdateDecision(ctx context.Context, row domaindecisions.Dec
 	return nil
 }
 
-func (r *Repository) AddDecisionEvidence(ctx context.Context, row domaindecisions.DecisionEvidenceRow) error {
+func (r *Repository) AddDecisionEvidence(ctx context.Context, row domaindecisions.DecisionEvidenceRow) (portResult0 error) {
+	defer func() {
+		portResult0 = sqlkit.DomainError(portResult0)
+	}()
+
 	_, err := r.execContext(ctx, `
 		INSERT INTO decision_evidence (id, decision_id, message_id, manual_item_id, added_at)
 		VALUES (?, ?, ?, ?, ?)
@@ -2579,7 +2935,11 @@ func (r *Repository) AddDecisionEvidence(ctx context.Context, row domaindecision
 	return err
 }
 
-func (r *Repository) RemoveDecisionEvidence(ctx context.Context, organisationID, decisionID, evidenceID uuid.UUID) error {
+func (r *Repository) RemoveDecisionEvidence(ctx context.Context, organisationID, decisionID, evidenceID uuid.UUID) (portResult0 error) {
+	defer func() {
+		portResult0 = sqlkit.DomainError(portResult0)
+	}()
+
 	res, err := r.execContext(ctx, `
 		DELETE FROM decision_evidence
 		WHERE id = ? AND decision_id = ? AND decision_id IN (SELECT id FROM decisions WHERE organisation_id = ?)
@@ -2594,7 +2954,11 @@ func (r *Repository) RemoveDecisionEvidence(ctx context.Context, organisationID,
 	return nil
 }
 
-func (r *Repository) ListDecisionEvidence(ctx context.Context, decisionID uuid.UUID) ([]domaindecisions.DecisionEvidenceRow, error) {
+func (r *Repository) ListDecisionEvidence(ctx context.Context, decisionID uuid.UUID) (portResult0 []domaindecisions.DecisionEvidenceRow, portResult1 error) {
+	defer func() {
+		portResult1 = sqlkit.DomainError(portResult1)
+	}()
+
 	rows, err := r.queryContext(ctx, `
 		SELECT id, decision_id, message_id, manual_item_id, added_at
 		FROM decision_evidence WHERE decision_id = ?
@@ -2655,7 +3019,11 @@ func scanDecisionEvidence(s rowScanner) (*domaindecisions.DecisionEvidenceRow, e
 	return row, nil
 }
 
-func (r *Repository) InsertConnectorAccount(ctx context.Context, row domainconnectors.ConnectorAccountRow, tokenCiphertext []byte) error {
+func (r *Repository) InsertConnectorAccount(ctx context.Context, row domainconnectors.ConnectorAccountRow, tokenCiphertext []byte) (portResult0 error) {
+	defer func() {
+		portResult0 = sqlkit.DomainError(portResult0)
+	}()
+
 	scopes, _ := json.Marshal(row.Scopes)
 	if row.Scopes == nil {
 		scopes = []byte("[]")
@@ -2669,7 +3037,11 @@ func (r *Repository) InsertConnectorAccount(ctx context.Context, row domainconne
 	return err
 }
 
-func (r *Repository) GetConnectorAccount(ctx context.Context, userID, id uuid.UUID) (*domainconnectors.ConnectorAccountRow, error) {
+func (r *Repository) GetConnectorAccount(ctx context.Context, userID, id uuid.UUID) (portResult0 *domainconnectors.ConnectorAccountRow, portResult1 error) {
+	defer func() {
+		portResult1 = sqlkit.DomainError(portResult1)
+	}()
+
 	row := r.queryRowContext(ctx, `
 		SELECT id, user_id, provider, label, external_tenant_id, connection_status, last_error, scopes_json, last_synced_at, created_at, updated_at
 		FROM connector_accounts WHERE id = ? AND user_id = ?
@@ -2681,7 +3053,11 @@ func (r *Repository) GetConnectorAccount(ctx context.Context, userID, id uuid.UU
 	return item, err
 }
 
-func (r *Repository) ListConnectorAccounts(ctx context.Context, userID uuid.UUID) ([]domainconnectors.ConnectorAccountRow, error) {
+func (r *Repository) ListConnectorAccounts(ctx context.Context, userID uuid.UUID) (portResult0 []domainconnectors.ConnectorAccountRow, portResult1 error) {
+	defer func() {
+		portResult1 = sqlkit.DomainError(portResult1)
+	}()
+
 	rows, err := r.queryContext(ctx, `
 		SELECT id, user_id, provider, label, external_tenant_id, connection_status, last_error, scopes_json, last_synced_at, created_at, updated_at
 		FROM connector_accounts WHERE user_id = ? ORDER BY created_at ASC
@@ -2701,12 +3077,20 @@ func (r *Repository) ListConnectorAccounts(ctx context.Context, userID uuid.UUID
 	return out, rows.Err()
 }
 
-func (r *Repository) DeleteConnectorAccount(ctx context.Context, userID, id uuid.UUID) error {
+func (r *Repository) DeleteConnectorAccount(ctx context.Context, userID, id uuid.UUID) (portResult0 error) {
+	defer func() {
+		portResult0 = sqlkit.DomainError(portResult0)
+	}()
+
 	_, err := r.execContext(ctx, `DELETE FROM connector_accounts WHERE id = ? AND user_id = ?`, id.String(), userID.String())
 	return err
 }
 
-func (r *Repository) GetConnectorTokenCipher(ctx context.Context, userID, id uuid.UUID) ([]byte, error) {
+func (r *Repository) GetConnectorTokenCipher(ctx context.Context, userID, id uuid.UUID) (portResult0 []byte, portResult1 error) {
+	defer func() {
+		portResult1 = sqlkit.DomainError(portResult1)
+	}()
+
 	var cipher []byte
 	err := r.queryRowContext(ctx, `SELECT token_ciphertext FROM connector_accounts WHERE id = ? AND user_id = ?`, id.String(), userID.String()).Scan(&cipher)
 	if errors.Is(err, sql.ErrNoRows) {
@@ -2718,7 +3102,11 @@ func (r *Repository) GetConnectorTokenCipher(ctx context.Context, userID, id uui
 	return append([]byte(nil), cipher...), nil
 }
 
-func (r *Repository) UpdateConnectorToken(ctx context.Context, userID, id uuid.UUID, tokenCiphertext []byte, scopes []string, status string, lastError *string, lastSyncedAt *time.Time) error {
+func (r *Repository) UpdateConnectorToken(ctx context.Context, userID, id uuid.UUID, tokenCiphertext []byte, scopes []string, status string, lastError *string, lastSyncedAt *time.Time) (portResult0 error) {
+	defer func() {
+		portResult0 = sqlkit.DomainError(portResult0)
+	}()
+
 	scopesJSON, _ := json.Marshal(scopes)
 	if scopes == nil {
 		scopesJSON = []byte("[]")
@@ -2731,7 +3119,11 @@ func (r *Repository) UpdateConnectorToken(ctx context.Context, userID, id uuid.U
 	return err
 }
 
-func (r *Repository) CreateConnectorBinding(ctx context.Context, row domainconnectors.ConnectorBindingRow) error {
+func (r *Repository) CreateConnectorBinding(ctx context.Context, row domainconnectors.ConnectorBindingRow) (portResult0 error) {
+	defer func() {
+		portResult0 = sqlkit.DomainError(portResult0)
+	}()
+
 	_, err := r.execContext(ctx, `
 		INSERT INTO connector_bindings (
 			id, connector_account_id, organisation_id, external_channel_id, project_id, label, sync_cursor, created_at, updated_at
@@ -2741,7 +3133,11 @@ func (r *Repository) CreateConnectorBinding(ctx context.Context, row domainconne
 	return err
 }
 
-func (r *Repository) GetConnectorBinding(ctx context.Context, userID, id uuid.UUID) (*domainconnectors.ConnectorBindingRow, error) {
+func (r *Repository) GetConnectorBinding(ctx context.Context, userID, id uuid.UUID) (portResult0 *domainconnectors.ConnectorBindingRow, portResult1 error) {
+	defer func() {
+		portResult1 = sqlkit.DomainError(portResult1)
+	}()
+
 	row := r.queryRowContext(ctx, `
 		SELECT b.id, b.connector_account_id, b.organisation_id, b.external_channel_id, b.project_id, b.label, b.sync_cursor, b.created_at, b.updated_at
 		FROM connector_bindings b
@@ -2755,7 +3151,11 @@ func (r *Repository) GetConnectorBinding(ctx context.Context, userID, id uuid.UU
 	return item, err
 }
 
-func (r *Repository) ListConnectorBindings(ctx context.Context, userID, connectorAccountID uuid.UUID) ([]domainconnectors.ConnectorBindingRow, error) {
+func (r *Repository) ListConnectorBindings(ctx context.Context, userID, connectorAccountID uuid.UUID) (portResult0 []domainconnectors.ConnectorBindingRow, portResult1 error) {
+	defer func() {
+		portResult1 = sqlkit.DomainError(portResult1)
+	}()
+
 	rows, err := r.queryContext(ctx, `
 		SELECT b.id, b.connector_account_id, b.organisation_id, b.external_channel_id, b.project_id, b.label, b.sync_cursor, b.created_at, b.updated_at
 		FROM connector_bindings b
@@ -2778,7 +3178,11 @@ func (r *Repository) ListConnectorBindings(ctx context.Context, userID, connecto
 	return out, rows.Err()
 }
 
-func (r *Repository) DeleteConnectorBinding(ctx context.Context, userID, id uuid.UUID) error {
+func (r *Repository) DeleteConnectorBinding(ctx context.Context, userID, id uuid.UUID) (portResult0 error) {
+	defer func() {
+		portResult0 = sqlkit.DomainError(portResult0)
+	}()
+
 	_, err := r.execContext(ctx, `
 		DELETE FROM connector_bindings
 		WHERE id = ? AND connector_account_id IN (
@@ -2788,7 +3192,11 @@ func (r *Repository) DeleteConnectorBinding(ctx context.Context, userID, id uuid
 	return err
 }
 
-func (r *Repository) UpdateConnectorBindingCursor(ctx context.Context, userID, id uuid.UUID, cursor *string, updatedAt time.Time) error {
+func (r *Repository) UpdateConnectorBindingCursor(ctx context.Context, userID, id uuid.UUID, cursor *string, updatedAt time.Time) (portResult0 error) {
+	defer func() {
+		portResult0 = sqlkit.DomainError(portResult0)
+	}()
+
 	_, err := r.execContext(ctx, `
 		UPDATE connector_bindings
 		SET sync_cursor = ?, updated_at = ?
@@ -2799,7 +3207,11 @@ func (r *Repository) UpdateConnectorBindingCursor(ctx context.Context, userID, i
 	return err
 }
 
-func (r *Repository) UpsertConnectorMessage(ctx context.Context, row domainconnectors.ConnectorMessageRow) error {
+func (r *Repository) UpsertConnectorMessage(ctx context.Context, row domainconnectors.ConnectorMessageRow) (portResult0 error) {
+	defer func() {
+		portResult0 = sqlkit.DomainError(portResult0)
+	}()
+
 	metaJSON := row.MetaJSON
 	if metaJSON == "" {
 		metaJSON = "{}"
@@ -2823,7 +3235,11 @@ func (r *Repository) UpsertConnectorMessage(ctx context.Context, row domainconne
 	return err
 }
 
-func (r *Repository) ListConnectorMessagesForProject(ctx context.Context, userID, organisationID, projectID uuid.UUID) ([]domainconnectors.ConnectorMessageRow, error) {
+func (r *Repository) ListConnectorMessagesForProject(ctx context.Context, userID, organisationID, projectID uuid.UUID) (portResult0 []domainconnectors.ConnectorMessageRow, portResult1 error) {
+	defer func() {
+		portResult1 = sqlkit.DomainError(portResult1)
+	}()
+
 	rows, err := r.queryContext(ctx, `
 		SELECT m.id, m.connector_account_id, m.organisation_id, m.project_id, m.provider_event_id, m.external_channel_id,
 			m.title, m.body_text, m.author_label, m.occurred_at, m.meta_json, m.created_at, m.updated_at
@@ -2847,7 +3263,11 @@ func (r *Repository) ListConnectorMessagesForProject(ctx context.Context, userID
 	return out, rows.Err()
 }
 
-func (r *Repository) GetConnectorMessage(ctx context.Context, userID, id uuid.UUID) (*domainconnectors.ConnectorMessageRow, error) {
+func (r *Repository) GetConnectorMessage(ctx context.Context, userID, id uuid.UUID) (portResult0 *domainconnectors.ConnectorMessageRow, portResult1 error) {
+	defer func() {
+		portResult1 = sqlkit.DomainError(portResult1)
+	}()
+
 	row := r.queryRowContext(ctx, `
 		SELECT m.id, m.connector_account_id, m.organisation_id, m.project_id, m.provider_event_id, m.external_channel_id,
 			m.title, m.body_text, m.author_label, m.occurred_at, m.meta_json, m.created_at, m.updated_at

@@ -7,7 +7,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/Kapital-B/automata/svc/internal/application/joblistcursor"
+	"github.com/Kapital-B/automata/svc/internal/adapters/outbound/joblistcursor"
 	domainjobs "github.com/Kapital-B/automata/svc/internal/domain/jobs"
 	"github.com/aws/aws-sdk-go-v2/feature/dynamodb/attributevalue"
 	"github.com/aws/aws-sdk-go-v2/service/dynamodb"

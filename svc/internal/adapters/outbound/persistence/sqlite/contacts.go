@@ -8,13 +8,18 @@ import (
 	"strings"
 	"time"
 
+	sqlkit "github.com/Kapital-B/automata/svc/internal/adapters/outbound/persistence/sqlkit"
 	"github.com/Kapital-B/automata/svc/internal/domain/contacts"
 	domaincontacts "github.com/Kapital-B/automata/svc/internal/domain/contacts"
 	domainorganisations "github.com/Kapital-B/automata/svc/internal/domain/organisations"
 	"github.com/google/uuid"
 )
 
-func (r *Repository) GetOrganisation(ctx context.Context, id uuid.UUID) (*domainorganisations.OrganisationRow, error) {
+func (r *Repository) GetOrganisation(ctx context.Context, id uuid.UUID) (portResult0 *domainorganisations.OrganisationRow, portResult1 error) {
+	defer func() {
+		portResult1 = sqlkit.DomainError(portResult1)
+	}()
+
 	var name, createdAt, updatedAt string
 	err := r.db.QueryRowContext(ctx, `
 		SELECT name, created_at, updated_at FROM organisations WHERE id = ?
@@ -36,7 +41,11 @@ func (r *Repository) GetOrganisation(ctx context.Context, id uuid.UUID) (*domain
 	return &domainorganisations.OrganisationRow{ID: id, Name: name, CreatedAt: cat, UpdatedAt: uat}, nil
 }
 
-func (r *Repository) ListContacts(ctx context.Context, organisationID uuid.UUID, filter domaincontacts.ContactListFilter) ([]domaincontacts.ContactRow, error) {
+func (r *Repository) ListContacts(ctx context.Context, organisationID uuid.UUID, filter domaincontacts.ContactListFilter) (portResult0 []domaincontacts.ContactRow, portResult1 error) {
+	defer func() {
+		portResult1 = sqlkit.DomainError(portResult1)
+	}()
+
 	limit := filter.Limit
 	if limit <= 0 {
 		limit = 50
@@ -135,7 +144,11 @@ func (r *Repository) attachPrimaryEmails(ctx context.Context, contacts []domainc
 	return rows.Err()
 }
 
-func (r *Repository) GetContact(ctx context.Context, organisationID, contactID uuid.UUID) (*domaincontacts.ContactRow, error) {
+func (r *Repository) GetContact(ctx context.Context, organisationID, contactID uuid.UUID) (portResult0 *domaincontacts.ContactRow, portResult1 error) {
+	defer func() {
+		portResult1 = sqlkit.DomainError(portResult1)
+	}()
+
 	row := r.db.QueryRowContext(ctx, `
 		SELECT id, organisation_id, display_name, company, merged_into_contact_id, created_at, updated_at
 		FROM contacts
@@ -151,7 +164,11 @@ func (r *Repository) GetContact(ctx context.Context, organisationID, contactID u
 	return c, nil
 }
 
-func (r *Repository) CreateContact(ctx context.Context, row domaincontacts.ContactRow) error {
+func (r *Repository) CreateContact(ctx context.Context, row domaincontacts.ContactRow) (portResult0 error) {
+	defer func() {
+		portResult0 = sqlkit.DomainError(portResult0)
+	}()
+
 	_, err := r.db.ExecContext(ctx, `
 		INSERT INTO contacts (id, organisation_id, display_name, company, merged_into_contact_id, created_at, updated_at)
 		VALUES (?, ?, ?, ?, NULL, ?, ?)
@@ -160,7 +177,11 @@ func (r *Repository) CreateContact(ctx context.Context, row domaincontacts.Conta
 	return err
 }
 
-func (r *Repository) UpdateContactDisplayNameIfEmpty(ctx context.Context, organisationID, contactID uuid.UUID, displayName string, at time.Time) error {
+func (r *Repository) UpdateContactDisplayNameIfEmpty(ctx context.Context, organisationID, contactID uuid.UUID, displayName string, at time.Time) (portResult0 error) {
+	defer func() {
+		portResult0 = sqlkit.DomainError(portResult0)
+	}()
+
 	name := strings.TrimSpace(displayName)
 	if name == "" {
 		return nil
@@ -173,7 +194,11 @@ func (r *Repository) UpdateContactDisplayNameIfEmpty(ctx context.Context, organi
 	return err
 }
 
-func (r *Repository) ListIdentities(ctx context.Context, organisationID, contactID uuid.UUID) ([]domaincontacts.ContactIdentityRow, error) {
+func (r *Repository) ListIdentities(ctx context.Context, organisationID, contactID uuid.UUID) (portResult0 []domaincontacts.ContactIdentityRow, portResult1 error) {
+	defer func() {
+		portResult1 = sqlkit.DomainError(portResult1)
+	}()
+
 	rows, err := r.db.QueryContext(ctx, `
 		SELECT id, organisation_id, contact_id, kind, value_normalized, value_raw, created_at
 		FROM contact_identities
@@ -195,7 +220,11 @@ func (r *Repository) ListIdentities(ctx context.Context, organisationID, contact
 	return out, rows.Err()
 }
 
-func (r *Repository) FindContactIdentity(ctx context.Context, organisationID uuid.UUID, kind, valueNormalized string) (*domaincontacts.ContactIdentityRow, error) {
+func (r *Repository) FindContactIdentity(ctx context.Context, organisationID uuid.UUID, kind, valueNormalized string) (portResult0 *domaincontacts.ContactIdentityRow, portResult1 error) {
+	defer func() {
+		portResult1 = sqlkit.DomainError(portResult1)
+	}()
+
 	row := r.db.QueryRowContext(ctx, `
 		SELECT id, organisation_id, contact_id, kind, value_normalized, value_raw, created_at
 		FROM contact_identities
@@ -211,7 +240,11 @@ func (r *Repository) FindContactIdentity(ctx context.Context, organisationID uui
 	return ident, nil
 }
 
-func (r *Repository) CreateIdentity(ctx context.Context, row domaincontacts.ContactIdentityRow) error {
+func (r *Repository) CreateIdentity(ctx context.Context, row domaincontacts.ContactIdentityRow) (portResult0 error) {
+	defer func() {
+		portResult0 = sqlkit.DomainError(portResult0)
+	}()
+
 	_, err := r.db.ExecContext(ctx, `
 		INSERT INTO contact_identities (id, organisation_id, contact_id, kind, value_normalized, value_raw, created_at)
 		VALUES (?, ?, ?, ?, ?, ?, ?)
@@ -220,7 +253,11 @@ func (r *Repository) CreateIdentity(ctx context.Context, row domaincontacts.Cont
 	return err
 }
 
-func (r *Repository) UpsertParticipant(ctx context.Context, row domaincontacts.CorrespondenceParticipantRow) error {
+func (r *Repository) UpsertParticipant(ctx context.Context, row domaincontacts.CorrespondenceParticipantRow) (portResult0 error) {
+	defer func() {
+		portResult0 = sqlkit.DomainError(portResult0)
+	}()
+
 	if row.MessageID == nil && row.ManualItemID == nil {
 		return fmt.Errorf("participant requires message_id or manual_item_id")
 	}
@@ -238,7 +275,11 @@ func (r *Repository) UpsertParticipant(ctx context.Context, row domaincontacts.C
 	return err
 }
 
-func (r *Repository) ListRecentMessageIDs(ctx context.Context, organisationID, contactID uuid.UUID, limit int) ([]uuid.UUID, error) {
+func (r *Repository) ListRecentMessageIDs(ctx context.Context, organisationID, contactID uuid.UUID, limit int) (portResult0 []uuid.UUID, portResult1 error) {
+	defer func() {
+		portResult1 = sqlkit.DomainError(portResult1)
+	}()
+
 	if limit <= 0 {
 		limit = 20
 	}
@@ -269,7 +310,11 @@ func (r *Repository) ListRecentMessageIDs(ctx context.Context, organisationID, c
 	return out, rows.Err()
 }
 
-func (r *Repository) SuggestMerges(ctx context.Context, organisationID, contactID uuid.UUID) ([]domaincontacts.ContactRow, error) {
+func (r *Repository) SuggestMerges(ctx context.Context, organisationID, contactID uuid.UUID) (portResult0 []domaincontacts.ContactRow, portResult1 error) {
+	defer func() {
+		portResult1 = sqlkit.DomainError(portResult1)
+	}()
+
 	var displayName string
 	err := r.db.QueryRowContext(ctx, `
 		SELECT display_name FROM contacts
@@ -316,7 +361,11 @@ func (r *Repository) SuggestMerges(ctx context.Context, organisationID, contactI
 	return out, rows.Err()
 }
 
-func (r *Repository) MergeContacts(ctx context.Context, organisationID, survivorID, sourceID uuid.UUID, at time.Time) error {
+func (r *Repository) MergeContacts(ctx context.Context, organisationID, survivorID, sourceID uuid.UUID, at time.Time) (portResult0 error) {
+	defer func() {
+		portResult0 = sqlkit.DomainError(portResult0)
+	}()
+
 	if survivorID == sourceID {
 		return fmt.Errorf("cannot merge a contact into itself")
 	}
@@ -458,7 +507,11 @@ func (r *Repository) MergeContacts(ctx context.Context, organisationID, survivor
 	return tx.Commit()
 }
 
-func (r *Repository) ResolveEmailContact(ctx context.Context, organisationID uuid.UUID, email, displayName string, now time.Time) (uuid.UUID, error) {
+func (r *Repository) ResolveEmailContact(ctx context.Context, organisationID uuid.UUID, email, displayName string, now time.Time) (portResult0 uuid.UUID, portResult1 error) {
+	defer func() {
+		portResult1 = sqlkit.DomainError(portResult1)
+	}()
+
 	norm := contacts.NormalizeEmail(email)
 	if norm == "" {
 		return uuid.Nil, fmt.Errorf("empty email")
