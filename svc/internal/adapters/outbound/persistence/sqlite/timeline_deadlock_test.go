@@ -7,8 +7,8 @@ import (
 	"time"
 
 	"github.com/Kapital-B/automata/svc/internal/adapters/outbound/persistence/sqlite"
-	"github.com/Kapital-B/automata/svc/internal/application/ports/driven"
 	appprojects "github.com/Kapital-B/automata/svc/internal/application/projects"
+	domainprojects "github.com/Kapital-B/automata/svc/internal/domain/projects"
 	"github.com/google/uuid"
 )
 
@@ -41,7 +41,7 @@ func TestProjectTimelineOnSingleConnectionPool(t *testing.T) {
 	for i := 0; i < 25; i++ {
 		conv := "conv-" + uuid.NewString()
 		msgID := insertMsg(t, repo, accountID, "Regarding DC01", conv, "body")
-		if err := repo.UpsertThreadAssignment(ctx, driven.AssignmentRow{
+		if err := repo.UpsertThreadAssignment(ctx, domainprojects.AssignmentRow{
 			ID: uuid.New(), OrganisationID: orgID, AccountID: accountID, ConversationID: conv,
 			ProjectID: &p.ID, Status: "committed", Reason: "seed", Source: "user",
 			CreatedAt: time.Now().UTC(), UpdatedAt: time.Now().UTC(),
@@ -52,12 +52,12 @@ func TestProjectTimelineOnSingleConnectionPool(t *testing.T) {
 	}
 
 	type result struct {
-		items []driven.TimelineItem
+		items []domainprojects.TimelineItem
 		err   error
 	}
 	done := make(chan result, 1)
 	go func() {
-		items, err := svc.GetTimeline(ctx, userID, p.ID, driven.TimelineFilter{Limit: 100})
+		items, err := svc.GetTimeline(ctx, userID, p.ID, domainprojects.TimelineFilter{Limit: 100})
 		done <- result{items, err}
 	}()
 

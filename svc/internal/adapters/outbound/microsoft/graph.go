@@ -15,7 +15,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/Kapital-B/automata/svc/internal/application/ports/driven"
+	domainaccounts "github.com/Kapital-B/automata/svc/internal/domain/accounts"
 )
 
 const graphBase = "https://graph.microsoft.com/v1.0"
@@ -278,13 +278,13 @@ func mapGraphRecipients(in []struct {
 		Name    string `json:"name"`
 		Address string `json:"address"`
 	} `json:"emailAddress"`
-}) []driven.MailRecipient {
+}) []domainaccounts.MailRecipient {
 	if len(in) == 0 {
 		return nil
 	}
-	out := make([]driven.MailRecipient, 0, len(in))
+	out := make([]domainaccounts.MailRecipient, 0, len(in))
 	for _, r := range in {
-		out = append(out, driven.MailRecipient{
+		out = append(out, domainaccounts.MailRecipient{
 			Name:    r.EmailAddress.Name,
 			Address: r.EmailAddress.Address,
 		})
@@ -292,8 +292,8 @@ func mapGraphRecipients(in []struct {
 	return out
 }
 
-func mapGraphMessage(m graphMessageJSON) driven.MailMessage {
-	return driven.MailMessage{
+func mapGraphMessage(m graphMessageJSON) domainaccounts.MailMessage {
+	return domainaccounts.MailMessage{
 		ID:               m.ID,
 		ConversationID:   m.ConversationID,
 		ReceivedDateTime: m.ReceivedDateTime,
@@ -312,7 +312,7 @@ func mapGraphMessage(m graphMessageJSON) driven.MailMessage {
 
 // ListInboxDelta lists exactly one Graph delta page and returns either a next
 // link or a final delta link.
-func (g *GraphClient) ListInboxDelta(ctx context.Context, accessToken string, deltaLink string, pageSize int) (*driven.MailChangePage, error) {
+func (g *GraphClient) ListInboxDelta(ctx context.Context, accessToken string, deltaLink string, pageSize int) (*domainaccounts.MailChangePage, error) {
 	if pageSize <= 0 {
 		pageSize = 50
 	}
@@ -331,11 +331,11 @@ func (g *GraphClient) ListInboxDelta(ctx context.Context, accessToken string, de
 	var res deltaMessagesResponse
 	if err := g.getJSONMail(ctx, accessToken, nextURL, &res); err != nil {
 		if deltaLink != "" && isExpiredDeltaError(err) {
-			return nil, fmt.Errorf("%w: %v", driven.ErrCursorExpired, err)
+			return nil, fmt.Errorf("%w: %v", domainaccounts.ErrCursorExpired, err)
 		}
 		return nil, err
 	}
-	page := &driven.MailChangePage{Messages: make([]driven.MailMessage, 0, len(res.Value))}
+	page := &domainaccounts.MailChangePage{Messages: make([]domainaccounts.MailMessage, 0, len(res.Value))}
 	for _, m := range res.Value {
 		id := strings.TrimSpace(m.ID)
 		if id == "" {
@@ -459,7 +459,7 @@ func (g *GraphClient) GetRawMessage(ctx context.Context, accessToken, providerMe
 		return nil, err
 	}
 	if int64(len(raw)) > limit {
-		return nil, driven.TooLarge(limit)
+		return nil, domainaccounts.TooLarge(limit)
 	}
 	return raw, nil
 }

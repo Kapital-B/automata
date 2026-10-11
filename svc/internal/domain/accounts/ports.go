@@ -1,11 +1,11 @@
-package driven
+package accounts
 
 import (
 	"context"
 	"errors"
 	"fmt"
-
-	"github.com/Kapital-B/automata/svc/internal/domain/accounts"
+	"github.com/google/uuid"
+	"time"
 )
 
 // Errors a mailbox reports so callers can act on the cause rather than the
@@ -112,7 +112,7 @@ type MailProvider interface {
 
 // ConnectOptions carries provider-specific connect choices.
 type ConnectOptions struct {
-	MsAccountKind accounts.MsAccountKind
+	MsAccountKind MsAccountKind
 }
 
 // ConnectedMailbox is what a successful connect learned about the mailbox.
@@ -120,7 +120,7 @@ type ConnectedMailbox struct {
 	Email         string
 	DefaultLabel  string
 	TenantID      *string
-	MsAccountKind accounts.MsAccountKind
+	MsAccountKind MsAccountKind
 	// Credential is plaintext; the caller encrypts it.
 	Credential []byte
 }
@@ -161,7 +161,8 @@ type ConnectRejectedError struct {
 	Reason string
 }
 
-func (e *ConnectRejectedError) Error() string        { return e.Reason }
+func (e *ConnectRejectedError) Error() string { return e.Reason }
+
 func (e *ConnectRejectedError) Is(target error) bool { return target == ErrConnectRejected }
 
 // ConnectRejected builds a ConnectRejectedError.
@@ -174,4 +175,47 @@ func ConnectRejected(format string, args ...any) error {
 // password fails at connect rather than on the first sync.
 type PasswordMailConnector interface {
 	Connect(ctx context.Context, req PasswordConnectRequest) (*ConnectedMailbox, error)
+}
+
+// TokenPair holds OAuth tokens from the token endpoint.
+type TokenPair struct {
+	AccessToken  string
+	RefreshToken string
+	ExpiresIn    int
+}
+
+// MicrosoftOAuth exchanges authorization codes and refreshes tokens.
+type MicrosoftOAuth interface {
+	AuthorizationURL(ctx context.Context, kind MsAccountKind, state string) (string, error)
+	ExchangeCode(ctx context.Context, kind MsAccountKind, code string) (TokenPair, error)
+	RefreshAccessToken(ctx context.Context, kind MsAccountKind, refreshToken string) (TokenPair, error)
+}
+
+// AccountRow is persistence shape for API responses (not a rich domain entity).
+type AccountRow struct {
+	UserID            uuid.UUID
+	ID                uuid.UUID
+	Label             string
+	Provider          string
+	MsAccountKind     MsAccountKind
+	GraphTenantID     *string
+	PrimaryEmail      string
+	MsalHomeAccountID *string
+	ConnectionStatus  string
+	LastError         *string
+	CreatedAt         time.Time
+	UpdatedAt         time.Time
+	LastSyncedAt      *time.Time
+}
+
+// AccountRepository persists accounts and OAuth tokens (ciphertext).
+type AccountRepository interface {
+	InsertAccount(ctx context.Context, a AccountRow, tokenCiphertext []byte) error
+	UpdateAccountTokens(ctx context.Context, userID uuid.UUID, id uuid.UUID, tokenCiphertext []byte, primaryEmail string, graphTenantID *string, msalHome *string, status string, lastErr *string) error
+	GetAccount(ctx context.Context, userID uuid.UUID, id uuid.UUID) (*AccountRow, []byte, error)
+	ListAccounts(ctx context.Context, userID uuid.UUID) ([]AccountRow, error)
+	DeleteAccount(ctx context.Context, userID uuid.UUID, id uuid.UUID) error
+	GetSyncDeltaLink(ctx context.Context, userID uuid.UUID, accountID uuid.UUID) (*string, error)
+	UpsertSyncState(ctx context.Context, userID uuid.UUID, accountID uuid.UUID, deltaLink *string, at time.Time) error
+	UpsertSyncStateTime(ctx context.Context, userID uuid.UUID, accountID uuid.UUID, at time.Time) error
 }

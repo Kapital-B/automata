@@ -10,7 +10,7 @@ import (
 	"unicode/utf8"
 
 	"github.com/Kapital-B/automata/svc/internal/adapters/outbound/persistence/sqlkit"
-	"github.com/Kapital-B/automata/svc/internal/application/ports/driven"
+	domainprojects "github.com/Kapital-B/automata/svc/internal/domain/projects"
 	"github.com/google/uuid"
 )
 
@@ -26,7 +26,7 @@ func (r *Repository) ListContactIDsForManualItem(ctx context.Context, organisati
 	return scanUUIDColumn(rows)
 }
 
-func (r *Repository) CreateManualItem(ctx context.Context, row driven.ManualItemRow) error {
+func (r *Repository) CreateManualItem(ctx context.Context, row domainprojects.ManualItemRow) error {
 	var proj, reason, source any
 	if row.ProjectID != nil {
 		proj = row.ProjectID.String()
@@ -49,7 +49,7 @@ func (r *Repository) CreateManualItem(ctx context.Context, row driven.ManualItem
 	return err
 }
 
-func (r *Repository) GetManualItem(ctx context.Context, organisationID, id uuid.UUID) (*driven.ManualItemRow, error) {
+func (r *Repository) GetManualItem(ctx context.Context, organisationID, id uuid.UUID) (*domainprojects.ManualItemRow, error) {
 	row := r.db.QueryRowContext(ctx, `
 		SELECT id, organisation_id, channel, occurred_at, title, body_text, project_id,
 			assignment_status, assignment_reason, assignment_source, created_by_user_id, created_at, not_relevant_at
@@ -82,7 +82,7 @@ func (r *Repository) UpdateManualItemAssignment(ctx context.Context, organisatio
 	return nil
 }
 
-func (r *Repository) ListManualItemsForProject(ctx context.Context, organisationID, projectID uuid.UUID) ([]driven.ManualItemRow, error) {
+func (r *Repository) ListManualItemsForProject(ctx context.Context, organisationID, projectID uuid.UUID) ([]domainprojects.ManualItemRow, error) {
 	rows, err := r.db.QueryContext(ctx, `
 		SELECT id, organisation_id, channel, occurred_at, title, body_text, project_id,
 			assignment_status, assignment_reason, assignment_source, created_by_user_id, created_at, not_relevant_at
@@ -97,7 +97,7 @@ func (r *Repository) ListManualItemsForProject(ctx context.Context, organisation
 	return scanManualItemRows(rows)
 }
 
-func (r *Repository) ListUnassignedManualItems(ctx context.Context, organisationID uuid.UUID, limit int) ([]driven.ManualItemRow, error) {
+func (r *Repository) ListUnassignedManualItems(ctx context.Context, organisationID uuid.UUID, limit int) ([]domainprojects.ManualItemRow, error) {
 	if limit <= 0 {
 		limit = 500
 	}
@@ -121,8 +121,8 @@ func (r *Repository) ListUnassignedManualItems(ctx context.Context, organisation
 	return scanManualItemRows(rows)
 }
 
-func scanManualItemRows(rows *sql.Rows) ([]driven.ManualItemRow, error) {
-	out := make([]driven.ManualItemRow, 0)
+func scanManualItemRows(rows *sql.Rows) ([]domainprojects.ManualItemRow, error) {
+	out := make([]domainprojects.ManualItemRow, 0)
 	for rows.Next() {
 		m, err := scanManualItem(rows)
 		if err != nil {
@@ -133,7 +133,7 @@ func scanManualItemRows(rows *sql.Rows) ([]driven.ManualItemRow, error) {
 	return out, rows.Err()
 }
 
-func scanManualItem(s rowScanner) (*driven.ManualItemRow, error) {
+func scanManualItem(s rowScanner) (*domainprojects.ManualItemRow, error) {
 	var idStr, orgStr, channel, occurredAt, title, body, status, createdBy, createdAt string
 	var proj, reason, source, notRelevantAt sql.NullString
 	if err := s.Scan(&idStr, &orgStr, &channel, &occurredAt, &title, &body, &proj,
@@ -160,7 +160,7 @@ func scanManualItem(s rowScanner) (*driven.ManualItemRow, error) {
 	if err != nil {
 		return nil, err
 	}
-	m := &driven.ManualItemRow{
+	m := &domainprojects.ManualItemRow{
 		ID: id, OrganisationID: orgID, Channel: channel, OccurredAt: ot,
 		Title: title, BodyText: body, AssignmentStatus: status,
 		CreatedByUserID: uid, CreatedAt: ct,
@@ -188,7 +188,7 @@ func scanManualItem(s rowScanner) (*driven.ManualItemRow, error) {
 	return m, nil
 }
 
-func (r *Repository) ListProjectTimeline(ctx context.Context, userID, organisationID, projectID uuid.UUID, filter driven.TimelineFilter) ([]driven.TimelineItem, error) {
+func (r *Repository) ListProjectTimeline(ctx context.Context, userID, organisationID, projectID uuid.UUID, filter domainprojects.TimelineFilter) ([]domainprojects.TimelineItem, error) {
 	limit := filter.Limit
 	if limit <= 0 {
 		limit = 100
@@ -202,7 +202,7 @@ func (r *Repository) ListProjectTimeline(ctx context.Context, userID, organisati
 		source = "all"
 	}
 
-	out := make([]driven.TimelineItem, 0)
+	out := make([]domainprojects.TimelineItem, 0)
 
 	if source == "all" || source == "mail" {
 		mailItems, err := r.listMailTimelineItems(ctx, userID, projectID)
@@ -217,7 +217,7 @@ func (r *Repository) ListProjectTimeline(ctx context.Context, userID, organisati
 			return nil, err
 		}
 		for _, m := range manuals {
-			item := driven.TimelineItem{
+			item := domainprojects.TimelineItem{
 				Source: "manual", OccurredAt: m.OccurredAt, Title: m.Title,
 				Snippet: snippetText(m.BodyText, 160), Channel: m.Channel, BodyText: m.BodyText,
 			}
@@ -246,7 +246,7 @@ func (r *Repository) ListProjectTimeline(ctx context.Context, userID, organisati
 			}
 			messageID := message.ID
 			accountID := message.ConnectorAccountID
-			out = append(out, driven.TimelineItem{
+			out = append(out, domainprojects.TimelineItem{
 				Source: "slack", OccurredAt: message.OccurredAt, Title: message.Title,
 				Snippet: snippetText(message.BodyText, 160), BodyText: message.BodyText,
 				AccountLabel: label, ConnectorMessageID: &messageID,
@@ -263,7 +263,7 @@ func (r *Repository) ListProjectTimeline(ctx context.Context, userID, organisati
 	}
 
 	if filter.UnassignedToIssue {
-		filtered := make([]driven.TimelineItem, 0, len(out))
+		filtered := make([]domainprojects.TimelineItem, 0, len(out))
 		for _, it := range out {
 			if it.IssueID == nil {
 				filtered = append(filtered, it)
@@ -276,7 +276,7 @@ func (r *Repository) ListProjectTimeline(ctx context.Context, userID, organisati
 		return out[i].OccurredAt.After(out[j].OccurredAt)
 	})
 	if offset >= len(out) {
-		return []driven.TimelineItem{}, nil
+		return []domainprojects.TimelineItem{}, nil
 	}
 	end := offset + limit
 	if end > len(out) {
@@ -285,7 +285,7 @@ func (r *Repository) ListProjectTimeline(ctx context.Context, userID, organisati
 	return out[offset:end], nil
 }
 
-func (r *Repository) listMailTimelineItems(ctx context.Context, userID, projectID uuid.UUID) ([]driven.TimelineItem, error) {
+func (r *Repository) listMailTimelineItems(ctx context.Context, userID, projectID uuid.UUID) ([]domainprojects.TimelineItem, error) {
 	rows, err := r.db.QueryContext(ctx, `
 		SELECT m.id, m.account_id, a.label, m.subject, m.body_text, m.received_at
 		FROM messages m
@@ -309,7 +309,7 @@ func (r *Repository) listMailTimelineItems(ctx context.Context, userID, projectI
 	}
 	defer rows.Close()
 
-	out := make([]driven.TimelineItem, 0)
+	out := make([]domainprojects.TimelineItem, 0)
 	for rows.Next() {
 		var idStr, accStr, label, subject string
 		var body sql.NullString
@@ -327,7 +327,7 @@ func (r *Repository) listMailTimelineItems(ctx context.Context, userID, projectI
 		if body.Valid {
 			bodyText = body.String
 		}
-		item := driven.TimelineItem{
+		item := domainprojects.TimelineItem{
 			Source: "mail", OccurredAt: rt, Title: subject, Snippet: snippetText(bodyText, 160),
 			AccountLabel: label,
 		}
@@ -358,7 +358,7 @@ const timelineHydrateChunk = 200
 // at once; SQLite here runs a single-connection pool (factory.go), so doing it
 // inline is a self-deadlock. Batching also turns 2 queries per row into a
 // handful in total. Mirrors the postgres adapter.
-func (r *Repository) hydrateTimelineItems(ctx context.Context, organisationID uuid.UUID, items []driven.TimelineItem) error {
+func (r *Repository) hydrateTimelineItems(ctx context.Context, organisationID uuid.UUID, items []domainprojects.TimelineItem) error {
 	if len(items) == 0 {
 		return nil
 	}
@@ -411,8 +411,8 @@ func (r *Repository) hydrateTimelineItems(ctx context.Context, organisationID uu
 
 // timelineContactsFor loads participants for many messages or manual items.
 // column is a trusted internal literal, never caller input.
-func (r *Repository) timelineContactsFor(ctx context.Context, organisationID uuid.UUID, column string, ids []uuid.UUID) (map[uuid.UUID][]driven.TimelineContact, error) {
-	out := map[uuid.UUID][]driven.TimelineContact{}
+func (r *Repository) timelineContactsFor(ctx context.Context, organisationID uuid.UUID, column string, ids []uuid.UUID) (map[uuid.UUID][]domainprojects.TimelineContact, error) {
+	out := map[uuid.UUID][]domainprojects.TimelineContact{}
 	for _, chunk := range sqlkit.ChunkUUIDs(sqlkit.DedupeUUIDs(ids), timelineHydrateChunk) {
 		args := make([]any, 0, len(chunk)+1)
 		args = append(args, organisationID.String())
@@ -436,7 +436,7 @@ func (r *Repository) timelineContactsFor(ctx context.Context, organisationID uui
 	return out, nil
 }
 
-func scanTimelineContactsByOwner(rows *sql.Rows, out map[uuid.UUID][]driven.TimelineContact) error {
+func scanTimelineContactsByOwner(rows *sql.Rows, out map[uuid.UUID][]domainprojects.TimelineContact) error {
 	defer rows.Close()
 	for rows.Next() {
 		var ownerStr, contactStr, displayName, role string
@@ -451,7 +451,7 @@ func scanTimelineContactsByOwner(rows *sql.Rows, out map[uuid.UUID][]driven.Time
 		if err != nil {
 			return err
 		}
-		out[ownerID] = append(out[ownerID], driven.TimelineContact{
+		out[ownerID] = append(out[ownerID], domainprojects.TimelineContact{
 			ID: contactID, DisplayName: displayName, Role: role,
 		})
 	}

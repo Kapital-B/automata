@@ -3,7 +3,7 @@ package connectors
 import (
 	"context"
 
-	"github.com/Kapital-B/automata/svc/internal/application/ports/driven"
+	domainjobs "github.com/Kapital-B/automata/svc/internal/domain/jobs"
 )
 
 type SyncSlackExecutor struct {
@@ -12,14 +12,14 @@ type SyncSlackExecutor struct {
 
 func (e *SyncSlackExecutor) JobType() string { return "sync_slack" }
 
-func (e *SyncSlackExecutor) ExecuteChunk(ctx context.Context, run driven.RunContext) (driven.ChunkResult, error) {
+func (e *SyncSlackExecutor) ExecuteChunk(ctx context.Context, run domainjobs.RunContext) (domainjobs.ChunkResult, error) {
 	res, err := e.Service.SyncConnectorChunk(ctx, run)
 	if err != nil {
-		return driven.ChunkResult{}, err
+		return domainjobs.ChunkResult{}, err
 	}
-	return driven.ChunkResult{
+	return domainjobs.ChunkResult{
 		NextCursor: res.NextCursor,
-		ProgressDelta: driven.JobProgress{
+		ProgressDelta: domainjobs.JobProgress{
 			Processed: res.MessagesUpserted,
 		},
 		Done: res.Done,

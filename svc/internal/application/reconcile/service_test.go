@@ -11,9 +11,9 @@ import (
 	"github.com/Kapital-B/automata/svc/internal/application/auth"
 	appdecisions "github.com/Kapital-B/automata/svc/internal/application/decisions"
 	appfacts "github.com/Kapital-B/automata/svc/internal/application/facts"
-	"github.com/Kapital-B/automata/svc/internal/application/ports/driven"
 	appprojects "github.com/Kapital-B/automata/svc/internal/application/projects"
 	appreconcile "github.com/Kapital-B/automata/svc/internal/application/reconcile"
+	domaininterpretations "github.com/Kapital-B/automata/svc/internal/domain/interpretations"
 	"github.com/google/uuid"
 	_ "modernc.org/sqlite"
 )
@@ -61,7 +61,7 @@ func insertPendingInterp(t *testing.T, repo *sqlite.Repository, orgID, projectID
 	t.Helper()
 	now := time.Now().UTC()
 	id := uuid.New()
-	if err := repo.CreateInterpretation(context.Background(), driven.InterpretationRow{
+	if err := repo.CreateInterpretation(context.Background(), domaininterpretations.InterpretationRow{
 		ID: id, OrganisationID: orgID, ProjectID: projectID, Status: "pending",
 		PayloadJSON: payload, CreatedAt: now, UpdatedAt: now,
 	}); err != nil {

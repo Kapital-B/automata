@@ -11,7 +11,7 @@ import (
 	"sync/atomic"
 	"testing"
 
-	"github.com/Kapital-B/automata/svc/internal/application/ports/driven"
+	domainaccounts "github.com/Kapital-B/automata/svc/internal/domain/accounts"
 )
 
 func TestListInboxDeltaReturnsSinglePageCursor(t *testing.T) {
@@ -187,7 +187,7 @@ func TestListInboxDeltaReportsAnExpiredCursor(t *testing.T) {
 
 	client := &GraphClient{APIRoot: server.URL + "/v1.0"}
 	_, err := client.ListInboxDelta(context.Background(), "token", server.URL+"/v1.0/stale-delta", 10)
-	if !errors.Is(err, driven.ErrCursorExpired) {
+	if !errors.Is(err, domainaccounts.ErrCursorExpired) {
 		t.Fatalf("err = %v, want ErrCursorExpired", err)
 	}
 }
@@ -203,7 +203,7 @@ func TestListInboxDeltaDoesNotCallAFreshListExpired(t *testing.T) {
 
 	client := &GraphClient{APIRoot: server.URL + "/v1.0"}
 	_, err := client.ListInboxDelta(context.Background(), "token", "", 10)
-	if err == nil || errors.Is(err, driven.ErrCursorExpired) {
+	if err == nil || errors.Is(err, domainaccounts.ErrCursorExpired) {
 		t.Fatalf("err = %v, want a plain failure", err)
 	}
 }
@@ -215,7 +215,7 @@ func TestGetRawMessageRefusesOversizedMessages(t *testing.T) {
 	defer server.Close()
 
 	client := &GraphClient{APIRoot: server.URL + "/v1.0"}
-	if _, err := client.GetRawMessage(context.Background(), "token", "m1", 32); !errors.Is(err, driven.ErrMailTooLarge) {
+	if _, err := client.GetRawMessage(context.Background(), "token", "m1", 32); !errors.Is(err, domainaccounts.ErrMailTooLarge) {
 		t.Fatalf("err = %v, want ErrMailTooLarge", err)
 	}
 	raw, err := client.GetRawMessage(context.Background(), "token", "m1", 128)

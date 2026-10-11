@@ -17,7 +17,7 @@ import (
 	appaccounts "github.com/Kapital-B/automata/svc/internal/application/accounts"
 	"github.com/Kapital-B/automata/svc/internal/application/auth"
 	appmessages "github.com/Kapital-B/automata/svc/internal/application/messages"
-	"github.com/Kapital-B/automata/svc/internal/application/ports/driven"
+	domainaccounts "github.com/Kapital-B/automata/svc/internal/domain/accounts"
 	_ "modernc.org/sqlite"
 )
 
@@ -37,12 +37,12 @@ func TestAuthRefreshRotatesTokens(t *testing.T) {
 	m365 := &microsoft.Provider{OAuth: oauth, Graph: &microsoft.GraphClient{}}
 	accountSvc := appaccounts.NewService(appaccounts.Deps{
 		Accounts: repo, OAuthState: repo, JobRuns: repo, Vault: vault,
-		Connectors: map[string]driven.OAuthMailConnector{appaccounts.ProviderM365: m365},
+		Connectors: map[string]domainaccounts.OAuthMailConnector{appaccounts.ProviderM365: m365},
 		Dashboard:  "http://localhost:5173", SuccessPath: "/ok", ErrorPath: "/err", StateTTL: 0,
 	})
 	mailboxes := &appaccounts.MailboxOpener{
 		Accounts: repo, Vault: vault,
-		Providers: map[string]driven.MailProvider{appaccounts.ProviderM365: m365},
+		Providers: map[string]domainaccounts.MailProvider{appaccounts.ProviderM365: m365},
 	}
 	syncSvc := &appmessages.SyncService{Accounts: repo, Messages: repo, Mailboxes: mailboxes, JobRuns: repo}
 	jwtSecret := []byte("abcdefghijklmnopqrstuvwxyz123456")

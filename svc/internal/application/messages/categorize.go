@@ -9,15 +9,18 @@ import (
 	"time"
 
 	"github.com/Kapital-B/automata/svc/internal/application/jobkit"
-	"github.com/Kapital-B/automata/svc/internal/application/ports/driven"
+	domainai "github.com/Kapital-B/automata/svc/internal/domain/ai"
+	domainjobs "github.com/Kapital-B/automata/svc/internal/domain/jobs"
 	"github.com/Kapital-B/automata/svc/internal/domain/mailtext"
+	domainmessages "github.com/Kapital-B/automata/svc/internal/domain/messages"
+
 	"github.com/google/uuid"
 )
 
 type CategorizeService struct {
-	Messages driven.MessageRepository
-	LLM      driven.LLMClient
-	JobRuns  driven.JobRunRepository
+	Messages domainmessages.MessageRepository
+	LLM      domainai.LLMClient
+	JobRuns  domainjobs.JobRunRepository
 }
 
 type CategorizeResult struct {
@@ -34,7 +37,7 @@ type CategorizeOptions struct {
 type CategorizeChunkResult struct {
 	MessagesCategorized int
 	MessagesScanned     int
-	NextCursor          *driven.JobCursor
+	NextCursor          *domainjobs.JobCursor
 	Done                bool
 }
 
@@ -82,7 +85,7 @@ func (s *CategorizeService) CategorizeAccount(ctx context.Context, userID, accou
 		return fail(fmt.Errorf("no categories defined for user"))
 	}
 
-	rows, err := s.Messages.ListMessages(ctx, userID, driven.MessageListFilter{
+	rows, err := s.Messages.ListMessages(ctx, userID, domainmessages.MessageListFilter{
 		AccountID: &accountID,
 		Limit:     200,
 	})
@@ -91,7 +94,7 @@ func (s *CategorizeService) CategorizeAccount(ctx context.Context, userID, accou
 	}
 
 	if !opts.Recategorize {
-		uncategorized := make([]driven.MessageRow, 0, len(rows))
+		uncategorized := make([]domainmessages.MessageRow, 0, len(rows))
 		for _, m := range rows {
 			if m.CategorySlug == nil || *m.CategorySlug == "" {
 				uncategorized = append(uncategorized, m)
@@ -126,7 +129,7 @@ func (s *CategorizeService) CategorizeAccount(ctx context.Context, userID, accou
 			}
 		}
 		now := time.Now().UTC()
-		err = s.Messages.UpsertMessageCategory(ctx, driven.MessageCategoryRow{
+		err = s.Messages.UpsertMessageCategory(ctx, domainmessages.MessageCategoryRow{
 			ID:         uuid.New(),
 			MessageID:  m.ID,
 			AccountID:  accountID,
@@ -153,7 +156,7 @@ func (s *CategorizeService) CategorizeAccount(ctx context.Context, userID, accou
 	return &CategorizeResult{JobRunID: jobID, MessagesCategorized: count}, nil
 }
 
-func (s *CategorizeService) classifyMessage(ctx context.Context, m driven.MessageRow, categories []driven.CategoryDefinitionRow) (*categorizePayload, error) {
+func (s *CategorizeService) classifyMessage(ctx context.Context, m domainmessages.MessageRow, categories []domainmessages.CategoryDefinitionRow) (*categorizePayload, error) {
 	const (
 		maxSubjectChars = 220
 		maxFromChars    = 280
@@ -181,7 +184,7 @@ func (s *CategorizeService) classifyMessage(ctx context.Context, m driven.Messag
 		return &out, nil
 	}
 
-	resp, err := s.LLM.ChatCompletion(ctx, []driven.LLMMessage{
+	resp, err := s.LLM.ChatCompletion(ctx, []domainai.LLMMessage{
 		{Role: "system", Content: "You are an email classifier. Return JSON only."},
 		{Role: "user", Content: prompt},
 	})
@@ -193,7 +196,7 @@ func (s *CategorizeService) classifyMessage(ctx context.Context, m driven.Messag
 		return parsed, nil
 	}
 
-	resp2, err2 := s.LLM.ChatCompletion(ctx, []driven.LLMMessage{
+	resp2, err2 := s.LLM.ChatCompletion(ctx, []domainai.LLMMessage{
 		{Role: "system", Content: "Fix the following into valid JSON only. Keep semantic meaning."},
 		{Role: "user", Content: resp.Content},
 	})
@@ -235,7 +238,7 @@ func normalizeJSONContent(s string) string {
 	return trimmed
 }
 
-func categorySlugList(categories []driven.CategoryDefinitionRow) []string {
+func categorySlugList(categories []domainmessages.CategoryDefinitionRow) []string {
 	out := make([]string, 0, len(categories))
 	for _, c := range categories {
 		out = append(out, c.Slug)
@@ -243,7 +246,7 @@ func categorySlugList(categories []driven.CategoryDefinitionRow) []string {
 	return out
 }
 
-func categoryDefinitionsBlock(categories []driven.CategoryDefinitionRow) string {
+func categoryDefinitionsBlock(categories []domainmessages.CategoryDefinitionRow) string {
 	lines := make([]string, 0, len(categories))
 	for _, c := range categories {
 		def := strings.TrimSpace(c.Definition)
@@ -255,7 +258,7 @@ func categoryDefinitionsBlock(categories []driven.CategoryDefinitionRow) string 
 	return strings.Join(lines, "\n")
 }
 
-func hasCategorySlug(categories []driven.CategoryDefinitionRow, slug string) bool {
+func hasCategorySlug(categories []domainmessages.CategoryDefinitionRow, slug string) bool {
 	for _, c := range categories {
 		if c.Slug == slug {
 			return true
@@ -264,7 +267,7 @@ func hasCategorySlug(categories []driven.CategoryDefinitionRow, slug string) boo
 	return false
 }
 
-func fallbackCategorySlug(categories []driven.CategoryDefinitionRow) string {
+func fallbackCategorySlug(categories []domainmessages.CategoryDefinitionRow) string {
 	if len(categories) == 0 {
 		return ""
 	}
@@ -273,8 +276,8 @@ func fallbackCategorySlug(categories []driven.CategoryDefinitionRow) string {
 			return "other"
 		}
 	}
-	sorted := append([]driven.CategoryDefinitionRow(nil), categories...)
-	slices.SortFunc(sorted, func(a, b driven.CategoryDefinitionRow) int {
+	sorted := append([]domainmessages.CategoryDefinitionRow(nil), categories...)
+	slices.SortFunc(sorted, func(a, b domainmessages.CategoryDefinitionRow) int {
 		if a.SortOrder != b.SortOrder {
 			if a.SortOrder < b.SortOrder {
 				return -1
@@ -286,7 +289,7 @@ func fallbackCategorySlug(categories []driven.CategoryDefinitionRow) string {
 	return sorted[0].Slug
 }
 
-func (s *CategorizeService) CategorizeChunk(ctx context.Context, run driven.RunContext) (*CategorizeChunkResult, error) {
+func (s *CategorizeService) CategorizeChunk(ctx context.Context, run domainjobs.RunContext) (*CategorizeChunkResult, error) {
 	if s == nil || s.Messages == nil || s.LLM == nil {
 		return nil, fmt.Errorf("categorize service not configured")
 	}
@@ -294,7 +297,7 @@ func (s *CategorizeService) CategorizeChunk(ctx context.Context, run driven.RunC
 		return nil, fmt.Errorf("account_id is required")
 	}
 	offset := jobkit.DecodeOffsetCursor(run.Cursor)
-	rows, err := s.Messages.ListMessages(ctx, run.UserID, driven.MessageListFilter{
+	rows, err := s.Messages.ListMessages(ctx, run.UserID, domainmessages.MessageListFilter{
 		AccountID: run.AccountID,
 		Limit:     26,
 		Offset:    offset,
@@ -339,7 +342,7 @@ func (s *CategorizeService) CategorizeChunk(ctx context.Context, run driven.RunC
 			}
 		}
 		now := time.Now().UTC()
-		if err := s.Messages.UpsertMessageCategory(ctx, driven.MessageCategoryRow{
+		if err := s.Messages.UpsertMessageCategory(ctx, domainmessages.MessageCategoryRow{
 			ID:         jobkit.DeterministicID(run.RunID, "categorize", m.ID.String()),
 			MessageID:  m.ID,
 			AccountID:  *run.AccountID,

@@ -7,7 +7,7 @@ import (
 
 	"github.com/Kapital-B/automata/svc/internal/adapters/outbound/memoryjobs"
 	appjobs "github.com/Kapital-B/automata/svc/internal/application/jobs"
-	"github.com/Kapital-B/automata/svc/internal/application/ports/driven"
+	domainjobs "github.com/Kapital-B/automata/svc/internal/domain/jobs"
 	"github.com/google/uuid"
 )
 
@@ -23,8 +23,8 @@ func TestExtractionChainIsValidAndOrdered(t *testing.T) {
 	ctx := context.Background()
 	userID, projectID := uuid.New(), uuid.New()
 
-	rec, err := enq.EnqueueChain(ctx, userID, nil, driven.JobTriggerAPI, extractionChain(),
-		driven.JobPayload{ProjectID: &projectID}, nil, nil)
+	rec, err := enq.EnqueueChain(ctx, userID, nil, domainjobs.JobTriggerAPI, extractionChain(),
+		domainjobs.JobPayload{ProjectID: &projectID}, nil, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -46,17 +46,17 @@ func TestExtractionCoalescesPerProject(t *testing.T) {
 	ctx := context.Background()
 	userID, projectID := uuid.New(), uuid.New()
 
-	first, err := enq.EnqueueChain(ctx, userID, nil, driven.JobTriggerAPI, extractionChain(),
-		driven.JobPayload{ProjectID: &projectID}, nil, nil)
+	first, err := enq.EnqueueChain(ctx, userID, nil, domainjobs.JobTriggerAPI, extractionChain(),
+		domainjobs.JobPayload{ProjectID: &projectID}, nil, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
 
 	conflicts := 0
 	for i := 0; i < 9; i++ {
-		if _, err := enq.EnqueueChain(ctx, userID, nil, driven.JobTriggerAPI, extractionChain(),
-			driven.JobPayload{ProjectID: &projectID}, nil, nil); err != nil {
-			if errors.Is(err, driven.ErrJobLockHeld) {
+		if _, err := enq.EnqueueChain(ctx, userID, nil, domainjobs.JobTriggerAPI, extractionChain(),
+			domainjobs.JobPayload{ProjectID: &projectID}, nil, nil); err != nil {
+			if errors.Is(err, domainjobs.ErrJobLockHeld) {
 				conflicts++
 				continue
 			}
@@ -69,8 +69,8 @@ func TestExtractionCoalescesPerProject(t *testing.T) {
 
 	// A different project is unaffected by the first project's lock.
 	other := uuid.New()
-	if _, err := enq.EnqueueChain(ctx, userID, nil, driven.JobTriggerAPI, extractionChain(),
-		driven.JobPayload{ProjectID: &other}, nil, nil); err != nil {
+	if _, err := enq.EnqueueChain(ctx, userID, nil, domainjobs.JobTriggerAPI, extractionChain(),
+		domainjobs.JobPayload{ProjectID: &other}, nil, nil); err != nil {
 		t.Fatalf("a second project must not be blocked: %v", err)
 	}
 	_ = first

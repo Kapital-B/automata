@@ -6,10 +6,14 @@ import (
 	"strings"
 	"time"
 
-	"github.com/Kapital-B/automata/svc/internal/application/ports/driven"
+	domainauth "github.com/Kapital-B/automata/svc/internal/domain/auth"
+	domaincontradictions "github.com/Kapital-B/automata/svc/internal/domain/contradictions"
 	domaindec "github.com/Kapital-B/automata/svc/internal/domain/decisions"
+	domaindecisions "github.com/Kapital-B/automata/svc/internal/domain/decisions"
 	domainfacts "github.com/Kapital-B/automata/svc/internal/domain/facts"
 	domainissues "github.com/Kapital-B/automata/svc/internal/domain/issues"
+	domainmessages "github.com/Kapital-B/automata/svc/internal/domain/messages"
+	domainprojects "github.com/Kapital-B/automata/svc/internal/domain/projects"
 	"github.com/google/uuid"
 )
 
@@ -59,16 +63,16 @@ type Result struct {
 }
 
 type Service struct {
-	Users          driven.UserRepository
-	Projects       driven.ProjectRepository
-	Issues         driven.IssueRepository
-	Facts          driven.FactRepository
-	Decisions      driven.DecisionRepository
-	Contradictions driven.ContradictionRepository
-	Summaries      driven.SummaryRepository
+	Users          domainauth.UserRepository
+	Projects       domainprojects.ProjectRepository
+	Issues         domainissues.IssueRepository
+	Facts          domainfacts.FactRepository
+	Decisions      domaindecisions.DecisionRepository
+	Contradictions domaincontradictions.ContradictionRepository
+	Summaries      domainmessages.SummaryRepository
 	// Assignments places mail to-dos on the project their message is filed
 	// to. Optional: without it they stay unplaced.
-	Assignments driven.AssignmentRepository
+	Assignments domainprojects.AssignmentRepository
 }
 
 // lookupChunk bounds the IN lists sent to the database.
@@ -110,7 +114,7 @@ func (s *Service) ForUser(ctx context.Context, userID uuid.UUID) (*Result, error
 
 // attentionItemFromRow formats a repository row into the API shape, keeping
 // the titles and ids identical to the per-project implementation.
-func attentionItemFromRow(row driven.AttentionRow) (Item, bool) {
+func attentionItemFromRow(row domainprojects.AttentionRow) (Item, bool) {
 	item := Item{
 		Title:       row.Title,
 		ProjectID:   row.ProjectID.String(),
@@ -301,15 +305,15 @@ func (s *Service) mailItems(ctx context.Context, userID, orgID uuid.UUID) ([]Ite
 }
 
 // placeMessages resolves the project and issue for many messages, in chunks.
-func (s *Service) placeMessages(ctx context.Context, userID, orgID uuid.UUID, messageIDs []uuid.UUID) (map[uuid.UUID]uuid.UUID, map[uuid.UUID]driven.IssueLink, error) {
+func (s *Service) placeMessages(ctx context.Context, userID, orgID uuid.UUID, messageIDs []uuid.UUID) (map[uuid.UUID]uuid.UUID, map[uuid.UUID]domainissues.IssueLink, error) {
 	projectOf := make(map[uuid.UUID]uuid.UUID, len(messageIDs))
-	issueOf := make(map[uuid.UUID]driven.IssueLink)
+	issueOf := make(map[uuid.UUID]domainissues.IssueLink)
 	for start := 0; start < len(messageIDs); start += lookupChunk {
 		chunk := messageIDs[start:min(start+lookupChunk, len(messageIDs))]
 		if s.Assignments != nil {
-			msgs := make([]driven.MessageRow, len(chunk))
+			msgs := make([]domainmessages.MessageRow, len(chunk))
 			for i, id := range chunk {
-				msgs[i] = driven.MessageRow{ID: id}
+				msgs[i] = domainmessages.MessageRow{ID: id}
 			}
 			projects, err := s.Assignments.EffectiveProjectIDsForMessages(ctx, userID, msgs)
 			if err != nil {
@@ -334,7 +338,7 @@ func (s *Service) placeMessages(ctx context.Context, userID, orgID uuid.UUID, me
 	return projectOf, issueOf, nil
 }
 
-func (s *Service) forProject(ctx context.Context, userID, orgID uuid.UUID, p driven.ProjectRow, m *driven.ProjectMemberRow) (*Result, error) {
+func (s *Service) forProject(ctx context.Context, userID, orgID uuid.UUID, p domainprojects.ProjectRow, m *domainprojects.ProjectMemberRow) (*Result, error) {
 	out := &Result{Items: make([]Item, 0)}
 	issues, err := s.Issues.ListIssuesByProject(ctx, orgID, p.ID)
 	if err != nil {
@@ -415,7 +419,7 @@ func (s *Service) forProject(ctx context.Context, userID, orgID uuid.UUID, p dri
 	return out, nil
 }
 
-func memberTouchesRole(m *driven.ProjectMemberRow) bool {
+func memberTouchesRole(m *domainprojects.ProjectMemberRow) bool {
 	if m == nil {
 		return false
 	}

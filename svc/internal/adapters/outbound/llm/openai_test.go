@@ -6,7 +6,7 @@ import (
 	"net/http/httptest"
 	"testing"
 
-	"github.com/Kapital-B/automata/svc/internal/application/ports/driven"
+	domainai "github.com/Kapital-B/automata/svc/internal/domain/ai"
 )
 
 func TestOpenAIClientChatCompletion(t *testing.T) {
@@ -23,7 +23,7 @@ func TestOpenAIClientChatCompletion(t *testing.T) {
 		Model:   "local-model",
 		APIKey:  "abc",
 	}
-	resp, err := c.ChatCompletion(context.Background(), []driven.LLMMessage{
+	resp, err := c.ChatCompletion(context.Background(), []domainai.LLMMessage{
 		{Role: "user", Content: "classify"},
 	})
 	if err != nil {
@@ -43,7 +43,7 @@ func TestOpenAIClientNon2xx(t *testing.T) {
 	}))
 	defer srv.Close()
 	c := &OpenAIClient{BaseURL: srv.URL, Model: "x"}
-	if _, err := c.ChatCompletion(context.Background(), []driven.LLMMessage{{Role: "user", Content: "x"}}); err == nil {
+	if _, err := c.ChatCompletion(context.Background(), []domainai.LLMMessage{{Role: "user", Content: "x"}}); err == nil {
 		t.Fatal("expected non-2xx error")
 	}
 }

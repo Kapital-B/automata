@@ -10,7 +10,11 @@ import (
 	"strings"
 	"time"
 
-	"github.com/Kapital-B/automata/svc/internal/application/ports/driven"
+	domainauth "github.com/Kapital-B/automata/svc/internal/domain/auth"
+	domainconnectors "github.com/Kapital-B/automata/svc/internal/domain/connectors"
+	domainjobs "github.com/Kapital-B/automata/svc/internal/domain/jobs"
+	domainprojects "github.com/Kapital-B/automata/svc/internal/domain/projects"
+	domainshared "github.com/Kapital-B/automata/svc/internal/domain/shared"
 	"github.com/google/uuid"
 )
 
@@ -23,13 +27,13 @@ var (
 
 // Service orchestrates Slack connector OAuth, bindings, and synchronization.
 type Service struct {
-	Connectors driven.ConnectorRepository
-	OAuthState driven.OAuthStateRepository
-	Users      driven.UserRepository
-	Projects   driven.ProjectRepository
-	Slack      driven.SlackClient
-	Vault      driven.TokenVault
-	JobRuns    driven.JobRunRepository
+	Connectors domainconnectors.ConnectorRepository
+	OAuthState domainauth.OAuthStateRepository
+	Users      domainauth.UserRepository
+	Projects   domainprojects.ProjectRepository
+	Slack      domainconnectors.SlackClient
+	Vault      domainshared.TokenVault
+	JobRuns    domainjobs.JobRunRepository
 }
 
 type StartConnectInput struct {
@@ -114,7 +118,7 @@ func (s *Service) CompleteOAuth(ctx context.Context, code, state string) (*Compl
 	}
 	now := time.Now().UTC()
 	id := uuid.New()
-	if err := s.Connectors.InsertConnectorAccount(ctx, driven.ConnectorAccountRow{
+	if err := s.Connectors.InsertConnectorAccount(ctx, domainconnectors.ConnectorAccountRow{
 		ID: id, UserID: *userID, Provider: "slack", Label: label,
 		ExternalTenantID: externalTenantID, ConnectionStatus: "connected",
 		Scopes: oauthResult.Scopes, CreatedAt: now, UpdatedAt: now,
@@ -124,7 +128,7 @@ func (s *Service) CompleteOAuth(ctx context.Context, code, state string) (*Compl
 	return &CompleteOAuthResult{ConnectorAccountID: id}, nil
 }
 
-func (s *Service) List(ctx context.Context, userID uuid.UUID) ([]driven.ConnectorAccountRow, error) {
+func (s *Service) List(ctx context.Context, userID uuid.UUID) ([]domainconnectors.ConnectorAccountRow, error) {
 	return s.Connectors.ListConnectorAccounts(ctx, userID)
 }
 
@@ -139,7 +143,7 @@ func (s *Service) Disconnect(ctx context.Context, userID, connectorAccountID uui
 	return s.Connectors.DeleteConnectorAccount(ctx, userID, connectorAccountID)
 }
 
-func (s *Service) ListBindings(ctx context.Context, userID, connectorAccountID uuid.UUID) ([]driven.ConnectorBindingRow, error) {
+func (s *Service) ListBindings(ctx context.Context, userID, connectorAccountID uuid.UUID) ([]domainconnectors.ConnectorBindingRow, error) {
 	account, err := s.Connectors.GetConnectorAccount(ctx, userID, connectorAccountID)
 	if err != nil {
 		return nil, err
@@ -157,7 +161,7 @@ type CreateBindingInput struct {
 	Label             string
 }
 
-func (s *Service) CreateBinding(ctx context.Context, userID, connectorAccountID uuid.UUID, in CreateBindingInput) (*driven.ConnectorBindingRow, error) {
+func (s *Service) CreateBinding(ctx context.Context, userID, connectorAccountID uuid.UUID, in CreateBindingInput) (*domainconnectors.ConnectorBindingRow, error) {
 	account, err := s.Connectors.GetConnectorAccount(ctx, userID, connectorAccountID)
 	if err != nil {
 		return nil, err
@@ -210,7 +214,7 @@ func (s *Service) CreateBinding(ctx context.Context, userID, connectorAccountID 
 		}
 	}
 	now := time.Now().UTC()
-	row := &driven.ConnectorBindingRow{
+	row := &domainconnectors.ConnectorBindingRow{
 		ID: uuid.New(), ConnectorAccountID: connectorAccountID, OrganisationID: organisationID,
 		ExternalChannelID: channelID, ProjectID: in.ProjectID, Label: label,
 		CreatedAt: now, UpdatedAt: now,

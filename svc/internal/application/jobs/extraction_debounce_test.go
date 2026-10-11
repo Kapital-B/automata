@@ -7,21 +7,22 @@ import (
 
 	"github.com/Kapital-B/automata/svc/internal/adapters/outbound/memoryjobs"
 	appjobs "github.com/Kapital-B/automata/svc/internal/application/jobs"
-	"github.com/Kapital-B/automata/svc/internal/application/ports/driven"
+	domainjobs "github.com/Kapital-B/automata/svc/internal/domain/jobs"
+	domainprojects "github.com/Kapital-B/automata/svc/internal/domain/projects"
 	"github.com/google/uuid"
 )
 
 // stubDueProjects reports a fixed due list and records the debounce windows it
 // was asked for.
 type stubDueProjects struct {
-	driven.ProjectRepository
-	due       []driven.DueProject
+	domainprojects.ProjectRepository
+	due       []domainprojects.DueProject
 	gotQuiet  time.Duration
 	gotCeil   time.Duration
 	extracted []uuid.UUID
 }
 
-func (s *stubDueProjects) ListProjectsDueForExtraction(ctx context.Context, now time.Time, quietFor, ceiling time.Duration, limit int) ([]driven.DueProject, error) {
+func (s *stubDueProjects) ListProjectsDueForExtraction(ctx context.Context, now time.Time, quietFor, ceiling time.Duration, limit int) ([]domainprojects.DueProject, error) {
 	s.gotQuiet = quietFor
 	s.gotCeil = ceiling
 	return s.due, nil
@@ -36,7 +37,7 @@ func TestSchedulerEnqueuesExtractionForDueProjects(t *testing.T) {
 	store := memoryjobs.NewStore()
 	projectA, projectB := uuid.New(), uuid.New()
 	owner := uuid.New()
-	projects := &stubDueProjects{due: []driven.DueProject{
+	projects := &stubDueProjects{due: []domainprojects.DueProject{
 		{ProjectID: projectA, OwnerUserID: owner},
 		{ProjectID: projectB, OwnerUserID: owner},
 	}}
@@ -59,7 +60,7 @@ func TestSchedulerEnqueuesExtractionForDueProjects(t *testing.T) {
 		t.Errorf("ceiling = %v, want 5m", projects.gotCeil)
 	}
 
-	page, err := store.List(context.Background(), driven.JobListFilter{UserID: owner, Limit: 50})
+	page, err := store.List(context.Background(), domainjobs.JobListFilter{UserID: owner, Limit: 50})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -82,7 +83,7 @@ func TestSchedulerCoalescesExtractionAndSurvivesLockConflicts(t *testing.T) {
 	store := memoryjobs.NewStore()
 	projectID := uuid.New()
 	owner := uuid.New()
-	projects := &stubDueProjects{due: []driven.DueProject{{ProjectID: projectID, OwnerUserID: owner}}}
+	projects := &stubDueProjects{due: []domainprojects.DueProject{{ProjectID: projectID, OwnerUserID: owner}}}
 	enq := &appjobs.Enqueuer{Store: store, Registry: appjobs.DefaultRegistry()}
 	sched := &appjobs.SchedulerService{
 		Store: store, Projects: projects, Enqueuer: enq, Registry: appjobs.DefaultRegistry(),
@@ -98,7 +99,7 @@ func TestSchedulerCoalescesExtractionAndSurvivesLockConflicts(t *testing.T) {
 		t.Fatalf("a held extraction lock must not fail the tick: %v", err)
 	}
 
-	page, err := store.List(ctx, driven.JobListFilter{UserID: owner, Limit: 50})
+	page, err := store.List(ctx, domainjobs.JobListFilter{UserID: owner, Limit: 50})
 	if err != nil {
 		t.Fatal(err)
 	}

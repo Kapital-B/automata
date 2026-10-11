@@ -5,36 +5,36 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	domaincontacts "github.com/Kapital-B/automata/svc/internal/domain/contacts"
 	"strconv"
 	"strings"
 	"time"
 
 	appaccounts "github.com/Kapital-B/automata/svc/internal/application/accounts"
-	"github.com/Kapital-B/automata/svc/internal/application/ports/driven"
+	domainaccounts "github.com/Kapital-B/automata/svc/internal/domain/accounts"
+	domainjobs "github.com/Kapital-B/automata/svc/internal/domain/jobs"
+	domainmessages "github.com/Kapital-B/automata/svc/internal/domain/messages"
+	domainprojects "github.com/Kapital-B/automata/svc/internal/domain/projects"
 	"github.com/google/uuid"
 )
 
 // SyncService pulls inbox messages into the store for one account.
 type SyncService struct {
-	Accounts  driven.AccountRepository
-	Messages  driven.MessageRepository
+	Accounts  domainaccounts.AccountRepository
+	Messages  domainmessages.MessageRepository
 	Mailboxes *appaccounts.MailboxOpener
-	JobRuns   driven.JobRunRepository
-	Resolve   interface {
-		BackfillAccount(ctx context.Context, userID, accountID uuid.UUID) error
-	}
-	Assign interface {
-		AssignAfterSync(ctx context.Context, userID, accountID uuid.UUID) error
-	}
+	JobRuns   domainjobs.JobRunRepository
+	Resolve   domaincontacts.AccountResolver
+	Assign    domainprojects.SyncAssigner
 	// AssignEnqueuer, when set, takes assignment off the sync request path:
 	// scoring a mailbox is real work and sync latency should not include it.
 	// Falls back to the inline Assign hook when nil.
-	AssignEnqueuer driven.JobEnqueuer
+	AssignEnqueuer domainjobs.JobEnqueuer
 	// ContactsEnqueuer does the same for contact resolution. Without it the
 	// chunked sync path resolved nothing at all: the inline hooks below are
 	// only reached by SyncInboxWithOptions, which a deployed worker never
 	// calls.
-	ContactsEnqueuer driven.JobEnqueuer
+	ContactsEnqueuer domainjobs.JobEnqueuer
 }
 
 type SyncResult struct {
@@ -57,7 +57,7 @@ type SyncChunkResult struct {
 	Fetched          int
 	DeltaReused      bool
 	DeltaResetReason string
-	NextCursor       *driven.JobCursor
+	NextCursor       *domainjobs.JobCursor
 	Done             bool
 }
 
@@ -65,7 +65,7 @@ func (s *SyncService) SyncInbox(ctx context.Context, userID uuid.UUID, accountID
 	return s.SyncInboxWithOptions(ctx, userID, accountID, SyncOptions{})
 }
 
-func (s *SyncService) SyncChunk(ctx context.Context, run driven.RunContext) (*SyncChunkResult, error) {
+func (s *SyncService) SyncChunk(ctx context.Context, run domainjobs.RunContext) (*SyncChunkResult, error) {
 	if s == nil || s.Accounts == nil || s.Messages == nil || s.Mailboxes == nil {
 		return nil, fmt.Errorf("sync service not configured")
 	}
@@ -98,7 +98,7 @@ func (s *SyncService) SyncChunk(ctx context.Context, run driven.RunContext) (*Sy
 		deltaUsed = cursor != ""
 	}
 	deltaRes, err := box.ListChanges(ctx, cursor, 100)
-	if err != nil && deltaUsed && errors.Is(err, driven.ErrCursorExpired) {
+	if err != nil && deltaUsed && errors.Is(err, domainaccounts.ErrCursorExpired) {
 		deltaResetReason = "invalid_delta_link"
 		deltaRes, err = box.ListChanges(ctx, "", 100)
 		deltaUsed = false
@@ -138,7 +138,7 @@ func (s *SyncService) SyncChunk(ctx context.Context, run driven.RunContext) (*Sy
 		ccJSON, _ := json.Marshal(graphRecipientsJSON(gm.CcRecipients))
 		conv := gm.ConversationID
 		etag := gm.ChangeKey
-		m := driven.MessageRow{
+		m := domainmessages.MessageRow{
 			ID:                uuid.New(),
 			AccountID:         accountID,
 			ProviderMessageID: gm.ID,
@@ -176,7 +176,7 @@ func (s *SyncService) SyncChunk(ctx context.Context, run driven.RunContext) (*Sy
 		DeltaResetReason: reportedReset,
 	}
 	if strings.TrimSpace(deltaRes.NextCursor) != "" {
-		out.NextCursor = &driven.JobCursor{Kind: "graph_next_link", Value: strings.TrimSpace(deltaRes.NextCursor)}
+		out.NextCursor = &domainjobs.JobCursor{Kind: "graph_next_link", Value: strings.TrimSpace(deltaRes.NextCursor)}
 		return out, nil
 	}
 	if strings.TrimSpace(deltaRes.FinalCursor) == "" {
@@ -238,7 +238,7 @@ func (s *SyncService) SyncInboxWithOptions(ctx context.Context, userID uuid.UUID
 		deltaResetReason = "forced"
 	}
 	deltaRes, err := box.ListChanges(ctx, strOrEmpty(prevDeltaLink), 50)
-	if err != nil && deltaUsed && errors.Is(err, driven.ErrCursorExpired) {
+	if err != nil && deltaUsed && errors.Is(err, domainaccounts.ErrCursorExpired) {
 		deltaResetReason = "invalid_delta_link"
 		deltaRes, err = box.ListChanges(ctx, "", 50)
 		deltaUsed = false
@@ -286,7 +286,7 @@ func (s *SyncService) SyncInboxWithOptions(ctx context.Context, userID uuid.UUID
 		ccJSON, _ := json.Marshal(graphRecipientsJSON(gm.CcRecipients))
 		conv := gm.ConversationID
 		etag := gm.ChangeKey
-		m := driven.MessageRow{
+		m := domainmessages.MessageRow{
 			ID:                uuid.New(),
 			AccountID:         accountID,
 			ProviderMessageID: gm.ID,
@@ -338,7 +338,7 @@ func parseGraphTime(s string) (time.Time, error) {
 	return time.Parse(time.RFC3339, s)
 }
 
-func graphRecipientsJSON(recs []driven.MailRecipient) []map[string]string {
+func graphRecipientsJSON(recs []domainaccounts.MailRecipient) []map[string]string {
 	out := make([]map[string]string, 0, len(recs))
 	for _, r := range recs {
 		out = append(out, map[string]string{"name": r.Name, "address": r.Address})
@@ -407,11 +407,11 @@ func timePtrSync(t time.Time) *time.Time {
 func (s *SyncService) scheduleContactResolution(ctx context.Context, userID, accountID uuid.UUID) {
 	if s.ContactsEnqueuer != nil {
 		acc := accountID
-		_, err := s.ContactsEnqueuer.Enqueue(ctx, driven.CreateJobInput{
+		_, err := s.ContactsEnqueuer.Enqueue(ctx, domainjobs.CreateJobInput{
 			JobType:     "resolve_contacts",
 			UserID:      userID,
 			AccountID:   &acc,
-			TriggerKind: driven.JobTriggerAPI,
+			TriggerKind: domainjobs.JobTriggerAPI,
 			Now:         time.Now().UTC(),
 		})
 		if err == nil {
@@ -426,11 +426,11 @@ func (s *SyncService) scheduleContactResolution(ctx context.Context, userID, acc
 func (s *SyncService) scheduleAssignment(ctx context.Context, userID, accountID uuid.UUID) {
 	if s.AssignEnqueuer != nil {
 		acc := accountID
-		_, err := s.AssignEnqueuer.Enqueue(ctx, driven.CreateJobInput{
+		_, err := s.AssignEnqueuer.Enqueue(ctx, domainjobs.CreateJobInput{
 			JobType:     "assign_projects",
 			UserID:      userID,
 			AccountID:   &acc,
-			TriggerKind: driven.JobTriggerAPI,
+			TriggerKind: domainjobs.JobTriggerAPI,
 			Now:         time.Now().UTC(),
 		})
 		if err == nil {

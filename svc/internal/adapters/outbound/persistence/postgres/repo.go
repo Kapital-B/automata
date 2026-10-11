@@ -9,9 +9,13 @@ import (
 	"strings"
 	"time"
 
-	"github.com/Kapital-B/automata/svc/internal/application/ports/driven"
 	"github.com/Kapital-B/automata/svc/internal/domain/accounts"
+	domainaccounts "github.com/Kapital-B/automata/svc/internal/domain/accounts"
+	domainjobs "github.com/Kapital-B/automata/svc/internal/domain/jobs"
+	domainmessages "github.com/Kapital-B/automata/svc/internal/domain/messages"
 	"github.com/Kapital-B/automata/svc/internal/domain/organisations"
+	domainorganisations "github.com/Kapital-B/automata/svc/internal/domain/organisations"
+
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5/pgconn"
 )
@@ -280,10 +284,10 @@ func scanUUIDColumn(rows *sql.Rows) ([]uuid.UUID, error) {
 	return out, rows.Err()
 }
 
-func scanMessageRow(row *sql.Row) (*driven.MessageRow, error) { return scanMessageScanner(row) }
+func scanMessageRow(row *sql.Row) (*domainmessages.MessageRow, error) { return scanMessageScanner(row) }
 
-func scanMessageRows(rows *sql.Rows) ([]driven.MessageRow, error) {
-	out := make([]driven.MessageRow, 0)
+func scanMessageRows(rows *sql.Rows) ([]domainmessages.MessageRow, error) {
+	out := make([]domainmessages.MessageRow, 0)
 	for rows.Next() {
 		m, err := scanMessageScanner(rows)
 		if err != nil {
@@ -294,8 +298,8 @@ func scanMessageRows(rows *sql.Rows) ([]driven.MessageRow, error) {
 	return out, rows.Err()
 }
 
-func scanMessageScanner(s rowScanner) (*driven.MessageRow, error) {
-	var m driven.MessageRow
+func scanMessageScanner(s rowScanner) (*domainmessages.MessageRow, error) {
+	var m domainmessages.MessageRow
 	var idStr, accStr string
 	var conv, preview, body, etag, categorySlug sql.NullString
 	var bodyAt, summarySeen, forwardSeen sql.NullTime
@@ -337,11 +341,11 @@ func scanMessageScanner(s rowScanner) (*driven.MessageRow, error) {
 	return &m, nil
 }
 
-func scanJobRunRow(_ rowScanner) (*driven.JobRunRow, error) {
+func scanJobRunRow(_ rowScanner) (*domainjobs.JobRunRow, error) {
 	return nil, fmt.Errorf("job runs are not stored in postgres product persistence")
 }
 
-func (r *Repository) InsertAccount(ctx context.Context, a driven.AccountRow, tokenCiphertext []byte) error {
+func (r *Repository) InsertAccount(ctx context.Context, a domainaccounts.AccountRow, tokenCiphertext []byte) error {
 	now := time.Now().UTC()
 	_, err := r.execContext(ctx, `
 		INSERT INTO accounts (id, user_id, label, provider, ms_account_kind, graph_tenant_id, primary_email, msal_home_account_id,
@@ -369,8 +373,8 @@ func (r *Repository) UpdateAccountTokens(ctx context.Context, userID uuid.UUID, 
 	return err
 }
 
-func (r *Repository) GetAccount(ctx context.Context, userID uuid.UUID, id uuid.UUID) (*driven.AccountRow, []byte, error) {
-	var a driven.AccountRow
+func (r *Repository) GetAccount(ctx context.Context, userID uuid.UUID, id uuid.UUID) (*domainaccounts.AccountRow, []byte, error) {
+	var a domainaccounts.AccountRow
 	var idStr, userStr, kindStr string
 	var graphT, msalH, lastE sql.NullString
 	var tok []byte
@@ -412,7 +416,7 @@ func (r *Repository) GetAccount(ctx context.Context, userID uuid.UUID, id uuid.U
 	return &a, tokenBytes, nil
 }
 
-func (r *Repository) ListAccounts(ctx context.Context, userID uuid.UUID) ([]driven.AccountRow, error) {
+func (r *Repository) ListAccounts(ctx context.Context, userID uuid.UUID) ([]domainaccounts.AccountRow, error) {
 	rows, err := r.queryContext(ctx, `
 		SELECT a.user_id, a.id, a.label, a.provider, a.ms_account_kind, a.graph_tenant_id, a.primary_email, a.msal_home_account_id,
 			a.connection_status, a.last_error, a.created_at, a.updated_at, s.last_synced_at
@@ -425,9 +429,9 @@ func (r *Repository) ListAccounts(ctx context.Context, userID uuid.UUID) ([]driv
 		return nil, err
 	}
 	defer rows.Close()
-	out := make([]driven.AccountRow, 0)
+	out := make([]domainaccounts.AccountRow, 0)
 	for rows.Next() {
-		var a driven.AccountRow
+		var a domainaccounts.AccountRow
 		var idStr, userStr, kindStr string
 		var graphT, msalH, lastE sql.NullString
 		var createdAt, updatedAt time.Time
@@ -551,7 +555,7 @@ func (r *Repository) UpsertSyncStateTime(ctx context.Context, userID uuid.UUID, 
 	return err
 }
 
-func (r *Repository) UpsertMessage(ctx context.Context, m driven.MessageRow) error {
+func (r *Repository) UpsertMessage(ctx context.Context, m domainmessages.MessageRow) error {
 	fromJSON := m.FromJSON
 	if fromJSON == "" {
 		fromJSON = "{}"
@@ -608,11 +612,11 @@ func (r *Repository) GetMessageIDByProvider(ctx context.Context, accountID uuid.
 	return uuid.Parse(idStr)
 }
 
-func (r *Repository) ListMessagesByAccount(ctx context.Context, userID uuid.UUID, accountID uuid.UUID, limit, offset int) ([]driven.MessageRow, error) {
-	return r.ListMessages(ctx, userID, driven.MessageListFilter{AccountID: &accountID, Limit: limit, Offset: offset})
+func (r *Repository) ListMessagesByAccount(ctx context.Context, userID uuid.UUID, accountID uuid.UUID, limit, offset int) ([]domainmessages.MessageRow, error) {
+	return r.ListMessages(ctx, userID, domainmessages.MessageListFilter{AccountID: &accountID, Limit: limit, Offset: offset})
 }
 
-func (r *Repository) GetMessage(ctx context.Context, userID uuid.UUID, id uuid.UUID) (*driven.MessageRow, error) {
+func (r *Repository) GetMessage(ctx context.Context, userID uuid.UUID, id uuid.UUID) (*domainmessages.MessageRow, error) {
 	row := r.queryRowContext(ctx, `
 		SELECT m.id, m.account_id, m.provider_message_id, m.conversation_id, m.received_at, m.subject, m.from_json,
 			m.to_json, m.cc_json, m.to_cc_preview, m.body_text, m.body_fetched_at, m.has_attachments, m.raw_etag,
@@ -630,7 +634,7 @@ func (r *Repository) GetMessage(ctx context.Context, userID uuid.UUID, id uuid.U
 	return m, err
 }
 
-func (r *Repository) ListMessages(ctx context.Context, userID uuid.UUID, filter driven.MessageListFilter) ([]driven.MessageRow, error) {
+func (r *Repository) ListMessages(ctx context.Context, userID uuid.UUID, filter domainmessages.MessageListFilter) ([]domainmessages.MessageRow, error) {
 	limit := filter.Limit
 	if limit <= 0 {
 		limit = 50
@@ -741,7 +745,7 @@ func (r *Repository) markMessagesSeen(ctx context.Context, column string, userID
 	return nil
 }
 
-func (r *Repository) UpsertMessageCategory(ctx context.Context, row driven.MessageCategoryRow) error {
+func (r *Repository) UpsertMessageCategory(ctx context.Context, row domainmessages.MessageCategoryRow) error {
 	_, err := r.execContext(ctx, `
 		INSERT INTO message_categories (id, message_id, account_id, category_id, source, confidence, run_id, created_at, updated_at)
 		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
@@ -756,7 +760,7 @@ func (r *Repository) UpsertMessageCategory(ctx context.Context, row driven.Messa
 	return err
 }
 
-func (r *Repository) ListCategoryDefinitions(ctx context.Context, userID uuid.UUID) ([]driven.CategoryDefinitionRow, error) {
+func (r *Repository) ListCategoryDefinitions(ctx context.Context, userID uuid.UUID) ([]domainmessages.CategoryDefinitionRow, error) {
 	rows, err := r.queryContext(ctx, `
 		SELECT id, user_id, slug, display_name, definition, sort_order, created_at, updated_at
 		FROM category_definitions
@@ -767,11 +771,11 @@ func (r *Repository) ListCategoryDefinitions(ctx context.Context, userID uuid.UU
 		return nil, err
 	}
 	defer rows.Close()
-	out := make([]driven.CategoryDefinitionRow, 0)
+	out := make([]domainmessages.CategoryDefinitionRow, 0)
 	for rows.Next() {
 		var idStr, userStr string
 		var createdAt, updatedAt time.Time
-		var row driven.CategoryDefinitionRow
+		var row domainmessages.CategoryDefinitionRow
 		if err := rows.Scan(&idStr, &userStr, &row.Slug, &row.DisplayName, &row.Definition, &row.SortOrder, &createdAt, &updatedAt); err != nil {
 			return nil, err
 		}
@@ -789,16 +793,16 @@ func (r *Repository) ListCategoryDefinitions(ctx context.Context, userID uuid.UU
 	return out, rows.Err()
 }
 
-func (r *Repository) GetCategoryDefinitionBySlug(ctx context.Context, userID uuid.UUID, slug string) (*driven.CategoryDefinitionRow, error) {
+func (r *Repository) GetCategoryDefinitionBySlug(ctx context.Context, userID uuid.UUID, slug string) (*domainmessages.CategoryDefinitionRow, error) {
 	return r.getCategoryDefinition(ctx, `SELECT id, user_id, slug, display_name, definition, sort_order, created_at, updated_at FROM category_definitions WHERE user_id = ? AND slug = ?`, userID.String(), slug)
 }
 
-func (r *Repository) GetCategoryDefinitionByID(ctx context.Context, userID uuid.UUID, id uuid.UUID) (*driven.CategoryDefinitionRow, error) {
+func (r *Repository) GetCategoryDefinitionByID(ctx context.Context, userID uuid.UUID, id uuid.UUID) (*domainmessages.CategoryDefinitionRow, error) {
 	return r.getCategoryDefinition(ctx, `SELECT id, user_id, slug, display_name, definition, sort_order, created_at, updated_at FROM category_definitions WHERE user_id = ? AND id = ?`, userID.String(), id.String())
 }
 
-func (r *Repository) getCategoryDefinition(ctx context.Context, query string, args ...any) (*driven.CategoryDefinitionRow, error) {
-	var row driven.CategoryDefinitionRow
+func (r *Repository) getCategoryDefinition(ctx context.Context, query string, args ...any) (*domainmessages.CategoryDefinitionRow, error) {
+	var row domainmessages.CategoryDefinitionRow
 	var idStr, userStr string
 	var createdAt, updatedAt time.Time
 	err := r.queryRowContext(ctx, query, args...).Scan(&idStr, &userStr, &row.Slug, &row.DisplayName, &row.Definition, &row.SortOrder, &createdAt, &updatedAt)
@@ -820,7 +824,7 @@ func (r *Repository) getCategoryDefinition(ctx context.Context, query string, ar
 	return &row, nil
 }
 
-func (r *Repository) CreateCategoryDefinition(ctx context.Context, row driven.CategoryDefinitionRow) error {
+func (r *Repository) CreateCategoryDefinition(ctx context.Context, row domainmessages.CategoryDefinitionRow) error {
 	_, err := r.execContext(ctx, `
 		INSERT INTO category_definitions (id, user_id, slug, display_name, definition, sort_order, created_at, updated_at)
 		VALUES (?, ?, ?, ?, ?, ?, ?, ?)
@@ -828,7 +832,7 @@ func (r *Repository) CreateCategoryDefinition(ctx context.Context, row driven.Ca
 	return err
 }
 
-func (r *Repository) UpdateCategoryDefinition(ctx context.Context, row driven.CategoryDefinitionRow) error {
+func (r *Repository) UpdateCategoryDefinition(ctx context.Context, row domainmessages.CategoryDefinitionRow) error {
 	_, err := r.execContext(ctx, `
 		UPDATE category_definitions
 		SET slug = ?, display_name = ?, definition = ?, sort_order = ?, updated_at = ?
@@ -945,7 +949,7 @@ func (r *Repository) DeleteExpiredStates(ctx context.Context, before time.Time) 
 	return err
 }
 
-func (r *Repository) GetSummarySettings(ctx context.Context, userID uuid.UUID) (*driven.SummarySettingsRow, error) {
+func (r *Repository) GetSummarySettings(ctx context.Context, userID uuid.UUID) (*domainmessages.SummarySettingsRow, error) {
 	var includeJSON, excludeJSON string
 	var chunkSize int
 	var updatedAt time.Time
@@ -960,7 +964,7 @@ func (r *Repository) GetSummarySettings(ctx context.Context, userID uuid.UUID) (
 	if err != nil {
 		return nil, err
 	}
-	row := &driven.SummarySettingsRow{UserID: userID, ChunkSize: chunkSize, UpdatedAt: updatedAt.UTC()}
+	row := &domainmessages.SummarySettingsRow{UserID: userID, ChunkSize: chunkSize, UpdatedAt: updatedAt.UTC()}
 	if err := json.Unmarshal([]byte(includeJSON), &row.IncludeCategorySlugs); err != nil {
 		return nil, err
 	}
@@ -970,7 +974,7 @@ func (r *Repository) GetSummarySettings(ctx context.Context, userID uuid.UUID) (
 	return row, nil
 }
 
-func (r *Repository) UpsertSummarySettings(ctx context.Context, row driven.SummarySettingsRow) error {
+func (r *Repository) UpsertSummarySettings(ctx context.Context, row domainmessages.SummarySettingsRow) error {
 	includeJSON, _ := json.Marshal(row.IncludeCategorySlugs)
 	excludeJSON, _ := json.Marshal(row.ExcludeCategorySlugs)
 	_, err := r.execContext(ctx, `
@@ -985,7 +989,7 @@ func (r *Repository) UpsertSummarySettings(ctx context.Context, row driven.Summa
 	return err
 }
 
-func (r *Repository) InsertSummarySnapshot(ctx context.Context, row driven.SummarySnapshotRow) error {
+func (r *Repository) InsertSummarySnapshot(ctx context.Context, row domainmessages.SummarySnapshotRow) error {
 	_, err := r.execContext(ctx, `
 		INSERT INTO summary_snapshots (id, user_id, account_id, run_id, window_start, window_end, general_summary, created_at)
 		VALUES (?, ?, ?, ?, ?, ?, ?, ?)
@@ -996,7 +1000,7 @@ func (r *Repository) InsertSummarySnapshot(ctx context.Context, row driven.Summa
 	return err
 }
 
-func (r *Repository) ListSummarySnapshots(ctx context.Context, userID uuid.UUID, accountID *uuid.UUID, limit int) ([]driven.SummarySnapshotRow, error) {
+func (r *Repository) ListSummarySnapshots(ctx context.Context, userID uuid.UUID, accountID *uuid.UUID, limit int) ([]domainmessages.SummarySnapshotRow, error) {
 	if limit <= 0 {
 		limit = 1
 	}
@@ -1014,12 +1018,12 @@ func (r *Repository) ListSummarySnapshots(ctx context.Context, userID uuid.UUID,
 		return nil, err
 	}
 	defer rows.Close()
-	out := make([]driven.SummarySnapshotRow, 0)
+	out := make([]domainmessages.SummarySnapshotRow, 0)
 	for rows.Next() {
 		var idStr, userStr, runStr string
 		var account sql.NullString
 		var windowStart, windowEnd, createdAt time.Time
-		var item driven.SummarySnapshotRow
+		var item domainmessages.SummarySnapshotRow
 		if err := rows.Scan(&idStr, &userStr, &account, &runStr, &windowStart, &windowEnd, &item.GeneralSummary, &createdAt); err != nil {
 			return nil, err
 		}
@@ -1044,11 +1048,11 @@ func (r *Repository) ListSummarySnapshots(ctx context.Context, userID uuid.UUID,
 	return out, rows.Err()
 }
 
-func (r *Repository) InsertActionItems(ctx context.Context, rows []driven.ActionItemRow) error {
+func (r *Repository) InsertActionItems(ctx context.Context, rows []domainmessages.ActionItemRow) error {
 	return r.insertActionItems(ctx, rows)
 }
 
-func (r *Repository) insertActionItems(ctx context.Context, rows []driven.ActionItemRow) error {
+func (r *Repository) insertActionItems(ctx context.Context, rows []domainmessages.ActionItemRow) error {
 	for i := 0; i < len(rows); i += defaultMutationChunkSize {
 		end := i + defaultMutationChunkSize
 		if end > len(rows) {
@@ -1080,7 +1084,7 @@ func (r *Repository) insertActionItems(ctx context.Context, rows []driven.Action
 	return nil
 }
 
-func (r *Repository) ListOpenActionItems(ctx context.Context, userID uuid.UUID, accountID *uuid.UUID) ([]driven.ActionItemRow, error) {
+func (r *Repository) ListOpenActionItems(ctx context.Context, userID uuid.UUID, accountID *uuid.UUID) ([]domainmessages.ActionItemRow, error) {
 	var b strings.Builder
 	b.WriteString(`SELECT id, user_id, account_id, message_id, run_id, text, due_at, status, actioned_at, auto_draft_seen_at, created_at, updated_at FROM action_items WHERE user_id = ? AND status = 'open'`)
 	args := []any{userID.String()}
@@ -1097,8 +1101,8 @@ func (r *Repository) ListOpenActionItems(ctx context.Context, userID uuid.UUID, 
 	return scanActionItems(rows)
 }
 
-func scanActionItems(rows *sql.Rows) ([]driven.ActionItemRow, error) {
-	out := make([]driven.ActionItemRow, 0)
+func scanActionItems(rows *sql.Rows) ([]domainmessages.ActionItemRow, error) {
+	out := make([]domainmessages.ActionItemRow, 0)
 	for rows.Next() {
 		var idStr, userStr, accountStr, messageStr, runStr, text, status string
 		var dueAt, actionedAt, autoDraftSeenAt sql.NullTime
@@ -1111,7 +1115,7 @@ func scanActionItems(rows *sql.Rows) ([]driven.ActionItemRow, error) {
 		accountID, _ := uuid.Parse(accountStr)
 		messageID, _ := uuid.Parse(messageStr)
 		runID, _ := uuid.Parse(runStr)
-		out = append(out, driven.ActionItemRow{
+		out = append(out, domainmessages.ActionItemRow{
 			ID:              id,
 			UserID:          userID,
 			AccountID:       accountID,
@@ -1170,13 +1174,13 @@ const projectTodosSQL = `
 	ORDER BY ai.created_at DESC
 	LIMIT 500`
 
-func (r *Repository) ListOpenActionItemsForProject(ctx context.Context, organisationID, projectID uuid.UUID) ([]driven.ProjectTodoRow, error) {
+func (r *Repository) ListOpenActionItemsForProject(ctx context.Context, organisationID, projectID uuid.UUID) ([]domainmessages.ProjectTodoRow, error) {
 	rows, err := r.queryContext(ctx, projectTodosSQL, projectID.String(), organisationID.String())
 	if err != nil {
 		return nil, err
 	}
 	defer rows.Close()
-	out := make([]driven.ProjectTodoRow, 0)
+	out := make([]domainmessages.ProjectTodoRow, 0)
 	for rows.Next() {
 		var idStr, userStr, accountStr, messageStr, runStr, text, status, email string
 		var dueAt, actionedAt, autoDraftSeenAt sql.NullTime
@@ -1191,8 +1195,8 @@ func (r *Repository) ListOpenActionItemsForProject(ctx context.Context, organisa
 		accountID, _ := uuid.Parse(accountStr)
 		messageID, _ := uuid.Parse(messageStr)
 		runID, _ := uuid.Parse(runStr)
-		row := driven.ProjectTodoRow{
-			Item: driven.ActionItemRow{
+		row := domainmessages.ProjectTodoRow{
+			Item: domainmessages.ActionItemRow{
 				ID: id, UserID: userID, AccountID: accountID, MessageID: messageID, RunID: runID,
 				Text: text, DueAt: nullTimePtr(dueAt), Status: status,
 				ActionedAt: nullTimePtr(actionedAt), AutoDraftSeenAt: nullTimePtr(autoDraftSeenAt),
@@ -1213,7 +1217,7 @@ func (r *Repository) ListOpenActionItemsForProject(ctx context.Context, organisa
 	return out, rows.Err()
 }
 
-func (r *Repository) InsertFYI(ctx context.Context, rows []driven.FYIRow) error {
+func (r *Repository) InsertFYI(ctx context.Context, rows []domainmessages.FYIRow) error {
 	for i := 0; i < len(rows); i += defaultMutationChunkSize {
 		end := i + defaultMutationChunkSize
 		if end > len(rows) {
@@ -1240,7 +1244,7 @@ func (r *Repository) InsertFYI(ctx context.Context, rows []driven.FYIRow) error 
 	return nil
 }
 
-func (r *Repository) ListFYIByRun(ctx context.Context, userID uuid.UUID, runID uuid.UUID) ([]driven.FYIRow, error) {
+func (r *Repository) ListFYIByRun(ctx context.Context, userID uuid.UUID, runID uuid.UUID) ([]domainmessages.FYIRow, error) {
 	rows, err := r.queryContext(ctx, `
 		SELECT id, user_id, account_id, message_id, run_id, text, created_at
 		FROM fyi_items WHERE user_id = ? AND run_id = ? ORDER BY created_at DESC
@@ -1252,7 +1256,7 @@ func (r *Repository) ListFYIByRun(ctx context.Context, userID uuid.UUID, runID u
 	return scanFYIRows(rows)
 }
 
-func (r *Repository) ListOpenFYI(ctx context.Context, userID uuid.UUID, accountID *uuid.UUID, limit int) ([]driven.FYIRow, error) {
+func (r *Repository) ListOpenFYI(ctx context.Context, userID uuid.UUID, accountID *uuid.UUID, limit int) ([]domainmessages.FYIRow, error) {
 	if limit <= 0 {
 		limit = 200
 	}
@@ -1276,8 +1280,8 @@ func (r *Repository) ListOpenFYI(ctx context.Context, userID uuid.UUID, accountI
 	return scanFYIRows(rows)
 }
 
-func scanFYIRows(rows *sql.Rows) ([]driven.FYIRow, error) {
-	out := make([]driven.FYIRow, 0)
+func scanFYIRows(rows *sql.Rows) ([]domainmessages.FYIRow, error) {
+	out := make([]domainmessages.FYIRow, 0)
 	for rows.Next() {
 		var idStr, userStr, accountStr, messageStr, runStr, text string
 		var createdAt time.Time
@@ -1289,7 +1293,7 @@ func scanFYIRows(rows *sql.Rows) ([]driven.FYIRow, error) {
 		accountID, _ := uuid.Parse(accountStr)
 		messageID, _ := uuid.Parse(messageStr)
 		runID, _ := uuid.Parse(runStr)
-		out = append(out, driven.FYIRow{
+		out = append(out, domainmessages.FYIRow{
 			ID:        id,
 			UserID:    userID,
 			AccountID: accountID,
@@ -1307,7 +1311,7 @@ func (r *Repository) DeleteFYI(ctx context.Context, userID uuid.UUID, id uuid.UU
 	return err
 }
 
-func (r *Repository) ListActionItemsForAutoDraft(ctx context.Context, userID uuid.UUID, accountID uuid.UUID, onlyUnseen bool, limit int) ([]driven.ActionItemRow, error) {
+func (r *Repository) ListActionItemsForAutoDraft(ctx context.Context, userID uuid.UUID, accountID uuid.UUID, onlyUnseen bool, limit int) ([]domainmessages.ActionItemRow, error) {
 	if limit <= 0 {
 		limit = 50
 	}
@@ -1327,7 +1331,7 @@ func (r *Repository) ListActionItemsForAutoDraft(ctx context.Context, userID uui
 	return scanActionItems(rows)
 }
 
-func (r *Repository) UpsertSummaryJobChunk(ctx context.Context, row driven.SummaryJobChunkRow) error {
+func (r *Repository) UpsertSummaryJobChunk(ctx context.Context, row domainmessages.SummaryJobChunkRow) error {
 	messageIDsJSON, _ := json.Marshal(uuidStrings(row.MessageIDs))
 	_, err := r.execContext(ctx, `
 		INSERT INTO summary_job_chunks (id, run_id, account_id, chunk_index, phase, message_ids_json, payload_json, created_at, updated_at)
@@ -1340,7 +1344,7 @@ func (r *Repository) UpsertSummaryJobChunk(ctx context.Context, row driven.Summa
 	return err
 }
 
-func (r *Repository) ListSummaryJobChunks(ctx context.Context, runID uuid.UUID) ([]driven.SummaryJobChunkRow, error) {
+func (r *Repository) ListSummaryJobChunks(ctx context.Context, runID uuid.UUID) ([]domainmessages.SummaryJobChunkRow, error) {
 	rows, err := r.queryContext(ctx, `
 		SELECT id, run_id, account_id, chunk_index, phase, message_ids_json, payload_json, created_at, updated_at
 		FROM summary_job_chunks
@@ -1351,11 +1355,11 @@ func (r *Repository) ListSummaryJobChunks(ctx context.Context, runID uuid.UUID) 
 		return nil, err
 	}
 	defer rows.Close()
-	out := make([]driven.SummaryJobChunkRow, 0)
+	out := make([]domainmessages.SummaryJobChunkRow, 0)
 	for rows.Next() {
 		var idStr, runIDStr, accountIDStr, messageIDsJSON string
 		var createdAt, updatedAt time.Time
-		var item driven.SummaryJobChunkRow
+		var item domainmessages.SummaryJobChunkRow
 		if err := rows.Scan(&idStr, &runIDStr, &accountIDStr, &item.ChunkIndex, &item.Phase, &messageIDsJSON, &item.PayloadJSON, &createdAt, &updatedAt); err != nil {
 			return nil, err
 		}
@@ -1398,7 +1402,7 @@ func (r *Repository) MarkActionItemsAutoDraftSeen(ctx context.Context, userID uu
 	return nil
 }
 
-func (r *Repository) InsertDraftSuggestions(ctx context.Context, rows []driven.DraftSuggestionRow) error {
+func (r *Repository) InsertDraftSuggestions(ctx context.Context, rows []domainmessages.DraftSuggestionRow) error {
 	if len(rows) == 0 {
 		return nil
 	}
@@ -1436,7 +1440,7 @@ func (r *Repository) InsertDraftSuggestions(ctx context.Context, rows []driven.D
 	return nil
 }
 
-func (r *Repository) ListDraftSuggestions(ctx context.Context, userID uuid.UUID, accountID *uuid.UUID, limit int) ([]driven.DraftSuggestionRow, error) {
+func (r *Repository) ListDraftSuggestions(ctx context.Context, userID uuid.UUID, accountID *uuid.UUID, limit int) ([]domainmessages.DraftSuggestionRow, error) {
 	if limit <= 0 {
 		limit = 100
 	}
@@ -1462,7 +1466,7 @@ func (r *Repository) ListDraftSuggestions(ctx context.Context, userID uuid.UUID,
 	return scanDraftSuggestions(rows)
 }
 
-func (r *Repository) GetDraftSuggestion(ctx context.Context, userID uuid.UUID, draftID uuid.UUID) (*driven.DraftSuggestionRow, error) {
+func (r *Repository) GetDraftSuggestion(ctx context.Context, userID uuid.UUID, draftID uuid.UUID) (*domainmessages.DraftSuggestionRow, error) {
 	row := r.queryRowContext(ctx, `
 		SELECT ds.id, ds.user_id, ds.account_id, ds.message_id, ds.action_item_id, ds.run_id, ds.subject, ds.body, ds.model, m.from_json, ds.status, ds.sent_at, ds.discarded_at, ds.updated_at, ds.created_at
 		FROM draft_suggestions ds
@@ -1476,8 +1480,8 @@ func (r *Repository) GetDraftSuggestion(ctx context.Context, userID uuid.UUID, d
 	return item, err
 }
 
-func scanDraftSuggestions(rows *sql.Rows) ([]driven.DraftSuggestionRow, error) {
-	out := make([]driven.DraftSuggestionRow, 0)
+func scanDraftSuggestions(rows *sql.Rows) ([]domainmessages.DraftSuggestionRow, error) {
+	out := make([]domainmessages.DraftSuggestionRow, 0)
 	for rows.Next() {
 		item, err := scanDraftSuggestion(rows)
 		if err != nil {
@@ -1488,7 +1492,7 @@ func scanDraftSuggestions(rows *sql.Rows) ([]driven.DraftSuggestionRow, error) {
 	return out, rows.Err()
 }
 
-func scanDraftSuggestion(s rowScanner) (*driven.DraftSuggestionRow, error) {
+func scanDraftSuggestion(s rowScanner) (*domainmessages.DraftSuggestionRow, error) {
 	var idStr, userStr, accountStr, messageStr, actionStr, runStr, subject, body, model, fromJSON, status string
 	var sentAt, discardedAt, updatedAt sql.NullTime
 	var createdAt time.Time
@@ -1501,7 +1505,7 @@ func scanDraftSuggestion(s rowScanner) (*driven.DraftSuggestionRow, error) {
 	messageID, _ := uuid.Parse(messageStr)
 	actionID, _ := uuid.Parse(actionStr)
 	runID, _ := uuid.Parse(runStr)
-	return &driven.DraftSuggestionRow{
+	return &domainmessages.DraftSuggestionRow{
 		ID:           id,
 		UserID:       userID,
 		AccountID:    accountID,
@@ -1546,7 +1550,7 @@ func (r *Repository) MarkDraftSuggestionStatus(ctx context.Context, userID uuid.
 	return err
 }
 
-func (r *Repository) InsertSendAttempt(ctx context.Context, row driven.SendAttemptRow) error {
+func (r *Repository) InsertSendAttempt(ctx context.Context, row domainmessages.SendAttemptRow) error {
 	_, err := r.execContext(ctx, `
 		INSERT INTO send_attempts (id, user_id, account_id, draft_id, message_id, status, provider_message_id, error_message, created_at)
 		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
@@ -1555,7 +1559,7 @@ func (r *Repository) InsertSendAttempt(ctx context.Context, row driven.SendAttem
 	return err
 }
 
-func (r *Repository) ListSendAttemptsByDraft(ctx context.Context, userID uuid.UUID, draftID uuid.UUID, limit int) ([]driven.SendAttemptRow, error) {
+func (r *Repository) ListSendAttemptsByDraft(ctx context.Context, userID uuid.UUID, draftID uuid.UUID, limit int) ([]domainmessages.SendAttemptRow, error) {
 	if limit <= 0 {
 		limit = 20
 	}
@@ -1573,7 +1577,7 @@ func (r *Repository) ListSendAttemptsByDraft(ctx context.Context, userID uuid.UU
 		return nil, err
 	}
 	defer rows.Close()
-	out := make([]driven.SendAttemptRow, 0, limit)
+	out := make([]domainmessages.SendAttemptRow, 0, limit)
 	for rows.Next() {
 		var idStr, userStr, accountStr, draftStr, messageStr, status string
 		var providerMessageID, errorMessage sql.NullString
@@ -1586,7 +1590,7 @@ func (r *Repository) ListSendAttemptsByDraft(ctx context.Context, userID uuid.UU
 		accountID, _ := uuid.Parse(accountStr)
 		draftID, _ := uuid.Parse(draftStr)
 		messageID, _ := uuid.Parse(messageStr)
-		out = append(out, driven.SendAttemptRow{
+		out = append(out, domainmessages.SendAttemptRow{
 			ID:                id,
 			UserID:            userID,
 			AccountID:         accountID,
@@ -1601,7 +1605,7 @@ func (r *Repository) ListSendAttemptsByDraft(ctx context.Context, userID uuid.UU
 	return out, rows.Err()
 }
 
-func (r *Repository) ListForwardAllowlist(ctx context.Context, userID uuid.UUID) ([]driven.ForwardAllowlistRow, error) {
+func (r *Repository) ListForwardAllowlist(ctx context.Context, userID uuid.UUID) ([]domainmessages.ForwardAllowlistRow, error) {
 	rows, err := r.queryContext(ctx, `
 		SELECT id, user_id, email, created_at
 		FROM forward_allowlist
@@ -1612,7 +1616,7 @@ func (r *Repository) ListForwardAllowlist(ctx context.Context, userID uuid.UUID)
 		return nil, err
 	}
 	defer rows.Close()
-	out := make([]driven.ForwardAllowlistRow, 0)
+	out := make([]domainmessages.ForwardAllowlistRow, 0)
 	for rows.Next() {
 		var idStr, userStr, email string
 		var createdAt time.Time
@@ -1621,7 +1625,7 @@ func (r *Repository) ListForwardAllowlist(ctx context.Context, userID uuid.UUID)
 		}
 		id, _ := uuid.Parse(idStr)
 		uid, _ := uuid.Parse(userStr)
-		out = append(out, driven.ForwardAllowlistRow{ID: id, UserID: uid, Email: email, CreatedAt: createdAt.UTC()})
+		out = append(out, domainmessages.ForwardAllowlistRow{ID: id, UserID: uid, Email: email, CreatedAt: createdAt.UTC()})
 	}
 	return out, rows.Err()
 }
@@ -1648,7 +1652,7 @@ func (r *Repository) ReplaceForwardAllowlist(ctx context.Context, userID uuid.UU
 	})
 }
 
-func (r *Repository) ListForwardRules(ctx context.Context, userID, accountID uuid.UUID) ([]driven.ForwardRuleRow, error) {
+func (r *Repository) ListForwardRules(ctx context.Context, userID, accountID uuid.UUID) ([]domainmessages.ForwardRuleRow, error) {
 	rows, err := r.queryContext(ctx, `
 		SELECT id, user_id, account_id, name, mode, condition_json, forward_to, enabled, apply_from, created_at, updated_at
 		FROM forward_rules
@@ -1659,7 +1663,7 @@ func (r *Repository) ListForwardRules(ctx context.Context, userID, accountID uui
 		return nil, err
 	}
 	defer rows.Close()
-	out := make([]driven.ForwardRuleRow, 0)
+	out := make([]domainmessages.ForwardRuleRow, 0)
 	for rows.Next() {
 		var idStr, userStr, accountStr, name, mode, conditionJSON, forwardTo string
 		var enabled bool
@@ -1671,7 +1675,7 @@ func (r *Repository) ListForwardRules(ctx context.Context, userID, accountID uui
 		id, _ := uuid.Parse(idStr)
 		userID, _ := uuid.Parse(userStr)
 		accountID, _ := uuid.Parse(accountStr)
-		out = append(out, driven.ForwardRuleRow{
+		out = append(out, domainmessages.ForwardRuleRow{
 			ID: id, UserID: userID, AccountID: accountID, Name: name, Mode: mode, ConditionJSON: conditionJSON,
 			ForwardTo: forwardTo, Enabled: enabled, ApplyFrom: nullTimePtr(applyFrom),
 			CreatedAt: createdAt.UTC(), UpdatedAt: updatedAt.UTC(),
@@ -1680,7 +1684,7 @@ func (r *Repository) ListForwardRules(ctx context.Context, userID, accountID uui
 	return out, rows.Err()
 }
 
-func (r *Repository) CreateForwardRule(ctx context.Context, row driven.ForwardRuleRow) error {
+func (r *Repository) CreateForwardRule(ctx context.Context, row domainmessages.ForwardRuleRow) error {
 	_, err := r.execContext(ctx, `
 		INSERT INTO forward_rules (id, user_id, account_id, name, mode, condition_json, forward_to, enabled, apply_from, created_at, updated_at)
 		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
@@ -1688,7 +1692,7 @@ func (r *Repository) CreateForwardRule(ctx context.Context, row driven.ForwardRu
 	return err
 }
 
-func (r *Repository) UpdateForwardRule(ctx context.Context, row driven.ForwardRuleRow) error {
+func (r *Repository) UpdateForwardRule(ctx context.Context, row domainmessages.ForwardRuleRow) error {
 	_, err := r.execContext(ctx, `
 		UPDATE forward_rules
 		SET name = ?, mode = ?, condition_json = ?, forward_to = ?, enabled = ?, apply_from = COALESCE(?, apply_from), updated_at = ?
@@ -1702,7 +1706,7 @@ func (r *Repository) DeleteForwardRule(ctx context.Context, userID, ruleID uuid.
 	return err
 }
 
-func (r *Repository) ListForwardAuditByRun(ctx context.Context, userID, runID uuid.UUID) ([]driven.ForwardAuditRow, error) {
+func (r *Repository) ListForwardAuditByRun(ctx context.Context, userID, runID uuid.UUID) ([]domainmessages.ForwardAuditRow, error) {
 	rows, err := r.queryContext(ctx, `
 		SELECT id, user_id, account_id, message_id, rule_id, run_id, status, reason, created_at
 		FROM forward_audit
@@ -1713,7 +1717,7 @@ func (r *Repository) ListForwardAuditByRun(ctx context.Context, userID, runID uu
 		return nil, err
 	}
 	defer rows.Close()
-	out := make([]driven.ForwardAuditRow, 0)
+	out := make([]domainmessages.ForwardAuditRow, 0)
 	for rows.Next() {
 		var idStr, userStr, accountStr, messageStr, ruleStr, runStr, status string
 		var reason sql.NullString
@@ -1727,7 +1731,7 @@ func (r *Repository) ListForwardAuditByRun(ctx context.Context, userID, runID uu
 		messageID, _ := uuid.Parse(messageStr)
 		ruleID, _ := uuid.Parse(ruleStr)
 		runID, _ := uuid.Parse(runStr)
-		out = append(out, driven.ForwardAuditRow{
+		out = append(out, domainmessages.ForwardAuditRow{
 			ID: id, UserID: userID, AccountID: accountID, MessageID: messageID, RuleID: ruleID, RunID: runID,
 			Status: status, Reason: nullStringPtr(reason), CreatedAt: createdAt.UTC(),
 		})
@@ -1735,7 +1739,7 @@ func (r *Repository) ListForwardAuditByRun(ctx context.Context, userID, runID uu
 	return out, rows.Err()
 }
 
-func (r *Repository) InsertForwardAudit(ctx context.Context, row driven.ForwardAuditRow) error {
+func (r *Repository) InsertForwardAudit(ctx context.Context, row domainmessages.ForwardAuditRow) error {
 	_, err := r.execContext(ctx, `
 		INSERT INTO forward_audit (id, user_id, account_id, message_id, rule_id, run_id, status, reason, pending, attempts, created_at)
 		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
@@ -1755,7 +1759,7 @@ func forwardPlaceholders(n int) string {
 	return strings.TrimSuffix(strings.Repeat("?, ", n), ", ")
 }
 
-func (r *Repository) ListForwardCandidates(ctx context.Context, userID, accountID uuid.UUID, ruleIDs []uuid.UUID, after *driven.ForwardCandidateCursor, limit int) ([]driven.MessageRow, error) {
+func (r *Repository) ListForwardCandidates(ctx context.Context, userID, accountID uuid.UUID, ruleIDs []uuid.UUID, after *domainmessages.ForwardCandidateCursor, limit int) ([]domainmessages.MessageRow, error) {
 	if len(ruleIDs) == 0 {
 		return nil, nil
 	}
@@ -1803,7 +1807,7 @@ func (r *Repository) ListForwardCandidates(ctx context.Context, userID, accountI
 	return scanMessageRows(rows)
 }
 
-func scanForwardAudit(s rowScanner, extra ...any) (driven.ForwardAuditRow, error) {
+func scanForwardAudit(s rowScanner, extra ...any) (domainmessages.ForwardAuditRow, error) {
 	var idStr, userStr, accountStr, messageStr, ruleStr, runStr, status string
 	var reason sql.NullString
 	var pending sql.NullBool
@@ -1811,9 +1815,9 @@ func scanForwardAudit(s rowScanner, extra ...any) (driven.ForwardAuditRow, error
 	var createdAt time.Time
 	dest := append([]any{&idStr, &userStr, &accountStr, &messageStr, &ruleStr, &runStr, &status, &reason, &pending, &attempts, &createdAt}, extra...)
 	if err := s.Scan(dest...); err != nil {
-		return driven.ForwardAuditRow{}, err
+		return domainmessages.ForwardAuditRow{}, err
 	}
-	row := driven.ForwardAuditRow{
+	row := domainmessages.ForwardAuditRow{
 		Status: status, Reason: nullStringPtr(reason), Pending: pending.Valid && pending.Bool,
 		Attempts: int(attempts.Int64), CreatedAt: createdAt.UTC(),
 	}
@@ -1828,7 +1832,7 @@ func scanForwardAudit(s rowScanner, extra ...any) (driven.ForwardAuditRow, error
 
 const forwardAuditColumns = `fa.id, fa.user_id, fa.account_id, fa.message_id, fa.rule_id, fa.run_id, fa.status, fa.reason, fa.pending, fa.attempts, fa.created_at`
 
-func (r *Repository) ListForwardAuditForMessages(ctx context.Context, userID uuid.UUID, messageIDs []uuid.UUID) ([]driven.ForwardAuditRow, error) {
+func (r *Repository) ListForwardAuditForMessages(ctx context.Context, userID uuid.UUID, messageIDs []uuid.UUID) ([]domainmessages.ForwardAuditRow, error) {
 	if len(messageIDs) == 0 {
 		return nil, nil
 	}
@@ -1845,7 +1849,7 @@ func (r *Repository) ListForwardAuditForMessages(ctx context.Context, userID uui
 		return nil, err
 	}
 	defer rows.Close()
-	out := []driven.ForwardAuditRow{}
+	out := []domainmessages.ForwardAuditRow{}
 	for rows.Next() {
 		row, err := scanForwardAudit(rows)
 		if err != nil {
@@ -1856,7 +1860,7 @@ func (r *Repository) ListForwardAuditForMessages(ctx context.Context, userID uui
 	return out, rows.Err()
 }
 
-func (r *Repository) ForwardRuleStats(ctx context.Context, userID, accountID uuid.UUID) ([]driven.ForwardRuleStats, error) {
+func (r *Repository) ForwardRuleStats(ctx context.Context, userID, accountID uuid.UUID) ([]domainmessages.ForwardRuleStats, error) {
 	rows, err := r.queryContext(ctx, `
 		SELECT fa.rule_id,
 			SUM(CASE WHEN fa.status = 'forwarded' THEN 1 ELSE 0 END),
@@ -1872,7 +1876,7 @@ func (r *Repository) ForwardRuleStats(ctx context.Context, userID, accountID uui
 		return nil, err
 	}
 	defer rows.Close()
-	out := []driven.ForwardRuleStats{}
+	out := []domainmessages.ForwardRuleStats{}
 	for rows.Next() {
 		var ruleStr string
 		var forwarded, failed, pending int64
@@ -1881,7 +1885,7 @@ func (r *Repository) ForwardRuleStats(ctx context.Context, userID, accountID uui
 			return nil, err
 		}
 		id, _ := uuid.Parse(ruleStr)
-		out = append(out, driven.ForwardRuleStats{
+		out = append(out, domainmessages.ForwardRuleStats{
 			RuleID: id, Forwarded: int(forwarded), Failed: int(failed), Pending: int(pending),
 			LastForwardedAt: nullTimePtr(lastForwarded), LastActivityAt: nullTimePtr(lastActivity),
 		})
@@ -1889,7 +1893,7 @@ func (r *Repository) ForwardRuleStats(ctx context.Context, userID, accountID uui
 	return out, rows.Err()
 }
 
-func (r *Repository) ListForwardActivity(ctx context.Context, userID, ruleID uuid.UUID, limit int) ([]driven.ForwardActivityRow, error) {
+func (r *Repository) ListForwardActivity(ctx context.Context, userID, ruleID uuid.UUID, limit int) ([]domainmessages.ForwardActivityRow, error) {
 	if limit <= 0 || limit > 200 {
 		limit = 50
 	}
@@ -1908,7 +1912,7 @@ func (r *Repository) ListForwardActivity(ctx context.Context, userID, ruleID uui
 		return nil, err
 	}
 	defer rows.Close()
-	out := []driven.ForwardActivityRow{}
+	out := []domainmessages.ForwardActivityRow{}
 	for rows.Next() {
 		var subject, fromJSON string
 		var received time.Time
@@ -1916,12 +1920,12 @@ func (r *Repository) ListForwardActivity(ctx context.Context, userID, ruleID uui
 		if err != nil {
 			return nil, err
 		}
-		out = append(out, driven.ForwardActivityRow{ForwardAuditRow: row, Subject: subject, FromJSON: fromJSON, ReceivedAt: received.UTC()})
+		out = append(out, domainmessages.ForwardActivityRow{ForwardAuditRow: row, Subject: subject, FromJSON: fromJSON, ReceivedAt: received.UTC()})
 	}
 	return out, rows.Err()
 }
 
-func (r *Repository) InsertManualForwardAudit(ctx context.Context, row driven.ManualForwardAuditRow) error {
+func (r *Repository) InsertManualForwardAudit(ctx context.Context, row domainmessages.ManualForwardAuditRow) error {
 	_, err := r.execContext(ctx, `
 		INSERT INTO manual_forward_audit (id, user_id, account_id, message_id, to_email, comment, status, reason, created_at)
 		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
@@ -1929,7 +1933,7 @@ func (r *Repository) InsertManualForwardAudit(ctx context.Context, row driven.Ma
 	return err
 }
 
-func (r *Repository) ListSchedulesByUser(ctx context.Context, userID uuid.UUID) ([]driven.ScheduleChainRow, error) {
+func (r *Repository) ListSchedulesByUser(ctx context.Context, userID uuid.UUID) ([]domainjobs.ScheduleChainRow, error) {
 	rows, err := r.queryContext(ctx, `
 		SELECT id, user_id, name, account_id, jobs_json, interval_minutes, enabled, last_run_at, next_run_at, created_at, updated_at
 		FROM schedule_chains
@@ -1940,7 +1944,7 @@ func (r *Repository) ListSchedulesByUser(ctx context.Context, userID uuid.UUID) 
 		return nil, err
 	}
 	defer rows.Close()
-	out := make([]driven.ScheduleChainRow, 0)
+	out := make([]domainjobs.ScheduleChainRow, 0)
 	for rows.Next() {
 		item, err := scanScheduleChainRow(rows)
 		if err != nil {
@@ -1951,7 +1955,7 @@ func (r *Repository) ListSchedulesByUser(ctx context.Context, userID uuid.UUID) 
 	return out, rows.Err()
 }
 
-func (r *Repository) ReplaceSchedulesByUser(ctx context.Context, userID uuid.UUID, rows []driven.ScheduleChainRow) error {
+func (r *Repository) ReplaceSchedulesByUser(ctx context.Context, userID uuid.UUID, rows []domainjobs.ScheduleChainRow) error {
 	return r.withTx(ctx, func(tx *sql.Tx) error {
 		if _, err := txExecContext(ctx, tx, `DELETE FROM schedule_chains WHERE user_id = ?`, userID.String()); err != nil {
 			return err
@@ -1970,7 +1974,7 @@ func (r *Repository) ReplaceSchedulesByUser(ctx context.Context, userID uuid.UUI
 	})
 }
 
-func (r *Repository) ListDueSchedules(ctx context.Context, now time.Time, limit int) ([]driven.ScheduleChainRow, error) {
+func (r *Repository) ListDueSchedules(ctx context.Context, now time.Time, limit int) ([]domainjobs.ScheduleChainRow, error) {
 	if limit <= 0 {
 		limit = 20
 	}
@@ -1985,7 +1989,7 @@ func (r *Repository) ListDueSchedules(ctx context.Context, now time.Time, limit 
 		return nil, err
 	}
 	defer rows.Close()
-	out := make([]driven.ScheduleChainRow, 0)
+	out := make([]domainjobs.ScheduleChainRow, 0)
 	for rows.Next() {
 		item, err := scanScheduleChainRow(rows)
 		if err != nil {
@@ -2021,8 +2025,8 @@ func (r *Repository) MarkScheduleExecutedIfDue(ctx context.Context, id uuid.UUID
 	return rows > 0, nil
 }
 
-func scanScheduleChainRow(s rowScanner) (*driven.ScheduleChainRow, error) {
-	var item driven.ScheduleChainRow
+func scanScheduleChainRow(s rowScanner) (*domainjobs.ScheduleChainRow, error) {
+	var item domainjobs.ScheduleChainRow
 	var idStr, userStr, jobsJSON string
 	var accountID sql.NullString
 	var lastRunAt sql.NullTime
@@ -2186,8 +2190,8 @@ func (r *Repository) AttachIdentity(ctx context.Context, id uuid.UUID, userID uu
 	return err
 }
 
-func (r *Repository) GetOrganisation(ctx context.Context, id uuid.UUID) (*driven.OrganisationRow, error) {
-	var row driven.OrganisationRow
+func (r *Repository) GetOrganisation(ctx context.Context, id uuid.UUID) (*domainorganisations.OrganisationRow, error) {
+	var row domainorganisations.OrganisationRow
 	var createdAt, updatedAt time.Time
 	err := r.queryRowContext(ctx, `SELECT name, created_at, updated_at FROM organisations WHERE id = ?`, id.String()).Scan(&row.Name, &createdAt, &updatedAt)
 	if errors.Is(err, sql.ErrNoRows) {

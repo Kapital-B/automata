@@ -14,8 +14,9 @@ import (
 	appattention "github.com/Kapital-B/automata/svc/internal/application/attention"
 	"github.com/Kapital-B/automata/svc/internal/application/auth"
 	appoverview "github.com/Kapital-B/automata/svc/internal/application/overview"
-	"github.com/Kapital-B/automata/svc/internal/application/ports/driven"
 	appprojects "github.com/Kapital-B/automata/svc/internal/application/projects"
+	domaincontradictions "github.com/Kapital-B/automata/svc/internal/domain/contradictions"
+	domaindecisions "github.com/Kapital-B/automata/svc/internal/domain/decisions"
 	"github.com/google/uuid"
 	_ "modernc.org/sqlite"
 )
@@ -91,7 +92,7 @@ func TestOverviewHTTP(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := f.repo.CreateContradiction(ctx, driven.ContradictionRow{
+	if err := f.repo.CreateContradiction(ctx, domaincontradictions.ContradictionRow{
 		ID: uuid.New(), OrganisationID: orgID, ProjectID: p.ID, Status: "open",
 		Summary: "conflict", CreatedAt: now, UpdatedAt: now,
 	}); err != nil {
@@ -136,7 +137,7 @@ func TestActivityHTTP(t *testing.T) {
 		t.Fatal(err)
 	}
 	decided := now.Add(-time.Hour)
-	if err := f.repo.CreateDecision(ctx, driven.DecisionRow{
+	if err := f.repo.CreateDecision(ctx, domaindecisions.DecisionRow{
 		ID: uuid.New(), OrganisationID: orgID, ProjectID: p.ID,
 		Statement: "Proceed with 90 kW", Status: "accepted", Source: "llm",
 		DecidedAt: &decided, CreatedAt: now.Add(-3 * time.Hour), UpdatedAt: decided,

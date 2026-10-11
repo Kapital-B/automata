@@ -5,6 +5,7 @@ import (
 	"database/sql"
 	"errors"
 	"fmt"
+	"github.com/go-chi/chi/v5"
 	"log/slog"
 	"net/http"
 	"strings"
@@ -35,44 +36,56 @@ import (
 	appjobs "github.com/Kapital-B/automata/svc/internal/application/jobs"
 	appmessages "github.com/Kapital-B/automata/svc/internal/application/messages"
 	appoverview "github.com/Kapital-B/automata/svc/internal/application/overview"
-	"github.com/Kapital-B/automata/svc/internal/application/ports/driven"
 	appprojectai "github.com/Kapital-B/automata/svc/internal/application/projectai"
 	appprojects "github.com/Kapital-B/automata/svc/internal/application/projects"
 	appreconcile "github.com/Kapital-B/automata/svc/internal/application/reconcile"
 	appretrieval "github.com/Kapital-B/automata/svc/internal/application/retrieval"
 	apptodos "github.com/Kapital-B/automata/svc/internal/application/todos"
 	"github.com/Kapital-B/automata/svc/internal/configuration"
+	domainaccounts "github.com/Kapital-B/automata/svc/internal/domain/accounts"
+	domainai "github.com/Kapital-B/automata/svc/internal/domain/ai"
+	domainauth "github.com/Kapital-B/automata/svc/internal/domain/auth"
+	domainconnectors "github.com/Kapital-B/automata/svc/internal/domain/connectors"
+	domaincontacts "github.com/Kapital-B/automata/svc/internal/domain/contacts"
+	domaincontradictions "github.com/Kapital-B/automata/svc/internal/domain/contradictions"
+	domaindecisions "github.com/Kapital-B/automata/svc/internal/domain/decisions"
+	domainfacts "github.com/Kapital-B/automata/svc/internal/domain/facts"
+	domaininterpretations "github.com/Kapital-B/automata/svc/internal/domain/interpretations"
+	domainissues "github.com/Kapital-B/automata/svc/internal/domain/issues"
+	domainjobs "github.com/Kapital-B/automata/svc/internal/domain/jobs"
+	domainmessages "github.com/Kapital-B/automata/svc/internal/domain/messages"
+	domainprojects "github.com/Kapital-B/automata/svc/internal/domain/projects"
 	"github.com/aws/aws-sdk-go-v2/aws"
 	awsconfig "github.com/aws/aws-sdk-go-v2/config"
 	"github.com/aws/aws-sdk-go-v2/service/dynamodb"
-	"github.com/go-chi/chi/v5"
+
 	"github.com/google/uuid"
 )
 
 const msSignInScopes = "openid offline_access profile email"
 
 type repository interface {
-	driven.AccountRepository
-	driven.ConnectorRepository
-	driven.MessageRepository
-	driven.OAuthStateRepository
-	driven.UserRepository
-	driven.AuthSessionRepository
-	driven.ProjectRepository
-	driven.ContactRepository
-	driven.IssueRepository
-	driven.FactRepository
-	driven.InterpretationRepository
-	driven.ContradictionRepository
-	driven.DecisionRepository
-	driven.ManualItemRepository
-	driven.TimelineRepository
-	driven.AssignmentRepository
-	driven.SummaryRepository
-	driven.ScheduleRepository
-	driven.ForwardRepository
-	driven.LLMUsageRepository
-	driven.MessageSearchRepository
+	domainaccounts.AccountRepository
+	domainconnectors.ConnectorRepository
+	domainmessages.MessageRepository
+	domainauth.OAuthStateRepository
+	domainauth.UserRepository
+	domainauth.AuthSessionRepository
+	domainprojects.ProjectRepository
+	domaincontacts.ContactRepository
+	domainissues.IssueRepository
+	domainfacts.FactRepository
+	domaininterpretations.InterpretationRepository
+	domaincontradictions.ContradictionRepository
+	domaindecisions.DecisionRepository
+	domainprojects.ManualItemRepository
+	domainprojects.TimelineRepository
+	domainprojects.AssignmentRepository
+	domainmessages.SummaryRepository
+	domainjobs.ScheduleRepository
+	domainmessages.ForwardRepository
+	domainai.LLMUsageRepository
+	domainmessages.MessageSearchRepository
 }
 
 type Options struct {
@@ -95,7 +108,7 @@ type Runtime struct {
 	Enqueuer    *appjobs.Enqueuer
 	Registry    *appjobs.Registry
 	QueueClient *asynqadapter.QueueClient
-	JobStore    driven.JobStore
+	JobStore    domainjobs.JobStore
 }
 
 func (r *Runtime) Close() error {
@@ -232,7 +245,7 @@ func openRepository(ctx context.Context, cfg configuration.Config, autoMigrate b
 	}
 }
 
-func buildJobStore(ctx context.Context, cfg configuration.Config) (driven.JobStore, error) {
+func buildJobStore(ctx context.Context, cfg configuration.Config) (domainjobs.JobStore, error) {
 	awsCfg, err := awsconfig.LoadDefaultConfig(ctx, awsconfig.WithRegion(cfg.AWSRegion))
 	if err != nil {
 		return nil, err
@@ -270,17 +283,17 @@ func (r *Runtime) buildServices(ctx context.Context) error {
 	mailboxes := &appaccounts.MailboxOpener{
 		Accounts: repo,
 		Vault:    vault,
-		Providers: map[string]driven.MailProvider{
+		Providers: map[string]domainaccounts.MailProvider{
 			appaccounts.ProviderM365: m365,
 		},
 	}
-	mailConnectors := map[string]driven.OAuthMailConnector{
+	mailConnectors := map[string]domainaccounts.OAuthMailConnector{
 		appaccounts.ProviderM365: m365,
 	}
 	// IMAP needs no app registration, so it is always available.
 	imapProvider := &imapmail.Provider{}
 	mailboxes.Providers[appaccounts.ProviderIMAP] = imapProvider
-	passwordConnectors := map[string]driven.PasswordMailConnector{
+	passwordConnectors := map[string]domainaccounts.PasswordMailConnector{
 		appaccounts.ProviderIMAP: imapProvider,
 	}
 	// Google is optional: without a mail client configured, Google accounts
@@ -393,12 +406,12 @@ func (r *Runtime) buildServices(ctx context.Context) error {
 			return
 		}
 		pid := projectID
-		_, err := r.Enqueuer.EnqueueChain(ctx, userID, nil, driven.JobTriggerAPI,
+		_, err := r.Enqueuer.EnqueueChain(ctx, userID, nil, domainjobs.JobTriggerAPI,
 			[]string{appjobs.TypeInterpretProject, appjobs.TypeReconcileProject},
-			driven.JobPayload{ProjectID: &pid}, nil, nil)
+			domainjobs.JobPayload{ProjectID: &pid}, nil, nil)
 		// A held lock means extraction is already queued or running for this
 		// project: the coalescing working as intended, not a failure.
-		if err != nil && !errors.Is(err, driven.ErrJobLockHeld) && !errors.Is(err, driven.ErrJobConflict) {
+		if err != nil && !errors.Is(err, domainjobs.ErrJobLockHeld) && !errors.Is(err, domainjobs.ErrJobConflict) {
 			r.Log.Error("enqueue project extraction", "err", err, "project_id", pid)
 		}
 	}
@@ -474,7 +487,7 @@ func (r *Runtime) buildServices(ctx context.Context) error {
 	// Forwards go through a send ledger so nothing is sent twice. Deployed,
 	// that is the job store; running inline there is none, so the ledger
 	// lives in memory and guards the one process.
-	var forwardEffects driven.JobStore = r.JobStore
+	var forwardEffects domainjobs.JobStore = r.JobStore
 	if forwardEffects == nil {
 		forwardEffects = memoryjobs.NewStore()
 	}
@@ -486,7 +499,7 @@ func (r *Runtime) buildServices(ctx context.Context) error {
 	if llmClient != nil {
 		// Each service gets a client that meters its calls under its own
 		// feature name, so spend can be broken down per user and feature.
-		metered := func(feature string) driven.LLMClient {
+		metered := func(feature string) domainai.LLMClient {
 			return &llmadapter.MeteredClient{Inner: llmClient, Usage: repo, Feature: feature, Model: llmLabel, Log: r.Log}
 		}
 		issueSvc.LLM = metered("issue_suggest")
@@ -631,7 +644,7 @@ func (r *Runtime) buildServices(ctx context.Context) error {
 	return nil
 }
 
-func buildLLMClient(ctx context.Context, cfg configuration.Config) (driven.LLMClient, string, error) {
+func buildLLMClient(ctx context.Context, cfg configuration.Config) (domainai.LLMClient, string, error) {
 	if cfg.LLMBaseURL != "" && cfg.LLMModel != "" {
 		return &llmadapter.OpenAIClient{
 			BaseURL: cfg.LLMBaseURL,

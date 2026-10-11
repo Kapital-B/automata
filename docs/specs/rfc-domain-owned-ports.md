@@ -1,6 +1,6 @@
 # RFC: Domain-Owned Ports and Service Boundaries
 
-**Status:** R0 complete; R1–R4 proposed
+**Status:** R0–R1 complete; R2–R4 proposed
 
 **Related:** [Initial specification §2.4](initial.md#24-backend-project-structure-ddd-hexagonal-ports-and-adapters), [AWS deployment](aws-deployment.md), [Multi-provider mail RFC](rfc-multi-provider-mail.md)
 
@@ -245,3 +245,9 @@ The first migration should preserve existing interfaces and representations wher
 R0 was completed on 2026-10-11. The [baseline report](r0-domain-owned-ports-baseline.md) records working-tree scope, helper seams, absence/idempotency behavior and validation limits. The [source inventory](r0-domain-owned-ports-inventory.md) lists all 44 application-owned contracts, 98 central supporting types, 41 dependency exceptions and 66 direct HTTP dependency calls.
 
 The [architecture check](../../svc/internal/architecture/README.md) enforces domain isolation immediately and tracks exact existing exceptions with removal phases. Full before/after test runs passed with local Postgres and DynamoDB contracts enabled; [package-level evidence](r0-domain-owned-ports-test-results.json) records the results. R1–R4 remain to be implemented.
+
+## 11. Migration execution
+
+R1 relocated all 44 inventoried contracts and their supporting types into the domain contexts in §3. Every caller now imports the owning domain package; inward compatibility aliases remain for R4 cleanup. All 44 ownership and 13 R1 import exceptions were removed. Backend CI now provisions DynamoDB Local and rejects skipped tests alongside its existing Postgres fixture.
+
+Validation used Go 1.24.0 with both local databases enabled; the full fresh suite passed with 489 test cases and no skipped tests. [Phase results](domain-owned-ports-migration-results.json) record validation as subsequent phases complete. Live Aurora DSQL validation remains outside these local checks.

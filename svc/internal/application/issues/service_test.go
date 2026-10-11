@@ -10,9 +10,12 @@ import (
 	"github.com/Kapital-B/automata/svc/internal/adapters/outbound/persistence/sqlite"
 	"github.com/Kapital-B/automata/svc/internal/application/auth"
 	appissues "github.com/Kapital-B/automata/svc/internal/application/issues"
-	"github.com/Kapital-B/automata/svc/internal/application/ports/driven"
 	appprojects "github.com/Kapital-B/automata/svc/internal/application/projects"
 	apptodos "github.com/Kapital-B/automata/svc/internal/application/todos"
+	domainaccounts "github.com/Kapital-B/automata/svc/internal/domain/accounts"
+	domaincontacts "github.com/Kapital-B/automata/svc/internal/domain/contacts"
+	domainissues "github.com/Kapital-B/automata/svc/internal/domain/issues"
+	domainmessages "github.com/Kapital-B/automata/svc/internal/domain/messages"
 	domainprojects "github.com/Kapital-B/automata/svc/internal/domain/projects"
 	"github.com/google/uuid"
 	_ "modernc.org/sqlite"
@@ -48,7 +51,7 @@ func setupIssues(t *testing.T, name string) (*sql.DB, *sqlite.Repository, *appis
 		t.Fatal(err)
 	}
 	accountID := uuid.New()
-	if err := repo.InsertAccount(context.Background(), driven.AccountRow{
+	if err := repo.InsertAccount(context.Background(), domainaccounts.AccountRow{
 		UserID: userID, ID: accountID, Label: "Work", Provider: "m365",
 		MsAccountKind: "work", PrimaryEmail: name + "@example.com", ConnectionStatus: "connected",
 	}, []byte("tok")); err != nil {
@@ -76,7 +79,7 @@ func TestRejectDualAssignee(t *testing.T) {
 	orgID, _ := repo.GetHomeOrganisationID(context.Background(), userID)
 	contactID := uuid.New()
 	now := time.Now().UTC()
-	if err := repo.CreateContact(context.Background(), driven.ContactRow{
+	if err := repo.CreateContact(context.Background(), domaincontacts.ContactRow{
 		ID: contactID, OrganisationID: orgID, DisplayName: "Alex", CreatedAt: now, UpdatedAt: now,
 	}); err != nil {
 		t.Fatal(err)
@@ -96,7 +99,7 @@ func TestAttachMailAndManualAndConflict(t *testing.T) {
 	msgID := uuid.New()
 	conv := "conv-1"
 	body := "pump sizing"
-	if err := repo.UpsertMessage(ctx, driven.MessageRow{
+	if err := repo.UpsertMessage(ctx, domainmessages.MessageRow{
 		ID: msgID, AccountID: accountID, ProviderMessageID: msgID.String(),
 		ReceivedAt: time.Now().UTC(), Subject: "Outlook pump", BodyText: &body,
 		FromJSON: `{}`, ConversationID: &conv,
@@ -142,7 +145,7 @@ func TestDeleteMessageSurvivesIssue(t *testing.T) {
 	ctx := context.Background()
 	msgID := uuid.New()
 	conv := "conv-del"
-	if err := repo.UpsertMessage(ctx, driven.MessageRow{
+	if err := repo.UpsertMessage(ctx, domainmessages.MessageRow{
 		ID: msgID, AccountID: accountID, ProviderMessageID: "pmdel",
 		ReceivedAt: time.Now().UTC(), Subject: "gone", FromJSON: `{}`, ConversationID: &conv,
 	}); err != nil {
@@ -216,14 +219,14 @@ func TestTimelineUnassignedToIssue(t *testing.T) {
 		t.Fatal(err)
 	}
 	orgID, _ := repo.GetHomeOrganisationID(ctx, userID)
-	all, err := repo.ListProjectTimeline(ctx, userID, orgID, projectID, driven.TimelineFilter{Source: "all"})
+	all, err := repo.ListProjectTimeline(ctx, userID, orgID, projectID, domainprojects.TimelineFilter{Source: "all"})
 	if err != nil {
 		t.Fatal(err)
 	}
 	if len(all) != 2 {
 		t.Fatalf("want 2 timeline items, got %d", len(all))
 	}
-	filt, err := repo.ListProjectTimeline(ctx, userID, orgID, projectID, driven.TimelineFilter{
+	filt, err := repo.ListProjectTimeline(ctx, userID, orgID, projectID, domainprojects.TimelineFilter{
 		Source: "all", UnassignedToIssue: true,
 	})
 	if err != nil {
@@ -252,7 +255,7 @@ func TestIssueTodosFromTrailAndCompleteOnResolve(t *testing.T) {
 	now := time.Now().UTC()
 	newMsg := func(subject, conv string) uuid.UUID {
 		id := uuid.New()
-		if err := repo.UpsertMessage(ctx, driven.MessageRow{
+		if err := repo.UpsertMessage(ctx, domainmessages.MessageRow{
 			ID: id, AccountID: accountID, ProviderMessageID: id.String(),
 			ReceivedAt: now, Subject: subject, FromJSON: `{}`, ConversationID: &conv,
 		}); err != nil {
@@ -272,7 +275,7 @@ func TestIssueTodosFromTrailAndCompleteOnResolve(t *testing.T) {
 		t.Fatal(err)
 	}
 	trailTodo, otherTodo := uuid.New(), uuid.New()
-	if err := repo.InsertActionItems(ctx, []driven.ActionItemRow{
+	if err := repo.InsertActionItems(ctx, []domainmessages.ActionItemRow{
 		{ID: trailTodo, UserID: userID, AccountID: accountID, MessageID: onTrail, RunID: runID, Text: "Reply to Jan", Status: "open", CreatedAt: now, UpdatedAt: now},
 		{ID: otherTodo, UserID: userID, AccountID: accountID, MessageID: elsewhere, RunID: runID, Text: "Pay invoice", Status: "open", CreatedAt: now, UpdatedAt: now},
 	}); err != nil {
@@ -298,7 +301,7 @@ func TestIssueTodosFromTrailAndCompleteOnResolve(t *testing.T) {
 		t.Fatal(err)
 	}
 	mateAccount := uuid.New()
-	if err := repo.InsertAccount(ctx, driven.AccountRow{
+	if err := repo.InsertAccount(ctx, domainaccounts.AccountRow{
 		UserID: mateID, ID: mateAccount, Label: "Work", Provider: "m365", MsAccountKind: "work",
 		PrimaryEmail: "mate@example.com", ConnectionStatus: "connected",
 	}, []byte("tok")); err != nil {
@@ -306,7 +309,7 @@ func TestIssueTodosFromTrailAndCompleteOnResolve(t *testing.T) {
 	}
 	mateMsg := uuid.New()
 	mateConv := "c-3"
-	if err := repo.UpsertMessage(ctx, driven.MessageRow{
+	if err := repo.UpsertMessage(ctx, domainmessages.MessageRow{
 		ID: mateMsg, AccountID: mateAccount, ProviderMessageID: mateMsg.String(),
 		ReceivedAt: now, Subject: "Pump duty", FromJSON: `{}`, ConversationID: &mateConv,
 	}); err != nil {
@@ -317,12 +320,12 @@ func TestIssueTodosFromTrailAndCompleteOnResolve(t *testing.T) {
 		t.Fatal(err)
 	}
 	mateTodo := uuid.New()
-	if err := repo.InsertActionItems(ctx, []driven.ActionItemRow{
+	if err := repo.InsertActionItems(ctx, []domainmessages.ActionItemRow{
 		{ID: mateTodo, UserID: mateID, AccountID: mateAccount, MessageID: mateMsg, RunID: mateRun, Text: "Chase the drawing", Status: "open", CreatedAt: now, UpdatedAt: now},
 	}); err != nil {
 		t.Fatal(err)
 	}
-	if err := repo.AddIssueItem(ctx, driven.IssueItemRow{ID: uuid.New(), IssueID: view.Issue.ID, MessageID: &mateMsg, AddedAt: now}); err != nil {
+	if err := repo.AddIssueItem(ctx, domainissues.IssueItemRow{ID: uuid.New(), IssueID: view.Issue.ID, MessageID: &mateMsg, AddedAt: now}); err != nil {
 		t.Fatal(err)
 	}
 

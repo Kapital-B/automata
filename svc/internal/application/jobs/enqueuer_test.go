@@ -6,7 +6,7 @@ import (
 	"time"
 
 	"github.com/Kapital-B/automata/svc/internal/adapters/outbound/memoryjobs"
-	"github.com/Kapital-B/automata/svc/internal/application/ports/driven"
+	domainjobs "github.com/Kapital-B/automata/svc/internal/domain/jobs"
 	"github.com/google/uuid"
 )
 
@@ -18,11 +18,11 @@ func TestEnqueueMapsAliasesOnlyAtEnqueue(t *testing.T) {
 	now := time.Now().UTC()
 
 	enqueuer := Enqueuer{Store: store}
-	job, err := enqueuer.Enqueue(ctx, driven.CreateJobInput{
+	job, err := enqueuer.Enqueue(ctx, domainjobs.CreateJobInput{
 		JobType:       "auto-draft",
 		UserID:        userID,
 		AccountID:     &accountID,
-		TriggerKind:   driven.JobTriggerAPI,
+		TriggerKind:   domainjobs.JobTriggerAPI,
 		ChainID:       uuid.New(),
 		RemainingJobs: []string{"forward"},
 		Now:           now,
@@ -47,7 +47,7 @@ func TestEnqueueChainUsesDeterministicScheduleIDs(t *testing.T) {
 	when := time.Date(2026, 8, 29, 0, 0, 0, 0, time.UTC)
 
 	enqueuer := Enqueuer{Store: store}
-	job, err := enqueuer.EnqueueChain(ctx, userID, &accountID, driven.JobTriggerSchedule, DefaultMailboxChain, driven.JobPayload{}, &scheduleID, &when)
+	job, err := enqueuer.EnqueueChain(ctx, userID, &accountID, domainjobs.JobTriggerSchedule, DefaultMailboxChain, domainjobs.JobPayload{}, &scheduleID, &when)
 	if err != nil {
 		t.Fatal(err)
 	}

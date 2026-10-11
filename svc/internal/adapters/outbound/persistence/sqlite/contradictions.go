@@ -5,11 +5,11 @@ import (
 	"database/sql"
 	"errors"
 
-	"github.com/Kapital-B/automata/svc/internal/application/ports/driven"
+	domaincontradictions "github.com/Kapital-B/automata/svc/internal/domain/contradictions"
 	"github.com/google/uuid"
 )
 
-func (r *Repository) CreateContradiction(ctx context.Context, row driven.ContradictionRow) error {
+func (r *Repository) CreateContradiction(ctx context.Context, row domaincontradictions.ContradictionRow) error {
 	var note, resolvedAt, resolvedBy any
 	if row.ResolutionNote != nil {
 		note = *row.ResolutionNote
@@ -31,7 +31,7 @@ func (r *Repository) CreateContradiction(ctx context.Context, row driven.Contrad
 	return err
 }
 
-func (r *Repository) AddContradictionSide(ctx context.Context, row driven.ContradictionSideRow) error {
+func (r *Repository) AddContradictionSide(ctx context.Context, row domaincontradictions.ContradictionSideRow) error {
 	var fv, dec any
 	if row.FactVersionID != nil {
 		fv = row.FactVersionID.String()
@@ -46,7 +46,7 @@ func (r *Repository) AddContradictionSide(ctx context.Context, row driven.Contra
 	return err
 }
 
-func (r *Repository) GetContradiction(ctx context.Context, organisationID, id uuid.UUID) (*driven.ContradictionRow, error) {
+func (r *Repository) GetContradiction(ctx context.Context, organisationID, id uuid.UUID) (*domaincontradictions.ContradictionRow, error) {
 	row := r.db.QueryRowContext(ctx, `
 		SELECT id, organisation_id, project_id, status, summary, resolution_note,
 			resolved_at, resolved_by_user_id, created_at, updated_at
@@ -59,7 +59,7 @@ func (r *Repository) GetContradiction(ctx context.Context, organisationID, id uu
 	return out, err
 }
 
-func (r *Repository) ListContradictionsByProject(ctx context.Context, organisationID, projectID uuid.UUID, status string) ([]driven.ContradictionRow, error) {
+func (r *Repository) ListContradictionsByProject(ctx context.Context, organisationID, projectID uuid.UUID, status string) ([]domaincontradictions.ContradictionRow, error) {
 	q := `
 		SELECT id, organisation_id, project_id, status, summary, resolution_note,
 			resolved_at, resolved_by_user_id, created_at, updated_at
@@ -75,7 +75,7 @@ func (r *Repository) ListContradictionsByProject(ctx context.Context, organisati
 		return nil, err
 	}
 	defer rows.Close()
-	out := make([]driven.ContradictionRow, 0)
+	out := make([]domaincontradictions.ContradictionRow, 0)
 	for rows.Next() {
 		c, err := scanContradiction(rows)
 		if err != nil {
@@ -86,7 +86,7 @@ func (r *Repository) ListContradictionsByProject(ctx context.Context, organisati
 	return out, rows.Err()
 }
 
-func (r *Repository) UpdateContradiction(ctx context.Context, row driven.ContradictionRow) error {
+func (r *Repository) UpdateContradiction(ctx context.Context, row domaincontradictions.ContradictionRow) error {
 	var note, resolvedAt, resolvedBy any
 	if row.ResolutionNote != nil {
 		note = *row.ResolutionNote
@@ -113,7 +113,7 @@ func (r *Repository) UpdateContradiction(ctx context.Context, row driven.Contrad
 	return nil
 }
 
-func (r *Repository) ListContradictionSides(ctx context.Context, contradictionID uuid.UUID) ([]driven.ContradictionSideRow, error) {
+func (r *Repository) ListContradictionSides(ctx context.Context, contradictionID uuid.UUID) ([]domaincontradictions.ContradictionSideRow, error) {
 	rows, err := r.db.QueryContext(ctx, `
 		SELECT id, contradiction_id, fact_version_id, decision_id
 		FROM contradiction_sides WHERE contradiction_id = ?
@@ -122,7 +122,7 @@ func (r *Repository) ListContradictionSides(ctx context.Context, contradictionID
 		return nil, err
 	}
 	defer rows.Close()
-	out := make([]driven.ContradictionSideRow, 0)
+	out := make([]domaincontradictions.ContradictionSideRow, 0)
 	for rows.Next() {
 		s, err := scanContradictionSide(rows)
 		if err != nil {
@@ -133,7 +133,7 @@ func (r *Repository) ListContradictionSides(ctx context.Context, contradictionID
 	return out, rows.Err()
 }
 
-func scanContradiction(s rowScanner) (*driven.ContradictionRow, error) {
+func scanContradiction(s rowScanner) (*domaincontradictions.ContradictionRow, error) {
 	var idStr, orgStr, projStr, status, summary, createdAt, updatedAt string
 	var note, resolvedAt, resolvedBy sql.NullString
 	if err := s.Scan(&idStr, &orgStr, &projStr, &status, &summary, &note, &resolvedAt, &resolvedBy, &createdAt, &updatedAt); err != nil {
@@ -159,7 +159,7 @@ func scanContradiction(s rowScanner) (*driven.ContradictionRow, error) {
 	if err != nil {
 		return nil, err
 	}
-	row := &driven.ContradictionRow{
+	row := &domaincontradictions.ContradictionRow{
 		ID: id, OrganisationID: orgID, ProjectID: projID, Status: status,
 		Summary: summary, CreatedAt: cat, UpdatedAt: uat,
 	}
@@ -184,7 +184,7 @@ func scanContradiction(s rowScanner) (*driven.ContradictionRow, error) {
 	return row, nil
 }
 
-func scanContradictionSide(s rowScanner) (*driven.ContradictionSideRow, error) {
+func scanContradictionSide(s rowScanner) (*domaincontradictions.ContradictionSideRow, error) {
 	var idStr, cidStr string
 	var fv, dec sql.NullString
 	if err := s.Scan(&idStr, &cidStr, &fv, &dec); err != nil {
@@ -198,7 +198,7 @@ func scanContradictionSide(s rowScanner) (*driven.ContradictionSideRow, error) {
 	if err != nil {
 		return nil, err
 	}
-	row := &driven.ContradictionSideRow{ID: id, ContradictionID: cid}
+	row := &domaincontradictions.ContradictionSideRow{ID: id, ContradictionID: cid}
 	if fv.Valid && fv.String != "" {
 		vid, err := uuid.Parse(fv.String)
 		if err != nil {

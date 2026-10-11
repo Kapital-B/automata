@@ -2,9 +2,10 @@ package projects
 
 import (
 	"encoding/json"
+	domainmessages "github.com/Kapital-B/automata/svc/internal/domain/messages"
 	"strings"
 
-	"github.com/Kapital-B/automata/svc/internal/application/ports/driven"
+	domainprojects "github.com/Kapital-B/automata/svc/internal/domain/projects"
 )
 
 // confidenceCodeToken is the confidence recorded for a project code match,
@@ -33,7 +34,7 @@ func senderAddress(fromJSON string) string {
 
 // codeTokenHit reports whether exactly one project code token appears, which is
 // the only signal Wave 1 §7 allows to commit without operator confirmation.
-func codeTokenHit(msg driven.MessageRow, projects []driven.ProjectRow) (driven.ProjectRow, bool) {
+func codeTokenHit(msg domainmessages.MessageRow, projects []domainprojects.ProjectRow) (domainprojects.ProjectRow, bool) {
 	body := ""
 	if msg.BodyText != nil {
 		body = *msg.BodyText
@@ -42,5 +43,5 @@ func codeTokenHit(msg driven.MessageRow, projects []driven.ProjectRow) (driven.P
 	if len(hits) == 1 {
 		return hits[0], true
 	}
-	return driven.ProjectRow{}, false
+	return domainprojects.ProjectRow{}, false
 }

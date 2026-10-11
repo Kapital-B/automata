@@ -7,11 +7,11 @@ import (
 	"errors"
 	"time"
 
-	"github.com/Kapital-B/automata/svc/internal/application/ports/driven"
+	domainconnectors "github.com/Kapital-B/automata/svc/internal/domain/connectors"
 	"github.com/google/uuid"
 )
 
-func (r *Repository) InsertConnectorAccount(ctx context.Context, row driven.ConnectorAccountRow, tokenCiphertext []byte) error {
+func (r *Repository) InsertConnectorAccount(ctx context.Context, row domainconnectors.ConnectorAccountRow, tokenCiphertext []byte) error {
 	scopes, _ := json.Marshal(row.Scopes)
 	if row.Scopes == nil {
 		scopes = []byte("[]")
@@ -27,7 +27,7 @@ func (r *Repository) InsertConnectorAccount(ctx context.Context, row driven.Conn
 	return err
 }
 
-func (r *Repository) GetConnectorAccount(ctx context.Context, userID, id uuid.UUID) (*driven.ConnectorAccountRow, error) {
+func (r *Repository) GetConnectorAccount(ctx context.Context, userID, id uuid.UUID) (*domainconnectors.ConnectorAccountRow, error) {
 	row := r.db.QueryRowContext(ctx, `
 		SELECT id, user_id, provider, label, external_tenant_id, connection_status,
 			last_error, scopes_json, last_synced_at, created_at, updated_at
@@ -40,7 +40,7 @@ func (r *Repository) GetConnectorAccount(ctx context.Context, userID, id uuid.UU
 	return out, err
 }
 
-func (r *Repository) ListConnectorAccounts(ctx context.Context, userID uuid.UUID) ([]driven.ConnectorAccountRow, error) {
+func (r *Repository) ListConnectorAccounts(ctx context.Context, userID uuid.UUID) ([]domainconnectors.ConnectorAccountRow, error) {
 	rows, err := r.db.QueryContext(ctx, `
 		SELECT id, user_id, provider, label, external_tenant_id, connection_status,
 			last_error, scopes_json, last_synced_at, created_at, updated_at
@@ -50,7 +50,7 @@ func (r *Repository) ListConnectorAccounts(ctx context.Context, userID uuid.UUID
 		return nil, err
 	}
 	defer rows.Close()
-	out := make([]driven.ConnectorAccountRow, 0)
+	out := make([]domainconnectors.ConnectorAccountRow, 0)
 	for rows.Next() {
 		row, err := scanConnectorAccount(rows)
 		if err != nil {
@@ -103,7 +103,7 @@ func (r *Repository) UpdateConnectorToken(
 	return err
 }
 
-func (r *Repository) CreateConnectorBinding(ctx context.Context, row driven.ConnectorBindingRow) error {
+func (r *Repository) CreateConnectorBinding(ctx context.Context, row domainconnectors.ConnectorBindingRow) error {
 	_, err := r.db.ExecContext(ctx, `
 		INSERT INTO connector_bindings (
 			id, connector_account_id, organisation_id, external_channel_id,
@@ -118,7 +118,7 @@ func (r *Repository) CreateConnectorBinding(ctx context.Context, row driven.Conn
 	return err
 }
 
-func (r *Repository) GetConnectorBinding(ctx context.Context, userID, id uuid.UUID) (*driven.ConnectorBindingRow, error) {
+func (r *Repository) GetConnectorBinding(ctx context.Context, userID, id uuid.UUID) (*domainconnectors.ConnectorBindingRow, error) {
 	row := r.db.QueryRowContext(ctx, `
 		SELECT b.id, b.connector_account_id, b.organisation_id, b.external_channel_id,
 			b.project_id, b.label, b.sync_cursor, b.created_at, b.updated_at
@@ -133,7 +133,7 @@ func (r *Repository) GetConnectorBinding(ctx context.Context, userID, id uuid.UU
 	return out, err
 }
 
-func (r *Repository) ListConnectorBindings(ctx context.Context, userID, connectorAccountID uuid.UUID) ([]driven.ConnectorBindingRow, error) {
+func (r *Repository) ListConnectorBindings(ctx context.Context, userID, connectorAccountID uuid.UUID) ([]domainconnectors.ConnectorBindingRow, error) {
 	rows, err := r.db.QueryContext(ctx, `
 		SELECT b.id, b.connector_account_id, b.organisation_id, b.external_channel_id,
 			b.project_id, b.label, b.sync_cursor, b.created_at, b.updated_at
@@ -146,7 +146,7 @@ func (r *Repository) ListConnectorBindings(ctx context.Context, userID, connecto
 		return nil, err
 	}
 	defer rows.Close()
-	out := make([]driven.ConnectorBindingRow, 0)
+	out := make([]domainconnectors.ConnectorBindingRow, 0)
 	for rows.Next() {
 		row, err := scanConnectorBinding(rows)
 		if err != nil {
@@ -178,7 +178,7 @@ func (r *Repository) UpdateConnectorBindingCursor(ctx context.Context, userID, i
 	return err
 }
 
-func (r *Repository) UpsertConnectorMessage(ctx context.Context, row driven.ConnectorMessageRow) error {
+func (r *Repository) UpsertConnectorMessage(ctx context.Context, row domainconnectors.ConnectorMessageRow) error {
 	meta := row.MetaJSON
 	if meta == "" {
 		meta = "{}"
@@ -205,7 +205,7 @@ func (r *Repository) UpsertConnectorMessage(ctx context.Context, row driven.Conn
 	return err
 }
 
-func (r *Repository) ListConnectorMessagesForProject(ctx context.Context, userID, organisationID, projectID uuid.UUID) ([]driven.ConnectorMessageRow, error) {
+func (r *Repository) ListConnectorMessagesForProject(ctx context.Context, userID, organisationID, projectID uuid.UUID) ([]domainconnectors.ConnectorMessageRow, error) {
 	rows, err := r.db.QueryContext(ctx, `
 		SELECT m.id, m.connector_account_id, m.organisation_id, m.project_id, m.provider_event_id,
 			m.external_channel_id, m.title, m.body_text, m.author_label, m.occurred_at,
@@ -219,7 +219,7 @@ func (r *Repository) ListConnectorMessagesForProject(ctx context.Context, userID
 		return nil, err
 	}
 	defer rows.Close()
-	out := make([]driven.ConnectorMessageRow, 0)
+	out := make([]domainconnectors.ConnectorMessageRow, 0)
 	for rows.Next() {
 		row, err := scanConnectorMessage(rows)
 		if err != nil {
@@ -230,7 +230,7 @@ func (r *Repository) ListConnectorMessagesForProject(ctx context.Context, userID
 	return out, rows.Err()
 }
 
-func (r *Repository) GetConnectorMessage(ctx context.Context, userID, id uuid.UUID) (*driven.ConnectorMessageRow, error) {
+func (r *Repository) GetConnectorMessage(ctx context.Context, userID, id uuid.UUID) (*domainconnectors.ConnectorMessageRow, error) {
 	row := r.db.QueryRowContext(ctx, `
 		SELECT m.id, m.connector_account_id, m.organisation_id, m.project_id, m.provider_event_id,
 			m.external_channel_id, m.title, m.body_text, m.author_label, m.occurred_at,
@@ -246,8 +246,8 @@ func (r *Repository) GetConnectorMessage(ctx context.Context, userID, id uuid.UU
 	return out, err
 }
 
-func scanConnectorAccount(s rowScanner) (*driven.ConnectorAccountRow, error) {
-	var row driven.ConnectorAccountRow
+func scanConnectorAccount(s rowScanner) (*domainconnectors.ConnectorAccountRow, error) {
+	var row domainconnectors.ConnectorAccountRow
 	var id, userID, scopesJSON, createdAt, updatedAt string
 	var tenant, lastError, lastSynced sql.NullString
 	if err := s.Scan(&id, &userID, &row.Provider, &row.Label, &tenant, &row.ConnectionStatus,
@@ -285,8 +285,8 @@ func scanConnectorAccount(s rowScanner) (*driven.ConnectorAccountRow, error) {
 	return &row, nil
 }
 
-func scanConnectorBinding(s rowScanner) (*driven.ConnectorBindingRow, error) {
-	var row driven.ConnectorBindingRow
+func scanConnectorBinding(s rowScanner) (*domainconnectors.ConnectorBindingRow, error) {
+	var row domainconnectors.ConnectorBindingRow
 	var id, accountID, organisationID, createdAt, updatedAt string
 	var projectID, cursor sql.NullString
 	if err := s.Scan(&id, &accountID, &organisationID, &row.ExternalChannelID,
@@ -320,8 +320,8 @@ func scanConnectorBinding(s rowScanner) (*driven.ConnectorBindingRow, error) {
 	return &row, nil
 }
 
-func scanConnectorMessage(s rowScanner) (*driven.ConnectorMessageRow, error) {
-	var row driven.ConnectorMessageRow
+func scanConnectorMessage(s rowScanner) (*domainconnectors.ConnectorMessageRow, error) {
+	var row domainconnectors.ConnectorMessageRow
 	var id, accountID, organisationID, occurredAt, createdAt, updatedAt string
 	var projectID sql.NullString
 	if err := s.Scan(&id, &accountID, &organisationID, &projectID, &row.ProviderEventID,

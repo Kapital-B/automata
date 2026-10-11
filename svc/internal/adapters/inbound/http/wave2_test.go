@@ -19,10 +19,10 @@ import (
 	appdecisions "github.com/Kapital-B/automata/svc/internal/application/decisions"
 	appfacts "github.com/Kapital-B/automata/svc/internal/application/facts"
 	appinterpret "github.com/Kapital-B/automata/svc/internal/application/interpret"
-	"github.com/Kapital-B/automata/svc/internal/application/ports/driven"
 	appprojectai "github.com/Kapital-B/automata/svc/internal/application/projectai"
 	appprojects "github.com/Kapital-B/automata/svc/internal/application/projects"
 	appreconcile "github.com/Kapital-B/automata/svc/internal/application/reconcile"
+	domainai "github.com/Kapital-B/automata/svc/internal/domain/ai"
 	"github.com/google/uuid"
 	_ "modernc.org/sqlite"
 )
@@ -31,8 +31,8 @@ type wave2LLM struct {
 	content string
 }
 
-func (f *wave2LLM) ChatCompletion(ctx context.Context, messages []driven.LLMMessage) (*driven.LLMResponse, error) {
-	return &driven.LLMResponse{Content: f.content}, nil
+func (f *wave2LLM) ChatCompletion(ctx context.Context, messages []domainai.LLMMessage) (*domainai.LLMResponse, error) {
+	return &domainai.LLMResponse{Content: f.content}, nil
 }
 
 func setupWave2HTTP(t *testing.T) (*httptest.Server, *auth.Service, *sqlite.Repository, *wave2LLM) {

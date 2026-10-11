@@ -2,11 +2,12 @@ package http
 
 import (
 	"errors"
+	"github.com/go-chi/chi/v5"
 	"net/http"
 	"time"
 
 	apptodos "github.com/Kapital-B/automata/svc/internal/application/todos"
-	"github.com/go-chi/chi/v5"
+
 	"github.com/google/uuid"
 )
 

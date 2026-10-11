@@ -4,14 +4,14 @@ import (
 	"context"
 	"time"
 
-	"github.com/Kapital-B/automata/svc/internal/application/ports/driven"
+	domainjobs "github.com/Kapital-B/automata/svc/internal/domain/jobs"
 	"github.com/google/uuid"
 )
 
 type noopJobRuns struct{}
 
-func resolveJobRuns(repo any) driven.JobRunRepository {
-	if jobRuns, ok := repo.(driven.JobRunRepository); ok {
+func resolveJobRuns(repo any) domainjobs.JobRunRepository {
+	if jobRuns, ok := repo.(domainjobs.JobRunRepository); ok {
 		return jobRuns
 	}
 	return noopJobRuns{}
@@ -33,10 +33,10 @@ func (noopJobRuns) UpdateJobRunStatus(context.Context, uuid.UUID, string, *time.
 	return nil
 }
 
-func (noopJobRuns) ListJobRuns(context.Context, uuid.UUID, driven.JobRunListFilter) ([]driven.JobRunRow, error) {
-	return []driven.JobRunRow{}, nil
+func (noopJobRuns) ListJobRuns(context.Context, uuid.UUID, domainjobs.JobRunListFilter) ([]domainjobs.JobRunRow, error) {
+	return []domainjobs.JobRunRow{}, nil
 }
 
-func (noopJobRuns) GetJobRun(context.Context, uuid.UUID, uuid.UUID) (*driven.JobRunRow, error) {
+func (noopJobRuns) GetJobRun(context.Context, uuid.UUID, uuid.UUID) (*domainjobs.JobRunRow, error) {
 	return nil, nil
 }

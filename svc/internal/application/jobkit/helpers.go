@@ -5,7 +5,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/Kapital-B/automata/svc/internal/application/ports/driven"
+	domainjobs "github.com/Kapital-B/automata/svc/internal/domain/jobs"
 	"github.com/google/uuid"
 )
 
@@ -19,7 +19,7 @@ func DeterministicID(runID uuid.UUID, scope string, parts ...string) uuid.UUID {
 	return uuid.NewSHA1(deterministicNamespace, []byte(key))
 }
 
-func DecodeOffsetCursor(cursor *driven.JobCursor) int {
+func DecodeOffsetCursor(cursor *domainjobs.JobCursor) int {
 	if cursor == nil {
 		return 0
 	}
@@ -30,11 +30,11 @@ func DecodeOffsetCursor(cursor *driven.JobCursor) int {
 	return n
 }
 
-func EncodeOffsetCursor(offset int) *driven.JobCursor {
+func EncodeOffsetCursor(offset int) *domainjobs.JobCursor {
 	if offset < 0 {
 		offset = 0
 	}
-	return &driven.JobCursor{Kind: "message_keyset", Value: strconv.Itoa(offset)}
+	return &domainjobs.JobCursor{Kind: "message_keyset", Value: strconv.Itoa(offset)}
 }
 
 // EncodeKeysetCursor encodes a position in a received_at DESC, id DESC scan.
@@ -42,8 +42,8 @@ func EncodeOffsetCursor(offset int) *driven.JobCursor {
 // Offset paging is unsafe here: assignment mutates the set between chunks, so
 // rows shift under the cursor and messages get skipped. A keyset is stable
 // because it names the last row seen rather than a count of rows behind it.
-func EncodeKeysetCursor(receivedAt time.Time, id uuid.UUID) *driven.JobCursor {
-	return &driven.JobCursor{
+func EncodeKeysetCursor(receivedAt time.Time, id uuid.UUID) *domainjobs.JobCursor {
+	return &domainjobs.JobCursor{
 		Kind:  "message_keyset",
 		Value: receivedAt.UTC().Format(time.RFC3339Nano) + "|" + id.String(),
 	}
@@ -51,7 +51,7 @@ func EncodeKeysetCursor(receivedAt time.Time, id uuid.UUID) *driven.JobCursor {
 
 // DecodeKeysetCursor reverses EncodeKeysetCursor. ok is false for a missing or
 // unparseable cursor, which callers treat as "start from the beginning".
-func DecodeKeysetCursor(cursor *driven.JobCursor) (receivedAt time.Time, id uuid.UUID, ok bool) {
+func DecodeKeysetCursor(cursor *domainjobs.JobCursor) (receivedAt time.Time, id uuid.UUID, ok bool) {
 	if cursor == nil {
 		return time.Time{}, uuid.Nil, false
 	}

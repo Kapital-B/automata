@@ -8,12 +8,13 @@ import (
 	"strings"
 	"time"
 
-	"github.com/Kapital-B/automata/svc/internal/application/ports/driven"
 	"github.com/Kapital-B/automata/svc/internal/domain/contacts"
+	domaincontacts "github.com/Kapital-B/automata/svc/internal/domain/contacts"
+	domainorganisations "github.com/Kapital-B/automata/svc/internal/domain/organisations"
 	"github.com/google/uuid"
 )
 
-func (r *Repository) GetOrganisation(ctx context.Context, id uuid.UUID) (*driven.OrganisationRow, error) {
+func (r *Repository) GetOrganisation(ctx context.Context, id uuid.UUID) (*domainorganisations.OrganisationRow, error) {
 	var name, createdAt, updatedAt string
 	err := r.db.QueryRowContext(ctx, `
 		SELECT name, created_at, updated_at FROM organisations WHERE id = ?
@@ -32,10 +33,10 @@ func (r *Repository) GetOrganisation(ctx context.Context, id uuid.UUID) (*driven
 	if err != nil {
 		return nil, err
 	}
-	return &driven.OrganisationRow{ID: id, Name: name, CreatedAt: cat, UpdatedAt: uat}, nil
+	return &domainorganisations.OrganisationRow{ID: id, Name: name, CreatedAt: cat, UpdatedAt: uat}, nil
 }
 
-func (r *Repository) ListContacts(ctx context.Context, organisationID uuid.UUID, filter driven.ContactListFilter) ([]driven.ContactRow, error) {
+func (r *Repository) ListContacts(ctx context.Context, organisationID uuid.UUID, filter domaincontacts.ContactListFilter) ([]domaincontacts.ContactRow, error) {
 	limit := filter.Limit
 	if limit <= 0 {
 		limit = 50
@@ -81,7 +82,7 @@ func (r *Repository) ListContacts(ctx context.Context, organisationID uuid.UUID,
 		return nil, err
 	}
 	defer rows.Close()
-	out := make([]driven.ContactRow, 0)
+	out := make([]domaincontacts.ContactRow, 0)
 	for rows.Next() {
 		row, err := scanContactRow(rows)
 		if err != nil {
@@ -100,7 +101,7 @@ func (r *Repository) ListContacts(ctx context.Context, organisationID uuid.UUID,
 
 // attachPrimaryEmails fills PrimaryEmail on a page of contacts with one query
 // rather than one per row.
-func (r *Repository) attachPrimaryEmails(ctx context.Context, contacts []driven.ContactRow) error {
+func (r *Repository) attachPrimaryEmails(ctx context.Context, contacts []domaincontacts.ContactRow) error {
 	if len(contacts) == 0 {
 		return nil
 	}
@@ -134,7 +135,7 @@ func (r *Repository) attachPrimaryEmails(ctx context.Context, contacts []driven.
 	return rows.Err()
 }
 
-func (r *Repository) GetContact(ctx context.Context, organisationID, contactID uuid.UUID) (*driven.ContactRow, error) {
+func (r *Repository) GetContact(ctx context.Context, organisationID, contactID uuid.UUID) (*domaincontacts.ContactRow, error) {
 	row := r.db.QueryRowContext(ctx, `
 		SELECT id, organisation_id, display_name, company, merged_into_contact_id, created_at, updated_at
 		FROM contacts
@@ -150,7 +151,7 @@ func (r *Repository) GetContact(ctx context.Context, organisationID, contactID u
 	return c, nil
 }
 
-func (r *Repository) CreateContact(ctx context.Context, row driven.ContactRow) error {
+func (r *Repository) CreateContact(ctx context.Context, row domaincontacts.ContactRow) error {
 	_, err := r.db.ExecContext(ctx, `
 		INSERT INTO contacts (id, organisation_id, display_name, company, merged_into_contact_id, created_at, updated_at)
 		VALUES (?, ?, ?, ?, NULL, ?, ?)
@@ -172,7 +173,7 @@ func (r *Repository) UpdateContactDisplayNameIfEmpty(ctx context.Context, organi
 	return err
 }
 
-func (r *Repository) ListIdentities(ctx context.Context, organisationID, contactID uuid.UUID) ([]driven.ContactIdentityRow, error) {
+func (r *Repository) ListIdentities(ctx context.Context, organisationID, contactID uuid.UUID) ([]domaincontacts.ContactIdentityRow, error) {
 	rows, err := r.db.QueryContext(ctx, `
 		SELECT id, organisation_id, contact_id, kind, value_normalized, value_raw, created_at
 		FROM contact_identities
@@ -183,7 +184,7 @@ func (r *Repository) ListIdentities(ctx context.Context, organisationID, contact
 		return nil, err
 	}
 	defer rows.Close()
-	out := make([]driven.ContactIdentityRow, 0)
+	out := make([]domaincontacts.ContactIdentityRow, 0)
 	for rows.Next() {
 		ident, err := scanIdentityRow(rows)
 		if err != nil {
@@ -194,7 +195,7 @@ func (r *Repository) ListIdentities(ctx context.Context, organisationID, contact
 	return out, rows.Err()
 }
 
-func (r *Repository) FindContactIdentity(ctx context.Context, organisationID uuid.UUID, kind, valueNormalized string) (*driven.ContactIdentityRow, error) {
+func (r *Repository) FindContactIdentity(ctx context.Context, organisationID uuid.UUID, kind, valueNormalized string) (*domaincontacts.ContactIdentityRow, error) {
 	row := r.db.QueryRowContext(ctx, `
 		SELECT id, organisation_id, contact_id, kind, value_normalized, value_raw, created_at
 		FROM contact_identities
@@ -210,7 +211,7 @@ func (r *Repository) FindContactIdentity(ctx context.Context, organisationID uui
 	return ident, nil
 }
 
-func (r *Repository) CreateIdentity(ctx context.Context, row driven.ContactIdentityRow) error {
+func (r *Repository) CreateIdentity(ctx context.Context, row domaincontacts.ContactIdentityRow) error {
 	_, err := r.db.ExecContext(ctx, `
 		INSERT INTO contact_identities (id, organisation_id, contact_id, kind, value_normalized, value_raw, created_at)
 		VALUES (?, ?, ?, ?, ?, ?, ?)
@@ -219,7 +220,7 @@ func (r *Repository) CreateIdentity(ctx context.Context, row driven.ContactIdent
 	return err
 }
 
-func (r *Repository) UpsertParticipant(ctx context.Context, row driven.CorrespondenceParticipantRow) error {
+func (r *Repository) UpsertParticipant(ctx context.Context, row domaincontacts.CorrespondenceParticipantRow) error {
 	if row.MessageID == nil && row.ManualItemID == nil {
 		return fmt.Errorf("participant requires message_id or manual_item_id")
 	}
@@ -268,7 +269,7 @@ func (r *Repository) ListRecentMessageIDs(ctx context.Context, organisationID, c
 	return out, rows.Err()
 }
 
-func (r *Repository) SuggestMerges(ctx context.Context, organisationID, contactID uuid.UUID) ([]driven.ContactRow, error) {
+func (r *Repository) SuggestMerges(ctx context.Context, organisationID, contactID uuid.UUID) ([]domaincontacts.ContactRow, error) {
 	var displayName string
 	err := r.db.QueryRowContext(ctx, `
 		SELECT display_name FROM contacts
@@ -282,7 +283,7 @@ func (r *Repository) SuggestMerges(ctx context.Context, organisationID, contactI
 	}
 	name := strings.TrimSpace(displayName)
 	if name == "" {
-		return []driven.ContactRow{}, nil
+		return []domaincontacts.ContactRow{}, nil
 	}
 	rows, err := r.db.QueryContext(ctx, `
 		SELECT c.id, c.organisation_id, c.display_name, c.company, c.merged_into_contact_id, c.created_at, c.updated_at
@@ -304,7 +305,7 @@ func (r *Repository) SuggestMerges(ctx context.Context, organisationID, contactI
 		return nil, err
 	}
 	defer rows.Close()
-	out := make([]driven.ContactRow, 0)
+	out := make([]domaincontacts.ContactRow, 0)
 	for rows.Next() {
 		row, err := scanContactRow(rows)
 		if err != nil {
@@ -472,7 +473,7 @@ func (r *Repository) ResolveEmailContact(ctx context.Context, organisationID uui
 	}
 	contactID := uuid.New()
 	name := strings.TrimSpace(displayName)
-	row := driven.ContactRow{
+	row := domaincontacts.ContactRow{
 		ID:             contactID,
 		OrganisationID: organisationID,
 		DisplayName:    name,
@@ -482,7 +483,7 @@ func (r *Repository) ResolveEmailContact(ctx context.Context, organisationID uui
 	if err := r.CreateContact(ctx, row); err != nil {
 		return uuid.Nil, err
 	}
-	ident := driven.ContactIdentityRow{
+	ident := domaincontacts.ContactIdentityRow{
 		ID:              uuid.New(),
 		OrganisationID:  organisationID,
 		ContactID:       contactID,
@@ -507,7 +508,7 @@ func (r *Repository) ResolveEmailContact(ctx context.Context, organisationID uui
 	return contactID, nil
 }
 
-func scanContactRow(s rowScanner) (*driven.ContactRow, error) {
+func scanContactRow(s rowScanner) (*domaincontacts.ContactRow, error) {
 	var idStr, orgStr, displayName, createdAt, updatedAt string
 	var company, merged sql.NullString
 	if err := s.Scan(&idStr, &orgStr, &displayName, &company, &merged, &createdAt, &updatedAt); err != nil {
@@ -529,7 +530,7 @@ func scanContactRow(s rowScanner) (*driven.ContactRow, error) {
 	if err != nil {
 		return nil, err
 	}
-	row := &driven.ContactRow{
+	row := &domaincontacts.ContactRow{
 		ID:             id,
 		OrganisationID: orgID,
 		DisplayName:    displayName,
@@ -547,7 +548,7 @@ func scanContactRow(s rowScanner) (*driven.ContactRow, error) {
 	return row, nil
 }
 
-func scanIdentityRow(s rowScanner) (*driven.ContactIdentityRow, error) {
+func scanIdentityRow(s rowScanner) (*domaincontacts.ContactIdentityRow, error) {
 	var idStr, orgStr, contactStr, kind, norm, raw, createdAt string
 	if err := s.Scan(&idStr, &orgStr, &contactStr, &kind, &norm, &raw, &createdAt); err != nil {
 		return nil, err
@@ -568,7 +569,7 @@ func scanIdentityRow(s rowScanner) (*driven.ContactIdentityRow, error) {
 	if err != nil {
 		return nil, err
 	}
-	return &driven.ContactIdentityRow{
+	return &domaincontacts.ContactIdentityRow{
 		ID:              id,
 		OrganisationID:  orgID,
 		ContactID:       contactID,

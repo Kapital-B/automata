@@ -5,13 +5,20 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	domainattention "github.com/Kapital-B/automata/svc/internal/domain/attention"
 	"strings"
 	"time"
 
-	"github.com/Kapital-B/automata/svc/internal/application/ports/driven"
 	"github.com/Kapital-B/automata/svc/internal/application/retrieval"
+	domainai "github.com/Kapital-B/automata/svc/internal/domain/ai"
+	domainauth "github.com/Kapital-B/automata/svc/internal/domain/auth"
 	domaindec "github.com/Kapital-B/automata/svc/internal/domain/decisions"
+	domaindecisions "github.com/Kapital-B/automata/svc/internal/domain/decisions"
 	domainfacts "github.com/Kapital-B/automata/svc/internal/domain/facts"
+	domainissues "github.com/Kapital-B/automata/svc/internal/domain/issues"
+	domainjobs "github.com/Kapital-B/automata/svc/internal/domain/jobs"
+	domainmessages "github.com/Kapital-B/automata/svc/internal/domain/messages"
+	domainprojects "github.com/Kapital-B/automata/svc/internal/domain/projects"
 	"github.com/google/uuid"
 )
 
@@ -22,22 +29,22 @@ var (
 )
 
 type Service struct {
-	Users     driven.UserRepository
-	Projects  driven.ProjectRepository
-	Facts     driven.FactRepository
-	Decisions driven.DecisionRepository
-	Issues    driven.IssueRepository
-	Timeline  driven.TimelineRepository
-	JobRuns   driven.JobRunRepository
-	LLM       driven.LLMClient
+	Users     domainauth.UserRepository
+	Projects  domainprojects.ProjectRepository
+	Facts     domainfacts.FactRepository
+	Decisions domaindecisions.DecisionRepository
+	Issues    domainissues.IssueRepository
+	Timeline  domainprojects.TimelineRepository
+	JobRuns   domainjobs.JobRunRepository
+	LLM       domainai.LLMClient
 	Attention AttentionProjects
 	// Resolver finds the projects, contacts and keywords a question names.
 	// Search finds matching mail. Assignments tags hits with their project.
 	// All three are optional; without them answers use the project
 	// snapshots alone.
 	Resolver    *retrieval.Resolver
-	Search      driven.MessageSearchRepository
-	Assignments driven.AssignmentRepository
+	Search      domainmessages.MessageSearchRepository
+	Assignments domainprojects.AssignmentRepository
 }
 
 const (
@@ -46,9 +53,7 @@ const (
 )
 
 // AttentionProjects reports home-org projects that currently need operator input.
-type AttentionProjects interface {
-	ProjectIDsNeedingInput(ctx context.Context, userID uuid.UUID) (map[uuid.UUID]struct{}, error)
-}
+type AttentionProjects = domainattention.AttentionProjects
 
 const maxAskAcrossProjects = 8
 
@@ -109,7 +114,7 @@ func newContextPack() *contextPack {
 	}
 }
 
-func (p *contextPack) noteCite(typ, id string, project driven.ProjectRow) {
+func (p *contextPack) noteCite(typ, id string, project domainprojects.ProjectRow) {
 	if p == nil || id == "" {
 		return
 	}
@@ -194,11 +199,11 @@ func (s *Service) Ask(ctx context.Context, userID, projectID uuid.UUID, question
 
 	// Older mail on this project is reachable through search; the snapshot
 	// only carries the most recent items.
-	res, err := s.resolve(ctx, orgID, []driven.ProjectRow{*p}, q)
+	res, err := s.resolve(ctx, orgID, []domainprojects.ProjectRow{*p}, q)
 	if err != nil {
 		return nil, err
 	}
-	section, hits, err := s.matchingCorrespondence(ctx, userID, res, []uuid.UUID{p.ID}, map[uuid.UUID]driven.ProjectRow{p.ID: *p}, pack)
+	section, hits, err := s.matchingCorrespondence(ctx, userID, res, []uuid.UUID{p.ID}, map[uuid.UUID]domainprojects.ProjectRow{p.ID: *p}, pack)
 	if err != nil {
 		return nil, err
 	}
@@ -221,7 +226,7 @@ func (s *Service) AskAcross(ctx context.Context, userID uuid.UUID, question stri
 		return nil, err
 	}
 	// Membership is filtered in the query, not with a lookup per project.
-	accessible, err := s.Projects.ListProjects(ctx, orgID, driven.ProjectListFilter{MemberUserID: &userID, Limit: 200})
+	accessible, err := s.Projects.ListProjects(ctx, orgID, domainprojects.ProjectListFilter{MemberUserID: &userID, Limit: 200})
 	if err != nil {
 		return nil, err
 	}
@@ -237,7 +242,7 @@ func (s *Service) AskAcross(ctx context.Context, userID uuid.UUID, question stri
 	if err != nil {
 		return nil, err
 	}
-	var named []driven.ProjectRow
+	var named []domainprojects.ProjectRow
 	if res != nil {
 		named = res.Projects
 	}
@@ -268,7 +273,7 @@ func (s *Service) AskAcross(ctx context.Context, userID uuid.UUID, question stri
 	if res != nil {
 		scope = res.ProjectIDs()
 	}
-	byID := make(map[uuid.UUID]driven.ProjectRow, len(accessible))
+	byID := make(map[uuid.UUID]domainprojects.ProjectRow, len(accessible))
 	for _, p := range accessible {
 		byID[p.ID] = p
 	}
@@ -292,7 +297,7 @@ func (s *Service) AskAcross(ctx context.Context, userID uuid.UUID, question stri
 	return s.runAsk(ctx, q, combined, meta, true)
 }
 
-func (s *Service) resolve(ctx context.Context, orgID uuid.UUID, projects []driven.ProjectRow, question string) (*retrieval.Resolution, error) {
+func (s *Service) resolve(ctx context.Context, orgID uuid.UUID, projects []domainprojects.ProjectRow, question string) (*retrieval.Resolution, error) {
 	if s.Resolver == nil {
 		return nil, nil
 	}
@@ -303,11 +308,11 @@ func (s *Service) resolve(ctx context.Context, orgID uuid.UUID, projects []drive
 // names and renders the hits as context lines, noting each as citable. Hits
 // already in the pack are skipped. projects maps the projects a hit may be
 // cited under; a hit filed elsewhere, or nowhere, is cited without one.
-func (s *Service) matchingCorrespondence(ctx context.Context, userID uuid.UUID, res *retrieval.Resolution, scope []uuid.UUID, projects map[uuid.UUID]driven.ProjectRow, pack *contextPack) (string, int, error) {
+func (s *Service) matchingCorrespondence(ctx context.Context, userID uuid.UUID, res *retrieval.Resolution, scope []uuid.UUID, projects map[uuid.UUID]domainprojects.ProjectRow, pack *contextPack) (string, int, error) {
 	if s.Search == nil || !res.HasSearch() {
 		return "", 0, nil
 	}
-	hits, err := s.Search.SearchMessages(ctx, userID, driven.MessageSearchFilter{
+	hits, err := s.Search.SearchMessages(ctx, userID, domainmessages.MessageSearchFilter{
 		Terms: res.Terms, ProjectIDs: scope, ContactIDs: res.ContactIDs(), Limit: maxSearchHits,
 	})
 	if err != nil {
@@ -324,9 +329,9 @@ func (s *Service) matchingCorrespondence(ctx context.Context, userID uuid.UUID, 
 	}
 	var effective map[uuid.UUID]*uuid.UUID
 	if s.Assignments != nil {
-		rows := make([]driven.MessageRow, 0, len(fresh))
+		rows := make([]domainmessages.MessageRow, 0, len(fresh))
 		for _, h := range fresh {
-			rows = append(rows, driven.MessageRow{ID: h.ID, AccountID: h.AccountID, ConversationID: h.ConversationID})
+			rows = append(rows, domainmessages.MessageRow{ID: h.ID, AccountID: h.AccountID, ConversationID: h.ConversationID})
 		}
 		if effective, err = s.Assignments.EffectiveProjectIDsForMessages(ctx, userID, rows); err != nil {
 			return "", 0, err
@@ -334,7 +339,7 @@ func (s *Service) matchingCorrespondence(ctx context.Context, userID uuid.UUID, 
 	}
 	var b strings.Builder
 	for _, h := range fresh {
-		var project driven.ProjectRow
+		var project domainprojects.ProjectRow
 		if pid := effective[h.ID]; pid != nil {
 			project = projects[*pid]
 		}
@@ -433,7 +438,7 @@ func (s *Service) runAsk(ctx context.Context, question string, pack *contextPack
 	return out, nil
 }
 
-func (s *Service) buildContext(ctx context.Context, userID, orgID uuid.UUID, project driven.ProjectRow, limits contextLimits) (*contextPack, error) {
+func (s *Service) buildContext(ctx context.Context, userID, orgID uuid.UUID, project domainprojects.ProjectRow, limits contextLimits) (*contextPack, error) {
 	pack := newContextPack()
 	var b strings.Builder
 	fmt.Fprintf(&b, "Project: %s code=%s (%s)\n\n", project.Name, project.Code, project.ID.String())
@@ -453,13 +458,13 @@ func (s *Service) buildContext(ctx context.Context, userID, orgID uuid.UUID, pro
 	if err != nil {
 		return nil, err
 	}
-	activeByFact := make(map[uuid.UUID]driven.FactVersionRow, len(versions))
+	activeByFact := make(map[uuid.UUID]domainfacts.FactVersionRow, len(versions))
 	for _, v := range versions {
 		activeByFact[v.FactID] = v
 	}
 	type activeFact struct {
-		fact    driven.FactRow
-		version driven.FactVersionRow
+		fact    domainfacts.FactRow
+		version domainfacts.FactVersionRow
 	}
 	selected := make([]activeFact, 0, len(facts))
 	for _, f := range facts {
@@ -480,7 +485,7 @@ func (s *Service) buildContext(ctx context.Context, userID, orgID uuid.UUID, pro
 	if err != nil {
 		return nil, err
 	}
-	evidenceByVersion := make(map[uuid.UUID][]driven.FactEvidenceRow, len(selected))
+	evidenceByVersion := make(map[uuid.UUID][]domainfacts.FactEvidenceRow, len(selected))
 	for _, e := range evidence {
 		evidenceByVersion[e.FactVersionID] = append(evidenceByVersion[e.FactVersionID], e)
 	}
@@ -544,7 +549,7 @@ func (s *Service) buildContext(ctx context.Context, userID, orgID uuid.UUID, pro
 		if timelineLimit <= 0 {
 			timelineLimit = 12
 		}
-		items, err := s.Timeline.ListProjectTimeline(ctx, userID, orgID, project.ID, driven.TimelineFilter{Limit: timelineLimit})
+		items, err := s.Timeline.ListProjectTimeline(ctx, userID, orgID, project.ID, domainprojects.TimelineFilter{Limit: timelineLimit})
 		if err == nil {
 			for _, it := range items {
 				snip := strings.TrimSpace(it.Snippet)
@@ -585,7 +590,7 @@ func (s *Service) callAskLLM(ctx context.Context, contextText, question string, 
 	user := "Answer using ONLY the context below. Cite ids from the context. If insufficient, say so.\n\nContext:\n" +
 		contextText + "\n\nQuestion: " + question +
 		"\n\nReturn JSON: {\"schema_version\":1,\"answer\":\"\",\"citations\":[{\"type\":\"fact_version|decision|issue|message|manual_item\",\"id\":\"uuid\"}],\"confidence\":0.0}"
-	resp, err := s.LLM.ChatCompletion(ctx, []driven.LLMMessage{
+	resp, err := s.LLM.ChatCompletion(ctx, []domainai.LLMMessage{
 		{Role: "system", Content: system},
 		{Role: "user", Content: user},
 	})
@@ -596,7 +601,7 @@ func (s *Service) callAskLLM(ctx context.Context, contextText, question string, 
 	if err == nil {
 		return parsed, nil
 	}
-	resp2, err2 := s.LLM.ChatCompletion(ctx, []driven.LLMMessage{
+	resp2, err2 := s.LLM.ChatCompletion(ctx, []domainai.LLMMessage{
 		{Role: "system", Content: "Fix into valid JSON only."},
 		{Role: "user", Content: resp.Content},
 	})

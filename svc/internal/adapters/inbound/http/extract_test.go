@@ -14,8 +14,8 @@ import (
 	"github.com/Kapital-B/automata/svc/internal/adapters/outbound/persistence/sqlite"
 	"github.com/Kapital-B/automata/svc/internal/application/auth"
 	appjobs "github.com/Kapital-B/automata/svc/internal/application/jobs"
-	"github.com/Kapital-B/automata/svc/internal/application/ports/driven"
 	appprojects "github.com/Kapital-B/automata/svc/internal/application/projects"
+	domainjobs "github.com/Kapital-B/automata/svc/internal/domain/jobs"
 	_ "modernc.org/sqlite"
 )
 
@@ -85,7 +85,7 @@ func TestExtractProjectQueuesChain(t *testing.T) {
 	}
 
 	// The queued head is the interpret step with reconcile behind it.
-	page, err := store.List(context.Background(), driven.JobListFilter{UserID: userA, Limit: 10})
+	page, err := store.List(context.Background(), domainjobs.JobListFilter{UserID: userA, Limit: 10})
 	if err != nil {
 		t.Fatal(err)
 	}

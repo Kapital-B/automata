@@ -3,13 +3,14 @@ package http
 import (
 	"encoding/json"
 	"errors"
+	"github.com/go-chi/chi/v5"
 	"net/http"
 	"strings"
 	"time"
 
 	appissues "github.com/Kapital-B/automata/svc/internal/application/issues"
 	domainissues "github.com/Kapital-B/automata/svc/internal/domain/issues"
-	"github.com/go-chi/chi/v5"
+
 	"github.com/google/uuid"
 )
 

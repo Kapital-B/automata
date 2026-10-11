@@ -11,8 +11,12 @@ import (
 	"unicode"
 
 	"github.com/Kapital-B/automata/svc/internal/application/jobkit"
-	"github.com/Kapital-B/automata/svc/internal/application/ports/driven"
+	domainai "github.com/Kapital-B/automata/svc/internal/domain/ai"
+	domainauth "github.com/Kapital-B/automata/svc/internal/domain/auth"
 	"github.com/Kapital-B/automata/svc/internal/domain/contacts"
+	domaincontacts "github.com/Kapital-B/automata/svc/internal/domain/contacts"
+	domainjobs "github.com/Kapital-B/automata/svc/internal/domain/jobs"
+	domainmessages "github.com/Kapital-B/automata/svc/internal/domain/messages"
 	domainprojects "github.com/Kapital-B/automata/svc/internal/domain/projects"
 	"github.com/google/uuid"
 )
@@ -26,13 +30,13 @@ var (
 
 // Service handles project CRUD and manual assignment.
 type Service struct {
-	Users       driven.UserRepository
-	Projects    driven.ProjectRepository
-	Assignments driven.AssignmentRepository
-	Manuals     driven.ManualItemRepository
-	Timeline    driven.TimelineRepository
-	Contacts    driven.ContactRepository
-	Messages    driven.MessageRepository
+	Users       domainauth.UserRepository
+	Projects    domainprojects.ProjectRepository
+	Assignments domainprojects.AssignmentRepository
+	Manuals     domainprojects.ManualItemRepository
+	Timeline    domainprojects.TimelineRepository
+	Contacts    domaincontacts.ContactRepository
+	Messages    domainmessages.MessageRepository
 	// AfterProjectCorrespondence is optional best-effort hook (e.g. interpret) after
 	// committed paste/assign. Must not fail the caller.
 	AfterProjectCorrespondence func(ctx context.Context, userID, projectID uuid.UUID, messageID, manualItemID *uuid.UUID)
@@ -42,7 +46,7 @@ func (s *Service) homeOrg(ctx context.Context, userID uuid.UUID) (uuid.UUID, err
 	return s.Users.GetHomeOrganisationID(ctx, userID)
 }
 
-func (s *Service) List(ctx context.Context, userID uuid.UUID, filter driven.ProjectListFilter) ([]driven.ProjectRow, error) {
+func (s *Service) List(ctx context.Context, userID uuid.UUID, filter domainprojects.ProjectListFilter) ([]domainprojects.ProjectRow, error) {
 	orgID, err := s.homeOrg(ctx, userID)
 	if err != nil {
 		return nil, err
@@ -51,8 +55,8 @@ func (s *Service) List(ctx context.Context, userID uuid.UUID, filter driven.Proj
 }
 
 type ProjectDetail struct {
-	Project driven.ProjectRow
-	Member  *driven.ProjectMemberRow
+	Project domainprojects.ProjectRow
+	Member  *domainprojects.ProjectMemberRow
 }
 
 func (s *Service) Get(ctx context.Context, userID, projectID uuid.UUID) (*ProjectDetail, error) {
@@ -88,7 +92,7 @@ type CreateProjectInput struct {
 	OutOfScope        *string
 }
 
-func (s *Service) Create(ctx context.Context, userID uuid.UUID, in CreateProjectInput) (*driven.ProjectRow, error) {
+func (s *Service) Create(ctx context.Context, userID uuid.UUID, in CreateProjectInput) (*domainprojects.ProjectRow, error) {
 	orgID, err := s.homeOrg(ctx, userID)
 	if err != nil {
 		return nil, err
@@ -104,7 +108,7 @@ func (s *Service) Create(ctx context.Context, userID uuid.UUID, in CreateProject
 	}
 	now := time.Now().UTC()
 	id := uuid.New()
-	project := driven.ProjectRow{
+	project := domainprojects.ProjectRow{
 		ID: id, OrganisationID: orgID, Name: strings.TrimSpace(in.Name), Code: code,
 		Description: in.Description, Client: in.Client, Keywords: in.Keywords,
 		CreatedAt: now, UpdatedAt: now,
@@ -115,7 +119,7 @@ func (s *Service) Create(ctx context.Context, userID uuid.UUID, in CreateProject
 	if project.Keywords == nil {
 		project.Keywords = []string{}
 	}
-	member := driven.ProjectMemberRow{
+	member := domainprojects.ProjectMemberRow{
 		ID: uuid.New(), ProjectID: id, UserID: userID,
 		Role:       strings.TrimSpace(in.MemberRole),
 		Discipline: in.Discipline, Responsibilities: in.Responsibilities,
@@ -139,7 +143,7 @@ type UpdateProjectInput struct {
 	Archive     *bool
 }
 
-func (s *Service) Update(ctx context.Context, userID, projectID uuid.UUID, in UpdateProjectInput) (*driven.ProjectRow, error) {
+func (s *Service) Update(ctx context.Context, userID, projectID uuid.UUID, in UpdateProjectInput) (*domainprojects.ProjectRow, error) {
 	orgID, err := s.homeOrg(ctx, userID)
 	if err != nil {
 		return nil, err
@@ -187,7 +191,7 @@ type UpdateMemberInput struct {
 	OutOfScope        *string
 }
 
-func (s *Service) UpdateMember(ctx context.Context, userID, projectID uuid.UUID, in UpdateMemberInput) (*driven.ProjectMemberRow, error) {
+func (s *Service) UpdateMember(ctx context.Context, userID, projectID uuid.UUID, in UpdateMemberInput) (*domainprojects.ProjectMemberRow, error) {
 	orgID, err := s.homeOrg(ctx, userID)
 	if err != nil {
 		return nil, err
@@ -237,7 +241,7 @@ type AssignInput struct {
 	Status    domainprojects.AssignmentStatus
 }
 
-func (s *Service) AssignMessage(ctx context.Context, userID, messageID uuid.UUID, in AssignInput) (*driven.EffectiveAssignment, error) {
+func (s *Service) AssignMessage(ctx context.Context, userID, messageID uuid.UUID, in AssignInput) (*domainprojects.EffectiveAssignment, error) {
 	orgID, err := s.homeOrg(ctx, userID)
 	if err != nil {
 		return nil, err
@@ -288,7 +292,7 @@ func (s *Service) AssignMessage(ctx context.Context, userID, messageID uuid.UUID
 				return nil, err
 			}
 		} else {
-			row := driven.AssignmentRow{
+			row := domainprojects.AssignmentRow{
 				ID: uuid.New(), OrganisationID: orgID, AccountID: msg.AccountID,
 				ConversationID: *msg.ConversationID, ProjectID: in.ProjectID,
 				Status: string(status), Reason: "user_assign", Source: string(domainprojects.SourceUser),
@@ -299,7 +303,7 @@ func (s *Service) AssignMessage(ctx context.Context, userID, messageID uuid.UUID
 			}
 		}
 	case domainprojects.ScopeMessage:
-		row := driven.AssignmentRow{
+		row := domainprojects.AssignmentRow{
 			OrganisationID: orgID, AccountID: msg.AccountID, MessageID: &messageID,
 			ProjectID: in.ProjectID, Status: string(status), Reason: "user_assign",
 			Source: string(domainprojects.SourceUser), AssignedByUserID: &uid,
@@ -321,7 +325,7 @@ func (s *Service) AssignMessage(ctx context.Context, userID, messageID uuid.UUID
 	return s.Assignments.EffectiveAssignment(ctx, userID, messageID)
 }
 
-func (s *Service) ClearOverride(ctx context.Context, userID, messageID uuid.UUID) (*driven.EffectiveAssignment, error) {
+func (s *Service) ClearOverride(ctx context.Context, userID, messageID uuid.UUID) (*domainprojects.EffectiveAssignment, error) {
 	msg, err := s.Messages.GetMessage(ctx, userID, messageID)
 	if err != nil {
 		return nil, err
@@ -335,19 +339,19 @@ func (s *Service) ClearOverride(ctx context.Context, userID, messageID uuid.UUID
 	return s.Assignments.EffectiveAssignment(ctx, userID, messageID)
 }
 
-func (s *Service) ListUnassigned(ctx context.Context, userID uuid.UUID, filter driven.UnassignedListFilter) ([]driven.UnassignedItem, error) {
+func (s *Service) ListUnassigned(ctx context.Context, userID uuid.UUID, filter domainprojects.UnassignedListFilter) ([]domainprojects.UnassignedItem, error) {
 	return s.Assignments.ListUnassigned(ctx, userID, filter)
 }
 
-func (s *Service) UnassignedSummary(ctx context.Context, userID uuid.UUID) (driven.UnassignedSummary, error) {
+func (s *Service) UnassignedSummary(ctx context.Context, userID uuid.UUID) (domainprojects.UnassignedSummary, error) {
 	return s.Assignments.CountUnassignedSummary(ctx, userID)
 }
 
-func (s *Service) EffectiveAssignment(ctx context.Context, userID, messageID uuid.UUID) (*driven.EffectiveAssignment, error) {
+func (s *Service) EffectiveAssignment(ctx context.Context, userID, messageID uuid.UUID) (*domainprojects.EffectiveAssignment, error) {
 	return s.Assignments.EffectiveAssignment(ctx, userID, messageID)
 }
 
-func (s *Service) upsertParticipantsFromMessage(ctx context.Context, orgID, projectID uuid.UUID, msg *driven.MessageRow) error {
+func (s *Service) upsertParticipantsFromMessage(ctx context.Context, orgID, projectID uuid.UUID, msg *domainmessages.MessageRow) error {
 	now := time.Now().UTC()
 	contactIDs, err := s.Contacts.ListContactIDsForMessage(ctx, orgID, msg.ID)
 	if err != nil {
@@ -384,7 +388,7 @@ type CreateManualInput struct {
 	ParticipantContactIDs []uuid.UUID
 }
 
-func (s *Service) CreateManualItem(ctx context.Context, userID uuid.UUID, in CreateManualInput) (*driven.ManualItemRow, error) {
+func (s *Service) CreateManualItem(ctx context.Context, userID uuid.UUID, in CreateManualInput) (*domainprojects.ManualItemRow, error) {
 	if s.Manuals == nil {
 		return nil, fmt.Errorf("manuals not configured")
 	}
@@ -419,7 +423,7 @@ func (s *Service) CreateManualItem(ctx context.Context, userID uuid.UUID, in Cre
 	if in.ProjectID != nil {
 		status = string(domainprojects.StatusCommitted)
 	}
-	row := driven.ManualItemRow{
+	row := domainprojects.ManualItemRow{
 		ID: uuid.New(), OrganisationID: orgID, Channel: string(ch),
 		OccurredAt: in.OccurredAt.UTC(), Title: strings.TrimSpace(in.Title), BodyText: body,
 		ProjectID: in.ProjectID, AssignmentStatus: status,
@@ -434,7 +438,7 @@ func (s *Service) CreateManualItem(ctx context.Context, userID uuid.UUID, in Cre
 		if err != nil || c == nil {
 			continue
 		}
-		_ = s.Contacts.UpsertParticipant(ctx, driven.CorrespondenceParticipantRow{
+		_ = s.Contacts.UpsertParticipant(ctx, domaincontacts.CorrespondenceParticipantRow{
 			ID: uuid.New(), OrganisationID: orgID, ContactID: cid,
 			Role: string(contacts.RoleParticipant), ManualItemID: &row.ID,
 		})
@@ -450,7 +454,7 @@ func (s *Service) CreateManualItem(ctx context.Context, userID uuid.UUID, in Cre
 	return &row, nil
 }
 
-func (s *Service) AssignManualItem(ctx context.Context, userID, manualItemID uuid.UUID, projectID *uuid.UUID) (*driven.ManualItemRow, error) {
+func (s *Service) AssignManualItem(ctx context.Context, userID, manualItemID uuid.UUID, projectID *uuid.UUID) (*domainprojects.ManualItemRow, error) {
 	if s.Manuals == nil {
 		return nil, fmt.Errorf("manuals not configured")
 	}
@@ -498,7 +502,7 @@ func (s *Service) AssignManualItem(ctx context.Context, userID, manualItemID uui
 	return s.Manuals.GetManualItem(ctx, orgID, manualItemID)
 }
 
-func (s *Service) GetTimeline(ctx context.Context, userID, projectID uuid.UUID, filter driven.TimelineFilter) ([]driven.TimelineItem, error) {
+func (s *Service) GetTimeline(ctx context.Context, userID, projectID uuid.UUID, filter domainprojects.TimelineFilter) ([]domainprojects.TimelineItem, error) {
 	if s.Timeline == nil {
 		return nil, fmt.Errorf("timeline not configured")
 	}
@@ -521,19 +525,19 @@ func (s *Service) GetTimeline(ctx context.Context, userID, projectID uuid.UUID, 
 // LLM is optional. With it nil the service runs the deterministic tiers only,
 // which is the behaviour when no model is configured.
 type AssignService struct {
-	Users       driven.UserRepository
-	Projects    driven.ProjectRepository
-	Assignments driven.AssignmentRepository
-	Contacts    driven.ContactRepository
-	Messages    driven.MessageRepository
-	JobRuns     driven.JobRunRepository
-	LLM         driven.LLMClient
+	Users       domainauth.UserRepository
+	Projects    domainprojects.ProjectRepository
+	Assignments domainprojects.AssignmentRepository
+	Contacts    domaincontacts.ContactRepository
+	Messages    domainmessages.MessageRepository
+	JobRuns     domainjobs.JobRunRepository
+	LLM         domainai.LLMClient
 }
 
 type AssignChunkResult struct {
 	MessagesProcessed int
 	MessagesAssigned  int
-	NextCursor        *driven.JobCursor
+	NextCursor        *domainjobs.JobCursor
 	Done              bool
 	Tally             assignTally
 }
@@ -578,11 +582,11 @@ func (s *AssignService) AssignAfterSync(ctx context.Context, userID, accountID u
 	if err != nil {
 		return err
 	}
-	projects, err := s.Projects.ListProjects(ctx, orgID, driven.ProjectListFilter{Limit: 500})
+	projects, err := s.Projects.ListProjects(ctx, orgID, domainprojects.ProjectListFilter{Limit: 500})
 	if err != nil {
 		return err
 	}
-	msgs, err := s.Assignments.ListMessagesNeedingAssign(ctx, userID, accountID, driven.AssignCandidateFilter{Limit: 500})
+	msgs, err := s.Assignments.ListMessagesNeedingAssign(ctx, userID, accountID, domainprojects.AssignCandidateFilter{Limit: 500})
 	if err != nil {
 		return err
 	}
@@ -595,7 +599,7 @@ func (s *AssignService) AssignAfterSync(ctx context.Context, userID, accountID u
 	}
 	tally := assignTally{}
 	var firstErr error
-	var unscored []driven.MessageRow
+	var unscored []domainmessages.MessageRow
 	for _, msg := range msgs {
 		outcome, err := s.tryAssignOne(ctx, orgID, userID, accountID, msg, projects, runID, now)
 		if err != nil {
@@ -640,7 +644,7 @@ func (s *AssignService) AssignAfterSync(ctx context.Context, userID, accountID u
 	return firstErr
 }
 
-func (s *AssignService) AssignAccountChunk(ctx context.Context, run driven.RunContext) (*AssignChunkResult, error) {
+func (s *AssignService) AssignAccountChunk(ctx context.Context, run domainjobs.RunContext) (*AssignChunkResult, error) {
 	if s == nil || s.Users == nil || s.Projects == nil || s.Assignments == nil || s.Contacts == nil || s.Messages == nil {
 		return nil, fmt.Errorf("assign service not configured")
 	}
@@ -651,7 +655,7 @@ func (s *AssignService) AssignAccountChunk(ctx context.Context, run driven.RunCo
 	if err != nil {
 		return nil, err
 	}
-	projects, err := s.Projects.ListProjects(ctx, orgID, driven.ProjectListFilter{Limit: 500})
+	projects, err := s.Projects.ListProjects(ctx, orgID, domainprojects.ProjectListFilter{Limit: 500})
 	if err != nil {
 		return nil, err
 	}
@@ -659,7 +663,7 @@ func (s *AssignService) AssignAccountChunk(ctx context.Context, run driven.RunCo
 	// threads the operator had already filed or dismissed, and the model's
 	// provisional row replaced their decision and put the thread back in
 	// triage.
-	filter := driven.AssignCandidateFilter{Limit: 26}
+	filter := domainprojects.AssignCandidateFilter{Limit: 26}
 	if at, id, ok := jobkit.DecodeKeysetCursor(run.Cursor); ok {
 		filter.BeforeReceivedAt = &at
 		filter.BeforeID = &id
@@ -674,7 +678,7 @@ func (s *AssignService) AssignAccountChunk(ctx context.Context, run driven.RunCo
 	}
 	now := time.Now().UTC()
 	tally := assignTally{}
-	var unscored []driven.MessageRow
+	var unscored []domainmessages.MessageRow
 	for _, msg := range msgs {
 		outcome, err := s.tryAssignOne(ctx, orgID, run.UserID, *run.AccountID, msg, projects, &run.RunID, now)
 		if err != nil {
@@ -718,7 +722,7 @@ const (
 // Order follows Wave 1 §9: a committed sibling in the same thread wins, then a
 // single project code token commits, then the ranked scorer supplies a
 // provisional suggestion. Only a code token may commit without the operator.
-func (s *AssignService) tryAssignOne(ctx context.Context, orgID, userID, accountID uuid.UUID, msg driven.MessageRow, projects []driven.ProjectRow, runID *uuid.UUID, now time.Time) (assignOutcome, error) {
+func (s *AssignService) tryAssignOne(ctx context.Context, orgID, userID, accountID uuid.UUID, msg domainmessages.MessageRow, projects []domainprojects.ProjectRow, runID *uuid.UUID, now time.Time) (assignOutcome, error) {
 	// 1. Sibling committed project.
 	if msg.ConversationID != nil && strings.TrimSpace(*msg.ConversationID) != "" {
 		sib, err := s.Assignments.FindCommittedSiblingProject(ctx, userID, accountID, *msg.ConversationID, msg.ID)
@@ -726,7 +730,7 @@ func (s *AssignService) tryAssignOne(ctx context.Context, orgID, userID, account
 			return outcomeUnscored, err
 		}
 		if sib != nil {
-			row := driven.AssignmentRow{
+			row := domainprojects.AssignmentRow{
 				ID: uuid.New(), OrganisationID: orgID, AccountID: accountID,
 				ConversationID: *msg.ConversationID, ProjectID: sib,
 				Status: string(domainprojects.StatusCommitted), Reason: "thread_sibling",
@@ -760,17 +764,17 @@ func (s *AssignService) tryAssignOne(ctx context.Context, orgID, userID, account
 
 // writeAssignment upserts at thread scope when the message has a conversation,
 // and as a per-message override otherwise (Wave 1 §7).
-func (s *AssignService) writeAssignment(ctx context.Context, orgID, accountID uuid.UUID, msg driven.MessageRow, projectID uuid.UUID, status domainprojects.AssignmentStatus, reason string, source domainprojects.AssignmentSource, confidence *float64, runID *uuid.UUID, now time.Time) error {
+func (s *AssignService) writeAssignment(ctx context.Context, orgID, accountID uuid.UUID, msg domainmessages.MessageRow, projectID uuid.UUID, status domainprojects.AssignmentStatus, reason string, source domainprojects.AssignmentSource, confidence *float64, runID *uuid.UUID, now time.Time) error {
 	pid := projectID
 	if msg.ConversationID == nil || strings.TrimSpace(*msg.ConversationID) == "" {
 		mid := msg.ID
-		return s.Assignments.UpsertMessageOverride(ctx, driven.AssignmentRow{
+		return s.Assignments.UpsertMessageOverride(ctx, domainprojects.AssignmentRow{
 			OrganisationID: orgID, AccountID: accountID, MessageID: &mid, ProjectID: &pid,
 			Status: string(status), Confidence: confidence, Reason: reason,
 			Source: string(source), RunID: runID, CreatedAt: now, UpdatedAt: now,
 		})
 	}
-	return s.Assignments.UpsertThreadAssignment(ctx, driven.AssignmentRow{
+	return s.Assignments.UpsertThreadAssignment(ctx, domainprojects.AssignmentRow{
 		ID: uuid.New(), OrganisationID: orgID, AccountID: accountID,
 		ConversationID: *msg.ConversationID, ProjectID: &pid,
 		Status: string(status), Confidence: confidence, Reason: reason,
@@ -780,13 +784,13 @@ func (s *AssignService) writeAssignment(ctx context.Context, orgID, accountID uu
 
 // hasConversation reports whether a message belongs to a thread. Mail synced
 // from a delta tombstone lost its conversation id, so this is not hypothetical.
-func hasConversation(msg *driven.MessageRow) bool {
+func hasConversation(msg *domainmessages.MessageRow) bool {
 	return msg != nil && msg.ConversationID != nil && strings.TrimSpace(*msg.ConversationID) != ""
 }
 
 func ptrFloat64(v float64) *float64 { return &v }
 
-func (s *AssignService) upsertParticipants(ctx context.Context, orgID, projectID uuid.UUID, msg driven.MessageRow) error {
+func (s *AssignService) upsertParticipants(ctx context.Context, orgID, projectID uuid.UUID, msg domainmessages.MessageRow) error {
 	now := time.Now().UTC()
 	ids, err := s.Contacts.ListContactIDsForMessage(ctx, orgID, msg.ID)
 	if err != nil {
@@ -800,14 +804,14 @@ func (s *AssignService) upsertParticipants(ctx context.Context, orgID, projectID
 
 var tokenSplitter = regexp.MustCompile(`[^\p{L}\p{N}]+`)
 
-func matchProjectCodes(text string, projects []driven.ProjectRow) []driven.ProjectRow {
+func matchProjectCodes(text string, projects []domainprojects.ProjectRow) []domainprojects.ProjectRow {
 	upper := strings.ToUpper(text)
 	tokens := tokenizeAlnum(upper)
 	tokenSet := map[string]struct{}{}
 	for _, t := range tokens {
 		tokenSet[t] = struct{}{}
 	}
-	hits := make([]driven.ProjectRow, 0)
+	hits := make([]domainprojects.ProjectRow, 0)
 	for _, p := range projects {
 		if p.ArchivedAt != nil {
 			continue
@@ -819,9 +823,9 @@ func matchProjectCodes(text string, projects []driven.ProjectRow) []driven.Proje
 	return hits
 }
 
-func matchProjectNamesKeywords(text string, projects []driven.ProjectRow) []driven.ProjectRow {
+func matchProjectNamesKeywords(text string, projects []domainprojects.ProjectRow) []domainprojects.ProjectRow {
 	lower := strings.ToLower(text)
-	hits := make([]driven.ProjectRow, 0)
+	hits := make([]domainprojects.ProjectRow, 0)
 	for _, p := range projects {
 		if p.ArchivedAt != nil {
 			continue

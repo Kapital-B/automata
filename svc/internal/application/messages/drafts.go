@@ -7,13 +7,13 @@ import (
 	"time"
 
 	appaccounts "github.com/Kapital-B/automata/svc/internal/application/accounts"
-	"github.com/Kapital-B/automata/svc/internal/application/ports/driven"
+	domainmessages "github.com/Kapital-B/automata/svc/internal/domain/messages"
 	"github.com/google/uuid"
 )
 
 type DraftLifecycleService struct {
-	Summaries driven.SummaryRepository
-	Messages  driven.MessageRepository
+	Summaries domainmessages.SummaryRepository
+	Messages  domainmessages.MessageRepository
 	Mailboxes *appaccounts.MailboxOpener
 }
 
@@ -57,7 +57,7 @@ func (s *DraftLifecycleService) SendDraft(ctx context.Context, userID, draftID u
 		return fmt.Errorf("source message unavailable")
 	}
 	now := time.Now().UTC()
-	attempt := driven.SendAttemptRow{
+	attempt := domainmessages.SendAttemptRow{
 		ID:        uuid.New(),
 		UserID:    userID,
 		AccountID: draft.AccountID,

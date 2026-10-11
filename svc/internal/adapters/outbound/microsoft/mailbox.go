@@ -6,8 +6,8 @@ import (
 	"fmt"
 	"strings"
 
-	"github.com/Kapital-B/automata/svc/internal/application/ports/driven"
 	"github.com/Kapital-B/automata/svc/internal/domain/accounts"
+	domainaccounts "github.com/Kapital-B/automata/svc/internal/domain/accounts"
 )
 
 // DefaultMaxRawMessageBytes bounds GetRawMessage.
@@ -36,15 +36,15 @@ func decodeCredential(raw []byte) (accounts.MsAccountKind, string, error) {
 
 // Provider opens and connects Microsoft 365 mailboxes through Graph.
 type Provider struct {
-	OAuth driven.MicrosoftOAuth
+	OAuth domainaccounts.MicrosoftOAuth
 	Graph *GraphClient
 	// MaxRawMessageBytes bounds GetRawMessage; zero means the default.
 	MaxRawMessageBytes int64
 }
 
 var (
-	_ driven.MailProvider       = (*Provider)(nil)
-	_ driven.OAuthMailConnector = (*Provider)(nil)
+	_ domainaccounts.MailProvider       = (*Provider)(nil)
+	_ domainaccounts.OAuthMailConnector = (*Provider)(nil)
 )
 
 func (p *Provider) maxRaw() int64 {
@@ -57,7 +57,7 @@ func (p *Provider) maxRaw() int64 {
 // Open refreshes the access token. The refreshed credential is always handed
 // back for persisting, as the pre-provider code always rewrote it: that write
 // is also what returns an account in an error state to connected.
-func (p *Provider) Open(ctx context.Context, _ driven.AccountRow, raw []byte) (driven.Mailbox, []byte, error) {
+func (p *Provider) Open(ctx context.Context, _ domainaccounts.AccountRow, raw []byte) (domainaccounts.Mailbox, []byte, error) {
 	kind, refresh, err := decodeCredential(raw)
 	if err != nil {
 		return nil, nil, err
@@ -77,11 +77,11 @@ func (p *Provider) Open(ctx context.Context, _ driven.AccountRow, raw []byte) (d
 	return &mailbox{graph: p.Graph, token: tok.AccessToken, maxRaw: p.maxRaw()}, rotated, nil
 }
 
-func (p *Provider) AuthorizationURL(ctx context.Context, state string, opts driven.ConnectOptions) (string, error) {
+func (p *Provider) AuthorizationURL(ctx context.Context, state string, opts domainaccounts.ConnectOptions) (string, error) {
 	return p.OAuth.AuthorizationURL(ctx, opts.MsAccountKind, state)
 }
 
-func (p *Provider) Complete(ctx context.Context, code string, opts driven.ConnectOptions) (*driven.ConnectedMailbox, error) {
+func (p *Provider) Complete(ctx context.Context, code string, opts domainaccounts.ConnectOptions) (*domainaccounts.ConnectedMailbox, error) {
 	tok, err := p.OAuth.ExchangeCode(ctx, opts.MsAccountKind, code)
 	if err != nil {
 		return nil, fmt.Errorf("exchange: %w", err)
@@ -106,7 +106,7 @@ func (p *Provider) Complete(ctx context.Context, code string, opts driven.Connec
 		label = "Microsoft"
 	}
 	tenant := prof.TenantID
-	return &driven.ConnectedMailbox{
+	return &domainaccounts.ConnectedMailbox{
 		Email:         email,
 		DefaultLabel:  label,
 		TenantID:      &tenant,
@@ -122,7 +122,7 @@ type mailbox struct {
 	maxRaw int64
 }
 
-var capabilities = driven.MailboxCapabilities{
+var capabilities = domainaccounts.MailboxCapabilities{
 	IncrementalSync:   true,
 	ServerSideForward: true,
 	ServerSideReply:   true,
@@ -130,11 +130,11 @@ var capabilities = driven.MailboxCapabilities{
 	StableMessageIDs:  true,
 }
 
-func (p *Provider) Capabilities() driven.MailboxCapabilities { return capabilities }
+func (p *Provider) Capabilities() domainaccounts.MailboxCapabilities { return capabilities }
 
-func (m *mailbox) Capabilities() driven.MailboxCapabilities { return capabilities }
+func (m *mailbox) Capabilities() domainaccounts.MailboxCapabilities { return capabilities }
 
-func (m *mailbox) ListChanges(ctx context.Context, cursor string, pageSize int) (*driven.MailChangePage, error) {
+func (m *mailbox) ListChanges(ctx context.Context, cursor string, pageSize int) (*domainaccounts.MailChangePage, error) {
 	return m.graph.ListInboxDelta(ctx, m.token, cursor, pageSize)
 }
 
@@ -152,7 +152,7 @@ func (m *mailbox) Reply(ctx context.Context, providerMessageID, body string) err
 func (m *mailbox) Forward(ctx context.Context, providerMessageID, to, comment string) error {
 	id, err := m.graph.ResolveGraphMessageID(ctx, m.token, providerMessageID)
 	if err != nil {
-		return fmt.Errorf("%w: resolve message id: %v", driven.ErrMailNotSent, err)
+		return fmt.Errorf("%w: resolve message id: %v", domainaccounts.ErrMailNotSent, err)
 	}
 	return m.graph.ForwardMessage(ctx, m.token, id, strings.TrimSpace(to), comment)
 }

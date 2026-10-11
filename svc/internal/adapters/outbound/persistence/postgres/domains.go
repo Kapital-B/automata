@@ -12,12 +12,19 @@ import (
 	"unicode/utf8"
 
 	"github.com/Kapital-B/automata/svc/internal/adapters/outbound/persistence/sqlkit"
-	"github.com/Kapital-B/automata/svc/internal/application/ports/driven"
+	domainconnectors "github.com/Kapital-B/automata/svc/internal/domain/connectors"
 	domaincontacts "github.com/Kapital-B/automata/svc/internal/domain/contacts"
+	domaincontradictions "github.com/Kapital-B/automata/svc/internal/domain/contradictions"
+	domaindecisions "github.com/Kapital-B/automata/svc/internal/domain/decisions"
+	domainfacts "github.com/Kapital-B/automata/svc/internal/domain/facts"
+	domaininterpretations "github.com/Kapital-B/automata/svc/internal/domain/interpretations"
+	domainissues "github.com/Kapital-B/automata/svc/internal/domain/issues"
+	domainmessages "github.com/Kapital-B/automata/svc/internal/domain/messages"
+	domainprojects "github.com/Kapital-B/automata/svc/internal/domain/projects"
 	"github.com/google/uuid"
 )
 
-func (r *Repository) ListContacts(ctx context.Context, organisationID uuid.UUID, filter driven.ContactListFilter) ([]driven.ContactRow, error) {
+func (r *Repository) ListContacts(ctx context.Context, organisationID uuid.UUID, filter domaincontacts.ContactListFilter) ([]domaincontacts.ContactRow, error) {
 	limit := filter.Limit
 	if limit <= 0 {
 		limit = 50
@@ -65,7 +72,7 @@ func (r *Repository) ListContacts(ctx context.Context, organisationID uuid.UUID,
 		return nil, err
 	}
 	defer rows.Close()
-	out := make([]driven.ContactRow, 0)
+	out := make([]domaincontacts.ContactRow, 0)
 	for rows.Next() {
 		row, err := scanContactRow(rows)
 		if err != nil {
@@ -84,7 +91,7 @@ func (r *Repository) ListContacts(ctx context.Context, organisationID uuid.UUID,
 
 // attachPrimaryEmails fills PrimaryEmail on a page of contacts with one query
 // rather than one per row.
-func (r *Repository) attachPrimaryEmails(ctx context.Context, contacts []driven.ContactRow) error {
+func (r *Repository) attachPrimaryEmails(ctx context.Context, contacts []domaincontacts.ContactRow) error {
 	if len(contacts) == 0 {
 		return nil
 	}
@@ -118,7 +125,7 @@ func (r *Repository) attachPrimaryEmails(ctx context.Context, contacts []driven.
 	return rows.Err()
 }
 
-func (r *Repository) GetContact(ctx context.Context, organisationID, contactID uuid.UUID) (*driven.ContactRow, error) {
+func (r *Repository) GetContact(ctx context.Context, organisationID, contactID uuid.UUID) (*domaincontacts.ContactRow, error) {
 	row := r.queryRowContext(ctx, `
 		SELECT id, organisation_id, display_name, company, merged_into_contact_id, created_at, updated_at
 		FROM contacts
@@ -131,7 +138,7 @@ func (r *Repository) GetContact(ctx context.Context, organisationID, contactID u
 	return out, err
 }
 
-func (r *Repository) CreateContact(ctx context.Context, row driven.ContactRow) error {
+func (r *Repository) CreateContact(ctx context.Context, row domaincontacts.ContactRow) error {
 	_, err := r.execContext(ctx, `
 		INSERT INTO contacts (id, organisation_id, display_name, company, merged_into_contact_id, created_at, updated_at)
 		VALUES (?, ?, ?, ?, NULL, ?, ?)
@@ -152,7 +159,7 @@ func (r *Repository) UpdateContactDisplayNameIfEmpty(ctx context.Context, organi
 	return err
 }
 
-func (r *Repository) ListIdentities(ctx context.Context, organisationID, contactID uuid.UUID) ([]driven.ContactIdentityRow, error) {
+func (r *Repository) ListIdentities(ctx context.Context, organisationID, contactID uuid.UUID) ([]domaincontacts.ContactIdentityRow, error) {
 	rows, err := r.queryContext(ctx, `
 		SELECT id, organisation_id, contact_id, kind, value_normalized, value_raw, created_at
 		FROM contact_identities
@@ -163,7 +170,7 @@ func (r *Repository) ListIdentities(ctx context.Context, organisationID, contact
 		return nil, err
 	}
 	defer rows.Close()
-	out := make([]driven.ContactIdentityRow, 0)
+	out := make([]domaincontacts.ContactIdentityRow, 0)
 	for rows.Next() {
 		ident, err := scanIdentityRow(rows)
 		if err != nil {
@@ -174,7 +181,7 @@ func (r *Repository) ListIdentities(ctx context.Context, organisationID, contact
 	return out, rows.Err()
 }
 
-func (r *Repository) FindContactIdentity(ctx context.Context, organisationID uuid.UUID, kind, valueNormalized string) (*driven.ContactIdentityRow, error) {
+func (r *Repository) FindContactIdentity(ctx context.Context, organisationID uuid.UUID, kind, valueNormalized string) (*domaincontacts.ContactIdentityRow, error) {
 	row := r.queryRowContext(ctx, `
 		SELECT id, organisation_id, contact_id, kind, value_normalized, value_raw, created_at
 		FROM contact_identities
@@ -187,7 +194,7 @@ func (r *Repository) FindContactIdentity(ctx context.Context, organisationID uui
 	return out, err
 }
 
-func (r *Repository) CreateIdentity(ctx context.Context, row driven.ContactIdentityRow) error {
+func (r *Repository) CreateIdentity(ctx context.Context, row domaincontacts.ContactIdentityRow) error {
 	_, err := r.execContext(ctx, `
 		INSERT INTO contact_identities (id, organisation_id, contact_id, kind, value_normalized, value_raw, created_at)
 		VALUES (?, ?, ?, ?, ?, ?, ?)
@@ -195,7 +202,7 @@ func (r *Repository) CreateIdentity(ctx context.Context, row driven.ContactIdent
 	return err
 }
 
-func (r *Repository) UpsertParticipant(ctx context.Context, row driven.CorrespondenceParticipantRow) error {
+func (r *Repository) UpsertParticipant(ctx context.Context, row domaincontacts.CorrespondenceParticipantRow) error {
 	if row.MessageID == nil && row.ManualItemID == nil {
 		return fmt.Errorf("participant requires message_id or manual_item_id")
 	}
@@ -226,7 +233,7 @@ func (r *Repository) ListRecentMessageIDs(ctx context.Context, organisationID, c
 	return scanUUIDColumn(rows)
 }
 
-func (r *Repository) SuggestMerges(ctx context.Context, organisationID, contactID uuid.UUID) ([]driven.ContactRow, error) {
+func (r *Repository) SuggestMerges(ctx context.Context, organisationID, contactID uuid.UUID) ([]domaincontacts.ContactRow, error) {
 	var displayName string
 	err := r.queryRowContext(ctx, `
 		SELECT display_name FROM contacts
@@ -240,7 +247,7 @@ func (r *Repository) SuggestMerges(ctx context.Context, organisationID, contactI
 	}
 	name := strings.TrimSpace(displayName)
 	if name == "" {
-		return []driven.ContactRow{}, nil
+		return []domaincontacts.ContactRow{}, nil
 	}
 	rows, err := r.queryContext(ctx, `
 		SELECT c.id, c.organisation_id, c.display_name, c.company, c.merged_into_contact_id, c.created_at, c.updated_at
@@ -262,7 +269,7 @@ func (r *Repository) SuggestMerges(ctx context.Context, organisationID, contactI
 		return nil, err
 	}
 	defer rows.Close()
-	out := make([]driven.ContactRow, 0)
+	out := make([]domaincontacts.ContactRow, 0)
 	for rows.Next() {
 		row, err := scanContactRow(rows)
 		if err != nil {
@@ -427,7 +434,7 @@ func (r *Repository) ResolveEmailContact(ctx context.Context, organisationID uui
 		return existing.ContactID, nil
 	}
 	contactID := uuid.New()
-	row := driven.ContactRow{
+	row := domaincontacts.ContactRow{
 		ID:             contactID,
 		OrganisationID: organisationID,
 		DisplayName:    strings.TrimSpace(displayName),
@@ -437,7 +444,7 @@ func (r *Repository) ResolveEmailContact(ctx context.Context, organisationID uui
 	if err := r.CreateContact(ctx, row); err != nil {
 		return uuid.Nil, err
 	}
-	ident := driven.ContactIdentityRow{
+	ident := domaincontacts.ContactIdentityRow{
 		ID:              uuid.New(),
 		OrganisationID:  organisationID,
 		ContactID:       contactID,
@@ -499,7 +506,7 @@ func (r *Repository) ListContactIDsForManualItem(ctx context.Context, organisati
 	return scanUUIDColumn(rows)
 }
 
-func scanContactRow(s rowScanner) (*driven.ContactRow, error) {
+func scanContactRow(s rowScanner) (*domaincontacts.ContactRow, error) {
 	var idStr, orgStr, displayName string
 	var company, merged sql.NullString
 	var createdAt, updatedAt time.Time
@@ -514,7 +521,7 @@ func scanContactRow(s rowScanner) (*driven.ContactRow, error) {
 	if err != nil {
 		return nil, err
 	}
-	row := &driven.ContactRow{
+	row := &domaincontacts.ContactRow{
 		ID:             id,
 		OrganisationID: orgID,
 		DisplayName:    displayName,
@@ -532,7 +539,7 @@ func scanContactRow(s rowScanner) (*driven.ContactRow, error) {
 	return row, nil
 }
 
-func scanIdentityRow(s rowScanner) (*driven.ContactIdentityRow, error) {
+func scanIdentityRow(s rowScanner) (*domaincontacts.ContactIdentityRow, error) {
 	var idStr, orgStr, contactStr, kind, norm, raw string
 	var createdAt time.Time
 	if err := s.Scan(&idStr, &orgStr, &contactStr, &kind, &norm, &raw, &createdAt); err != nil {
@@ -550,7 +557,7 @@ func scanIdentityRow(s rowScanner) (*driven.ContactIdentityRow, error) {
 	if err != nil {
 		return nil, err
 	}
-	return &driven.ContactIdentityRow{
+	return &domaincontacts.ContactIdentityRow{
 		ID:              id,
 		OrganisationID:  orgID,
 		ContactID:       contactID,
@@ -561,7 +568,7 @@ func scanIdentityRow(s rowScanner) (*driven.ContactIdentityRow, error) {
 	}, nil
 }
 
-func (r *Repository) ListProjects(ctx context.Context, organisationID uuid.UUID, filter driven.ProjectListFilter) ([]driven.ProjectRow, error) {
+func (r *Repository) ListProjects(ctx context.Context, organisationID uuid.UUID, filter domainprojects.ProjectListFilter) ([]domainprojects.ProjectRow, error) {
 	limit := filter.Limit
 	if limit <= 0 {
 		limit = 100
@@ -588,7 +595,7 @@ func (r *Repository) ListProjects(ctx context.Context, organisationID uuid.UUID,
 		return nil, err
 	}
 	defer rows.Close()
-	out := make([]driven.ProjectRow, 0)
+	out := make([]domainprojects.ProjectRow, 0)
 	for rows.Next() {
 		p, err := scanProjectRow(rows)
 		if err != nil {
@@ -599,7 +606,7 @@ func (r *Repository) ListProjects(ctx context.Context, organisationID uuid.UUID,
 	return out, rows.Err()
 }
 
-func (r *Repository) GetProject(ctx context.Context, organisationID, projectID uuid.UUID) (*driven.ProjectRow, error) {
+func (r *Repository) GetProject(ctx context.Context, organisationID, projectID uuid.UUID) (*domainprojects.ProjectRow, error) {
 	row := r.queryRowContext(ctx, `
 		SELECT id, organisation_id, name, code, description, client, keywords_json, archived_at, created_at, updated_at, last_extracted_at
 		FROM projects WHERE id = ? AND organisation_id = ?
@@ -611,7 +618,7 @@ func (r *Repository) GetProject(ctx context.Context, organisationID, projectID u
 	return p, err
 }
 
-func (r *Repository) GetProjectByCode(ctx context.Context, organisationID uuid.UUID, code string) (*driven.ProjectRow, error) {
+func (r *Repository) GetProjectByCode(ctx context.Context, organisationID uuid.UUID, code string) (*domainprojects.ProjectRow, error) {
 	row := r.queryRowContext(ctx, `
 		SELECT id, organisation_id, name, code, description, client, keywords_json, archived_at, created_at, updated_at, last_extracted_at
 		FROM projects WHERE organisation_id = ? AND code = ?
@@ -623,7 +630,7 @@ func (r *Repository) GetProjectByCode(ctx context.Context, organisationID uuid.U
 	return p, err
 }
 
-func (r *Repository) CreateProject(ctx context.Context, project driven.ProjectRow, member driven.ProjectMemberRow) error {
+func (r *Repository) CreateProject(ctx context.Context, project domainprojects.ProjectRow, member domainprojects.ProjectMemberRow) error {
 	return r.withTx(ctx, func(tx *sql.Tx) error {
 		kw, _ := json.Marshal(project.Keywords)
 		if project.Keywords == nil {
@@ -646,7 +653,7 @@ func (r *Repository) CreateProject(ctx context.Context, project driven.ProjectRo
 	})
 }
 
-func (r *Repository) UpdateProject(ctx context.Context, project driven.ProjectRow) error {
+func (r *Repository) UpdateProject(ctx context.Context, project domainprojects.ProjectRow) error {
 	kw, _ := json.Marshal(project.Keywords)
 	if project.Keywords == nil {
 		kw = []byte("[]")
@@ -658,7 +665,7 @@ func (r *Repository) UpdateProject(ctx context.Context, project driven.ProjectRo
 	return err
 }
 
-func (r *Repository) GetProjectMember(ctx context.Context, projectID, userID uuid.UUID) (*driven.ProjectMemberRow, error) {
+func (r *Repository) GetProjectMember(ctx context.Context, projectID, userID uuid.UUID) (*domainprojects.ProjectMemberRow, error) {
 	row := r.queryRowContext(ctx, `
 		SELECT id, project_id, user_id, role, discipline, responsibilities, current_scope, approval_authority, out_of_scope, created_at, updated_at
 		FROM project_members WHERE project_id = ? AND user_id = ?
@@ -670,7 +677,7 @@ func (r *Repository) GetProjectMember(ctx context.Context, projectID, userID uui
 	return m, err
 }
 
-func (r *Repository) UpdateProjectMember(ctx context.Context, member driven.ProjectMemberRow) error {
+func (r *Repository) UpdateProjectMember(ctx context.Context, member domainprojects.ProjectMemberRow) error {
 	_, err := r.execContext(ctx, `
 		UPDATE project_members
 		SET role = ?, discipline = ?, responsibilities = ?, current_scope = ?, approval_authority = ?, out_of_scope = ?, updated_at = ?
@@ -694,7 +701,7 @@ func (r *Repository) CountProjectMembers(ctx context.Context, projectID uuid.UUI
 	return n, err
 }
 
-func scanProjectRow(s rowScanner) (*driven.ProjectRow, error) {
+func scanProjectRow(s rowScanner) (*domainprojects.ProjectRow, error) {
 	var idStr, orgStr, name, code, kwJSON string
 	var desc, client sql.NullString
 	var archived, lastExtracted sql.NullTime
@@ -717,7 +724,7 @@ func scanProjectRow(s rowScanner) (*driven.ProjectRow, error) {
 	if keywords == nil {
 		keywords = []string{}
 	}
-	p := &driven.ProjectRow{
+	p := &domainprojects.ProjectRow{
 		ID:             id,
 		OrganisationID: orgID,
 		Name:           name,
@@ -733,7 +740,7 @@ func scanProjectRow(s rowScanner) (*driven.ProjectRow, error) {
 	return p, nil
 }
 
-func scanMemberRow(s rowScanner) (*driven.ProjectMemberRow, error) {
+func scanMemberRow(s rowScanner) (*domainprojects.ProjectMemberRow, error) {
 	var idStr, projectStr, userStr, role string
 	var discipline, responsibilities, currentScope, approvalAuthority, outOfScope sql.NullString
 	var createdAt, updatedAt time.Time
@@ -743,7 +750,7 @@ func scanMemberRow(s rowScanner) (*driven.ProjectMemberRow, error) {
 	id, _ := uuid.Parse(idStr)
 	projectID, _ := uuid.Parse(projectStr)
 	userID, _ := uuid.Parse(userStr)
-	return &driven.ProjectMemberRow{
+	return &domainprojects.ProjectMemberRow{
 		ID:                id,
 		ProjectID:         projectID,
 		UserID:            userID,
@@ -783,27 +790,27 @@ const upsertThreadAssignmentSQL = `
 			updated_at = excluded.updated_at
 		WHERE thread_assignments.source <> 'user' OR excluded.source = 'user'`
 
-func threadAssignmentArgs(row driven.AssignmentRow) []any {
+func threadAssignmentArgs(row domainprojects.AssignmentRow) []any {
 	return []any{row.ID.String(), row.OrganisationID.String(), row.AccountID.String(), row.ConversationID,
 		nullUUID(row.ProjectID), row.Status, nullFloat(row.Confidence), row.Reason, row.Source,
 		nullUUID(row.RunID), nullUUID(row.AssignedByUserID), row.CreatedAt.UTC(), row.UpdatedAt.UTC(),
 		nullTime(row.NotRelevantAt)}
 }
 
-func (r *Repository) UpsertThreadAssignment(ctx context.Context, row driven.AssignmentRow) error {
+func (r *Repository) UpsertThreadAssignment(ctx context.Context, row domainprojects.AssignmentRow) error {
 	_, err := r.execContext(ctx, upsertThreadAssignmentSQL, threadAssignmentArgs(row)...)
 	return err
 }
 
-func (r *Repository) UpsertThreadAssignments(ctx context.Context, rows []driven.AssignmentRow) error {
-	return chunkedTx(ctx, r, rows, func(ctx context.Context, tx *sql.Tx, row driven.AssignmentRow) error {
+func (r *Repository) UpsertThreadAssignments(ctx context.Context, rows []domainprojects.AssignmentRow) error {
+	return chunkedTx(ctx, r, rows, func(ctx context.Context, tx *sql.Tx, row domainprojects.AssignmentRow) error {
 		_, err := txExecContext(ctx, tx, upsertThreadAssignmentSQL, threadAssignmentArgs(row)...)
 		return err
 	})
 }
 
 // chunkedTx applies fn to every row, committing one transaction per chunk.
-func chunkedTx(ctx context.Context, r *Repository, rows []driven.AssignmentRow, fn func(context.Context, *sql.Tx, driven.AssignmentRow) error) error {
+func chunkedTx(ctx context.Context, r *Repository, rows []domainprojects.AssignmentRow, fn func(context.Context, *sql.Tx, domainprojects.AssignmentRow) error) error {
 	for start := 0; start < len(rows); start += assignmentUpsertChunk {
 		end := start + assignmentUpsertChunk
 		if end > len(rows) {
@@ -824,7 +831,7 @@ func chunkedTx(ctx context.Context, r *Repository, rows []driven.AssignmentRow, 
 	return nil
 }
 
-func (r *Repository) GetThreadAssignment(ctx context.Context, accountID uuid.UUID, conversationID string) (*driven.AssignmentRow, error) {
+func (r *Repository) GetThreadAssignment(ctx context.Context, accountID uuid.UUID, conversationID string) (*domainprojects.AssignmentRow, error) {
 	row := r.queryRowContext(ctx, `
 		SELECT id, organisation_id, account_id, conversation_id, project_id, status, confidence, reason, source,
 			run_id, assigned_by_user_id, created_at, updated_at, not_relevant_at
@@ -860,14 +867,14 @@ const upsertMessageOverrideSQL = `
 			updated_at = excluded.updated_at
 		WHERE message_assignment_overrides.source <> 'user' OR excluded.source = 'user'`
 
-func messageOverrideArgs(row driven.AssignmentRow) []any {
+func messageOverrideArgs(row domainprojects.AssignmentRow) []any {
 	return []any{row.MessageID.String(), row.OrganisationID.String(), row.AccountID.String(),
 		nullUUID(row.ProjectID), row.Status, nullFloat(row.Confidence), row.Reason, row.Source,
 		nullUUID(row.RunID), nullUUID(row.AssignedByUserID), row.CreatedAt.UTC(), row.UpdatedAt.UTC(),
 		nullTime(row.NotRelevantAt)}
 }
 
-func (r *Repository) UpsertMessageOverride(ctx context.Context, row driven.AssignmentRow) error {
+func (r *Repository) UpsertMessageOverride(ctx context.Context, row domainprojects.AssignmentRow) error {
 	if row.MessageID == nil {
 		return fmt.Errorf("message override requires message_id")
 	}
@@ -875,19 +882,19 @@ func (r *Repository) UpsertMessageOverride(ctx context.Context, row driven.Assig
 	return err
 }
 
-func (r *Repository) UpsertMessageOverrides(ctx context.Context, rows []driven.AssignmentRow) error {
+func (r *Repository) UpsertMessageOverrides(ctx context.Context, rows []domainprojects.AssignmentRow) error {
 	for _, row := range rows {
 		if row.MessageID == nil {
 			return fmt.Errorf("message override requires message_id")
 		}
 	}
-	return chunkedTx(ctx, r, rows, func(ctx context.Context, tx *sql.Tx, row driven.AssignmentRow) error {
+	return chunkedTx(ctx, r, rows, func(ctx context.Context, tx *sql.Tx, row domainprojects.AssignmentRow) error {
 		_, err := txExecContext(ctx, tx, upsertMessageOverrideSQL, messageOverrideArgs(row)...)
 		return err
 	})
 }
 
-func (r *Repository) GetMessageOverride(ctx context.Context, messageID uuid.UUID) (*driven.AssignmentRow, error) {
+func (r *Repository) GetMessageOverride(ctx context.Context, messageID uuid.UUID) (*domainprojects.AssignmentRow, error) {
 	row := r.queryRowContext(ctx, `
 		SELECT message_id, organisation_id, account_id, project_id, status, confidence, reason, source,
 			run_id, assigned_by_user_id, created_at, updated_at, not_relevant_at
@@ -905,12 +912,12 @@ func (r *Repository) DeleteMessageOverride(ctx context.Context, messageID uuid.U
 	return err
 }
 
-func (r *Repository) EffectiveAssignment(ctx context.Context, userID, messageID uuid.UUID) (*driven.EffectiveAssignment, error) {
+func (r *Repository) EffectiveAssignment(ctx context.Context, userID, messageID uuid.UUID) (*domainprojects.EffectiveAssignment, error) {
 	msg, err := r.GetMessage(ctx, userID, messageID)
 	if err != nil || msg == nil {
 		return msgEffectiveNil(msg, err)
 	}
-	out := &driven.EffectiveAssignment{Status: "unassigned", Scope: "none", AccountID: msg.AccountID, MessageID: msg.ID}
+	out := &domainprojects.EffectiveAssignment{Status: "unassigned", Scope: "none", AccountID: msg.AccountID, MessageID: msg.ID}
 	if msg.ConversationID != nil {
 		out.ConversationID = msg.ConversationID
 	}
@@ -950,7 +957,7 @@ func (r *Repository) EffectiveAssignment(ctx context.Context, userID, messageID 
 	return out, nil
 }
 
-func msgEffectiveNil(msg *driven.MessageRow, err error) (*driven.EffectiveAssignment, error) {
+func msgEffectiveNil(msg *domainmessages.MessageRow, err error) (*domainprojects.EffectiveAssignment, error) {
 	if err != nil {
 		return nil, err
 	}
@@ -961,7 +968,7 @@ func msgEffectiveNil(msg *driven.MessageRow, err error) (*driven.EffectiveAssign
 }
 
 // EffectiveProjectIDsForMessages resolves projects for a page of messages in one query.
-func (r *Repository) EffectiveProjectIDsForMessages(ctx context.Context, userID uuid.UUID, messages []driven.MessageRow) (map[uuid.UUID]*uuid.UUID, error) {
+func (r *Repository) EffectiveProjectIDsForMessages(ctx context.Context, userID uuid.UUID, messages []domainmessages.MessageRow) (map[uuid.UUID]*uuid.UUID, error) {
 	out := make(map[uuid.UUID]*uuid.UUID, len(messages))
 	if len(messages) == 0 {
 		return out, nil
@@ -1094,7 +1101,7 @@ func normalizeUnassignedStatus(status string) string {
 	return s
 }
 
-func (r *Repository) ListUnassigned(ctx context.Context, userID uuid.UUID, filter driven.UnassignedListFilter) ([]driven.UnassignedItem, error) {
+func (r *Repository) ListUnassigned(ctx context.Context, userID uuid.UUID, filter domainprojects.UnassignedListFilter) ([]domainprojects.UnassignedItem, error) {
 	limit := filter.Limit
 	if limit <= 0 {
 		limit = 50
@@ -1156,8 +1163,8 @@ func (r *Repository) ListUnassigned(ctx context.Context, userID uuid.UUID, filte
 	return scanUnassignedRows(rows)
 }
 
-func scanUnassignedRows(rows *sql.Rows) ([]driven.UnassignedItem, error) {
-	out := make([]driven.UnassignedItem, 0)
+func scanUnassignedRows(rows *sql.Rows) ([]domainprojects.UnassignedItem, error) {
+	out := make([]domainprojects.UnassignedItem, 0)
 	for rows.Next() {
 		var kind, idStr, accountLabel, subject, fromJSON, channel, status, reason, source string
 		var accountID, conversationID, projectID sql.NullString
@@ -1177,7 +1184,7 @@ func scanUnassignedRows(rows *sql.Rows) ([]driven.UnassignedItem, error) {
 		if threadCount < 1 {
 			threadCount = 1
 		}
-		item := driven.UnassignedItem{
+		item := domainprojects.UnassignedItem{
 			Kind:          kind,
 			Subject:       subject,
 			Channel:       channel,
@@ -1221,8 +1228,8 @@ func scanUnassignedRows(rows *sql.Rows) ([]driven.UnassignedItem, error) {
 	return out, rows.Err()
 }
 
-func (r *Repository) CountUnassignedSummary(ctx context.Context, userID uuid.UUID) (driven.UnassignedSummary, error) {
-	var sum driven.UnassignedSummary
+func (r *Repository) CountUnassignedSummary(ctx context.Context, userID uuid.UUID) (domainprojects.UnassignedSummary, error) {
+	var sum domainprojects.UnassignedSummary
 	orgID, err := r.GetHomeOrganisationID(ctx, userID)
 	if err != nil {
 		return sum, err
@@ -1244,7 +1251,7 @@ func (r *Repository) CountUnassignedSummary(ctx context.Context, userID uuid.UUI
 		var dismissed bool
 		var n int
 		if err := rows.Scan(&status, &dismissed, &n); err != nil {
-			return driven.UnassignedSummary{}, err
+			return domainprojects.UnassignedSummary{}, err
 		}
 		// Dismissed items are reported separately and never counted toward the
 		// badge, whatever status their row carries.
@@ -1264,7 +1271,7 @@ func (r *Repository) CountUnassignedSummary(ctx context.Context, userID uuid.UUI
 // ListMessagesNeedingAssign returns what automatic assignment may place:
 // messages with no assignment, or only a machine's provisional suggestion.
 // Rows a user wrote are excluded, so a triage decision is never re-scored.
-func (r *Repository) ListMessagesNeedingAssign(ctx context.Context, userID, accountID uuid.UUID, filter driven.AssignCandidateFilter) ([]driven.MessageRow, error) {
+func (r *Repository) ListMessagesNeedingAssign(ctx context.Context, userID, accountID uuid.UUID, filter domainprojects.AssignCandidateFilter) ([]domainmessages.MessageRow, error) {
 	limit := filter.Limit
 	if limit <= 0 {
 		limit = 500
@@ -1306,7 +1313,7 @@ func (r *Repository) ListMessagesNeedingAssign(ctx context.Context, userID, acco
 	return scanMessageRows(rows)
 }
 
-func (r *Repository) ListMessagesNeedingContactResolution(ctx context.Context, userID, accountID uuid.UUID, limit int) ([]driven.MessageRow, error) {
+func (r *Repository) ListMessagesNeedingContactResolution(ctx context.Context, userID, accountID uuid.UUID, limit int) ([]domainmessages.MessageRow, error) {
 	if limit <= 0 {
 		limit = 100
 	}
@@ -1338,7 +1345,7 @@ func (r *Repository) FindCommittedSiblingProject(ctx context.Context, userID, ac
 	if strings.TrimSpace(conversationID) == "" {
 		return nil, nil
 	}
-	msgs, err := r.ListMessages(ctx, userID, driven.MessageListFilter{AccountID: &accountID, Limit: 200})
+	msgs, err := r.ListMessages(ctx, userID, domainmessages.MessageListFilter{AccountID: &accountID, Limit: 200})
 	if err != nil {
 		return nil, err
 	}
@@ -1357,7 +1364,7 @@ func (r *Repository) FindCommittedSiblingProject(ctx context.Context, userID, ac
 	return nil, nil
 }
 
-func scanThreadAssignment(s rowScanner) (*driven.AssignmentRow, error) {
+func scanThreadAssignment(s rowScanner) (*domainprojects.AssignmentRow, error) {
 	var idStr, orgStr, accountStr, conversationID, status, reason, source string
 	var projectID, runID, assignedBy sql.NullString
 	var confidence sql.NullFloat64
@@ -1369,7 +1376,7 @@ func scanThreadAssignment(s rowScanner) (*driven.AssignmentRow, error) {
 	return buildAssignmentRow(idStr, orgStr, accountStr, conversationID, nil, projectID, status, confidence, reason, source, runID, assignedBy, createdAt, updatedAt, notRelevantAt)
 }
 
-func scanOverrideAssignment(s rowScanner) (*driven.AssignmentRow, error) {
+func scanOverrideAssignment(s rowScanner) (*domainprojects.AssignmentRow, error) {
 	var messageStr, orgStr, accountStr, status, reason, source string
 	var projectID, runID, assignedBy sql.NullString
 	var confidence sql.NullFloat64
@@ -1385,7 +1392,7 @@ func scanOverrideAssignment(s rowScanner) (*driven.AssignmentRow, error) {
 	return buildAssignmentRow(uuid.Nil.String(), orgStr, accountStr, "", &messageID, projectID, status, confidence, reason, source, runID, assignedBy, createdAt, updatedAt, notRelevantAt)
 }
 
-func buildAssignmentRow(idStr, orgStr, accountStr, conversationID string, messageID *uuid.UUID, projectID sql.NullString, status string, confidence sql.NullFloat64, reason, source string, runID, assignedBy sql.NullString, createdAt, updatedAt time.Time, notRelevantAt sql.NullTime) (*driven.AssignmentRow, error) {
+func buildAssignmentRow(idStr, orgStr, accountStr, conversationID string, messageID *uuid.UUID, projectID sql.NullString, status string, confidence sql.NullFloat64, reason, source string, runID, assignedBy sql.NullString, createdAt, updatedAt time.Time, notRelevantAt sql.NullTime) (*domainprojects.AssignmentRow, error) {
 	var (
 		id  uuid.UUID
 		err error
@@ -1405,7 +1412,7 @@ func buildAssignmentRow(idStr, orgStr, accountStr, conversationID string, messag
 	if err != nil {
 		return nil, err
 	}
-	row := &driven.AssignmentRow{
+	row := &domainprojects.AssignmentRow{
 		ID:             id,
 		OrganisationID: orgID,
 		AccountID:      accountID,
@@ -1446,7 +1453,7 @@ func buildAssignmentRow(idStr, orgStr, accountStr, conversationID string, messag
 	return row, nil
 }
 
-func (r *Repository) CreateManualItem(ctx context.Context, row driven.ManualItemRow) error {
+func (r *Repository) CreateManualItem(ctx context.Context, row domainprojects.ManualItemRow) error {
 	_, err := r.execContext(ctx, `
 		INSERT INTO manual_items (
 			id, organisation_id, channel, occurred_at, title, body_text, project_id,
@@ -1456,7 +1463,7 @@ func (r *Repository) CreateManualItem(ctx context.Context, row driven.ManualItem
 	return err
 }
 
-func (r *Repository) GetManualItem(ctx context.Context, organisationID, id uuid.UUID) (*driven.ManualItemRow, error) {
+func (r *Repository) GetManualItem(ctx context.Context, organisationID, id uuid.UUID) (*domainprojects.ManualItemRow, error) {
 	row := r.queryRowContext(ctx, `
 		SELECT id, organisation_id, channel, occurred_at, title, body_text, project_id,
 			assignment_status, assignment_reason, assignment_source, created_by_user_id, created_at, not_relevant_at
@@ -1485,7 +1492,7 @@ func (r *Repository) UpdateManualItemAssignment(ctx context.Context, organisatio
 	return nil
 }
 
-func (r *Repository) ListManualItemsForProject(ctx context.Context, organisationID, projectID uuid.UUID) ([]driven.ManualItemRow, error) {
+func (r *Repository) ListManualItemsForProject(ctx context.Context, organisationID, projectID uuid.UUID) ([]domainprojects.ManualItemRow, error) {
 	rows, err := r.queryContext(ctx, `
 		SELECT id, organisation_id, channel, occurred_at, title, body_text, project_id,
 			assignment_status, assignment_reason, assignment_source, created_by_user_id, created_at, not_relevant_at
@@ -1500,7 +1507,7 @@ func (r *Repository) ListManualItemsForProject(ctx context.Context, organisation
 	return scanManualItemRows(rows)
 }
 
-func (r *Repository) ListUnassignedManualItems(ctx context.Context, organisationID uuid.UUID, limit int) ([]driven.ManualItemRow, error) {
+func (r *Repository) ListUnassignedManualItems(ctx context.Context, organisationID uuid.UUID, limit int) ([]domainprojects.ManualItemRow, error) {
 	if limit <= 0 {
 		limit = 500
 	}
@@ -1524,8 +1531,8 @@ func (r *Repository) ListUnassignedManualItems(ctx context.Context, organisation
 	return scanManualItemRows(rows)
 }
 
-func scanManualItemRows(rows *sql.Rows) ([]driven.ManualItemRow, error) {
-	out := make([]driven.ManualItemRow, 0)
+func scanManualItemRows(rows *sql.Rows) ([]domainprojects.ManualItemRow, error) {
+	out := make([]domainprojects.ManualItemRow, 0)
 	for rows.Next() {
 		item, err := scanManualItem(rows)
 		if err != nil {
@@ -1536,7 +1543,7 @@ func scanManualItemRows(rows *sql.Rows) ([]driven.ManualItemRow, error) {
 	return out, rows.Err()
 }
 
-func scanManualItem(s rowScanner) (*driven.ManualItemRow, error) {
+func scanManualItem(s rowScanner) (*domainprojects.ManualItemRow, error) {
 	var idStr, orgStr, channel, title, body, status, createdBy string
 	var occurredAt, createdAt time.Time
 	var projectID, reason, source sql.NullString
@@ -1547,7 +1554,7 @@ func scanManualItem(s rowScanner) (*driven.ManualItemRow, error) {
 	id, _ := uuid.Parse(idStr)
 	orgID, _ := uuid.Parse(orgStr)
 	userID, _ := uuid.Parse(createdBy)
-	row := &driven.ManualItemRow{
+	row := &domainprojects.ManualItemRow{
 		ID:               id,
 		OrganisationID:   orgID,
 		Channel:          channel,
@@ -1571,7 +1578,7 @@ func scanManualItem(s rowScanner) (*driven.ManualItemRow, error) {
 	return row, nil
 }
 
-func (r *Repository) ListProjectTimeline(ctx context.Context, userID, organisationID, projectID uuid.UUID, filter driven.TimelineFilter) ([]driven.TimelineItem, error) {
+func (r *Repository) ListProjectTimeline(ctx context.Context, userID, organisationID, projectID uuid.UUID, filter domainprojects.TimelineFilter) ([]domainprojects.TimelineItem, error) {
 	limit := filter.Limit
 	if limit <= 0 {
 		limit = 100
@@ -1584,7 +1591,7 @@ func (r *Repository) ListProjectTimeline(ctx context.Context, userID, organisati
 	if source == "" {
 		source = "all"
 	}
-	out := make([]driven.TimelineItem, 0)
+	out := make([]domainprojects.TimelineItem, 0)
 	if source == "all" || source == "mail" {
 		items, err := r.listMailTimelineItems(ctx, userID, projectID)
 		if err != nil {
@@ -1598,7 +1605,7 @@ func (r *Repository) ListProjectTimeline(ctx context.Context, userID, organisati
 			return nil, err
 		}
 		for _, m := range manuals {
-			item := driven.TimelineItem{
+			item := domainprojects.TimelineItem{
 				Source: "manual", OccurredAt: m.OccurredAt, Title: m.Title, Snippet: snippetText(m.BodyText, 160), Channel: m.Channel, BodyText: m.BodyText,
 			}
 			id := m.ID
@@ -1626,7 +1633,7 @@ func (r *Repository) ListProjectTimeline(ctx context.Context, userID, organisati
 			}
 			messageID := message.ID
 			accountID := message.ConnectorAccountID
-			out = append(out, driven.TimelineItem{
+			out = append(out, domainprojects.TimelineItem{
 				Source: "slack", OccurredAt: message.OccurredAt, Title: message.Title, Snippet: snippetText(message.BodyText, 160),
 				BodyText: message.BodyText, AccountLabel: label, ConnectorMessageID: &messageID, ConnectorAccountID: &accountID, Channel: message.ExternalChannelID,
 			})
@@ -1640,7 +1647,7 @@ func (r *Repository) ListProjectTimeline(ctx context.Context, userID, organisati
 	}
 
 	if filter.UnassignedToIssue {
-		filtered := make([]driven.TimelineItem, 0, len(out))
+		filtered := make([]domainprojects.TimelineItem, 0, len(out))
 		for _, item := range out {
 			if item.IssueID == nil {
 				filtered = append(filtered, item)
@@ -1650,7 +1657,7 @@ func (r *Repository) ListProjectTimeline(ctx context.Context, userID, organisati
 	}
 	sort.Slice(out, func(i, j int) bool { return out[i].OccurredAt.After(out[j].OccurredAt) })
 	if offset >= len(out) {
-		return []driven.TimelineItem{}, nil
+		return []domainprojects.TimelineItem{}, nil
 	}
 	end := offset + limit
 	if end > len(out) {
@@ -1659,7 +1666,7 @@ func (r *Repository) ListProjectTimeline(ctx context.Context, userID, organisati
 	return out[offset:end], nil
 }
 
-func (r *Repository) listMailTimelineItems(ctx context.Context, userID, projectID uuid.UUID) ([]driven.TimelineItem, error) {
+func (r *Repository) listMailTimelineItems(ctx context.Context, userID, projectID uuid.UUID) ([]domainprojects.TimelineItem, error) {
 	rows, err := r.queryContext(ctx, `
 		SELECT m.id, m.account_id, a.label, m.subject, m.body_text, m.received_at
 		FROM messages m
@@ -1682,7 +1689,7 @@ func (r *Repository) listMailTimelineItems(ctx context.Context, userID, projectI
 		return nil, err
 	}
 	defer rows.Close()
-	out := make([]driven.TimelineItem, 0)
+	out := make([]domainprojects.TimelineItem, 0)
 	for rows.Next() {
 		var idStr, accountStr, label, subject string
 		var body sql.NullString
@@ -1696,7 +1703,7 @@ func (r *Repository) listMailTimelineItems(ctx context.Context, userID, projectI
 		if body.Valid {
 			bodyText = body.String
 		}
-		item := driven.TimelineItem{Source: "mail", OccurredAt: receivedAt.UTC(), Title: subject, Snippet: snippetText(bodyText, 160), AccountLabel: label}
+		item := domainprojects.TimelineItem{Source: "mail", OccurredAt: receivedAt.UTC(), Title: subject, Snippet: snippetText(bodyText, 160), AccountLabel: label}
 		item.AccountID = &accountID
 		item.MessageID = &msgID
 		out = append(out, item)
@@ -1713,7 +1720,7 @@ func snippetText(s string, max int) string {
 	return string(runes[:max]) + "..."
 }
 
-func (r *Repository) CreateIssue(ctx context.Context, row driven.IssueRow) error {
+func (r *Repository) CreateIssue(ctx context.Context, row domainissues.IssueRow) error {
 	_, err := r.execContext(ctx, `
 		INSERT INTO issues (id, organisation_id, project_id, title, current_position_note, status, assignee_user_id, assignee_contact_id, created_at, updated_at, resolved_at, discarded_at, source)
 		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
@@ -1721,7 +1728,7 @@ func (r *Repository) CreateIssue(ctx context.Context, row driven.IssueRow) error
 	return err
 }
 
-func (r *Repository) GetIssue(ctx context.Context, organisationID, issueID uuid.UUID) (*driven.IssueRow, error) {
+func (r *Repository) GetIssue(ctx context.Context, organisationID, issueID uuid.UUID) (*domainissues.IssueRow, error) {
 	row := r.queryRowContext(ctx, `
 		SELECT id, organisation_id, project_id, title, current_position_note, status, assignee_user_id, assignee_contact_id, created_at, updated_at, resolved_at, discarded_at, source
 		FROM issues WHERE id = ? AND organisation_id = ?
@@ -1733,7 +1740,7 @@ func (r *Repository) GetIssue(ctx context.Context, organisationID, issueID uuid.
 	return item, err
 }
 
-func (r *Repository) ListIssuesByProject(ctx context.Context, organisationID, projectID uuid.UUID) ([]driven.IssueRow, error) {
+func (r *Repository) ListIssuesByProject(ctx context.Context, organisationID, projectID uuid.UUID) ([]domainissues.IssueRow, error) {
 	rows, err := r.queryContext(ctx, `
 		SELECT id, organisation_id, project_id, title, current_position_note, status, assignee_user_id, assignee_contact_id, created_at, updated_at, resolved_at, discarded_at, source
 		FROM issues WHERE organisation_id = ? AND project_id = ?
@@ -1743,7 +1750,7 @@ func (r *Repository) ListIssuesByProject(ctx context.Context, organisationID, pr
 		return nil, err
 	}
 	defer rows.Close()
-	out := make([]driven.IssueRow, 0)
+	out := make([]domainissues.IssueRow, 0)
 	for rows.Next() {
 		item, err := scanIssueRow(rows)
 		if err != nil {
@@ -1754,7 +1761,7 @@ func (r *Repository) ListIssuesByProject(ctx context.Context, organisationID, pr
 	return out, rows.Err()
 }
 
-func (r *Repository) UpdateIssue(ctx context.Context, row driven.IssueRow) error {
+func (r *Repository) UpdateIssue(ctx context.Context, row domainissues.IssueRow) error {
 	res, err := r.execContext(ctx, `
 		UPDATE issues SET title = ?, current_position_note = ?, status = ?, assignee_user_id = ?, assignee_contact_id = ?, updated_at = ?, resolved_at = ?, discarded_at = ?, source = ?
 		WHERE id = ? AND organisation_id = ?
@@ -1769,7 +1776,7 @@ func (r *Repository) UpdateIssue(ctx context.Context, row driven.IssueRow) error
 	return nil
 }
 
-func (r *Repository) AddIssueItem(ctx context.Context, row driven.IssueItemRow) error {
+func (r *Repository) AddIssueItem(ctx context.Context, row domainissues.IssueItemRow) error {
 	_, err := r.execContext(ctx, `
 		INSERT INTO issue_items (id, issue_id, message_id, manual_item_id, added_at)
 		VALUES (?, ?, ?, ?, ?)
@@ -1792,7 +1799,7 @@ func (r *Repository) RemoveIssueItem(ctx context.Context, organisationID, issueI
 	return nil
 }
 
-func (r *Repository) GetIssueItem(ctx context.Context, organisationID, itemID uuid.UUID) (*driven.IssueItemRow, error) {
+func (r *Repository) GetIssueItem(ctx context.Context, organisationID, itemID uuid.UUID) (*domainissues.IssueItemRow, error) {
 	row := r.queryRowContext(ctx, `
 		SELECT ii.id, ii.issue_id, ii.message_id, ii.manual_item_id, ii.added_at
 		FROM issue_items ii
@@ -1806,7 +1813,7 @@ func (r *Repository) GetIssueItem(ctx context.Context, organisationID, itemID uu
 	return item, err
 }
 
-func (r *Repository) ListIssueItems(ctx context.Context, issueID uuid.UUID) ([]driven.IssueItemRow, error) {
+func (r *Repository) ListIssueItems(ctx context.Context, issueID uuid.UUID) ([]domainissues.IssueItemRow, error) {
 	rows, err := r.queryContext(ctx, `
 		SELECT id, issue_id, message_id, manual_item_id, added_at
 		FROM issue_items WHERE issue_id = ?
@@ -1816,7 +1823,7 @@ func (r *Repository) ListIssueItems(ctx context.Context, issueID uuid.UUID) ([]d
 		return nil, err
 	}
 	defer rows.Close()
-	out := make([]driven.IssueItemRow, 0)
+	out := make([]domainissues.IssueItemRow, 0)
 	for rows.Next() {
 		item, err := scanIssueItem(rows)
 		if err != nil {
@@ -1872,8 +1879,8 @@ func (r *Repository) FindIssueIDByMessage(ctx context.Context, messageID uuid.UU
 }
 
 // ListIssueLinksForMessages resolves the issue for many messages in one query.
-func (r *Repository) ListIssueLinksForMessages(ctx context.Context, organisationID uuid.UUID, messageIDs []uuid.UUID) (map[uuid.UUID]driven.IssueLink, error) {
-	out := make(map[uuid.UUID]driven.IssueLink, len(messageIDs))
+func (r *Repository) ListIssueLinksForMessages(ctx context.Context, organisationID uuid.UUID, messageIDs []uuid.UUID) (map[uuid.UUID]domainissues.IssueLink, error) {
+	out := make(map[uuid.UUID]domainissues.IssueLink, len(messageIDs))
 	if len(messageIDs) == 0 {
 		return out, nil
 	}
@@ -1914,7 +1921,7 @@ func (r *Repository) ListIssueLinksForMessages(ctx context.Context, organisation
 		if err != nil {
 			return nil, err
 		}
-		out[mid] = driven.IssueLink{IssueID: iid, ProjectID: pid, Title: title, Status: status}
+		out[mid] = domainissues.IssueLink{IssueID: iid, ProjectID: pid, Title: title, Status: status}
 	}
 	return out, rows.Err()
 }
@@ -1935,7 +1942,7 @@ func (r *Repository) FindIssueIDByManualItem(ctx context.Context, manualItemID u
 	return &id, nil
 }
 
-func scanIssueRow(s rowScanner) (*driven.IssueRow, error) {
+func scanIssueRow(s rowScanner) (*domainissues.IssueRow, error) {
 	var idStr, orgStr, projectStr, title, note, status string
 	var assigneeUser, assigneeContact sql.NullString
 	var createdAt, updatedAt time.Time
@@ -1947,7 +1954,7 @@ func scanIssueRow(s rowScanner) (*driven.IssueRow, error) {
 	id, _ := uuid.Parse(idStr)
 	orgID, _ := uuid.Parse(orgStr)
 	projectID, _ := uuid.Parse(projectStr)
-	row := &driven.IssueRow{ID: id, OrganisationID: orgID, ProjectID: projectID, Title: title, CurrentPositionNote: note, Status: status, CreatedAt: createdAt.UTC(), UpdatedAt: updatedAt.UTC()}
+	row := &domainissues.IssueRow{ID: id, OrganisationID: orgID, ProjectID: projectID, Title: title, CurrentPositionNote: note, Status: status, CreatedAt: createdAt.UTC(), UpdatedAt: updatedAt.UTC()}
 	if row.AssigneeUserID, _ = scanUUID(assigneeUser); false {
 	}
 	contactID, err := scanUUID(assigneeContact)
@@ -1961,7 +1968,7 @@ func scanIssueRow(s rowScanner) (*driven.IssueRow, error) {
 	return row, nil
 }
 
-func scanIssueItem(s rowScanner) (*driven.IssueItemRow, error) {
+func scanIssueItem(s rowScanner) (*domainissues.IssueItemRow, error) {
 	var idStr, issueStr string
 	var messageID, manualItemID sql.NullString
 	var addedAt time.Time
@@ -1970,14 +1977,14 @@ func scanIssueItem(s rowScanner) (*driven.IssueItemRow, error) {
 	}
 	id, _ := uuid.Parse(idStr)
 	issueID, _ := uuid.Parse(issueStr)
-	row := &driven.IssueItemRow{ID: id, IssueID: issueID, AddedAt: addedAt.UTC()}
+	row := &domainissues.IssueItemRow{ID: id, IssueID: issueID, AddedAt: addedAt.UTC()}
 	if row.MessageID, _ = scanUUID(messageID); false {
 	}
 	row.ManualItemID, _ = scanUUID(manualItemID)
 	return row, nil
 }
 
-func (r *Repository) CreateFact(ctx context.Context, row driven.FactRow) error {
+func (r *Repository) CreateFact(ctx context.Context, row domainfacts.FactRow) error {
 	_, err := r.execContext(ctx, `
 		INSERT INTO facts (id, organisation_id, project_id, issue_id, subject_key, label, created_at, updated_at)
 		VALUES (?, ?, ?, ?, ?, ?, ?, ?)
@@ -1985,7 +1992,7 @@ func (r *Repository) CreateFact(ctx context.Context, row driven.FactRow) error {
 	return err
 }
 
-func (r *Repository) UpdateFact(ctx context.Context, row driven.FactRow) error {
+func (r *Repository) UpdateFact(ctx context.Context, row domainfacts.FactRow) error {
 	res, err := r.execContext(ctx, `
 		UPDATE facts SET issue_id = ?, label = ?, updated_at = ?
 		WHERE id = ? AND organisation_id = ?
@@ -2000,7 +2007,7 @@ func (r *Repository) UpdateFact(ctx context.Context, row driven.FactRow) error {
 	return nil
 }
 
-func (r *Repository) GetFact(ctx context.Context, organisationID, factID uuid.UUID) (*driven.FactRow, error) {
+func (r *Repository) GetFact(ctx context.Context, organisationID, factID uuid.UUID) (*domainfacts.FactRow, error) {
 	row := r.queryRowContext(ctx, `
 		SELECT id, organisation_id, project_id, issue_id, subject_key, label, created_at, updated_at
 		FROM facts WHERE id = ? AND organisation_id = ?
@@ -2012,7 +2019,7 @@ func (r *Repository) GetFact(ctx context.Context, organisationID, factID uuid.UU
 	return out, err
 }
 
-func (r *Repository) GetFactBySubject(ctx context.Context, organisationID, projectID uuid.UUID, subjectKey string) (*driven.FactRow, error) {
+func (r *Repository) GetFactBySubject(ctx context.Context, organisationID, projectID uuid.UUID, subjectKey string) (*domainfacts.FactRow, error) {
 	row := r.queryRowContext(ctx, `
 		SELECT id, organisation_id, project_id, issue_id, subject_key, label, created_at, updated_at
 		FROM facts WHERE organisation_id = ? AND project_id = ? AND subject_key = ?
@@ -2024,7 +2031,7 @@ func (r *Repository) GetFactBySubject(ctx context.Context, organisationID, proje
 	return out, err
 }
 
-func (r *Repository) ListFactsByProject(ctx context.Context, organisationID, projectID uuid.UUID) ([]driven.FactRow, error) {
+func (r *Repository) ListFactsByProject(ctx context.Context, organisationID, projectID uuid.UUID) ([]domainfacts.FactRow, error) {
 	rows, err := r.queryContext(ctx, `
 		SELECT id, organisation_id, project_id, issue_id, subject_key, label, created_at, updated_at
 		FROM facts WHERE organisation_id = ? AND project_id = ?
@@ -2034,7 +2041,7 @@ func (r *Repository) ListFactsByProject(ctx context.Context, organisationID, pro
 		return nil, err
 	}
 	defer rows.Close()
-	out := make([]driven.FactRow, 0)
+	out := make([]domainfacts.FactRow, 0)
 	for rows.Next() {
 		item, err := scanFactRow(rows)
 		if err != nil {
@@ -2045,7 +2052,7 @@ func (r *Repository) ListFactsByProject(ctx context.Context, organisationID, pro
 	return out, rows.Err()
 }
 
-func (r *Repository) CreateFactVersion(ctx context.Context, row driven.FactVersionRow) error {
+func (r *Repository) CreateFactVersion(ctx context.Context, row domainfacts.FactVersionRow) error {
 	return withSerializableWrite(ctx, func() error {
 		_, err := r.execContext(ctx, `
 			INSERT INTO fact_versions (
@@ -2058,7 +2065,7 @@ func (r *Repository) CreateFactVersion(ctx context.Context, row driven.FactVersi
 	})
 }
 
-func (r *Repository) GetFactVersion(ctx context.Context, organisationID, versionID uuid.UUID) (*driven.FactVersionRow, error) {
+func (r *Repository) GetFactVersion(ctx context.Context, organisationID, versionID uuid.UUID) (*domainfacts.FactVersionRow, error) {
 	row := r.queryRowContext(ctx, `
 		SELECT fv.id, fv.fact_id, fv.status, fv.value_json, fv.value_text, fv.unit, fv.source, fv.confidence, fv.interpretation_id,
 			fv.supersedes_version_id, fv.superseded_by_version_id, fv.superseded_at, fv.created_by_user_id, fv.created_at, fv.activated_at
@@ -2073,7 +2080,7 @@ func (r *Repository) GetFactVersion(ctx context.Context, organisationID, version
 	return out, err
 }
 
-func (r *Repository) ListFactVersions(ctx context.Context, factID uuid.UUID) ([]driven.FactVersionRow, error) {
+func (r *Repository) ListFactVersions(ctx context.Context, factID uuid.UUID) ([]domainfacts.FactVersionRow, error) {
 	rows, err := r.queryContext(ctx, `
 		SELECT id, fact_id, status, value_json, value_text, unit, source, confidence, interpretation_id,
 			supersedes_version_id, superseded_by_version_id, superseded_at, created_by_user_id, created_at, activated_at
@@ -2084,7 +2091,7 @@ func (r *Repository) ListFactVersions(ctx context.Context, factID uuid.UUID) ([]
 		return nil, err
 	}
 	defer rows.Close()
-	out := make([]driven.FactVersionRow, 0)
+	out := make([]domainfacts.FactVersionRow, 0)
 	for rows.Next() {
 		item, err := scanFactVersionRow(rows)
 		if err != nil {
@@ -2095,7 +2102,7 @@ func (r *Repository) ListFactVersions(ctx context.Context, factID uuid.UUID) ([]
 	return out, rows.Err()
 }
 
-func (r *Repository) GetActiveFactVersion(ctx context.Context, factID uuid.UUID) (*driven.FactVersionRow, error) {
+func (r *Repository) GetActiveFactVersion(ctx context.Context, factID uuid.UUID) (*domainfacts.FactVersionRow, error) {
 	row := r.queryRowContext(ctx, `
 		SELECT id, fact_id, status, value_json, value_text, unit, source, confidence, interpretation_id,
 			supersedes_version_id, superseded_by_version_id, superseded_at, created_by_user_id, created_at, activated_at
@@ -2108,7 +2115,7 @@ func (r *Repository) GetActiveFactVersion(ctx context.Context, factID uuid.UUID)
 	return out, err
 }
 
-func (r *Repository) UpdateFactVersion(ctx context.Context, row driven.FactVersionRow) error {
+func (r *Repository) UpdateFactVersion(ctx context.Context, row domainfacts.FactVersionRow) error {
 	return withSerializableWrite(ctx, func() error {
 		res, err := r.execContext(ctx, `
 			UPDATE fact_versions SET status = ?, value_json = ?, value_text = ?, unit = ?, source = ?, confidence = ?,
@@ -2136,7 +2143,7 @@ func withSerializableWrite(ctx context.Context, fn func() error) error {
 	return err
 }
 
-func (r *Repository) AddFactEvidence(ctx context.Context, row driven.FactEvidenceRow) error {
+func (r *Repository) AddFactEvidence(ctx context.Context, row domainfacts.FactEvidenceRow) error {
 	_, err := r.execContext(ctx, `
 		INSERT INTO fact_evidence (id, fact_version_id, message_id, manual_item_id, added_at)
 		VALUES (?, ?, ?, ?, ?)
@@ -2164,7 +2171,7 @@ func (r *Repository) RemoveFactEvidence(ctx context.Context, organisationID, ver
 	return nil
 }
 
-func (r *Repository) ListFactEvidence(ctx context.Context, versionID uuid.UUID) ([]driven.FactEvidenceRow, error) {
+func (r *Repository) ListFactEvidence(ctx context.Context, versionID uuid.UUID) ([]domainfacts.FactEvidenceRow, error) {
 	rows, err := r.queryContext(ctx, `
 		SELECT id, fact_version_id, message_id, manual_item_id, added_at
 		FROM fact_evidence WHERE fact_version_id = ?
@@ -2177,7 +2184,7 @@ func (r *Repository) ListFactEvidence(ctx context.Context, versionID uuid.UUID) 
 	return scanFactEvidenceRows(rows)
 }
 
-func (r *Repository) ListFactEvidenceForFact(ctx context.Context, factID uuid.UUID) ([]driven.FactEvidenceRow, error) {
+func (r *Repository) ListFactEvidenceForFact(ctx context.Context, factID uuid.UUID) ([]domainfacts.FactEvidenceRow, error) {
 	rows, err := r.queryContext(ctx, `
 		SELECT fe.id, fe.fact_version_id, fe.message_id, fe.manual_item_id, fe.added_at
 		FROM fact_evidence fe
@@ -2192,7 +2199,7 @@ func (r *Repository) ListFactEvidenceForFact(ctx context.Context, factID uuid.UU
 	return scanFactEvidenceRows(rows)
 }
 
-func scanFactRow(s rowScanner) (*driven.FactRow, error) {
+func scanFactRow(s rowScanner) (*domainfacts.FactRow, error) {
 	var idStr, orgStr, projectStr, subjectKey, label string
 	var issueID sql.NullString
 	var createdAt, updatedAt time.Time
@@ -2202,12 +2209,12 @@ func scanFactRow(s rowScanner) (*driven.FactRow, error) {
 	id, _ := uuid.Parse(idStr)
 	orgID, _ := uuid.Parse(orgStr)
 	projectID, _ := uuid.Parse(projectStr)
-	row := &driven.FactRow{ID: id, OrganisationID: orgID, ProjectID: projectID, SubjectKey: subjectKey, Label: label, CreatedAt: createdAt.UTC(), UpdatedAt: updatedAt.UTC()}
+	row := &domainfacts.FactRow{ID: id, OrganisationID: orgID, ProjectID: projectID, SubjectKey: subjectKey, Label: label, CreatedAt: createdAt.UTC(), UpdatedAt: updatedAt.UTC()}
 	row.IssueID, _ = scanUUID(issueID)
 	return row, nil
 }
 
-func scanFactVersionRow(s rowScanner) (*driven.FactVersionRow, error) {
+func scanFactVersionRow(s rowScanner) (*domainfacts.FactVersionRow, error) {
 	var idStr, factStr, status, valueJSON, valueText, source string
 	var unit, interpretationID, supersedesID, supersededByID, createdBy sql.NullString
 	var confidence sql.NullFloat64
@@ -2218,7 +2225,7 @@ func scanFactVersionRow(s rowScanner) (*driven.FactVersionRow, error) {
 	}
 	id, _ := uuid.Parse(idStr)
 	factID, _ := uuid.Parse(factStr)
-	row := &driven.FactVersionRow{ID: id, FactID: factID, Status: status, ValueJSON: valueJSON, ValueText: valueText, Unit: nullStringPtr(unit), Source: source, CreatedAt: createdAt.UTC(), SupersededAt: nullTimePtr(supersededAt)}
+	row := &domainfacts.FactVersionRow{ID: id, FactID: factID, Status: status, ValueJSON: valueJSON, ValueText: valueText, Unit: nullStringPtr(unit), Source: source, CreatedAt: createdAt.UTC(), SupersededAt: nullTimePtr(supersededAt)}
 	if confidence.Valid {
 		v := confidence.Float64
 		row.Confidence = &v
@@ -2231,8 +2238,8 @@ func scanFactVersionRow(s rowScanner) (*driven.FactVersionRow, error) {
 	return row, nil
 }
 
-func scanFactEvidenceRows(rows *sql.Rows) ([]driven.FactEvidenceRow, error) {
-	out := make([]driven.FactEvidenceRow, 0)
+func scanFactEvidenceRows(rows *sql.Rows) ([]domainfacts.FactEvidenceRow, error) {
+	out := make([]domainfacts.FactEvidenceRow, 0)
 	for rows.Next() {
 		item, err := scanFactEvidenceRow(rows)
 		if err != nil {
@@ -2243,7 +2250,7 @@ func scanFactEvidenceRows(rows *sql.Rows) ([]driven.FactEvidenceRow, error) {
 	return out, rows.Err()
 }
 
-func scanFactEvidenceRow(s rowScanner) (*driven.FactEvidenceRow, error) {
+func scanFactEvidenceRow(s rowScanner) (*domainfacts.FactEvidenceRow, error) {
 	var idStr, versionStr string
 	var messageID, manualItemID sql.NullString
 	var addedAt time.Time
@@ -2252,13 +2259,13 @@ func scanFactEvidenceRow(s rowScanner) (*driven.FactEvidenceRow, error) {
 	}
 	id, _ := uuid.Parse(idStr)
 	versionID, _ := uuid.Parse(versionStr)
-	row := &driven.FactEvidenceRow{ID: id, FactVersionID: versionID, AddedAt: addedAt.UTC()}
+	row := &domainfacts.FactEvidenceRow{ID: id, FactVersionID: versionID, AddedAt: addedAt.UTC()}
 	row.MessageID, _ = scanUUID(messageID)
 	row.ManualItemID, _ = scanUUID(manualItemID)
 	return row, nil
 }
 
-func (r *Repository) CreateInterpretation(ctx context.Context, row driven.InterpretationRow) error {
+func (r *Repository) CreateInterpretation(ctx context.Context, row domaininterpretations.InterpretationRow) error {
 	_, err := r.execContext(ctx, `
 		INSERT INTO interpretations (id, organisation_id, project_id, account_id, run_id, status, payload_json, confidence, reason, created_at, updated_at)
 		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
@@ -2266,7 +2273,7 @@ func (r *Repository) CreateInterpretation(ctx context.Context, row driven.Interp
 	return err
 }
 
-func (r *Repository) AddInterpretationSource(ctx context.Context, row driven.InterpretationSourceRow) error {
+func (r *Repository) AddInterpretationSource(ctx context.Context, row domaininterpretations.InterpretationSourceRow) error {
 	_, err := r.execContext(ctx, `
 		INSERT INTO interpretation_sources (id, interpretation_id, message_id, manual_item_id, connector_message_id)
 		VALUES (?, ?, ?, ?, ?)
@@ -2274,7 +2281,7 @@ func (r *Repository) AddInterpretationSource(ctx context.Context, row driven.Int
 	return err
 }
 
-func (r *Repository) GetInterpretation(ctx context.Context, organisationID, id uuid.UUID) (*driven.InterpretationRow, error) {
+func (r *Repository) GetInterpretation(ctx context.Context, organisationID, id uuid.UUID) (*domaininterpretations.InterpretationRow, error) {
 	row := r.queryRowContext(ctx, `
 		SELECT id, organisation_id, project_id, account_id, run_id, status, payload_json, confidence, reason, created_at, updated_at
 		FROM interpretations WHERE id = ? AND organisation_id = ?
@@ -2286,7 +2293,7 @@ func (r *Repository) GetInterpretation(ctx context.Context, organisationID, id u
 	return item, err
 }
 
-func (r *Repository) ListPendingInterpretations(ctx context.Context, organisationID, projectID uuid.UUID) ([]driven.InterpretationRow, error) {
+func (r *Repository) ListPendingInterpretations(ctx context.Context, organisationID, projectID uuid.UUID) ([]domaininterpretations.InterpretationRow, error) {
 	rows, err := r.queryContext(ctx, `
 		SELECT id, organisation_id, project_id, account_id, run_id, status, payload_json, confidence, reason, created_at, updated_at
 		FROM interpretations
@@ -2297,7 +2304,7 @@ func (r *Repository) ListPendingInterpretations(ctx context.Context, organisatio
 		return nil, err
 	}
 	defer rows.Close()
-	out := make([]driven.InterpretationRow, 0)
+	out := make([]domaininterpretations.InterpretationRow, 0)
 	for rows.Next() {
 		item, err := scanInterpretationRow(rows)
 		if err != nil {
@@ -2323,7 +2330,7 @@ func (r *Repository) UpdateInterpretationStatus(ctx context.Context, organisatio
 	return nil
 }
 
-func (r *Repository) ListInterpretationSources(ctx context.Context, interpretationID uuid.UUID) ([]driven.InterpretationSourceRow, error) {
+func (r *Repository) ListInterpretationSources(ctx context.Context, interpretationID uuid.UUID) ([]domaininterpretations.InterpretationSourceRow, error) {
 	rows, err := r.queryContext(ctx, `
 		SELECT id, interpretation_id, message_id, manual_item_id, connector_message_id
 		FROM interpretation_sources WHERE interpretation_id = ?
@@ -2332,7 +2339,7 @@ func (r *Repository) ListInterpretationSources(ctx context.Context, interpretati
 		return nil, err
 	}
 	defer rows.Close()
-	out := make([]driven.InterpretationSourceRow, 0)
+	out := make([]domaininterpretations.InterpretationSourceRow, 0)
 	for rows.Next() {
 		item, err := scanInterpretationSource(rows)
 		if err != nil {
@@ -2343,7 +2350,7 @@ func (r *Repository) ListInterpretationSources(ctx context.Context, interpretati
 	return out, rows.Err()
 }
 
-func scanInterpretationRow(s rowScanner) (*driven.InterpretationRow, error) {
+func scanInterpretationRow(s rowScanner) (*domaininterpretations.InterpretationRow, error) {
 	var idStr, orgStr, projectStr, status, payloadJSON, reason string
 	var accountID, runID sql.NullString
 	var confidence sql.NullFloat64
@@ -2354,7 +2361,7 @@ func scanInterpretationRow(s rowScanner) (*driven.InterpretationRow, error) {
 	id, _ := uuid.Parse(idStr)
 	orgID, _ := uuid.Parse(orgStr)
 	projectID, _ := uuid.Parse(projectStr)
-	row := &driven.InterpretationRow{ID: id, OrganisationID: orgID, ProjectID: projectID, Status: status, PayloadJSON: payloadJSON, Reason: reason, CreatedAt: createdAt.UTC(), UpdatedAt: updatedAt.UTC()}
+	row := &domaininterpretations.InterpretationRow{ID: id, OrganisationID: orgID, ProjectID: projectID, Status: status, PayloadJSON: payloadJSON, Reason: reason, CreatedAt: createdAt.UTC(), UpdatedAt: updatedAt.UTC()}
 	row.AccountID, _ = scanUUID(accountID)
 	row.RunID, _ = scanUUID(runID)
 	if confidence.Valid {
@@ -2364,7 +2371,7 @@ func scanInterpretationRow(s rowScanner) (*driven.InterpretationRow, error) {
 	return row, nil
 }
 
-func scanInterpretationSource(s rowScanner) (*driven.InterpretationSourceRow, error) {
+func scanInterpretationSource(s rowScanner) (*domaininterpretations.InterpretationSourceRow, error) {
 	var idStr, interpretationStr string
 	var messageID, manualItemID, connectorMessageID sql.NullString
 	if err := s.Scan(&idStr, &interpretationStr, &messageID, &manualItemID, &connectorMessageID); err != nil {
@@ -2372,14 +2379,14 @@ func scanInterpretationSource(s rowScanner) (*driven.InterpretationSourceRow, er
 	}
 	id, _ := uuid.Parse(idStr)
 	interpretationID, _ := uuid.Parse(interpretationStr)
-	row := &driven.InterpretationSourceRow{ID: id, InterpretationID: interpretationID}
+	row := &domaininterpretations.InterpretationSourceRow{ID: id, InterpretationID: interpretationID}
 	row.MessageID, _ = scanUUID(messageID)
 	row.ManualItemID, _ = scanUUID(manualItemID)
 	row.ConnectorMessageID, _ = scanUUID(connectorMessageID)
 	return row, nil
 }
 
-func (r *Repository) CreateContradiction(ctx context.Context, row driven.ContradictionRow) error {
+func (r *Repository) CreateContradiction(ctx context.Context, row domaincontradictions.ContradictionRow) error {
 	_, err := r.execContext(ctx, `
 		INSERT INTO contradictions (id, organisation_id, project_id, status, summary, resolution_note, resolved_at, resolved_by_user_id, created_at, updated_at)
 		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
@@ -2387,7 +2394,7 @@ func (r *Repository) CreateContradiction(ctx context.Context, row driven.Contrad
 	return err
 }
 
-func (r *Repository) AddContradictionSide(ctx context.Context, row driven.ContradictionSideRow) error {
+func (r *Repository) AddContradictionSide(ctx context.Context, row domaincontradictions.ContradictionSideRow) error {
 	_, err := r.execContext(ctx, `
 		INSERT INTO contradiction_sides (id, contradiction_id, fact_version_id, decision_id)
 		VALUES (?, ?, ?, ?)
@@ -2395,7 +2402,7 @@ func (r *Repository) AddContradictionSide(ctx context.Context, row driven.Contra
 	return err
 }
 
-func (r *Repository) GetContradiction(ctx context.Context, organisationID, id uuid.UUID) (*driven.ContradictionRow, error) {
+func (r *Repository) GetContradiction(ctx context.Context, organisationID, id uuid.UUID) (*domaincontradictions.ContradictionRow, error) {
 	row := r.queryRowContext(ctx, `
 		SELECT id, organisation_id, project_id, status, summary, resolution_note, resolved_at, resolved_by_user_id, created_at, updated_at
 		FROM contradictions WHERE id = ? AND organisation_id = ?
@@ -2407,7 +2414,7 @@ func (r *Repository) GetContradiction(ctx context.Context, organisationID, id uu
 	return item, err
 }
 
-func (r *Repository) ListContradictionsByProject(ctx context.Context, organisationID, projectID uuid.UUID, status string) ([]driven.ContradictionRow, error) {
+func (r *Repository) ListContradictionsByProject(ctx context.Context, organisationID, projectID uuid.UUID, status string) ([]domaincontradictions.ContradictionRow, error) {
 	q := `
 		SELECT id, organisation_id, project_id, status, summary, resolution_note, resolved_at, resolved_by_user_id, created_at, updated_at
 		FROM contradictions WHERE organisation_id = ? AND project_id = ?`
@@ -2422,7 +2429,7 @@ func (r *Repository) ListContradictionsByProject(ctx context.Context, organisati
 		return nil, err
 	}
 	defer rows.Close()
-	out := make([]driven.ContradictionRow, 0)
+	out := make([]domaincontradictions.ContradictionRow, 0)
 	for rows.Next() {
 		item, err := scanContradiction(rows)
 		if err != nil {
@@ -2433,7 +2440,7 @@ func (r *Repository) ListContradictionsByProject(ctx context.Context, organisati
 	return out, rows.Err()
 }
 
-func (r *Repository) UpdateContradiction(ctx context.Context, row driven.ContradictionRow) error {
+func (r *Repository) UpdateContradiction(ctx context.Context, row domaincontradictions.ContradictionRow) error {
 	res, err := r.execContext(ctx, `
 		UPDATE contradictions SET status = ?, summary = ?, resolution_note = ?, resolved_at = ?, resolved_by_user_id = ?, updated_at = ?
 		WHERE id = ? AND organisation_id = ?
@@ -2448,7 +2455,7 @@ func (r *Repository) UpdateContradiction(ctx context.Context, row driven.Contrad
 	return nil
 }
 
-func (r *Repository) ListContradictionSides(ctx context.Context, contradictionID uuid.UUID) ([]driven.ContradictionSideRow, error) {
+func (r *Repository) ListContradictionSides(ctx context.Context, contradictionID uuid.UUID) ([]domaincontradictions.ContradictionSideRow, error) {
 	rows, err := r.queryContext(ctx, `
 		SELECT id, contradiction_id, fact_version_id, decision_id
 		FROM contradiction_sides WHERE contradiction_id = ?
@@ -2457,7 +2464,7 @@ func (r *Repository) ListContradictionSides(ctx context.Context, contradictionID
 		return nil, err
 	}
 	defer rows.Close()
-	out := make([]driven.ContradictionSideRow, 0)
+	out := make([]domaincontradictions.ContradictionSideRow, 0)
 	for rows.Next() {
 		item, err := scanContradictionSide(rows)
 		if err != nil {
@@ -2468,7 +2475,7 @@ func (r *Repository) ListContradictionSides(ctx context.Context, contradictionID
 	return out, rows.Err()
 }
 
-func scanContradiction(s rowScanner) (*driven.ContradictionRow, error) {
+func scanContradiction(s rowScanner) (*domaincontradictions.ContradictionRow, error) {
 	var idStr, orgStr, projectStr, status, summary string
 	var note, resolvedBy sql.NullString
 	var resolvedAt sql.NullTime
@@ -2479,12 +2486,12 @@ func scanContradiction(s rowScanner) (*driven.ContradictionRow, error) {
 	id, _ := uuid.Parse(idStr)
 	orgID, _ := uuid.Parse(orgStr)
 	projectID, _ := uuid.Parse(projectStr)
-	row := &driven.ContradictionRow{ID: id, OrganisationID: orgID, ProjectID: projectID, Status: status, Summary: summary, ResolutionNote: nullStringPtr(note), ResolvedAt: nullTimePtr(resolvedAt), CreatedAt: createdAt.UTC(), UpdatedAt: updatedAt.UTC()}
+	row := &domaincontradictions.ContradictionRow{ID: id, OrganisationID: orgID, ProjectID: projectID, Status: status, Summary: summary, ResolutionNote: nullStringPtr(note), ResolvedAt: nullTimePtr(resolvedAt), CreatedAt: createdAt.UTC(), UpdatedAt: updatedAt.UTC()}
 	row.ResolvedByUserID, _ = scanUUID(resolvedBy)
 	return row, nil
 }
 
-func scanContradictionSide(s rowScanner) (*driven.ContradictionSideRow, error) {
+func scanContradictionSide(s rowScanner) (*domaincontradictions.ContradictionSideRow, error) {
 	var idStr, contradictionStr string
 	var factVersionID, decisionID sql.NullString
 	if err := s.Scan(&idStr, &contradictionStr, &factVersionID, &decisionID); err != nil {
@@ -2492,13 +2499,13 @@ func scanContradictionSide(s rowScanner) (*driven.ContradictionSideRow, error) {
 	}
 	id, _ := uuid.Parse(idStr)
 	contradictionID, _ := uuid.Parse(contradictionStr)
-	row := &driven.ContradictionSideRow{ID: id, ContradictionID: contradictionID}
+	row := &domaincontradictions.ContradictionSideRow{ID: id, ContradictionID: contradictionID}
 	row.FactVersionID, _ = scanUUID(factVersionID)
 	row.DecisionID, _ = scanUUID(decisionID)
 	return row, nil
 }
 
-func (r *Repository) CreateDecision(ctx context.Context, row driven.DecisionRow) error {
+func (r *Repository) CreateDecision(ctx context.Context, row domaindecisions.DecisionRow) error {
 	_, err := r.execContext(ctx, `
 		INSERT INTO decisions (
 			id, organisation_id, project_id, issue_id, statement, status, decided_at, assignee_user_id, assignee_contact_id,
@@ -2508,7 +2515,7 @@ func (r *Repository) CreateDecision(ctx context.Context, row driven.DecisionRow)
 	return err
 }
 
-func (r *Repository) GetDecision(ctx context.Context, organisationID, id uuid.UUID) (*driven.DecisionRow, error) {
+func (r *Repository) GetDecision(ctx context.Context, organisationID, id uuid.UUID) (*domaindecisions.DecisionRow, error) {
 	row := r.queryRowContext(ctx, `
 		SELECT id, organisation_id, project_id, issue_id, statement, status, decided_at, assignee_user_id, assignee_contact_id,
 			source, confidence, supersedes_decision_id, created_by_user_id, created_at, updated_at
@@ -2521,7 +2528,7 @@ func (r *Repository) GetDecision(ctx context.Context, organisationID, id uuid.UU
 	return item, err
 }
 
-func (r *Repository) ListDecisionsByProject(ctx context.Context, organisationID, projectID uuid.UUID, status string) ([]driven.DecisionRow, error) {
+func (r *Repository) ListDecisionsByProject(ctx context.Context, organisationID, projectID uuid.UUID, status string) ([]domaindecisions.DecisionRow, error) {
 	q := `
 		SELECT id, organisation_id, project_id, issue_id, statement, status, decided_at, assignee_user_id, assignee_contact_id,
 			source, confidence, supersedes_decision_id, created_by_user_id, created_at, updated_at
@@ -2537,7 +2544,7 @@ func (r *Repository) ListDecisionsByProject(ctx context.Context, organisationID,
 		return nil, err
 	}
 	defer rows.Close()
-	out := make([]driven.DecisionRow, 0)
+	out := make([]domaindecisions.DecisionRow, 0)
 	for rows.Next() {
 		item, err := scanDecision(rows)
 		if err != nil {
@@ -2548,7 +2555,7 @@ func (r *Repository) ListDecisionsByProject(ctx context.Context, organisationID,
 	return out, rows.Err()
 }
 
-func (r *Repository) UpdateDecision(ctx context.Context, row driven.DecisionRow) error {
+func (r *Repository) UpdateDecision(ctx context.Context, row domaindecisions.DecisionRow) error {
 	res, err := r.execContext(ctx, `
 		UPDATE decisions SET issue_id = ?, statement = ?, status = ?, decided_at = ?, assignee_user_id = ?, assignee_contact_id = ?,
 			source = ?, confidence = ?, supersedes_decision_id = ?, created_by_user_id = ?, updated_at = ?
@@ -2564,7 +2571,7 @@ func (r *Repository) UpdateDecision(ctx context.Context, row driven.DecisionRow)
 	return nil
 }
 
-func (r *Repository) AddDecisionEvidence(ctx context.Context, row driven.DecisionEvidenceRow) error {
+func (r *Repository) AddDecisionEvidence(ctx context.Context, row domaindecisions.DecisionEvidenceRow) error {
 	_, err := r.execContext(ctx, `
 		INSERT INTO decision_evidence (id, decision_id, message_id, manual_item_id, added_at)
 		VALUES (?, ?, ?, ?, ?)
@@ -2587,7 +2594,7 @@ func (r *Repository) RemoveDecisionEvidence(ctx context.Context, organisationID,
 	return nil
 }
 
-func (r *Repository) ListDecisionEvidence(ctx context.Context, decisionID uuid.UUID) ([]driven.DecisionEvidenceRow, error) {
+func (r *Repository) ListDecisionEvidence(ctx context.Context, decisionID uuid.UUID) ([]domaindecisions.DecisionEvidenceRow, error) {
 	rows, err := r.queryContext(ctx, `
 		SELECT id, decision_id, message_id, manual_item_id, added_at
 		FROM decision_evidence WHERE decision_id = ?
@@ -2597,7 +2604,7 @@ func (r *Repository) ListDecisionEvidence(ctx context.Context, decisionID uuid.U
 		return nil, err
 	}
 	defer rows.Close()
-	out := make([]driven.DecisionEvidenceRow, 0)
+	out := make([]domaindecisions.DecisionEvidenceRow, 0)
 	for rows.Next() {
 		item, err := scanDecisionEvidence(rows)
 		if err != nil {
@@ -2608,7 +2615,7 @@ func (r *Repository) ListDecisionEvidence(ctx context.Context, decisionID uuid.U
 	return out, rows.Err()
 }
 
-func scanDecision(s rowScanner) (*driven.DecisionRow, error) {
+func scanDecision(s rowScanner) (*domaindecisions.DecisionRow, error) {
 	var idStr, orgStr, projectStr, statement, status, source string
 	var issueID, assigneeUserID, assigneeContactID, supersedesDecisionID, createdByUserID sql.NullString
 	var decidedAt sql.NullTime
@@ -2620,7 +2627,7 @@ func scanDecision(s rowScanner) (*driven.DecisionRow, error) {
 	id, _ := uuid.Parse(idStr)
 	orgID, _ := uuid.Parse(orgStr)
 	projectID, _ := uuid.Parse(projectStr)
-	row := &driven.DecisionRow{ID: id, OrganisationID: orgID, ProjectID: projectID, Statement: statement, Status: status, DecidedAt: nullTimePtr(decidedAt), Source: source, CreatedAt: createdAt.UTC(), UpdatedAt: updatedAt.UTC()}
+	row := &domaindecisions.DecisionRow{ID: id, OrganisationID: orgID, ProjectID: projectID, Statement: statement, Status: status, DecidedAt: nullTimePtr(decidedAt), Source: source, CreatedAt: createdAt.UTC(), UpdatedAt: updatedAt.UTC()}
 	row.IssueID, _ = scanUUID(issueID)
 	row.AssigneeUserID, _ = scanUUID(assigneeUserID)
 	row.AssigneeContactID, _ = scanUUID(assigneeContactID)
@@ -2633,7 +2640,7 @@ func scanDecision(s rowScanner) (*driven.DecisionRow, error) {
 	return row, nil
 }
 
-func scanDecisionEvidence(s rowScanner) (*driven.DecisionEvidenceRow, error) {
+func scanDecisionEvidence(s rowScanner) (*domaindecisions.DecisionEvidenceRow, error) {
 	var idStr, decisionStr string
 	var messageID, manualItemID sql.NullString
 	var addedAt time.Time
@@ -2642,13 +2649,13 @@ func scanDecisionEvidence(s rowScanner) (*driven.DecisionEvidenceRow, error) {
 	}
 	id, _ := uuid.Parse(idStr)
 	decisionID, _ := uuid.Parse(decisionStr)
-	row := &driven.DecisionEvidenceRow{ID: id, DecisionID: decisionID, AddedAt: addedAt.UTC()}
+	row := &domaindecisions.DecisionEvidenceRow{ID: id, DecisionID: decisionID, AddedAt: addedAt.UTC()}
 	row.MessageID, _ = scanUUID(messageID)
 	row.ManualItemID, _ = scanUUID(manualItemID)
 	return row, nil
 }
 
-func (r *Repository) InsertConnectorAccount(ctx context.Context, row driven.ConnectorAccountRow, tokenCiphertext []byte) error {
+func (r *Repository) InsertConnectorAccount(ctx context.Context, row domainconnectors.ConnectorAccountRow, tokenCiphertext []byte) error {
 	scopes, _ := json.Marshal(row.Scopes)
 	if row.Scopes == nil {
 		scopes = []byte("[]")
@@ -2662,7 +2669,7 @@ func (r *Repository) InsertConnectorAccount(ctx context.Context, row driven.Conn
 	return err
 }
 
-func (r *Repository) GetConnectorAccount(ctx context.Context, userID, id uuid.UUID) (*driven.ConnectorAccountRow, error) {
+func (r *Repository) GetConnectorAccount(ctx context.Context, userID, id uuid.UUID) (*domainconnectors.ConnectorAccountRow, error) {
 	row := r.queryRowContext(ctx, `
 		SELECT id, user_id, provider, label, external_tenant_id, connection_status, last_error, scopes_json, last_synced_at, created_at, updated_at
 		FROM connector_accounts WHERE id = ? AND user_id = ?
@@ -2674,7 +2681,7 @@ func (r *Repository) GetConnectorAccount(ctx context.Context, userID, id uuid.UU
 	return item, err
 }
 
-func (r *Repository) ListConnectorAccounts(ctx context.Context, userID uuid.UUID) ([]driven.ConnectorAccountRow, error) {
+func (r *Repository) ListConnectorAccounts(ctx context.Context, userID uuid.UUID) ([]domainconnectors.ConnectorAccountRow, error) {
 	rows, err := r.queryContext(ctx, `
 		SELECT id, user_id, provider, label, external_tenant_id, connection_status, last_error, scopes_json, last_synced_at, created_at, updated_at
 		FROM connector_accounts WHERE user_id = ? ORDER BY created_at ASC
@@ -2683,7 +2690,7 @@ func (r *Repository) ListConnectorAccounts(ctx context.Context, userID uuid.UUID
 		return nil, err
 	}
 	defer rows.Close()
-	out := make([]driven.ConnectorAccountRow, 0)
+	out := make([]domainconnectors.ConnectorAccountRow, 0)
 	for rows.Next() {
 		item, err := scanConnectorAccount(rows)
 		if err != nil {
@@ -2724,7 +2731,7 @@ func (r *Repository) UpdateConnectorToken(ctx context.Context, userID, id uuid.U
 	return err
 }
 
-func (r *Repository) CreateConnectorBinding(ctx context.Context, row driven.ConnectorBindingRow) error {
+func (r *Repository) CreateConnectorBinding(ctx context.Context, row domainconnectors.ConnectorBindingRow) error {
 	_, err := r.execContext(ctx, `
 		INSERT INTO connector_bindings (
 			id, connector_account_id, organisation_id, external_channel_id, project_id, label, sync_cursor, created_at, updated_at
@@ -2734,7 +2741,7 @@ func (r *Repository) CreateConnectorBinding(ctx context.Context, row driven.Conn
 	return err
 }
 
-func (r *Repository) GetConnectorBinding(ctx context.Context, userID, id uuid.UUID) (*driven.ConnectorBindingRow, error) {
+func (r *Repository) GetConnectorBinding(ctx context.Context, userID, id uuid.UUID) (*domainconnectors.ConnectorBindingRow, error) {
 	row := r.queryRowContext(ctx, `
 		SELECT b.id, b.connector_account_id, b.organisation_id, b.external_channel_id, b.project_id, b.label, b.sync_cursor, b.created_at, b.updated_at
 		FROM connector_bindings b
@@ -2748,7 +2755,7 @@ func (r *Repository) GetConnectorBinding(ctx context.Context, userID, id uuid.UU
 	return item, err
 }
 
-func (r *Repository) ListConnectorBindings(ctx context.Context, userID, connectorAccountID uuid.UUID) ([]driven.ConnectorBindingRow, error) {
+func (r *Repository) ListConnectorBindings(ctx context.Context, userID, connectorAccountID uuid.UUID) ([]domainconnectors.ConnectorBindingRow, error) {
 	rows, err := r.queryContext(ctx, `
 		SELECT b.id, b.connector_account_id, b.organisation_id, b.external_channel_id, b.project_id, b.label, b.sync_cursor, b.created_at, b.updated_at
 		FROM connector_bindings b
@@ -2760,7 +2767,7 @@ func (r *Repository) ListConnectorBindings(ctx context.Context, userID, connecto
 		return nil, err
 	}
 	defer rows.Close()
-	out := make([]driven.ConnectorBindingRow, 0)
+	out := make([]domainconnectors.ConnectorBindingRow, 0)
 	for rows.Next() {
 		item, err := scanConnectorBinding(rows)
 		if err != nil {
@@ -2792,7 +2799,7 @@ func (r *Repository) UpdateConnectorBindingCursor(ctx context.Context, userID, i
 	return err
 }
 
-func (r *Repository) UpsertConnectorMessage(ctx context.Context, row driven.ConnectorMessageRow) error {
+func (r *Repository) UpsertConnectorMessage(ctx context.Context, row domainconnectors.ConnectorMessageRow) error {
 	metaJSON := row.MetaJSON
 	if metaJSON == "" {
 		metaJSON = "{}"
@@ -2816,7 +2823,7 @@ func (r *Repository) UpsertConnectorMessage(ctx context.Context, row driven.Conn
 	return err
 }
 
-func (r *Repository) ListConnectorMessagesForProject(ctx context.Context, userID, organisationID, projectID uuid.UUID) ([]driven.ConnectorMessageRow, error) {
+func (r *Repository) ListConnectorMessagesForProject(ctx context.Context, userID, organisationID, projectID uuid.UUID) ([]domainconnectors.ConnectorMessageRow, error) {
 	rows, err := r.queryContext(ctx, `
 		SELECT m.id, m.connector_account_id, m.organisation_id, m.project_id, m.provider_event_id, m.external_channel_id,
 			m.title, m.body_text, m.author_label, m.occurred_at, m.meta_json, m.created_at, m.updated_at
@@ -2829,7 +2836,7 @@ func (r *Repository) ListConnectorMessagesForProject(ctx context.Context, userID
 		return nil, err
 	}
 	defer rows.Close()
-	out := make([]driven.ConnectorMessageRow, 0)
+	out := make([]domainconnectors.ConnectorMessageRow, 0)
 	for rows.Next() {
 		item, err := scanConnectorMessage(rows)
 		if err != nil {
@@ -2840,7 +2847,7 @@ func (r *Repository) ListConnectorMessagesForProject(ctx context.Context, userID
 	return out, rows.Err()
 }
 
-func (r *Repository) GetConnectorMessage(ctx context.Context, userID, id uuid.UUID) (*driven.ConnectorMessageRow, error) {
+func (r *Repository) GetConnectorMessage(ctx context.Context, userID, id uuid.UUID) (*domainconnectors.ConnectorMessageRow, error) {
 	row := r.queryRowContext(ctx, `
 		SELECT m.id, m.connector_account_id, m.organisation_id, m.project_id, m.provider_event_id, m.external_channel_id,
 			m.title, m.body_text, m.author_label, m.occurred_at, m.meta_json, m.created_at, m.updated_at
@@ -2855,8 +2862,8 @@ func (r *Repository) GetConnectorMessage(ctx context.Context, userID, id uuid.UU
 	return item, err
 }
 
-func scanConnectorAccount(s rowScanner) (*driven.ConnectorAccountRow, error) {
-	var row driven.ConnectorAccountRow
+func scanConnectorAccount(s rowScanner) (*domainconnectors.ConnectorAccountRow, error) {
+	var row domainconnectors.ConnectorAccountRow
 	var idStr, userStr, scopesJSON string
 	var tenant, lastError sql.NullString
 	var lastSynced sql.NullTime
@@ -2885,8 +2892,8 @@ func scanConnectorAccount(s rowScanner) (*driven.ConnectorAccountRow, error) {
 	return &row, nil
 }
 
-func scanConnectorBinding(s rowScanner) (*driven.ConnectorBindingRow, error) {
-	var row driven.ConnectorBindingRow
+func scanConnectorBinding(s rowScanner) (*domainconnectors.ConnectorBindingRow, error) {
+	var row domainconnectors.ConnectorBindingRow
 	var idStr, accountStr, organisationStr string
 	var projectID, cursor sql.NullString
 	var createdAt, updatedAt time.Time
@@ -2913,8 +2920,8 @@ func scanConnectorBinding(s rowScanner) (*driven.ConnectorBindingRow, error) {
 	return &row, nil
 }
 
-func scanConnectorMessage(s rowScanner) (*driven.ConnectorMessageRow, error) {
-	var row driven.ConnectorMessageRow
+func scanConnectorMessage(s rowScanner) (*domainconnectors.ConnectorMessageRow, error) {
+	var row domainconnectors.ConnectorMessageRow
 	var idStr, accountStr, organisationStr string
 	var projectID sql.NullString
 	var occurredAt, createdAt, updatedAt time.Time
@@ -2953,7 +2960,7 @@ const timelineHydrateChunk = 200
 // at once, and the DSQL/Postgres pool is sized 1-3 (factory.go): on a pool of
 // one that is a guaranteed self-deadlock, and on three it starves under
 // concurrency. Batching also turns 2 queries per row into a handful in total.
-func (r *Repository) hydrateTimelineItems(ctx context.Context, organisationID uuid.UUID, items []driven.TimelineItem) error {
+func (r *Repository) hydrateTimelineItems(ctx context.Context, organisationID uuid.UUID, items []domainprojects.TimelineItem) error {
 	if len(items) == 0 {
 		return nil
 	}
@@ -3006,8 +3013,8 @@ func (r *Repository) hydrateTimelineItems(ctx context.Context, organisationID uu
 
 // timelineContactsFor loads participants for many messages or manual items.
 // column is a trusted internal literal, never caller input.
-func (r *Repository) timelineContactsFor(ctx context.Context, organisationID uuid.UUID, column string, ids []uuid.UUID) (map[uuid.UUID][]driven.TimelineContact, error) {
-	out := map[uuid.UUID][]driven.TimelineContact{}
+func (r *Repository) timelineContactsFor(ctx context.Context, organisationID uuid.UUID, column string, ids []uuid.UUID) (map[uuid.UUID][]domainprojects.TimelineContact, error) {
+	out := map[uuid.UUID][]domainprojects.TimelineContact{}
 	for _, chunk := range sqlkit.ChunkUUIDs(sqlkit.DedupeUUIDs(ids), timelineHydrateChunk) {
 		args := make([]any, 0, len(chunk)+1)
 		args = append(args, organisationID.String())
@@ -3031,7 +3038,7 @@ func (r *Repository) timelineContactsFor(ctx context.Context, organisationID uui
 	return out, nil
 }
 
-func scanTimelineContactsByOwner(rows *sql.Rows, out map[uuid.UUID][]driven.TimelineContact) error {
+func scanTimelineContactsByOwner(rows *sql.Rows, out map[uuid.UUID][]domainprojects.TimelineContact) error {
 	defer rows.Close()
 	for rows.Next() {
 		var ownerStr, contactStr, displayName, role string
@@ -3046,7 +3053,7 @@ func scanTimelineContactsByOwner(rows *sql.Rows, out map[uuid.UUID][]driven.Time
 		if err != nil {
 			return err
 		}
-		out[ownerID] = append(out[ownerID], driven.TimelineContact{
+		out[ownerID] = append(out[ownerID], domainprojects.TimelineContact{
 			ID: contactID, DisplayName: displayName, Role: role,
 		})
 	}

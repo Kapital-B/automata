@@ -3,16 +3,17 @@ package http
 import (
 	"encoding/json"
 	"errors"
+	"github.com/go-chi/chi/v5"
 	"net/http"
 	"strconv"
 	"strings"
 	"time"
 
 	appjobs "github.com/Kapital-B/automata/svc/internal/application/jobs"
-	"github.com/Kapital-B/automata/svc/internal/application/ports/driven"
 	appprojects "github.com/Kapital-B/automata/svc/internal/application/projects"
+	domainjobs "github.com/Kapital-B/automata/svc/internal/domain/jobs"
 	domainprojects "github.com/Kapital-B/automata/svc/internal/domain/projects"
-	"github.com/go-chi/chi/v5"
+
 	"github.com/google/uuid"
 )
 
@@ -26,7 +27,7 @@ func (h *Handlers) listProjects(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusServiceUnavailable, map[string]string{"error": "projects not configured"})
 		return
 	}
-	filter := driven.ProjectListFilter{IncludeArchived: r.URL.Query().Get("include_archived") == "true"}
+	filter := domainprojects.ProjectListFilter{IncludeArchived: r.URL.Query().Get("include_archived") == "true"}
 	if v := r.URL.Query().Get("limit"); v != "" {
 		n, err := strconv.Atoi(v)
 		if err != nil {
@@ -273,7 +274,7 @@ func (h *Handlers) listUnassigned(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusServiceUnavailable, map[string]string{"error": "projects not configured"})
 		return
 	}
-	filter := driven.UnassignedListFilter{Status: strings.TrimSpace(r.URL.Query().Get("status"))}
+	filter := domainprojects.UnassignedListFilter{Status: strings.TrimSpace(r.URL.Query().Get("status"))}
 	if v := r.URL.Query().Get("limit"); v != "" {
 		n, err := strconv.Atoi(v)
 		if err != nil {
@@ -421,7 +422,7 @@ func (h *Handlers) clearMessageOverride(w http.ResponseWriter, r *http.Request) 
 	writeJSON(w, http.StatusOK, effectiveJSON(eff))
 }
 
-func projectJSON(p driven.ProjectRow) map[string]any {
+func projectJSON(p domainprojects.ProjectRow) map[string]any {
 	m := map[string]any{
 		"id":              p.ID.String(),
 		"organisation_id": p.OrganisationID.String(),
@@ -446,7 +447,7 @@ func projectJSON(p driven.ProjectRow) map[string]any {
 	return m
 }
 
-func memberJSON(m driven.ProjectMemberRow) map[string]any {
+func memberJSON(m domainprojects.ProjectMemberRow) map[string]any {
 	out := map[string]any{
 		"id":         m.ID.String(),
 		"project_id": m.ProjectID.String(),
@@ -473,7 +474,7 @@ func memberJSON(m driven.ProjectMemberRow) map[string]any {
 	return out
 }
 
-func effectiveJSON(eff *driven.EffectiveAssignment) map[string]any {
+func effectiveJSON(eff *domainprojects.EffectiveAssignment) map[string]any {
 	if eff == nil {
 		return map[string]any{"status": "unassigned"}
 	}
@@ -521,7 +522,7 @@ func (h *Handlers) getProjectTimeline(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "bad id"})
 		return
 	}
-	filter := driven.TimelineFilter{Source: strings.TrimSpace(r.URL.Query().Get("source"))}
+	filter := domainprojects.TimelineFilter{Source: strings.TrimSpace(r.URL.Query().Get("source"))}
 	filter.UnassignedToIssue = r.URL.Query().Get("unassigned_to_issue") == "true"
 	if v := r.URL.Query().Get("limit"); v != "" {
 		n, err := strconv.Atoi(v)
@@ -701,7 +702,7 @@ func (h *Handlers) assignManualItemProject(w http.ResponseWriter, r *http.Reques
 	writeJSON(w, http.StatusOK, manualItemJSON(*row))
 }
 
-func manualItemJSON(m driven.ManualItemRow) map[string]any {
+func manualItemJSON(m domainprojects.ManualItemRow) map[string]any {
 	out := map[string]any{
 		"id":                 m.ID.String(),
 		"organisation_id":    m.OrganisationID.String(),
@@ -873,7 +874,7 @@ func (h *Handlers) rescanUnassigned(w http.ResponseWriter, r *http.Request) {
 
 	runIDs := make([]string, 0, len(accountIDs))
 	for _, accountID := range accountIDs {
-		job, err := h.enqueueAccountJob(r.Context(), uid, accountID, appjobs.TypeAssignProjects, driven.JobPayload{})
+		job, err := h.enqueueAccountJob(r.Context(), uid, accountID, appjobs.TypeAssignProjects, domainjobs.JobPayload{})
 		if err != nil {
 			h.Log.Error("enqueue assign_projects", "err", err)
 			writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "internal"})

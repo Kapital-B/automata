@@ -11,8 +11,9 @@ import (
 	"time"
 
 	"github.com/Kapital-B/automata/svc/internal/adapters/outbound/security"
-	"github.com/Kapital-B/automata/svc/internal/application/ports/driven"
 	domainacc "github.com/Kapital-B/automata/svc/internal/domain/accounts"
+	domainaccounts "github.com/Kapital-B/automata/svc/internal/domain/accounts"
+	domainauth "github.com/Kapital-B/automata/svc/internal/domain/auth"
 	"github.com/google/uuid"
 	"golang.org/x/crypto/bcrypt"
 )
@@ -24,18 +25,18 @@ const (
 
 // Service handles registration, password login, and Microsoft/Google sign-in with email linking.
 type Service struct {
-	Users      driven.UserRepository
-	Sessions   driven.AuthSessionRepository
-	OAuthState driven.OAuthStateRepository
-	MSAuth     driven.MicrosoftOAuth
-	Google     driven.GoogleOAuth
+	Users      domainauth.UserRepository
+	Sessions   domainauth.AuthSessionRepository
+	OAuthState domainauth.OAuthStateRepository
+	MSAuth     domainaccounts.MicrosoftOAuth
+	Google     domainauth.GoogleOAuth
 	JWTSecret  []byte
 	JWTTTL     time.Duration
 	RefreshTTL time.Duration
 }
 
 // NewService constructs the auth service.
-func NewService(users driven.UserRepository, sessions driven.AuthSessionRepository, states driven.OAuthStateRepository, msAuth driven.MicrosoftOAuth, google driven.GoogleOAuth, jwtSecret []byte, jwtTTL, refreshTTL time.Duration) *Service {
+func NewService(users domainauth.UserRepository, sessions domainauth.AuthSessionRepository, states domainauth.OAuthStateRepository, msAuth domainaccounts.MicrosoftOAuth, google domainauth.GoogleOAuth, jwtSecret []byte, jwtTTL, refreshTTL time.Duration) *Service {
 	return &Service{
 		Users:      users,
 		Sessions:   sessions,

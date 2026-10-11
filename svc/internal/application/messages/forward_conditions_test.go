@@ -3,11 +3,10 @@ package messages
 import (
 	"encoding/json"
 	"errors"
+	domainmessages "github.com/Kapital-B/automata/svc/internal/domain/messages"
 	"strings"
 	"testing"
 	"time"
-
-	"github.com/Kapital-B/automata/svc/internal/application/ports/driven"
 )
 
 // Review findings 6 and 7: an empty condition matched every message, and an
@@ -50,7 +49,7 @@ func TestNormalizeForwardRuleCanonicalises(t *testing.T) {
 
 func TestLogicFieldsMatch(t *testing.T) {
 	finance := "finance"
-	msg := driven.MessageRow{
+	msg := domainmessages.MessageRow{
 		Subject: "Invoice INV-7", FromJSON: `{"name":"Acme Billing","address":"billing@eu.acme.com"}`,
 		HasAttachments: true, CategorySlug: &finance, ReceivedAt: time.Now(),
 	}

@@ -7,8 +7,8 @@ import (
 	"net/http/httptest"
 	"testing"
 
-	"github.com/Kapital-B/automata/svc/internal/application/ports/driven"
 	"github.com/Kapital-B/automata/svc/internal/domain/accounts"
+	domainaccounts "github.com/Kapital-B/automata/svc/internal/domain/accounts"
 )
 
 func invalidGrantIdP(t *testing.T) *OAuth {
@@ -26,7 +26,7 @@ func invalidGrantIdP(t *testing.T) *OAuth {
 // reconnecting; nothing a retry can do.
 func TestRefreshReportsARejectedRefreshToken(t *testing.T) {
 	_, err := invalidGrantIdP(t).RefreshAccessToken(context.Background(), accounts.KindWork, "expired")
-	if !errors.Is(err, driven.ErrCredentialsRejected) {
+	if !errors.Is(err, domainaccounts.ErrCredentialsRejected) {
 		t.Fatalf("err = %v, want ErrCredentialsRejected", err)
 	}
 }
@@ -35,7 +35,7 @@ func TestRefreshReportsARejectedRefreshToken(t *testing.T) {
 // failed connect, not an account whose credentials were revoked.
 func TestExchangeDoesNotMistakeABadCodeForARevokedAccount(t *testing.T) {
 	_, err := invalidGrantIdP(t).ExchangeCode(context.Background(), accounts.KindWork, "reused")
-	if err == nil || errors.Is(err, driven.ErrCredentialsRejected) {
+	if err == nil || errors.Is(err, domainaccounts.ErrCredentialsRejected) {
 		t.Fatalf("err = %v, want a plain failure", err)
 	}
 }

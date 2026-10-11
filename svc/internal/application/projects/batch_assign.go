@@ -3,10 +3,10 @@ package projects
 import (
 	"context"
 	"fmt"
+	domainmessages "github.com/Kapital-B/automata/svc/internal/domain/messages"
 	"strings"
 	"time"
 
-	"github.com/Kapital-B/automata/svc/internal/application/ports/driven"
 	domainprojects "github.com/Kapital-B/automata/svc/internal/domain/projects"
 	"github.com/google/uuid"
 )
@@ -63,7 +63,7 @@ func (s *Service) AssignBatch(ctx context.Context, userID uuid.UUID, items []Bat
 	}
 
 	// Resolve every distinct project once instead of per item.
-	projects := map[uuid.UUID]*driven.ProjectRow{}
+	projects := map[uuid.UUID]*domainprojects.ProjectRow{}
 	for _, it := range items {
 		if it.ProjectID == nil {
 			continue
@@ -85,8 +85,8 @@ func (s *Service) AssignBatch(ctx context.Context, userID uuid.UUID, items []Bat
 	uid := userID
 
 	var (
-		threadRows   []driven.AssignmentRow
-		overrideRows []driven.AssignmentRow
+		threadRows   []domainprojects.AssignmentRow
+		overrideRows []domainprojects.AssignmentRow
 		threadClears []threadClear
 		// Index of the result each pending write belongs to, so a chunk failure
 		// can be reported against the right items.
@@ -148,7 +148,7 @@ func (s *Service) AssignBatch(ctx context.Context, userID uuid.UUID, items []Bat
 				if marksNotRelevant(it) {
 					// A settled decision that there is no project: committed,
 					// with no project id and the time it was decided.
-					threadRows = append(threadRows, driven.AssignmentRow{
+					threadRows = append(threadRows, domainprojects.AssignmentRow{
 						ID: uuid.New(), OrganisationID: orgID, AccountID: msg.AccountID,
 						ConversationID: *msg.ConversationID,
 						Status:         string(domainprojects.StatusCommitted), Reason: notRelevantReason,
@@ -164,7 +164,7 @@ func (s *Service) AssignBatch(ctx context.Context, userID uuid.UUID, items []Bat
 					threadClears = append(threadClears, threadClear{index: i, accountID: msg.AccountID, conversationID: *msg.ConversationID})
 					continue
 				}
-				threadRows = append(threadRows, driven.AssignmentRow{
+				threadRows = append(threadRows, domainprojects.AssignmentRow{
 					ID: uuid.New(), OrganisationID: orgID, AccountID: msg.AccountID,
 					ConversationID: *msg.ConversationID, ProjectID: it.ProjectID,
 					Status: string(domainprojects.StatusCommitted), Reason: "user_assign",
@@ -174,7 +174,7 @@ func (s *Service) AssignBatch(ctx context.Context, userID uuid.UUID, items []Bat
 				threadIdx = append(threadIdx, i)
 			case domainprojects.ScopeMessage:
 				mid := it.ID
-				row := driven.AssignmentRow{
+				row := domainprojects.AssignmentRow{
 					OrganisationID: orgID, AccountID: msg.AccountID, MessageID: &mid,
 					ProjectID: it.ProjectID, Status: string(domainprojects.StatusCommitted),
 					Reason: "user_assign", Source: string(domainprojects.SourceUser),
@@ -251,7 +251,7 @@ type batchCommit struct {
 	projectID    uuid.UUID
 	messageID    *uuid.UUID
 	manualItemID *uuid.UUID
-	msg          *driven.MessageRow
+	msg          *domainmessages.MessageRow
 }
 
 // notRelevantReason labels an assignment row that records "no project".

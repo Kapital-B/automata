@@ -3,6 +3,7 @@ package http
 import (
 	"encoding/json"
 	"errors"
+	"github.com/go-chi/chi/v5"
 	"net/http"
 	"net/url"
 	"strings"
@@ -10,8 +11,9 @@ import (
 
 	asynqadapter "github.com/Kapital-B/automata/svc/internal/adapters/inbound/asynq"
 	appconnectors "github.com/Kapital-B/automata/svc/internal/application/connectors"
-	"github.com/Kapital-B/automata/svc/internal/application/ports/driven"
-	"github.com/go-chi/chi/v5"
+	domainconnectors "github.com/Kapital-B/automata/svc/internal/domain/connectors"
+	domainjobs "github.com/Kapital-B/automata/svc/internal/domain/jobs"
+
 	"github.com/google/uuid"
 )
 
@@ -224,11 +226,11 @@ func (h *Handlers) syncConnector(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if h.JobEnqueuer != nil {
-		job, err := h.JobEnqueuer.Enqueue(r.Context(), driven.CreateJobInput{
+		job, err := h.JobEnqueuer.Enqueue(r.Context(), domainjobs.CreateJobInput{
 			JobType:     "sync_slack",
 			UserID:      userID,
-			TriggerKind: driven.JobTriggerAPI,
-			Payload: driven.JobPayload{
+			TriggerKind: domainjobs.JobTriggerAPI,
+			Payload: domainjobs.JobPayload{
 				ConnectorAccountID: &connectorAccountID,
 			},
 			Now: time.Now().UTC(),
@@ -270,7 +272,7 @@ func (h *Handlers) syncConnector(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusAccepted, map[string]any{"job_run_id": runID.String(), "status": "queued"})
 }
 
-func connectorAccountJSON(row driven.ConnectorAccountRow) map[string]any {
+func connectorAccountJSON(row domainconnectors.ConnectorAccountRow) map[string]any {
 	out := map[string]any{
 		"id": row.ID.String(), "provider": row.Provider, "label": row.Label,
 		"connection_status": row.ConnectionStatus, "scopes": row.Scopes,
@@ -289,7 +291,7 @@ func connectorAccountJSON(row driven.ConnectorAccountRow) map[string]any {
 	return out
 }
 
-func connectorBindingJSON(row driven.ConnectorBindingRow) map[string]any {
+func connectorBindingJSON(row domainconnectors.ConnectorBindingRow) map[string]any {
 	out := map[string]any{
 		"id": row.ID.String(), "connector_account_id": row.ConnectorAccountID.String(),
 		"organisation_id": row.OrganisationID.String(), "external_channel_id": row.ExternalChannelID,

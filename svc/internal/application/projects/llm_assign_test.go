@@ -3,11 +3,13 @@ package projects
 import (
 	"context"
 	"errors"
+	domainmessages "github.com/Kapital-B/automata/svc/internal/domain/messages"
 	"strings"
 	"testing"
 	"time"
 
-	"github.com/Kapital-B/automata/svc/internal/application/ports/driven"
+	domainai "github.com/Kapital-B/automata/svc/internal/domain/ai"
+	domainprojects "github.com/Kapital-B/automata/svc/internal/domain/projects"
 	"github.com/google/uuid"
 )
 
@@ -18,7 +20,7 @@ type fakeLLM struct {
 	err       error
 }
 
-func (f *fakeLLM) ChatCompletion(ctx context.Context, msgs []driven.LLMMessage) (*driven.LLMResponse, error) {
+func (f *fakeLLM) ChatCompletion(ctx context.Context, msgs []domainai.LLMMessage) (*domainai.LLMResponse, error) {
 	if f.err != nil {
 		return nil, f.err
 	}
@@ -32,30 +34,30 @@ func (f *fakeLLM) ChatCompletion(ctx context.Context, msgs []driven.LLMMessage) 
 	if idx >= len(f.responses) {
 		idx = len(f.responses) - 1
 	}
-	return &driven.LLMResponse{Content: f.responses[idx]}, nil
+	return &domainai.LLMResponse{Content: f.responses[idx]}, nil
 }
 
 // recordingAssignments captures writes so tests can assert status and source
 // without a database.
 type recordingAssignments struct {
-	driven.AssignmentRepository
-	threads   []driven.AssignmentRow
-	overrides []driven.AssignmentRow
+	domainprojects.AssignmentRepository
+	threads   []domainprojects.AssignmentRow
+	overrides []domainprojects.AssignmentRow
 }
 
-func (r *recordingAssignments) UpsertThreadAssignment(ctx context.Context, row driven.AssignmentRow) error {
+func (r *recordingAssignments) UpsertThreadAssignment(ctx context.Context, row domainprojects.AssignmentRow) error {
 	r.threads = append(r.threads, row)
 	return nil
 }
 
-func (r *recordingAssignments) UpsertMessageOverride(ctx context.Context, row driven.AssignmentRow) error {
+func (r *recordingAssignments) UpsertMessageOverride(ctx context.Context, row domainprojects.AssignmentRow) error {
 	r.overrides = append(r.overrides, row)
 	return nil
 }
 
-func llmTestMessage(subject, conv string) driven.MessageRow {
+func llmTestMessage(subject, conv string) domainmessages.MessageRow {
 	body := "some body text"
-	m := driven.MessageRow{ID: uuid.New(), Subject: subject, BodyText: &body, FromJSON: `{"address":"a@b.com"}`}
+	m := domainmessages.MessageRow{ID: uuid.New(), Subject: subject, BodyText: &body, FromJSON: `{"address":"a@b.com"}`}
 	if conv != "" {
 		c := conv
 		m.ConversationID = &c
@@ -71,8 +73,8 @@ func TestScoreWithLLMWritesProvisionalNeverCommitted(t *testing.T) {
 	}}
 	svc := &AssignService{Assignments: rec, LLM: llm}
 
-	msgs := []driven.MessageRow{llmTestMessage("commissioning plan", "conv-1")}
-	n, err := svc.scoreWithLLM(context.Background(), uuid.New(), uuid.New(), msgs, []driven.ProjectRow{dc01}, nil, nowUTC())
+	msgs := []domainmessages.MessageRow{llmTestMessage("commissioning plan", "conv-1")}
+	n, err := svc.scoreWithLLM(context.Background(), uuid.New(), uuid.New(), msgs, []domainprojects.ProjectRow{dc01}, nil, nowUTC())
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -110,8 +112,8 @@ func TestScoreWithLLMDropsUnknownRefAndCode(t *testing.T) {
 	}}
 	svc := &AssignService{Assignments: rec, LLM: llm}
 
-	msgs := []driven.MessageRow{llmTestMessage("subject", "conv-1")}
-	n, err := svc.scoreWithLLM(context.Background(), uuid.New(), uuid.New(), msgs, []driven.ProjectRow{dc01}, nil, nowUTC())
+	msgs := []domainmessages.MessageRow{llmTestMessage("subject", "conv-1")}
+	n, err := svc.scoreWithLLM(context.Background(), uuid.New(), uuid.New(), msgs, []domainprojects.ProjectRow{dc01}, nil, nowUTC())
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -128,8 +130,8 @@ func TestScoreWithLLMDropsLowConfidence(t *testing.T) {
 		`{"schema_version":1,"assignments":[{"ref":"t1","project_code":"DC01","confidence":0.05,"reason":"weak"}]}`,
 	}}
 	svc := &AssignService{Assignments: rec, LLM: llm}
-	msgs := []driven.MessageRow{llmTestMessage("subject", "conv-1")}
-	n, _ := svc.scoreWithLLM(context.Background(), uuid.New(), uuid.New(), msgs, []driven.ProjectRow{dc01}, nil, nowUTC())
+	msgs := []domainmessages.MessageRow{llmTestMessage("subject", "conv-1")}
+	n, _ := svc.scoreWithLLM(context.Background(), uuid.New(), uuid.New(), msgs, []domainprojects.ProjectRow{dc01}, nil, nowUTC())
 	if n != 0 {
 		t.Fatalf("confidence below the provisional floor must not be written, got %d", n)
 	}
@@ -143,8 +145,8 @@ func TestScoreWithLLMRepairsMalformedJSONOnce(t *testing.T) {
 		"```json\n{\"schema_version\":1,\"assignments\":[{\"ref\":\"t1\",\"project_code\":\"DC01\",\"confidence\":0.8,\"reason\":\"ok\"}]}\n```",
 	}}
 	svc := &AssignService{Assignments: rec, LLM: llm}
-	msgs := []driven.MessageRow{llmTestMessage("subject", "conv-1")}
-	n, err := svc.scoreWithLLM(context.Background(), uuid.New(), uuid.New(), msgs, []driven.ProjectRow{dc01}, nil, nowUTC())
+	msgs := []domainmessages.MessageRow{llmTestMessage("subject", "conv-1")}
+	n, err := svc.scoreWithLLM(context.Background(), uuid.New(), uuid.New(), msgs, []domainprojects.ProjectRow{dc01}, nil, nowUTC())
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -159,9 +161,9 @@ func TestScoreWithLLMRepairsMalformedJSONOnce(t *testing.T) {
 func TestScoreWithLLMNilClientIsNoOp(t *testing.T) {
 	rec := &recordingAssignments{}
 	svc := &AssignService{Assignments: rec}
-	msgs := []driven.MessageRow{llmTestMessage("subject", "conv-1")}
+	msgs := []domainmessages.MessageRow{llmTestMessage("subject", "conv-1")}
 	n, err := svc.scoreWithLLM(context.Background(), uuid.New(), uuid.New(), msgs,
-		[]driven.ProjectRow{proj("DC01", "Cooling")}, nil, nowUTC())
+		[]domainprojects.ProjectRow{proj("DC01", "Cooling")}, nil, nowUTC())
 	if err != nil || n != 0 {
 		t.Fatalf("nil LLM must be a no-op, got n=%d err=%v", n, err)
 	}
@@ -175,13 +177,13 @@ func TestScoreWithLLMScoresThreadsNotMessages(t *testing.T) {
 
 	// Twelve messages across three conversations must cost one call describing
 	// three threads, not twelve.
-	msgs := []driven.MessageRow{}
+	msgs := []domainmessages.MessageRow{}
 	for i := 0; i < 4; i++ {
 		msgs = append(msgs, llmTestMessage("a", "conv-a"))
 		msgs = append(msgs, llmTestMessage("b", "conv-b"))
 		msgs = append(msgs, llmTestMessage("c", "conv-c"))
 	}
-	if _, err := svc.scoreWithLLM(context.Background(), uuid.New(), uuid.New(), msgs, []driven.ProjectRow{dc01}, nil, nowUTC()); err != nil {
+	if _, err := svc.scoreWithLLM(context.Background(), uuid.New(), uuid.New(), msgs, []domainprojects.ProjectRow{dc01}, nil, nowUTC()); err != nil {
 		t.Fatal(err)
 	}
 	if llm.calls != 1 {
@@ -199,11 +201,11 @@ func TestScoreWithLLMBatchesLargeInput(t *testing.T) {
 	llm := &fakeLLM{responses: []string{`{"schema_version":1,"assignments":[]}`}}
 	svc := &AssignService{Assignments: rec, LLM: llm}
 
-	msgs := []driven.MessageRow{}
+	msgs := []domainmessages.MessageRow{}
 	for i := 0; i < llmBatchSize*2+3; i++ {
 		msgs = append(msgs, llmTestMessage("s", uuid.NewString()))
 	}
-	if _, err := svc.scoreWithLLM(context.Background(), uuid.New(), uuid.New(), msgs, []driven.ProjectRow{dc01}, nil, nowUTC()); err != nil {
+	if _, err := svc.scoreWithLLM(context.Background(), uuid.New(), uuid.New(), msgs, []domainprojects.ProjectRow{dc01}, nil, nowUTC()); err != nil {
 		t.Fatal(err)
 	}
 	if llm.calls != 3 {
@@ -220,8 +222,8 @@ func TestScoreWithLLMNeverOffersArchivedProject(t *testing.T) {
 		`{"schema_version":1,"assignments":[{"ref":"t1","project_code":"DC01","confidence":0.9,"reason":"x"}]}`,
 	}}
 	svc := &AssignService{Assignments: rec, LLM: llm}
-	msgs := []driven.MessageRow{llmTestMessage("subject", "conv-1")}
-	n, err := svc.scoreWithLLM(context.Background(), uuid.New(), uuid.New(), msgs, []driven.ProjectRow{archived}, nil, nowUTC())
+	msgs := []domainmessages.MessageRow{llmTestMessage("subject", "conv-1")}
+	n, err := svc.scoreWithLLM(context.Background(), uuid.New(), uuid.New(), msgs, []domainprojects.ProjectRow{archived}, nil, nowUTC())
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -240,8 +242,8 @@ func TestScoreWithLLMMessageWithoutConversationWritesOverride(t *testing.T) {
 		`{"schema_version":1,"assignments":[{"ref":"t1","project_code":"DC01","confidence":0.8,"reason":"ok"}]}`,
 	}}
 	svc := &AssignService{Assignments: rec, LLM: llm}
-	msgs := []driven.MessageRow{llmTestMessage("subject", "")}
-	if _, err := svc.scoreWithLLM(context.Background(), uuid.New(), uuid.New(), msgs, []driven.ProjectRow{dc01}, nil, nowUTC()); err != nil {
+	msgs := []domainmessages.MessageRow{llmTestMessage("subject", "")}
+	if _, err := svc.scoreWithLLM(context.Background(), uuid.New(), uuid.New(), msgs, []domainprojects.ProjectRow{dc01}, nil, nowUTC()); err != nil {
 		t.Fatal(err)
 	}
 	if len(rec.overrides) != 1 || len(rec.threads) != 0 {
@@ -259,8 +261,8 @@ func TestScoreWithLLMAbandonsAfterOneFailedRepair(t *testing.T) {
 	llm := &fakeLLM{responses: []string{"still not json", "also not json"}}
 	svc := &AssignService{Assignments: rec, LLM: llm}
 
-	msgs := []driven.MessageRow{llmTestMessage("subject", "conv-1")}
-	n, err := svc.scoreWithLLM(context.Background(), uuid.New(), uuid.New(), msgs, []driven.ProjectRow{dc01}, nil, nowUTC())
+	msgs := []domainmessages.MessageRow{llmTestMessage("subject", "conv-1")}
+	n, err := svc.scoreWithLLM(context.Background(), uuid.New(), uuid.New(), msgs, []domainprojects.ProjectRow{dc01}, nil, nowUTC())
 	if err == nil {
 		t.Fatal("expected an error once the repair also fails")
 	}
@@ -281,8 +283,8 @@ func TestScoreWithLLMPropagatesTransportError(t *testing.T) {
 	llm := &fakeLLM{err: errors.New("upstream unavailable")}
 	svc := &AssignService{Assignments: rec, LLM: llm}
 
-	msgs := []driven.MessageRow{llmTestMessage("subject", "conv-1")}
-	if _, err := svc.scoreWithLLM(context.Background(), uuid.New(), uuid.New(), msgs, []driven.ProjectRow{dc01}, nil, nowUTC()); err == nil {
+	msgs := []domainmessages.MessageRow{llmTestMessage("subject", "conv-1")}
+	if _, err := svc.scoreWithLLM(context.Background(), uuid.New(), uuid.New(), msgs, []domainprojects.ProjectRow{dc01}, nil, nowUTC()); err == nil {
 		t.Fatal("expected the transport error to surface")
 	}
 	if len(rec.threads) != 0 {

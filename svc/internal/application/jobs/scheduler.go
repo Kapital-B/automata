@@ -8,7 +8,10 @@ import (
 	"strings"
 	"time"
 
-	"github.com/Kapital-B/automata/svc/internal/application/ports/driven"
+	domainaccounts "github.com/Kapital-B/automata/svc/internal/domain/accounts"
+	domainauth "github.com/Kapital-B/automata/svc/internal/domain/auth"
+	domainjobs "github.com/Kapital-B/automata/svc/internal/domain/jobs"
+	domainprojects "github.com/Kapital-B/automata/svc/internal/domain/projects"
 	"github.com/google/uuid"
 )
 
@@ -17,25 +20,19 @@ const (
 	DefaultPendingWakeAfter    = 2 * time.Minute
 )
 
-type ScheduleCASRepository interface {
-	MarkScheduleExecutedIfDue(ctx context.Context, id uuid.UUID, scheduledFor, lastRunAt, nextRunAt time.Time) (bool, error)
-}
+type ScheduleCASRepository = domainjobs.ScheduleCASRepository
 
-type EffectAuditReconciler interface {
-	BackfillEffectAudit(ctx context.Context, effect driven.EffectRecord, now time.Time) (bool, error)
-}
+type EffectAuditReconciler = domainjobs.EffectAuditReconciler
 
-type ChainEnqueuer interface {
-	EnqueueChain(ctx context.Context, userID uuid.UUID, accountID *uuid.UUID, trigger string, chain []string, payload driven.JobPayload, scheduleID *uuid.UUID, scheduledFor *time.Time) (*driven.JobRecord, error)
-}
+type ChainEnqueuer = domainjobs.ChainEnqueuer
 
 type SchedulerService struct {
-	OAuthStates driven.OAuthStateRepository
-	Schedules   driven.ScheduleRepository
-	Accounts    driven.AccountRepository
+	OAuthStates domainauth.OAuthStateRepository
+	Schedules   domainjobs.ScheduleRepository
+	Accounts    domainaccounts.AccountRepository
 	// Projects is optional; without it the extraction debounce pass is skipped.
-	Projects         driven.ProjectRepository
-	Store            driven.JobStore
+	Projects         domainprojects.ProjectRepository
+	Store            domainjobs.JobStore
 	Enqueuer         ChainEnqueuer
 	Registry         *Registry
 	EffectReconciler EffectAuditReconciler
@@ -123,13 +120,13 @@ func (s *SchedulerService) enqueueDueExtractions(ctx context.Context, now time.T
 	enqueued, coalesced := 0, 0
 	for _, project := range due {
 		pid := project.ProjectID
-		_, err := s.Enqueuer.EnqueueChain(ctx, project.OwnerUserID, nil, driven.JobTriggerSchedule,
+		_, err := s.Enqueuer.EnqueueChain(ctx, project.OwnerUserID, nil, domainjobs.JobTriggerSchedule,
 			[]string{TypeInterpretProject, TypeReconcileProject},
-			driven.JobPayload{ProjectID: &pid}, nil, nil)
+			domainjobs.JobPayload{ProjectID: &pid}, nil, nil)
 		if err != nil {
 			// Already queued or running for this project: the coalescing
 			// working, not a failure.
-			if errors.Is(err, driven.ErrJobLockHeld) || errors.Is(err, driven.ErrJobConflict) {
+			if errors.Is(err, domainjobs.ErrJobLockHeld) || errors.Is(err, domainjobs.ErrJobConflict) {
 				coalesced++
 				continue
 			}
@@ -199,8 +196,8 @@ func (s *SchedulerService) enqueueDueSchedules(ctx context.Context, now time.Tim
 			return err
 		}
 		for _, accountID := range accountIDs {
-			if _, err := enq.EnqueueChain(ctx, chain.UserID, &accountID, driven.JobTriggerSchedule, jobs, driven.JobPayload{}, &chain.ID, &scheduledFor); err != nil {
-				if errors.Is(err, driven.ErrJobLockHeld) {
+			if _, err := enq.EnqueueChain(ctx, chain.UserID, &accountID, domainjobs.JobTriggerSchedule, jobs, domainjobs.JobPayload{}, &chain.ID, &scheduledFor); err != nil {
+				if errors.Is(err, domainjobs.ErrJobLockHeld) {
 					// Another active/pending job owns the mailbox lock — skip this
 					// account and keep ticking so pending rewake/lease recovery run.
 					skippedLock++
@@ -250,7 +247,7 @@ func (s *SchedulerService) rewakePending(ctx context.Context, now time.Time) err
 	rewoke, conflicts := 0, 0
 	for _, job := range stale {
 		if _, err := s.Store.ReWakePending(ctx, job.ID, job.Revision, now); err != nil {
-			if err == driven.ErrJobConflict {
+			if err == domainjobs.ErrJobConflict {
 				conflicts++
 				continue
 			}
@@ -280,7 +277,7 @@ func (s *SchedulerService) recoverExpiredLeases(ctx context.Context, now time.Ti
 			continue
 		}
 		if _, err := s.Store.RecoverExpiredLease(ctx, job.ID, job.Revision, *job.AttemptID, now); err != nil {
-			if err == driven.ErrJobConflict {
+			if err == domainjobs.ErrJobConflict {
 				conflicts++
 				continue
 			}
@@ -300,9 +297,9 @@ func (s *SchedulerService) reconcileEffects(ctx context.Context, now time.Time) 
 		return nil
 	}
 	for _, state := range []string{
-		driven.EffectSucceededPendingAudit,
-		driven.EffectClaimed,
-		driven.EffectUnknown,
+		domainjobs.EffectSucceededPendingAudit,
+		domainjobs.EffectClaimed,
+		domainjobs.EffectUnknown,
 	} {
 		effects, err := s.Store.ListEffectsByState(ctx, state, now, s.batchLimit())
 		if err != nil {
@@ -314,7 +311,7 @@ func (s *SchedulerService) reconcileEffects(ctx context.Context, now time.Time) 
 		s.log().Info("scheduler reconcile effects", "state", state, "count", len(effects))
 		for _, effect := range effects {
 			switch effect.State {
-			case driven.EffectSucceededPendingAudit:
+			case domainjobs.EffectSucceededPendingAudit:
 				if s.EffectReconciler == nil {
 					continue
 				}
@@ -325,13 +322,13 @@ func (s *SchedulerService) reconcileEffects(ctx context.Context, now time.Time) 
 				if !ok {
 					continue
 				}
-				if _, err := s.Store.UpdateEffect(ctx, effect.AccountID, effect.EffectKey, effect.Revision, driven.EffectSucceeded, effect.AuditJSON, now); err != nil && err != driven.ErrJobConflict {
+				if _, err := s.Store.UpdateEffect(ctx, effect.AccountID, effect.EffectKey, effect.Revision, domainjobs.EffectSucceeded, effect.AuditJSON, now); err != nil && err != domainjobs.ErrJobConflict {
 					return err
 				}
-			case driven.EffectClaimed:
-				updated, err := s.Store.UpdateEffect(ctx, effect.AccountID, effect.EffectKey, effect.Revision, driven.EffectUnknown, effect.AuditJSON, now)
+			case domainjobs.EffectClaimed:
+				updated, err := s.Store.UpdateEffect(ctx, effect.AccountID, effect.EffectKey, effect.Revision, domainjobs.EffectUnknown, effect.AuditJSON, now)
 				if err != nil {
-					if err == driven.ErrJobConflict {
+					if err == domainjobs.ErrJobConflict {
 						continue
 					}
 					return err
@@ -341,7 +338,7 @@ func (s *SchedulerService) reconcileEffects(ctx context.Context, now time.Time) 
 						return err
 					}
 				}
-			case driven.EffectUnknown:
+			case domainjobs.EffectUnknown:
 				if s.EffectReconciler == nil {
 					continue
 				}
@@ -354,7 +351,7 @@ func (s *SchedulerService) reconcileEffects(ctx context.Context, now time.Time) 
 	return nil
 }
 
-func (s *SchedulerService) targetAccounts(ctx context.Context, chain driven.ScheduleChainRow) ([]uuid.UUID, error) {
+func (s *SchedulerService) targetAccounts(ctx context.Context, chain domainjobs.ScheduleChainRow) ([]uuid.UUID, error) {
 	if chain.AccountID != nil {
 		return []uuid.UUID{*chain.AccountID}, nil
 	}

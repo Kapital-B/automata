@@ -5,6 +5,7 @@ import (
 	"database/sql"
 	"encoding/json"
 	"errors"
+	domainmessages "github.com/Kapital-B/automata/svc/internal/domain/messages"
 	"strings"
 	"testing"
 	"time"
@@ -13,8 +14,9 @@ import (
 	"github.com/Kapital-B/automata/svc/internal/application/auth"
 	appfacts "github.com/Kapital-B/automata/svc/internal/application/facts"
 	appinterpret "github.com/Kapital-B/automata/svc/internal/application/interpret"
-	"github.com/Kapital-B/automata/svc/internal/application/ports/driven"
 	appprojects "github.com/Kapital-B/automata/svc/internal/application/projects"
+	domainaccounts "github.com/Kapital-B/automata/svc/internal/domain/accounts"
+	domainai "github.com/Kapital-B/automata/svc/internal/domain/ai"
 	domainprojects "github.com/Kapital-B/automata/svc/internal/domain/projects"
 	"github.com/google/uuid"
 	_ "modernc.org/sqlite"
@@ -26,7 +28,7 @@ type fakeLLM struct {
 	prompts []string
 }
 
-func (f *fakeLLM) ChatCompletion(ctx context.Context, messages []driven.LLMMessage) (*driven.LLMResponse, error) {
+func (f *fakeLLM) ChatCompletion(ctx context.Context, messages []domainai.LLMMessage) (*domainai.LLMResponse, error) {
 	for _, m := range messages {
 		if m.Role == "user" {
 			f.prompts = append(f.prompts, m.Content)
@@ -35,7 +37,7 @@ func (f *fakeLLM) ChatCompletion(ctx context.Context, messages []driven.LLMMessa
 	if f.err != nil {
 		return nil, f.err
 	}
-	return &driven.LLMResponse{Content: f.content}, nil
+	return &domainai.LLMResponse{Content: f.content}, nil
 }
 
 func setupInterpret(t *testing.T, name string) (*sqlite.Repository, *appinterpret.Service, *appprojects.Service, *appfacts.Service, uuid.UUID, uuid.UUID, uuid.UUID) {
@@ -72,7 +74,7 @@ func setupInterpret(t *testing.T, name string) (*sqlite.Repository, *appinterpre
 		t.Fatal(err)
 	}
 	accountID := uuid.New()
-	if err := repo.InsertAccount(context.Background(), driven.AccountRow{
+	if err := repo.InsertAccount(context.Background(), domainaccounts.AccountRow{
 		UserID: userID, ID: accountID, Label: "Work", Provider: "m365",
 		MsAccountKind: "work", PrimaryEmail: name + "@example.com", ConnectionStatus: "connected",
 	}, []byte("tok")); err != nil {
@@ -94,7 +96,7 @@ func TestRunPersistsPendingWithoutCreatingFacts(t *testing.T) {
 	msgID := uuid.New()
 	conv := "conv-i"
 	body := "approve 90 kW"
-	if err := repo.UpsertMessage(ctx, driven.MessageRow{
+	if err := repo.UpsertMessage(ctx, domainmessages.MessageRow{
 		ID: msgID, AccountID: accountID, ProviderMessageID: msgID.String(),
 		ReceivedAt: time.Now().UTC(), Subject: "Duty", BodyText: &body,
 		FromJSON: `{}`, ConversationID: &conv,
@@ -192,7 +194,7 @@ func TestMixedAccountsRejected(t *testing.T) {
 	repo, interpSvc, projectSvc, _, userID, projectID, accountID := setupInterpret(t, "interpmix")
 	ctx := context.Background()
 	account2 := uuid.New()
-	if err := repo.InsertAccount(ctx, driven.AccountRow{
+	if err := repo.InsertAccount(ctx, domainaccounts.AccountRow{
 		UserID: userID, ID: account2, Label: "Personal", Provider: "m365",
 		MsAccountKind: "personal", PrimaryEmail: "p@example.com", ConnectionStatus: "connected",
 	}, []byte("tok2")); err != nil {
@@ -210,7 +212,7 @@ func TestMixedAccountsRejected(t *testing.T) {
 		{msg1, accountID, conv1},
 		{msg2, account2, conv2},
 	} {
-		if err := repo.UpsertMessage(ctx, driven.MessageRow{
+		if err := repo.UpsertMessage(ctx, domainmessages.MessageRow{
 			ID: pair.id, AccountID: pair.acc, ProviderMessageID: pair.id.String(),
 			ReceivedAt: time.Now().UTC(), Subject: "x", BodyText: &body,
 			FromJSON: `{}`, ConversationID: &pair.cv,
@@ -266,7 +268,7 @@ func TestRunPromptCarriesTheStoredBodyNotTheListSnippet(t *testing.T) {
 
 	msgID := uuid.New()
 	conv := "conv-body"
-	if err := repo.UpsertMessage(ctx, driven.MessageRow{
+	if err := repo.UpsertMessage(ctx, domainmessages.MessageRow{
 		ID: msgID, AccountID: accountID, ProviderMessageID: msgID.String(),
 		ReceivedAt: time.Now().UTC(), Subject: "Site visit", BodyText: &body,
 		FromJSON: `{}`, ConversationID: &conv,

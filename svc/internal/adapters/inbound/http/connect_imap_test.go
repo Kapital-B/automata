@@ -15,22 +15,22 @@ import (
 	"github.com/Kapital-B/automata/svc/internal/adapters/outbound/persistence/sqlite"
 	"github.com/Kapital-B/automata/svc/internal/adapters/outbound/security"
 	appaccounts "github.com/Kapital-B/automata/svc/internal/application/accounts"
-	"github.com/Kapital-B/automata/svc/internal/application/ports/driven"
+	domainaccounts "github.com/Kapital-B/automata/svc/internal/domain/accounts"
 	"github.com/google/uuid"
 )
 
 // recordingPasswordConnector accepts one password and records what it saw.
 type recordingPasswordConnector struct {
 	password string
-	got      driven.PasswordConnectRequest
+	got      domainaccounts.PasswordConnectRequest
 }
 
-func (c *recordingPasswordConnector) Connect(_ context.Context, req driven.PasswordConnectRequest) (*driven.ConnectedMailbox, error) {
+func (c *recordingPasswordConnector) Connect(_ context.Context, req domainaccounts.PasswordConnectRequest) (*domainaccounts.ConnectedMailbox, error) {
 	c.got = req
 	if req.Password != c.password {
-		return nil, driven.ConnectRejected("the IMAP server at %s refused the username or password", req.IMAP.Host)
+		return nil, domainaccounts.ConnectRejected("the IMAP server at %s refused the username or password", req.IMAP.Host)
 	}
-	return &driven.ConnectedMailbox{Email: req.Email, DefaultLabel: req.Email, Credential: []byte("cred")}, nil
+	return &domainaccounts.ConnectedMailbox{Email: req.Email, DefaultLabel: req.Email, Credential: []byte("cred")}, nil
 }
 
 func TestConnectIMAPStoresAVerifiedAccountAndReportsRejections(t *testing.T) {
@@ -46,8 +46,8 @@ func TestConnectIMAPStoresAVerifiedAccountAndReportsRejections(t *testing.T) {
 		Log: slog.New(slog.NewTextHandler(io.Discard, nil)),
 		AccountSvc: appaccounts.NewService(appaccounts.Deps{
 			Accounts: repo, OAuthState: repo, Vault: vault,
-			PasswordConnectors: map[string]driven.PasswordMailConnector{appaccounts.ProviderIMAP: conn},
-			Mailboxes: &appaccounts.MailboxOpener{Providers: map[string]driven.MailProvider{
+			PasswordConnectors: map[string]domainaccounts.PasswordMailConnector{appaccounts.ProviderIMAP: conn},
+			Mailboxes: &appaccounts.MailboxOpener{Providers: map[string]domainaccounts.MailProvider{
 				appaccounts.ProviderIMAP: &imapmail.Provider{},
 			}},
 		}),
@@ -80,7 +80,7 @@ func TestConnectIMAPStoresAVerifiedAccountAndReportsRejections(t *testing.T) {
 	if status != http.StatusOK {
 		t.Fatalf("connect: %d %v", status, out)
 	}
-	if conn.got.IMAP != (driven.MailServer{Host: "imap.fastmail.com", Port: 993, Security: "tls"}) || conn.got.SMTP.Port != 465 {
+	if conn.got.IMAP != (domainaccounts.MailServer{Host: "imap.fastmail.com", Port: 993, Security: "tls"}) || conn.got.SMTP.Port != 465 {
 		t.Errorf("servers reached the connector as %+v / %+v", conn.got.IMAP, conn.got.SMTP)
 	}
 	rows, err := repo.ListAccounts(context.Background(), devUser)

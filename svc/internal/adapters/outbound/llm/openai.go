@@ -9,7 +9,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/Kapital-B/automata/svc/internal/application/ports/driven"
+	domainai "github.com/Kapital-B/automata/svc/internal/domain/ai"
 )
 
 type OpenAIClient struct {
@@ -19,11 +19,11 @@ type OpenAIClient struct {
 	HTTPClient *http.Client
 }
 
-func (c *OpenAIClient) ChatCompletion(ctx context.Context, messages []driven.LLMMessage) (*driven.LLMResponse, error) {
-	return c.ChatCompletionWithOptions(ctx, messages, driven.LLMRequestOptions{})
+func (c *OpenAIClient) ChatCompletion(ctx context.Context, messages []domainai.LLMMessage) (*domainai.LLMResponse, error) {
+	return c.ChatCompletionWithOptions(ctx, messages, domainai.LLMRequestOptions{})
 }
 
-func (c *OpenAIClient) ChatCompletionWithOptions(ctx context.Context, messages []driven.LLMMessage, opts driven.LLMRequestOptions) (*driven.LLMResponse, error) {
+func (c *OpenAIClient) ChatCompletionWithOptions(ctx context.Context, messages []domainai.LLMMessage, opts domainai.LLMRequestOptions) (*domainai.LLMResponse, error) {
 	if c == nil || c.BaseURL == "" || c.Model == "" {
 		return nil, fmt.Errorf("llm not configured")
 	}
@@ -94,7 +94,7 @@ func (c *OpenAIClient) ChatCompletionWithOptions(ctx context.Context, messages [
 	if len(out.Choices) == 0 {
 		return nil, fmt.Errorf("llm empty choices")
 	}
-	resp := &driven.LLMResponse{Content: out.Choices[0].Message.Content}
+	resp := &domainai.LLMResponse{Content: out.Choices[0].Message.Content}
 	resp.Usage.Model = out.Model
 	if u := out.Usage; u != nil {
 		// OpenAI counts cached prompt tokens inside prompt_tokens; split them

@@ -4,6 +4,7 @@ import (
 	"context"
 	"database/sql"
 	"encoding/json"
+	domainmessages "github.com/Kapital-B/automata/svc/internal/domain/messages"
 	"log/slog"
 	"net/http"
 	"net/http/httptest"
@@ -13,7 +14,8 @@ import (
 
 	"github.com/Kapital-B/automata/svc/internal/adapters/outbound/persistence/sqlite"
 	"github.com/Kapital-B/automata/svc/internal/application/auth"
-	"github.com/Kapital-B/automata/svc/internal/application/ports/driven"
+	domainaccounts "github.com/Kapital-B/automata/svc/internal/domain/accounts"
+
 	"github.com/google/uuid"
 	_ "modernc.org/sqlite"
 )
@@ -41,7 +43,7 @@ func TestListMessagesKeysetPaging(t *testing.T) {
 	userID, tokens := registerAndLogin(t, authSvc, "paging@example.com", "password123")
 	ctx := context.Background()
 	accountID := uuid.New()
-	if err := repo.InsertAccount(ctx, driven.AccountRow{
+	if err := repo.InsertAccount(ctx, domainaccounts.AccountRow{
 		UserID: userID, ID: accountID, Label: "Work", Provider: "m365",
 		MsAccountKind: "work", PrimaryEmail: "paging@example.com", ConnectionStatus: "connected",
 	}, []byte("tok")); err != nil {
@@ -50,7 +52,7 @@ func TestListMessagesKeysetPaging(t *testing.T) {
 	insert := func(at time.Time) {
 		t.Helper()
 		id := uuid.New()
-		if err := repo.UpsertMessage(ctx, driven.MessageRow{
+		if err := repo.UpsertMessage(ctx, domainmessages.MessageRow{
 			ID: id, AccountID: accountID, ProviderMessageID: id.String(),
 			ReceivedAt: at, Subject: "s", FromJSON: `{}`,
 		}); err != nil {

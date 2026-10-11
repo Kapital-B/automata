@@ -10,7 +10,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/Kapital-B/automata/svc/internal/application/ports/driven"
+	domainconnectors "github.com/Kapital-B/automata/svc/internal/domain/connectors"
 )
 
 const defaultScopes = "channels:history,channels:read,groups:history,groups:read,users:read"
@@ -57,12 +57,12 @@ func (c *Client) AuthorizationURL(_ context.Context, state string) (string, erro
 	return u.String(), nil
 }
 
-func (c *Client) ExchangeCode(ctx context.Context, code string) (*driven.SlackOAuthResult, error) {
+func (c *Client) ExchangeCode(ctx context.Context, code string) (*domainconnectors.SlackOAuthResult, error) {
 	if c.fake() {
 		if code != "fake" {
 			return nil, fmt.Errorf("invalid fake Slack code")
 		}
-		return &driven.SlackOAuthResult{
+		return &domainconnectors.SlackOAuthResult{
 			TeamID: "T_FAKE", TeamName: "Fake Slack", AccessToken: "xoxb-fake",
 			Scopes: strings.Split(defaultScopes, ","),
 		}, nil
@@ -98,19 +98,19 @@ func (c *Client) ExchangeCode(ctx context.Context, code string) (*driven.SlackOA
 	if response.AccessToken == "" {
 		return nil, fmt.Errorf("slack oauth: missing bot access token")
 	}
-	return &driven.SlackOAuthResult{
+	return &domainconnectors.SlackOAuthResult{
 		TeamID: response.Team.ID, TeamName: response.Team.Name,
 		AccessToken: response.AccessToken, RefreshToken: response.RefreshToken,
 		Scopes: splitScopes(response.Scope),
 	}, nil
 }
 
-func (c *Client) ListConversations(ctx context.Context, accessToken string) ([]driven.SlackConversation, error) {
+func (c *Client) ListConversations(ctx context.Context, accessToken string) ([]domainconnectors.SlackConversation, error) {
 	if c.fake() {
-		return []driven.SlackConversation{{ID: "C_FAKE_DC01", Name: "dc01-project"}}, nil
+		return []domainconnectors.SlackConversation{{ID: "C_FAKE_DC01", Name: "dc01-project"}}, nil
 	}
 	cursor := ""
-	out := make([]driven.SlackConversation, 0)
+	out := make([]domainconnectors.SlackConversation, 0)
 	for {
 		u, _ := url.Parse("https://slack.com/api/conversations.list")
 		q := u.Query()
@@ -140,7 +140,7 @@ func (c *Client) ListConversations(ctx context.Context, accessToken string) ([]d
 			return nil, fmt.Errorf("slack conversations.list: %s", response.Error)
 		}
 		for _, channel := range response.Channels {
-			out = append(out, driven.SlackConversation{ID: channel.ID, Name: channel.Name})
+			out = append(out, domainconnectors.SlackConversation{ID: channel.ID, Name: channel.Name})
 		}
 		cursor = strings.TrimSpace(response.ResponseMetadata.NextCursor)
 		if cursor == "" {
@@ -149,12 +149,12 @@ func (c *Client) ListConversations(ctx context.Context, accessToken string) ([]d
 	}
 }
 
-func (c *Client) FetchHistory(ctx context.Context, accessToken, channelID, cursor string) (*driven.SlackHistoryPage, error) {
+func (c *Client) FetchHistory(ctx context.Context, accessToken, channelID, cursor string) (*domainconnectors.SlackHistoryPage, error) {
 	if c.fake() {
 		if channelID != "C_FAKE_DC01" || cursor != "" {
-			return &driven.SlackHistoryPage{Messages: []driven.SlackMessage{}}, nil
+			return &domainconnectors.SlackHistoryPage{Messages: []domainconnectors.SlackMessage{}}, nil
 		}
-		return &driven.SlackHistoryPage{Messages: []driven.SlackMessage{
+		return &domainconnectors.SlackHistoryPage{Messages: []domainconnectors.SlackMessage{
 			{
 				ProviderEventID: "1724320800.000100",
 				Text:            "Pump P-03 duty point approved at 42 L/s.",
@@ -200,8 +200,8 @@ func (c *Client) FetchHistory(ctx context.Context, accessToken, channelID, curso
 		return nil, fmt.Errorf("slack conversations.history: %s", response.Error)
 	}
 	displayCache := map[string]string{}
-	out := &driven.SlackHistoryPage{
-		Messages:   make([]driven.SlackMessage, 0, len(response.Messages)),
+	out := &domainconnectors.SlackHistoryPage{
+		Messages:   make([]domainconnectors.SlackMessage, 0, len(response.Messages)),
 		NextCursor: strings.TrimSpace(response.ResponseMetadata.NextCursor),
 	}
 	for _, message := range response.Messages {
@@ -220,7 +220,7 @@ func (c *Client) FetchHistory(ctx context.Context, accessToken, channelID, curso
 		if author == "" && message.BotID != "" {
 			author = "Slack bot"
 		}
-		out.Messages = append(out.Messages, driven.SlackMessage{
+		out.Messages = append(out.Messages, domainconnectors.SlackMessage{
 			ProviderEventID: message.TS,
 			Text:            message.Text,
 			AuthorLabel:     author,

@@ -3,16 +3,20 @@ package projects
 import (
 	"context"
 	"errors"
+	domainmessages "github.com/Kapital-B/automata/svc/internal/domain/messages"
 	"strings"
 	"testing"
 	"time"
 
-	"github.com/Kapital-B/automata/svc/internal/application/ports/driven"
+	domainauth "github.com/Kapital-B/automata/svc/internal/domain/auth"
+	domaincontacts "github.com/Kapital-B/automata/svc/internal/domain/contacts"
+	domainjobs "github.com/Kapital-B/automata/svc/internal/domain/jobs"
+	domainprojects "github.com/Kapital-B/automata/svc/internal/domain/projects"
 	"github.com/google/uuid"
 )
 
 type stubUsers struct {
-	driven.UserRepository
+	domainauth.UserRepository
 	orgID uuid.UUID
 }
 
@@ -21,11 +25,11 @@ func (s stubUsers) GetHomeOrganisationID(ctx context.Context, userID uuid.UUID) 
 }
 
 type stubProjects struct {
-	driven.ProjectRepository
-	rows []driven.ProjectRow
+	domainprojects.ProjectRepository
+	rows []domainprojects.ProjectRow
 }
 
-func (s stubProjects) ListProjects(ctx context.Context, orgID uuid.UUID, f driven.ProjectListFilter) ([]driven.ProjectRow, error) {
+func (s stubProjects) ListProjects(ctx context.Context, orgID uuid.UUID, f domainprojects.ProjectListFilter) ([]domainprojects.ProjectRow, error) {
 	return s.rows, nil
 }
 
@@ -35,11 +39,11 @@ func (s stubProjects) UpsertProjectParticipant(ctx context.Context, projectID, c
 
 // failingAssignments accepts reads but rejects every write.
 type failingAssignments struct {
-	driven.AssignmentRepository
-	msgs []driven.MessageRow
+	domainprojects.AssignmentRepository
+	msgs []domainmessages.MessageRow
 }
 
-func (f *failingAssignments) ListMessagesNeedingAssign(ctx context.Context, userID, accountID uuid.UUID, filter driven.AssignCandidateFilter) ([]driven.MessageRow, error) {
+func (f *failingAssignments) ListMessagesNeedingAssign(ctx context.Context, userID, accountID uuid.UUID, filter domainprojects.AssignCandidateFilter) ([]domainmessages.MessageRow, error) {
 	return f.msgs, nil
 }
 
@@ -47,16 +51,16 @@ func (f *failingAssignments) FindCommittedSiblingProject(ctx context.Context, us
 	return nil, nil
 }
 
-func (f *failingAssignments) UpsertThreadAssignment(ctx context.Context, row driven.AssignmentRow) error {
+func (f *failingAssignments) UpsertThreadAssignment(ctx context.Context, row domainprojects.AssignmentRow) error {
 	return errors.New("write rejected")
 }
 
-func (f *failingAssignments) UpsertMessageOverride(ctx context.Context, row driven.AssignmentRow) error {
+func (f *failingAssignments) UpsertMessageOverride(ctx context.Context, row domainprojects.AssignmentRow) error {
 	return errors.New("write rejected")
 }
 
 type recordingJobRuns struct {
-	driven.JobRunRepository
+	domainjobs.JobRunRepository
 	status string
 	errMsg string
 	meta   string
@@ -76,7 +80,7 @@ func (r *recordingJobRuns) UpdateJobRunStatus(ctx context.Context, id uuid.UUID,
 }
 
 type stubContacts struct {
-	driven.ContactRepository
+	domaincontacts.ContactRepository
 }
 
 func (stubContacts) ListContactIDsForMessage(ctx context.Context, orgID, messageID uuid.UUID) ([]uuid.UUID, error) {
@@ -92,7 +96,7 @@ func TestAssignAfterSyncReportsFailure(t *testing.T) {
 	dc01 := proj("DC01", "Cooling")
 	body := "please review"
 	conv := "conv-1"
-	msgs := []driven.MessageRow{{
+	msgs := []domainmessages.MessageRow{{
 		ID: uuid.New(), AccountID: uuid.New(), Subject: "Regarding DC01",
 		BodyText: &body, ConversationID: &conv, FromJSON: `{"address":"a@b.com"}`,
 	}}
@@ -100,7 +104,7 @@ func TestAssignAfterSyncReportsFailure(t *testing.T) {
 	runs := &recordingJobRuns{}
 	svc := &AssignService{
 		Users:       stubUsers{orgID: orgID},
-		Projects:    stubProjects{rows: []driven.ProjectRow{dc01}},
+		Projects:    stubProjects{rows: []domainprojects.ProjectRow{dc01}},
 		Assignments: &failingAssignments{msgs: msgs},
 		Contacts:    stubContacts{},
 		JobRuns:     runs,
@@ -127,7 +131,7 @@ func TestAssignAfterSyncRecordsOutcomeBreakdown(t *testing.T) {
 	orgID := uuid.New()
 	body := "nothing relevant here"
 	conv := "conv-1"
-	msgs := []driven.MessageRow{{
+	msgs := []domainmessages.MessageRow{{
 		ID: uuid.New(), AccountID: uuid.New(), Subject: "lunch?",
 		BodyText: &body, ConversationID: &conv, FromJSON: `{"address":"a@b.com"}`,
 	}}
@@ -135,7 +139,7 @@ func TestAssignAfterSyncRecordsOutcomeBreakdown(t *testing.T) {
 	runs := &recordingJobRuns{}
 	svc := &AssignService{
 		Users:       stubUsers{orgID: orgID},
-		Projects:    stubProjects{rows: []driven.ProjectRow{proj("DC01", "Cooling")}},
+		Projects:    stubProjects{rows: []domainprojects.ProjectRow{proj("DC01", "Cooling")}},
 		Assignments: &failingAssignments{msgs: msgs},
 		Contacts:    stubContacts{},
 		JobRuns:     runs,

@@ -6,8 +6,10 @@ import (
 	"testing"
 	"time"
 
-	"github.com/Kapital-B/automata/svc/internal/application/ports/driven"
 	domainacc "github.com/Kapital-B/automata/svc/internal/domain/accounts"
+	domainaccounts "github.com/Kapital-B/automata/svc/internal/domain/accounts"
+	domainmessages "github.com/Kapital-B/automata/svc/internal/domain/messages"
+
 	"github.com/google/uuid"
 	_ "modernc.org/sqlite"
 )
@@ -26,7 +28,7 @@ func TestCategorizationTablesAndMessageFilters(t *testing.T) {
 
 	userID := uuid.MustParse("a0000001-0000-4000-8000-000000000001")
 	accountID := uuid.New()
-	err = repo.InsertAccount(ctx, driven.AccountRow{
+	err = repo.InsertAccount(ctx, domainaccounts.AccountRow{
 		UserID:           userID,
 		ID:               accountID,
 		Label:            "Work",
@@ -51,7 +53,7 @@ func TestCategorizationTablesAndMessageFilters(t *testing.T) {
 		t.Fatalf("important category missing: %v", err)
 	}
 
-	msg := driven.MessageRow{
+	msg := domainmessages.MessageRow{
 		ID:                uuid.New(),
 		AccountID:         accountID,
 		ProviderMessageID: "provider-1",
@@ -71,7 +73,7 @@ func TestCategorizationTablesAndMessageFilters(t *testing.T) {
 		t.Fatal(err)
 	}
 	conf := 0.93
-	if err := repo.UpsertMessageCategory(ctx, driven.MessageCategoryRow{
+	if err := repo.UpsertMessageCategory(ctx, domainmessages.MessageCategoryRow{
 		ID:         uuid.New(),
 		MessageID:  msg.ID,
 		AccountID:  accountID,
@@ -85,7 +87,7 @@ func TestCategorizationTablesAndMessageFilters(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	rows, err := repo.ListMessages(ctx, userID, driven.MessageListFilter{AccountID: &accountID, Category: "important"})
+	rows, err := repo.ListMessages(ctx, userID, domainmessages.MessageListFilter{AccountID: &accountID, Category: "important"})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -162,7 +164,7 @@ func TestMigrateDeletesOrphanedMessageCategories(t *testing.T) {
 	ctx := context.Background()
 	userID := uuid.MustParse("a0000001-0000-4000-8000-000000000001")
 	accountID := uuid.New()
-	if err := repo.InsertAccount(ctx, driven.AccountRow{
+	if err := repo.InsertAccount(ctx, domainaccounts.AccountRow{
 		UserID:           userID,
 		ID:               accountID,
 		Label:            "Work",
@@ -173,7 +175,7 @@ func TestMigrateDeletesOrphanedMessageCategories(t *testing.T) {
 	}, []byte("cipher")); err != nil {
 		t.Fatal(err)
 	}
-	msg := driven.MessageRow{
+	msg := domainmessages.MessageRow{
 		ID:                uuid.New(),
 		AccountID:         accountID,
 		ProviderMessageID: "provider-orphan",

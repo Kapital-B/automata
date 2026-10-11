@@ -14,11 +14,12 @@ import (
 	"github.com/Kapital-B/automata/svc/internal/adapters/outbound/persistence/sqlite"
 	"github.com/Kapital-B/automata/svc/internal/adapters/outbound/security"
 	appaccounts "github.com/Kapital-B/automata/svc/internal/application/accounts"
-	"github.com/Kapital-B/automata/svc/internal/application/ports/driven"
 	domainacc "github.com/Kapital-B/automata/svc/internal/domain/accounts"
+	domainaccounts "github.com/Kapital-B/automata/svc/internal/domain/accounts"
+	domainshared "github.com/Kapital-B/automata/svc/internal/domain/shared"
 )
 
-type stubBox struct{ driven.Mailbox }
+type stubBox struct{ domainaccounts.Mailbox }
 
 // stubProvider opens mailboxes on command.
 type stubProvider struct {
@@ -26,9 +27,11 @@ type stubProvider struct {
 	rotated []byte
 }
 
-func (p *stubProvider) Capabilities() driven.MailboxCapabilities { return driven.MailboxCapabilities{} }
+func (p *stubProvider) Capabilities() domainaccounts.MailboxCapabilities {
+	return domainaccounts.MailboxCapabilities{}
+}
 
-func (p *stubProvider) Open(ctx context.Context, account driven.AccountRow, credential []byte) (driven.Mailbox, []byte, error) {
+func (p *stubProvider) Open(ctx context.Context, account domainaccounts.AccountRow, credential []byte) (domainaccounts.Mailbox, []byte, error) {
 	if p.openErr != nil {
 		return nil, nil, p.openErr
 	}
@@ -41,17 +44,17 @@ type stubConnector struct {
 	cred  string
 }
 
-func (c *stubConnector) AuthorizationURL(ctx context.Context, state string, opts driven.ConnectOptions) (string, error) {
+func (c *stubConnector) AuthorizationURL(ctx context.Context, state string, opts domainaccounts.ConnectOptions) (string, error) {
 	return "https://idp.example/auth?state=" + state, nil
 }
 
-func (c *stubConnector) Complete(ctx context.Context, code string, opts driven.ConnectOptions) (*driven.ConnectedMailbox, error) {
-	return &driven.ConnectedMailbox{Email: c.email, DefaultLabel: c.email, Credential: []byte(c.cred)}, nil
+func (c *stubConnector) Complete(ctx context.Context, code string, opts domainaccounts.ConnectOptions) (*domainaccounts.ConnectedMailbox, error) {
+	return &domainaccounts.ConnectedMailbox{Email: c.email, DefaultLabel: c.email, Credential: []byte(c.cred)}, nil
 }
 
 type fixture struct {
 	repo   *sqlite.Repository
-	vault  driven.TokenVault
+	vault  domainshared.TokenVault
 	userID uuid.UUID
 }
 
@@ -85,7 +88,7 @@ func (f *fixture) account(t *testing.T, provider, email string) uuid.UUID {
 	}
 	id := uuid.New()
 	now := time.Now().UTC()
-	if err := f.repo.InsertAccount(context.Background(), driven.AccountRow{
+	if err := f.repo.InsertAccount(context.Background(), domainaccounts.AccountRow{
 		UserID: f.userID, ID: id, Label: email, Provider: provider, MsAccountKind: domainacc.KindWork,
 		PrimaryEmail: email, ConnectionStatus: "connected", CreatedAt: now, UpdatedAt: now,
 	}, cipher); err != nil {
@@ -94,8 +97,8 @@ func (f *fixture) account(t *testing.T, provider, email string) uuid.UUID {
 	return id
 }
 
-func (f *fixture) opener(p driven.MailProvider) *appaccounts.MailboxOpener {
-	return &appaccounts.MailboxOpener{Accounts: f.repo, Vault: f.vault, Providers: map[string]driven.MailProvider{"google": p, "m365": p}}
+func (f *fixture) opener(p domainaccounts.MailProvider) *appaccounts.MailboxOpener {
+	return &appaccounts.MailboxOpener{Accounts: f.repo, Vault: f.vault, Providers: map[string]domainaccounts.MailProvider{"google": p, "m365": p}}
 }
 
 // A revoked token is not a transient failure. Marking the account expired is
@@ -103,10 +106,10 @@ func (f *fixture) opener(p driven.MailProvider) *appaccounts.MailboxOpener {
 func TestOpenMarksAnAccountWithRejectedCredentialsExpired(t *testing.T) {
 	f := setup(t)
 	id := f.account(t, "google", "owner@example.org")
-	rejected := fmt.Errorf("%w: invalid_grant", driven.ErrCredentialsRejected)
+	rejected := fmt.Errorf("%w: invalid_grant", domainaccounts.ErrCredentialsRejected)
 
 	_, _, err := f.opener(&stubProvider{openErr: rejected}).Open(context.Background(), f.userID, id)
-	if !errors.Is(err, driven.ErrCredentialsRejected) {
+	if !errors.Is(err, domainaccounts.ErrCredentialsRejected) {
 		t.Fatalf("err = %v", err)
 	}
 	row, cipher, err := f.repo.GetAccount(context.Background(), f.userID, id)
@@ -151,16 +154,16 @@ func TestOpenPersistsRotatedCredentials(t *testing.T) {
 func TestOpenRefusesAProviderWithNoAdapter(t *testing.T) {
 	f := setup(t)
 	id := f.account(t, "imap", "owner@example.org")
-	opener := &appaccounts.MailboxOpener{Accounts: f.repo, Vault: f.vault, Providers: map[string]driven.MailProvider{}}
-	if _, _, err := opener.Open(context.Background(), f.userID, id); !errors.Is(err, driven.ErrUnsupportedProvider) {
+	opener := &appaccounts.MailboxOpener{Accounts: f.repo, Vault: f.vault, Providers: map[string]domainaccounts.MailProvider{}}
+	if _, _, err := opener.Open(context.Background(), f.userID, id); !errors.Is(err, domainaccounts.ErrUnsupportedProvider) {
 		t.Fatalf("err = %v, want ErrUnsupportedProvider", err)
 	}
 }
 
-func (f *fixture) service(conn driven.OAuthMailConnector) *appaccounts.Service {
+func (f *fixture) service(conn domainaccounts.OAuthMailConnector) *appaccounts.Service {
 	return appaccounts.NewService(appaccounts.Deps{
 		Accounts: f.repo, OAuthState: f.repo, Vault: f.vault,
-		Connectors: map[string]driven.OAuthMailConnector{"google": conn},
+		Connectors: map[string]domainaccounts.OAuthMailConnector{"google": conn},
 		StateTTL:   time.Minute,
 	})
 }
@@ -267,32 +270,32 @@ type stubPasswordConnector struct {
 	err error
 }
 
-func (c *stubPasswordConnector) Connect(ctx context.Context, req driven.PasswordConnectRequest) (*driven.ConnectedMailbox, error) {
+func (c *stubPasswordConnector) Connect(ctx context.Context, req domainaccounts.PasswordConnectRequest) (*domainaccounts.ConnectedMailbox, error) {
 	if c.err != nil {
 		return nil, c.err
 	}
-	return &driven.ConnectedMailbox{Email: req.Email, DefaultLabel: req.Email, Credential: []byte(req.Password)}, nil
+	return &domainaccounts.ConnectedMailbox{Email: req.Email, DefaultLabel: req.Email, Credential: []byte(req.Password)}, nil
 }
 
-func (f *fixture) passwordService(conn driven.PasswordMailConnector) *appaccounts.Service {
+func (f *fixture) passwordService(conn domainaccounts.PasswordMailConnector) *appaccounts.Service {
 	return appaccounts.NewService(appaccounts.Deps{
 		Accounts: f.repo, OAuthState: f.repo, Vault: f.vault,
-		PasswordConnectors: map[string]driven.PasswordMailConnector{"imap": conn},
+		PasswordConnectors: map[string]domainaccounts.PasswordMailConnector{"imap": conn},
 	})
 }
 
 func imapInput(email, password string) appaccounts.ConnectWithPasswordInput {
 	return appaccounts.ConnectWithPasswordInput{
 		Provider: "imap",
-		Request:  driven.PasswordConnectRequest{Email: email, Password: password},
+		Request:  domainaccounts.PasswordConnectRequest{Email: email, Password: password},
 	}
 }
 
 // Credentials the servers refuse are never stored.
 func TestPasswordConnectStoresNothingWhenRejected(t *testing.T) {
 	f := setup(t)
-	svc := f.passwordService(&stubPasswordConnector{err: driven.ConnectRejected("wrong password")})
-	if _, err := svc.ConnectWithPassword(context.Background(), f.userID, imapInput("me@fastmail.com", "nope")); !errors.Is(err, driven.ErrConnectRejected) {
+	svc := f.passwordService(&stubPasswordConnector{err: domainaccounts.ConnectRejected("wrong password")})
+	if _, err := svc.ConnectWithPassword(context.Background(), f.userID, imapInput("me@fastmail.com", "nope")); !errors.Is(err, domainaccounts.ErrConnectRejected) {
 		t.Fatalf("err = %v, want ErrConnectRejected", err)
 	}
 	if rows, _ := f.repo.ListAccounts(context.Background(), f.userID); len(rows) != 0 {
@@ -330,7 +333,7 @@ func TestPasswordConnectForAnUnconfiguredProviderIsUnsupported(t *testing.T) {
 	svc := f.passwordService(&stubPasswordConnector{})
 	in := imapInput("me@fastmail.com", "pw")
 	in.Provider = "pop3"
-	if _, err := svc.ConnectWithPassword(context.Background(), f.userID, in); !errors.Is(err, driven.ErrUnsupportedProvider) {
+	if _, err := svc.ConnectWithPassword(context.Background(), f.userID, in); !errors.Is(err, domainaccounts.ErrUnsupportedProvider) {
 		t.Fatalf("err = %v, want ErrUnsupportedProvider", err)
 	}
 }

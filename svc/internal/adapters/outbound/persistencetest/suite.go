@@ -8,33 +8,43 @@ import (
 	"testing"
 	"time"
 
-	"github.com/Kapital-B/automata/svc/internal/application/ports/driven"
 	appprojects "github.com/Kapital-B/automata/svc/internal/application/projects"
+	domainaccounts "github.com/Kapital-B/automata/svc/internal/domain/accounts"
+	domainai "github.com/Kapital-B/automata/svc/internal/domain/ai"
+	domainauth "github.com/Kapital-B/automata/svc/internal/domain/auth"
+	domaincontacts "github.com/Kapital-B/automata/svc/internal/domain/contacts"
+	domaincontradictions "github.com/Kapital-B/automata/svc/internal/domain/contradictions"
+	domaindecisions "github.com/Kapital-B/automata/svc/internal/domain/decisions"
+	domainfacts "github.com/Kapital-B/automata/svc/internal/domain/facts"
+	domainissues "github.com/Kapital-B/automata/svc/internal/domain/issues"
+	domainjobs "github.com/Kapital-B/automata/svc/internal/domain/jobs"
+	domainmessages "github.com/Kapital-B/automata/svc/internal/domain/messages"
+	domainorganisations "github.com/Kapital-B/automata/svc/internal/domain/organisations"
 	domainprojects "github.com/Kapital-B/automata/svc/internal/domain/projects"
 	"github.com/google/uuid"
 )
 
 type Repository interface {
-	driven.UserRepository
-	driven.AccountRepository
-	driven.MessageRepository
-	driven.OAuthStateRepository
-	driven.AuthSessionRepository
-	driven.OrganisationRepository
-	driven.ContactRepository
-	driven.ProjectRepository
-	driven.ManualItemRepository
-	driven.IssueRepository
-	driven.FactRepository
-	driven.DecisionRepository
-	driven.ContradictionRepository
-	driven.TimelineRepository
-	driven.AssignmentRepository
-	driven.SummaryRepository
-	driven.ScheduleRepository
-	driven.ForwardRepository
-	driven.LLMUsageRepository
-	driven.MessageSearchRepository
+	domainauth.UserRepository
+	domainaccounts.AccountRepository
+	domainmessages.MessageRepository
+	domainauth.OAuthStateRepository
+	domainauth.AuthSessionRepository
+	domainorganisations.OrganisationRepository
+	domaincontacts.ContactRepository
+	domainprojects.ProjectRepository
+	domainprojects.ManualItemRepository
+	domainissues.IssueRepository
+	domainfacts.FactRepository
+	domaindecisions.DecisionRepository
+	domaincontradictions.ContradictionRepository
+	domainprojects.TimelineRepository
+	domainprojects.AssignmentRepository
+	domainmessages.SummaryRepository
+	domainjobs.ScheduleRepository
+	domainmessages.ForwardRepository
+	domainai.LLMUsageRepository
+	domainmessages.MessageSearchRepository
 	MarkScheduleExecutedIfDue(ctx context.Context, id uuid.UUID, scheduledFor, lastRunAt, nextRunAt time.Time) (bool, error)
 }
 
@@ -133,7 +143,7 @@ func Run(t *testing.T, factory Factory) {
 		if err := h.Repo.MergeContacts(ctx, org1, c1, other, now); err != nil {
 			t.Fatal(err)
 		}
-		list, err := h.Repo.ListContacts(ctx, org1, driven.ContactListFilter{})
+		list, err := h.Repo.ListContacts(ctx, org1, domaincontacts.ContactListFilter{})
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -145,7 +155,7 @@ func Run(t *testing.T, factory Factory) {
 			t.Fatalf("merged contact primary email = %q", e)
 		}
 		// Search takes a different query and must fill it too.
-		found, err := h.Repo.ListContacts(ctx, org2, driven.ContactListFilter{Query: "acme"})
+		found, err := h.Repo.ListContacts(ctx, org2, domaincontacts.ContactListFilter{Query: "acme"})
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -182,7 +192,7 @@ func Run(t *testing.T, factory Factory) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		items, err := svc.GetTimeline(ctx, userID, project.ID, driven.TimelineFilter{Source: "all", Limit: 20})
+		items, err := svc.GetTimeline(ctx, userID, project.ID, domainprojects.TimelineFilter{Source: "all", Limit: 20})
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -203,14 +213,14 @@ func Run(t *testing.T, factory Factory) {
 		now := time.Now().UTC()
 		userID := uuid.MustParse("a0000001-0000-4000-8000-000000000001")
 		accountID := uuid.New()
-		if err := h.Repo.InsertAccount(ctx, driven.AccountRow{
+		if err := h.Repo.InsertAccount(ctx, domainaccounts.AccountRow{
 			UserID: userID, ID: accountID, Label: "Work", Provider: "m365", MsAccountKind: "work", PrimaryEmail: "work@example.com", ConnectionStatus: "connected",
 		}, []byte("cipher")); err != nil {
 			t.Fatal(err)
 		}
 		msgID := uuid.New()
 		body := "Please settle your invoice."
-		if err := h.Repo.UpsertMessage(ctx, driven.MessageRow{
+		if err := h.Repo.UpsertMessage(ctx, domainmessages.MessageRow{
 			ID: msgID, AccountID: accountID, ProviderMessageID: "provider-1", ReceivedAt: now, Subject: "Invoice", FromJSON: `{"name":"Stripe","address":"billing@example.com"}`,
 			BodyText: &body, CreatedAt: now, UpdatedAt: now,
 		}); err != nil {
@@ -222,17 +232,17 @@ func Run(t *testing.T, factory Factory) {
 		}
 		runID := uuid.New()
 		ensureLegacyJobRunIfPresent(t, h.DB, runID, accountID, now)
-		if err := h.Repo.UpsertMessageCategory(ctx, driven.MessageCategoryRow{
+		if err := h.Repo.UpsertMessageCategory(ctx, domainmessages.MessageCategoryRow{
 			ID: uuid.New(), MessageID: msgID, AccountID: accountID, CategoryID: def.ID, Source: "llm", Confidence: ptrFloat(0.9), RunID: runID, CreatedAt: now, UpdatedAt: now,
 		}); err != nil {
 			t.Fatal(err)
 		}
-		if err := h.Repo.UpsertSummarySettings(ctx, driven.SummarySettingsRow{
+		if err := h.Repo.UpsertSummarySettings(ctx, domainmessages.SummarySettingsRow{
 			UserID: userID, IncludeCategorySlugs: nil, ExcludeCategorySlugs: []string{"spam"}, ChunkSize: 12, UpdatedAt: now,
 		}); err != nil {
 			t.Fatal(err)
 		}
-		snapshot := driven.SummarySnapshotRow{
+		snapshot := domainmessages.SummarySnapshotRow{
 			ID: uuid.New(), UserID: userID, AccountID: &accountID, RunID: runID, WindowStart: now.Add(-time.Hour), WindowEnd: now, GeneralSummary: "ok", CreatedAt: now,
 		}
 		if err := h.Repo.InsertSummarySnapshot(ctx, snapshot); err != nil {
@@ -246,12 +256,12 @@ func Run(t *testing.T, factory Factory) {
 			t.Fatal("expected summary snapshot")
 		}
 		actionID := uuid.New()
-		if err := h.Repo.InsertActionItems(ctx, []driven.ActionItemRow{{
+		if err := h.Repo.InsertActionItems(ctx, []domainmessages.ActionItemRow{{
 			ID: actionID, UserID: userID, AccountID: accountID, MessageID: msgID, RunID: runID, Text: "Reply", Status: "open", CreatedAt: now, UpdatedAt: now,
 		}}); err != nil {
 			t.Fatal(err)
 		}
-		if err := h.Repo.InsertFYI(ctx, []driven.FYIRow{{
+		if err := h.Repo.InsertFYI(ctx, []domainmessages.FYIRow{{
 			ID: uuid.New(), UserID: userID, AccountID: accountID, MessageID: msgID, RunID: runID, Text: "FYI", CreatedAt: now,
 		}}); err != nil {
 			t.Fatal(err)
@@ -260,12 +270,12 @@ func Run(t *testing.T, factory Factory) {
 			t.Fatal(err)
 		}
 		ruleID := uuid.New()
-		if err := h.Repo.CreateForwardRule(ctx, driven.ForwardRuleRow{
+		if err := h.Repo.CreateForwardRule(ctx, domainmessages.ForwardRuleRow{
 			ID: ruleID, UserID: userID, AccountID: accountID, Name: "Forward", Mode: "logic", ConditionJSON: `{"all":[]}`, ForwardTo: "bills@example.com", Enabled: true, CreatedAt: now, UpdatedAt: now,
 		}); err != nil {
 			t.Fatal(err)
 		}
-		if err := h.Repo.InsertForwardAudit(ctx, driven.ForwardAuditRow{
+		if err := h.Repo.InsertForwardAudit(ctx, domainmessages.ForwardAuditRow{
 			ID: uuid.New(), UserID: userID, AccountID: accountID, MessageID: msgID, RuleID: ruleID, RunID: runID, Status: "forwarded", CreatedAt: now,
 		}); err != nil {
 			t.Fatal(err)
@@ -277,7 +287,7 @@ func Run(t *testing.T, factory Factory) {
 		if len(audit) != 1 || audit[0].Status != "forwarded" {
 			t.Fatalf("expected forward audit row, got %+v", audit)
 		}
-		if err := h.Repo.InsertDraftSuggestions(ctx, []driven.DraftSuggestionRow{{
+		if err := h.Repo.InsertDraftSuggestions(ctx, []domainmessages.DraftSuggestionRow{{
 			ID: uuid.New(), UserID: userID, AccountID: accountID, MessageID: msgID, ActionItemID: actionID, RunID: runID, Subject: "First", Body: "Body", Model: "test", CreatedAt: now, UpdatedAt: ptrTime(now),
 		}}); err != nil {
 			t.Fatal(err)
@@ -290,7 +300,7 @@ func Run(t *testing.T, factory Factory) {
 			t.Fatalf("expected draft suggestion row, got %+v", drafts)
 		}
 		scheduleID := uuid.New()
-		if err := h.Repo.ReplaceSchedulesByUser(ctx, userID, []driven.ScheduleChainRow{{
+		if err := h.Repo.ReplaceSchedulesByUser(ctx, userID, []domainjobs.ScheduleChainRow{{
 			ID: scheduleID, UserID: userID, Name: "Nightly", AccountID: &accountID, Jobs: []string{"sync", "summarize"}, IntervalMinutes: 60, Enabled: true, NextRunAt: now, CreatedAt: now, UpdatedAt: now,
 		}}); err != nil {
 			t.Fatal(err)
@@ -351,7 +361,7 @@ func Run(t *testing.T, factory Factory) {
 			msgID := insertMsg(t, h.Repo, accountID, tc.name, tc.conversation, "body", now.Add(-time.Duration(i)*time.Minute))
 			ids[tc.name] = msgID
 			if tc.thread != nil {
-				row := driven.AssignmentRow{
+				row := domainprojects.AssignmentRow{
 					ID: uuid.New(), OrganisationID: orgID, AccountID: accountID,
 					ConversationID: tc.conversation, Status: tc.threadStatus,
 					Reason: "seed", Source: string(domainprojects.SourceRule), CreatedAt: now, UpdatedAt: now,
@@ -366,7 +376,7 @@ func Run(t *testing.T, factory Factory) {
 			}
 			if tc.override != nil {
 				mid := msgID
-				row := driven.AssignmentRow{
+				row := domainprojects.AssignmentRow{
 					OrganisationID: orgID, AccountID: accountID, MessageID: &mid,
 					Status: tc.ovrStatus, Reason: "seed", Source: string(domainprojects.SourceUser),
 					CreatedAt: now, UpdatedAt: now,
@@ -381,11 +391,11 @@ func Run(t *testing.T, factory Factory) {
 			}
 		}
 
-		items, err := h.Repo.ListUnassigned(ctx, userID, driven.UnassignedListFilter{Status: "all", Limit: 100})
+		items, err := h.Repo.ListUnassigned(ctx, userID, domainprojects.UnassignedListFilter{Status: "all", Limit: 100})
 		if err != nil {
 			t.Fatal(err)
 		}
-		queued := map[uuid.UUID]driven.UnassignedItem{}
+		queued := map[uuid.UUID]domainprojects.UnassignedItem{}
 		for _, it := range items {
 			if it.MessageID != nil {
 				queued[*it.MessageID] = it
@@ -430,14 +440,14 @@ func Run(t *testing.T, factory Factory) {
 		insertMsg(t, h.Repo, accountID, "loose a", "", "body", now.Add(-10*time.Minute))
 		insertMsg(t, h.Repo, accountID, "loose b", "", "body", now.Add(-11*time.Minute))
 
-		items, err := h.Repo.ListUnassigned(ctx, userID, driven.UnassignedListFilter{Status: "all", Limit: 100})
+		items, err := h.Repo.ListUnassigned(ctx, userID, domainprojects.UnassignedListFilter{Status: "all", Limit: 100})
 		if err != nil {
 			t.Fatal(err)
 		}
 		if len(items) != 3 {
 			t.Fatalf("want 3 queue rows (1 thread + 2 loose), got %d", len(items))
 		}
-		var threadRow *driven.UnassignedItem
+		var threadRow *domainprojects.UnassignedItem
 		for i := range items {
 			if items[i].ConversationID != nil && *items[i].ConversationID == "conv-1" {
 				threadRow = &items[i]
@@ -478,7 +488,7 @@ func Run(t *testing.T, factory Factory) {
 		insertMsg(t, h.Repo, accountID, "m b", "conv-x", "body", now.Add(-time.Minute))
 
 		// Thread is provisional, but one message is individually cleared.
-		if err := h.Repo.UpsertThreadAssignment(ctx, driven.AssignmentRow{
+		if err := h.Repo.UpsertThreadAssignment(ctx, domainprojects.AssignmentRow{
 			ID: uuid.New(), OrganisationID: orgID, AccountID: accountID, ConversationID: "conv-x",
 			ProjectID: &projectID, Status: "provisional", Reason: "seed",
 			Source: string(domainprojects.SourceRule), CreatedAt: now, UpdatedAt: now,
@@ -486,7 +496,7 @@ func Run(t *testing.T, factory Factory) {
 			t.Fatal(err)
 		}
 		mid := a
-		if err := h.Repo.UpsertMessageOverride(ctx, driven.AssignmentRow{
+		if err := h.Repo.UpsertMessageOverride(ctx, domainprojects.AssignmentRow{
 			OrganisationID: orgID, AccountID: accountID, MessageID: &mid,
 			Status: "committed", Reason: "seed", Source: string(domainprojects.SourceUser),
 			CreatedAt: now, UpdatedAt: now,
@@ -494,7 +504,7 @@ func Run(t *testing.T, factory Factory) {
 			t.Fatal(err)
 		}
 
-		items, err := h.Repo.ListUnassigned(ctx, userID, driven.UnassignedListFilter{Status: "all", Limit: 100})
+		items, err := h.Repo.ListUnassigned(ctx, userID, domainprojects.UnassignedListFilter{Status: "all", Limit: 100})
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -524,7 +534,7 @@ func Run(t *testing.T, factory Factory) {
 		for i := 0; i < 5; i++ {
 			conv := fmt.Sprintf("prov-%d", i)
 			insertMsg(t, h.Repo, accountID, conv, conv, "body", now.Add(-time.Duration(i*2)*time.Minute))
-			if err := h.Repo.UpsertThreadAssignment(ctx, driven.AssignmentRow{
+			if err := h.Repo.UpsertThreadAssignment(ctx, domainprojects.AssignmentRow{
 				ID: uuid.New(), OrganisationID: orgID, AccountID: accountID, ConversationID: conv,
 				ProjectID: &projectID, Status: "provisional", Reason: "seed",
 				Source: string(domainprojects.SourceRule), CreatedAt: now, UpdatedAt: now,
@@ -535,14 +545,14 @@ func Run(t *testing.T, factory Factory) {
 			insertMsg(t, h.Repo, accountID, plain, plain, "body", now.Add(-time.Duration(i*2+1)*time.Minute))
 		}
 
-		all, err := h.Repo.ListUnassigned(ctx, userID, driven.UnassignedListFilter{Status: "all", Limit: 100})
+		all, err := h.Repo.ListUnassigned(ctx, userID, domainprojects.UnassignedListFilter{Status: "all", Limit: 100})
 		if err != nil {
 			t.Fatal(err)
 		}
 		if len(all) != 10 {
 			t.Fatalf("want 10 rows, got %d", len(all))
 		}
-		prov, err := h.Repo.ListUnassigned(ctx, userID, driven.UnassignedListFilter{Status: "provisional", Limit: 100})
+		prov, err := h.Repo.ListUnassigned(ctx, userID, domainprojects.UnassignedListFilter{Status: "provisional", Limit: 100})
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -556,15 +566,15 @@ func Run(t *testing.T, factory Factory) {
 		}
 
 		// Pagination must be a window over the filtered set, not over raw candidates.
-		page1, err := h.Repo.ListUnassigned(ctx, userID, driven.UnassignedListFilter{Status: "all", Limit: 4, Offset: 0})
+		page1, err := h.Repo.ListUnassigned(ctx, userID, domainprojects.UnassignedListFilter{Status: "all", Limit: 4, Offset: 0})
 		if err != nil {
 			t.Fatal(err)
 		}
-		page2, err := h.Repo.ListUnassigned(ctx, userID, driven.UnassignedListFilter{Status: "all", Limit: 4, Offset: 4})
+		page2, err := h.Repo.ListUnassigned(ctx, userID, domainprojects.UnassignedListFilter{Status: "all", Limit: 4, Offset: 4})
 		if err != nil {
 			t.Fatal(err)
 		}
-		page3, err := h.Repo.ListUnassigned(ctx, userID, driven.UnassignedListFilter{Status: "all", Limit: 4, Offset: 8})
+		page3, err := h.Repo.ListUnassigned(ctx, userID, domainprojects.UnassignedListFilter{Status: "all", Limit: 4, Offset: 8})
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -572,7 +582,7 @@ func Run(t *testing.T, factory Factory) {
 			t.Fatalf("page sizes = %d/%d/%d, want 4/4/2", len(page1), len(page2), len(page3))
 		}
 		seen := map[uuid.UUID]bool{}
-		for _, pg := range [][]driven.UnassignedItem{page1, page2, page3} {
+		for _, pg := range [][]domainprojects.UnassignedItem{page1, page2, page3} {
 			for _, it := range pg {
 				if it.MessageID == nil {
 					continue
@@ -611,7 +621,7 @@ func Run(t *testing.T, factory Factory) {
 		// Both calls resolve the home org first, then run one statement. The
 		// pre-rewrite implementation issued two to three per candidate message.
 		h.Counter.Reset()
-		if _, err := h.Repo.ListUnassigned(ctx, userID, driven.UnassignedListFilter{Status: "all", Limit: 50}); err != nil {
+		if _, err := h.Repo.ListUnassigned(ctx, userID, domainprojects.UnassignedListFilter{Status: "all", Limit: 50}); err != nil {
 			t.Fatal(err)
 		}
 		if n := h.Counter.Count(); n > 3 {
@@ -627,7 +637,7 @@ func Run(t *testing.T, factory Factory) {
 		}
 
 		h.Counter.Reset()
-		if _, err := h.Repo.ListMessagesNeedingAssign(ctx, userID, accountID, driven.AssignCandidateFilter{Limit: 500}); err != nil {
+		if _, err := h.Repo.ListMessagesNeedingAssign(ctx, userID, accountID, domainprojects.AssignCandidateFilter{Limit: 500}); err != nil {
 			t.Fatal(err)
 		}
 		if n := h.Counter.Count(); n > 3 {
@@ -652,7 +662,7 @@ func Run(t *testing.T, factory Factory) {
 		// and on DSQL it eats the 128 MiB query-memory budget.
 		for name, call := range map[string]func() error{
 			"ListUnassigned": func() error {
-				_, err := h.Repo.ListUnassigned(ctx, userID, driven.UnassignedListFilter{Status: "all", Limit: 50})
+				_, err := h.Repo.ListUnassigned(ctx, userID, domainprojects.UnassignedListFilter{Status: "all", Limit: 50})
 				return err
 			},
 			"CountUnassignedSummary": func() error {
@@ -687,7 +697,7 @@ func Run(t *testing.T, factory Factory) {
 
 		// A contact who participates in both a mail thread and a paste.
 		contactID := uuid.New()
-		if err := h.Repo.CreateContact(ctx, driven.ContactRow{
+		if err := h.Repo.CreateContact(ctx, domaincontacts.ContactRow{
 			ID: contactID, OrganisationID: orgID, DisplayName: "Dana Reed", CreatedAt: now, UpdatedAt: now,
 		}); err != nil {
 			t.Fatal(err)
@@ -699,7 +709,7 @@ func Run(t *testing.T, factory Factory) {
 			conv := fmt.Sprintf("tl-conv-%d", i)
 			msgID := insertMsg(t, h.Repo, accountID, "project mail", conv, "body", now.Add(-time.Duration(i)*time.Minute))
 			messageIDs = append(messageIDs, msgID)
-			if err := h.Repo.UpsertThreadAssignment(ctx, driven.AssignmentRow{
+			if err := h.Repo.UpsertThreadAssignment(ctx, domainprojects.AssignmentRow{
 				ID: uuid.New(), OrganisationID: orgID, AccountID: accountID, ConversationID: conv,
 				ProjectID: &projectID, Status: "committed", Reason: "seed",
 				Source: string(domainprojects.SourceUser), CreatedAt: now, UpdatedAt: now,
@@ -707,7 +717,7 @@ func Run(t *testing.T, factory Factory) {
 				t.Fatal(err)
 			}
 			mid := msgID
-			if err := h.Repo.UpsertParticipant(ctx, driven.CorrespondenceParticipantRow{
+			if err := h.Repo.UpsertParticipant(ctx, domaincontacts.CorrespondenceParticipantRow{
 				ID: uuid.New(), OrganisationID: orgID, ContactID: contactID, Role: "to", MessageID: &mid,
 			}); err != nil {
 				t.Fatal(err)
@@ -716,7 +726,7 @@ func Run(t *testing.T, factory Factory) {
 
 		manualID := uuid.New()
 		reason, source := "user_paste", string(domainprojects.SourceUser)
-		if err := h.Repo.CreateManualItem(ctx, driven.ManualItemRow{
+		if err := h.Repo.CreateManualItem(ctx, domainprojects.ManualItemRow{
 			ID: manualID, OrganisationID: orgID, Channel: "note", OccurredAt: now,
 			Title: "Site note", BodyText: "pasted", ProjectID: &projectID,
 			AssignmentStatus: "committed", AssignmentReason: &reason, AssignmentSource: &source,
@@ -724,7 +734,7 @@ func Run(t *testing.T, factory Factory) {
 		}); err != nil {
 			t.Fatal(err)
 		}
-		if err := h.Repo.UpsertParticipant(ctx, driven.CorrespondenceParticipantRow{
+		if err := h.Repo.UpsertParticipant(ctx, domaincontacts.CorrespondenceParticipantRow{
 			ID: uuid.New(), OrganisationID: orgID, ContactID: contactID, Role: "to", ManualItemID: &manualID,
 		}); err != nil {
 			t.Fatal(err)
@@ -732,20 +742,20 @@ func Run(t *testing.T, factory Factory) {
 
 		// One message and the paste belong to an issue.
 		issueID := uuid.New()
-		if err := h.Repo.CreateIssue(ctx, driven.IssueRow{
+		if err := h.Repo.CreateIssue(ctx, domainissues.IssueRow{
 			ID: issueID, OrganisationID: orgID, ProjectID: projectID, Title: "Leak",
 			Status: "open", CreatedAt: now, UpdatedAt: now,
 		}); err != nil {
 			t.Fatal(err)
 		}
 		linkedMsg := messageIDs[0]
-		if err := h.Repo.AddIssueItem(ctx, driven.IssueItemRow{
+		if err := h.Repo.AddIssueItem(ctx, domainissues.IssueItemRow{
 			ID: uuid.New(), IssueID: issueID, MessageID: &linkedMsg, AddedAt: now,
 		}); err != nil {
 			t.Fatal(err)
 		}
 		linkedManual := manualID
-		if err := h.Repo.AddIssueItem(ctx, driven.IssueItemRow{
+		if err := h.Repo.AddIssueItem(ctx, domainissues.IssueItemRow{
 			ID: uuid.New(), IssueID: issueID, ManualItemID: &linkedManual, AddedAt: now,
 		}); err != nil {
 			t.Fatal(err)
@@ -754,7 +764,7 @@ func Run(t *testing.T, factory Factory) {
 		if h.Counter != nil {
 			h.Counter.Reset()
 		}
-		items, err := h.Repo.ListProjectTimeline(ctx, userID, orgID, projectID, driven.TimelineFilter{Limit: 100})
+		items, err := h.Repo.ListProjectTimeline(ctx, userID, orgID, projectID, domainprojects.TimelineFilter{Limit: 100})
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -794,7 +804,7 @@ func Run(t *testing.T, factory Factory) {
 
 		// The unassigned-to-issue filter depends on hydration having happened.
 		unlinked, err := h.Repo.ListProjectTimeline(ctx, userID, orgID, projectID,
-			driven.TimelineFilter{Limit: 100, UnassignedToIssue: true})
+			domainprojects.TimelineFilter{Limit: 100, UnassignedToIssue: true})
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -828,7 +838,7 @@ func Run(t *testing.T, factory Factory) {
 		}
 
 		seen := map[uuid.UUID]int{}
-		filter := driven.MessageListFilter{AccountID: &accountID, Limit: 5, OmitBody: true}
+		filter := domainmessages.MessageListFilter{AccountID: &accountID, Limit: 5, OmitBody: true}
 		for page := 0; page < 10; page++ {
 			got, err := h.Repo.ListMessages(ctx, userID, filter)
 			if err != nil {
@@ -885,7 +895,7 @@ func Run(t *testing.T, factory Factory) {
 
 		// Assignment pages newest first, before the cursor.
 		seen := map[uuid.UUID]int{}
-		filter := driven.AssignCandidateFilter{Limit: 2}
+		filter := domainprojects.AssignCandidateFilter{Limit: 2}
 		for page := 0; page < 10; page++ {
 			got, err := h.Repo.ListMessagesNeedingAssign(ctx, userID, accountID, filter)
 			if err != nil {
@@ -908,7 +918,7 @@ func Run(t *testing.T, factory Factory) {
 		}
 		epoch := time.Unix(0, 0).UTC()
 		ruleID := uuid.New()
-		if err := h.Repo.CreateForwardRule(ctx, driven.ForwardRuleRow{
+		if err := h.Repo.CreateForwardRule(ctx, domainmessages.ForwardRuleRow{
 			ID: ruleID, UserID: userID, AccountID: accountID, Name: "r", Mode: "logic",
 			ConditionJSON: `{"all":[{"field":"subject","op":"contains","value":"x"}]}`, ForwardTo: "dest@example.com",
 			Enabled: true, ApplyFrom: &epoch, CreatedAt: now, UpdatedAt: now,
@@ -916,7 +926,7 @@ func Run(t *testing.T, factory Factory) {
 			t.Fatal(err)
 		}
 		seen = map[uuid.UUID]int{}
-		var after *driven.ForwardCandidateCursor
+		var after *domainmessages.ForwardCandidateCursor
 		for page := 0; page < 10; page++ {
 			got, err := h.Repo.ListForwardCandidates(ctx, userID, accountID, []uuid.UUID{ruleID}, after, 2)
 			if err != nil {
@@ -929,7 +939,7 @@ func Run(t *testing.T, factory Factory) {
 				seen[m.ID]++
 			}
 			last := got[len(got)-1]
-			after = &driven.ForwardCandidateCursor{ReceivedAt: last.ReceivedAt, MessageID: last.ID}
+			after = &domainmessages.ForwardCandidateCursor{ReceivedAt: last.ReceivedAt, MessageID: last.ID}
 		}
 		check("forward", seen)
 	})
@@ -942,7 +952,7 @@ func Run(t *testing.T, factory Factory) {
 		to := time.Date(2026, 11, 1, 0, 0, 0, 0, time.UTC)
 		insert := func(user *uuid.UUID, feature, model string, at time.Time, in, out, read, write int) {
 			t.Helper()
-			if err := h.Repo.InsertLLMUsage(ctx, driven.LLMUsageRow{
+			if err := h.Repo.InsertLLMUsage(ctx, domainai.LLMUsageRow{
 				ID: uuid.New(), UserID: user, AccountID: &accountID, Feature: feature, Model: model,
 				InputTokens: in, OutputTokens: out, CacheReadTokens: read, CacheWriteTokens: write, CreatedAt: at,
 			}); err != nil {
@@ -962,7 +972,7 @@ func Run(t *testing.T, factory Factory) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		want := []driven.LLMUsageTotal{
+		want := []domainai.LLMUsageTotal{
 			{Feature: "ask", Model: "m1", Calls: 1, InputTokens: 1000, OutputTokens: 300, CacheReadTokens: 4000, CacheWriteTokens: 500},
 			{Feature: "categorize", Model: "m1", Calls: 2, InputTokens: 300, OutputTokens: 30, CacheReadTokens: 5},
 			{Feature: "categorize", Model: "m2", Calls: 1, InputTokens: 7, OutputTokens: 1},
@@ -992,7 +1002,7 @@ func Run(t *testing.T, factory Factory) {
 
 		codes := func(member *uuid.UUID) string {
 			t.Helper()
-			rows, err := h.Repo.ListProjects(ctx, orgID, driven.ProjectListFilter{MemberUserID: member, Limit: 50})
+			rows, err := h.Repo.ListProjects(ctx, orgID, domainprojects.ProjectListFilter{MemberUserID: member, Limit: 50})
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -1025,7 +1035,7 @@ func Run(t *testing.T, factory Factory) {
 		newFact := func(key string) uuid.UUID {
 			t.Helper()
 			id := uuid.New()
-			if err := h.Repo.CreateFact(ctx, driven.FactRow{
+			if err := h.Repo.CreateFact(ctx, domainfacts.FactRow{
 				ID: id, OrganisationID: orgID, ProjectID: projectID,
 				SubjectKey: key, Label: key, CreatedAt: now, UpdatedAt: now,
 			}); err != nil {
@@ -1036,14 +1046,14 @@ func Run(t *testing.T, factory Factory) {
 		newVersion := func(factID uuid.UUID, status string, evidence ...uuid.UUID) uuid.UUID {
 			t.Helper()
 			id := uuid.New()
-			if err := h.Repo.CreateFactVersion(ctx, driven.FactVersionRow{
+			if err := h.Repo.CreateFactVersion(ctx, domainfacts.FactVersionRow{
 				ID: id, FactID: factID, Status: status, ValueJSON: `{}`, ValueText: status, Source: "user", CreatedAt: now,
 			}); err != nil {
 				t.Fatal(err)
 			}
 			for i, m := range evidence {
 				m := m
-				if err := h.Repo.AddFactEvidence(ctx, driven.FactEvidenceRow{
+				if err := h.Repo.AddFactEvidence(ctx, domainfacts.FactEvidenceRow{
 					ID: uuid.New(), FactVersionID: id, MessageID: &m, AddedAt: now.Add(time.Duration(i) * time.Second),
 				}); err != nil {
 					t.Fatal(err)
@@ -1102,7 +1112,7 @@ func Run(t *testing.T, factory Factory) {
 		dc41 := createProject(t, h.Repo, orgID, userID, "DC41", "Valves")
 		assign := func(conv string, project uuid.UUID) {
 			t.Helper()
-			if err := h.Repo.UpsertThreadAssignment(ctx, driven.AssignmentRow{
+			if err := h.Repo.UpsertThreadAssignment(ctx, domainprojects.AssignmentRow{
 				ID: uuid.New(), OrganisationID: orgID, AccountID: accountID, ConversationID: conv, ProjectID: &project,
 				Status: "committed", Reason: "seed", Source: string(domainprojects.SourceRule), CreatedAt: now, UpdatedAt: now,
 			}); err != nil {
@@ -1124,14 +1134,14 @@ func Run(t *testing.T, factory Factory) {
 		}
 		for _, m := range []uuid.UUID{m2, m5} {
 			m := m
-			if err := h.Repo.UpsertParticipant(ctx, driven.CorrespondenceParticipantRow{
+			if err := h.Repo.UpsertParticipant(ctx, domaincontacts.CorrespondenceParticipantRow{
 				ID: uuid.New(), OrganisationID: orgID, ContactID: jan, Role: "from", MessageID: &m,
 			}); err != nil {
 				t.Fatal(err)
 			}
 		}
 
-		search := func(f driven.MessageSearchFilter) []uuid.UUID {
+		search := func(f domainmessages.MessageSearchFilter) []uuid.UUID {
 			t.Helper()
 			hits, err := h.Repo.SearchMessages(ctx, userID, f)
 			if err != nil {
@@ -1145,26 +1155,26 @@ func Run(t *testing.T, factory Factory) {
 		}
 		yesterday := now.Add(-24 * time.Hour)
 		for name, tc := range map[string]struct {
-			f    driven.MessageSearchFilter
+			f    domainmessages.MessageSearchFilter
 			want []uuid.UUID
 		}{
 			// m1: seal and p-03 in subject (2+2) and body (1+1) = 6;
 			// m5: seal in subject = 2; m2: seal in body = 1.
-			"ranked by score":        {driven.MessageSearchFilter{Terms: []string{"seal", "p-03"}}, []uuid.UUID{m1, m5, m2}},
-			"project scope":          {driven.MessageSearchFilter{Terms: []string{"seal"}, ProjectIDs: []uuid.UUID{dc41}}, []uuid.UUID{m2}},
-			"contact scope":          {driven.MessageSearchFilter{Terms: []string{"seal"}, ContactIDs: []uuid.UUID{jan}}, []uuid.UUID{m5, m2}},
-			"since":                  {driven.MessageSearchFilter{Terms: []string{"seal"}, Since: &yesterday}, []uuid.UUID{m1, m2}},
-			"wildcards are literal":  {driven.MessageSearchFilter{Terms: []string{"100%"}}, []uuid.UUID{m4}},
-			"no terms, newest first": {driven.MessageSearchFilter{ContactIDs: []uuid.UUID{jan}}, []uuid.UUID{m2, m5}},
-			"limit":                  {driven.MessageSearchFilter{Terms: []string{"seal", "p-03"}, Limit: 1}, []uuid.UUID{m1}},
-			"nothing to search by":   {driven.MessageSearchFilter{}, []uuid.UUID{}},
+			"ranked by score":        {domainmessages.MessageSearchFilter{Terms: []string{"seal", "p-03"}}, []uuid.UUID{m1, m5, m2}},
+			"project scope":          {domainmessages.MessageSearchFilter{Terms: []string{"seal"}, ProjectIDs: []uuid.UUID{dc41}}, []uuid.UUID{m2}},
+			"contact scope":          {domainmessages.MessageSearchFilter{Terms: []string{"seal"}, ContactIDs: []uuid.UUID{jan}}, []uuid.UUID{m5, m2}},
+			"since":                  {domainmessages.MessageSearchFilter{Terms: []string{"seal"}, Since: &yesterday}, []uuid.UUID{m1, m2}},
+			"wildcards are literal":  {domainmessages.MessageSearchFilter{Terms: []string{"100%"}}, []uuid.UUID{m4}},
+			"no terms, newest first": {domainmessages.MessageSearchFilter{ContactIDs: []uuid.UUID{jan}}, []uuid.UUID{m2, m5}},
+			"limit":                  {domainmessages.MessageSearchFilter{Terms: []string{"seal", "p-03"}, Limit: 1}, []uuid.UUID{m1}},
+			"nothing to search by":   {domainmessages.MessageSearchFilter{}, []uuid.UUID{}},
 		} {
 			if got := search(tc.f); fmt.Sprint(got) != fmt.Sprint(tc.want) {
 				t.Errorf("%s: got %v, want %v", name, got, tc.want)
 			}
 		}
 
-		hits, err := h.Repo.SearchMessages(ctx, userID, driven.MessageSearchFilter{Terms: []string{"weeping"}})
+		hits, err := h.Repo.SearchMessages(ctx, userID, domainmessages.MessageSearchFilter{Terms: []string{"weeping"}})
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -1175,7 +1185,7 @@ func Run(t *testing.T, factory Factory) {
 
 		if h.Counter != nil {
 			h.Counter.Reset()
-			search(driven.MessageSearchFilter{Terms: []string{"seal", "p-03"}, ProjectIDs: []uuid.UUID{dc40, dc41}, ContactIDs: []uuid.UUID{jan}})
+			search(domainmessages.MessageSearchFilter{Terms: []string{"seal", "p-03"}, ProjectIDs: []uuid.UUID{dc40, dc41}, ContactIDs: []uuid.UUID{jan}})
 			if n := h.Counter.Count(); n != 1 {
 				t.Errorf("SearchMessages issued %d statements, want 1", n)
 			}
@@ -1193,7 +1203,7 @@ func Run(t *testing.T, factory Factory) {
 		threaded := insertMsg(t, h.Repo, accountID, "threaded", "conv-assigned", "body", now.Add(-time.Minute))
 		overridden := insertMsg(t, h.Repo, accountID, "overridden", "conv-ovr", "body", now.Add(-2*time.Minute))
 
-		if err := h.Repo.UpsertThreadAssignment(ctx, driven.AssignmentRow{
+		if err := h.Repo.UpsertThreadAssignment(ctx, domainprojects.AssignmentRow{
 			ID: uuid.New(), OrganisationID: orgID, AccountID: accountID, ConversationID: "conv-assigned",
 			ProjectID: &projectID, Status: "committed", Reason: "seed",
 			Source: string(domainprojects.SourceRule), CreatedAt: now, UpdatedAt: now,
@@ -1201,7 +1211,7 @@ func Run(t *testing.T, factory Factory) {
 			t.Fatal(err)
 		}
 		mid := overridden
-		if err := h.Repo.UpsertMessageOverride(ctx, driven.AssignmentRow{
+		if err := h.Repo.UpsertMessageOverride(ctx, domainprojects.AssignmentRow{
 			OrganisationID: orgID, AccountID: accountID, MessageID: &mid,
 			Status: "committed", Reason: "seed", Source: string(domainprojects.SourceUser),
 			CreatedAt: now, UpdatedAt: now,
@@ -1209,7 +1219,7 @@ func Run(t *testing.T, factory Factory) {
 			t.Fatal(err)
 		}
 
-		msgs, err := h.Repo.ListMessagesNeedingAssign(ctx, userID, accountID, driven.AssignCandidateFilter{Limit: 500})
+		msgs, err := h.Repo.ListMessagesNeedingAssign(ctx, userID, accountID, domainprojects.AssignCandidateFilter{Limit: 500})
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -1232,7 +1242,7 @@ func seedUserAccount(t *testing.T, repo Repository, userID uuid.UUID, now time.T
 		t.Fatal(err)
 	}
 	accountID := uuid.New()
-	if err := repo.InsertAccount(ctx, driven.AccountRow{
+	if err := repo.InsertAccount(ctx, domainaccounts.AccountRow{
 		UserID: userID, ID: accountID, Label: "Work", Provider: "m365", MsAccountKind: "work", PrimaryEmail: userID.String() + "@ex.com", ConnectionStatus: "connected",
 	}, []byte("tok")); err != nil {
 		t.Fatal(err)
@@ -1245,7 +1255,7 @@ func insertMsg(t *testing.T, repo Repository, accountID uuid.UUID, subject, conv
 	id := uuid.New()
 	convPtr := &conv
 	bodyPtr := &body
-	if err := repo.UpsertMessage(context.Background(), driven.MessageRow{
+	if err := repo.UpsertMessage(context.Background(), domainmessages.MessageRow{
 		ID: id, AccountID: accountID, ProviderMessageID: id.String(), Subject: subject, FromJSON: `{"address":"a@b.com"}`,
 		BodyText: bodyPtr, ConversationID: convPtr, ReceivedAt: occurredAt, CreatedAt: occurredAt, UpdatedAt: occurredAt,
 	}); err != nil {
@@ -1319,9 +1329,9 @@ func createProject(t *testing.T, repo Repository, orgID, userID uuid.UUID, code,
 	t.Helper()
 	id := uuid.New()
 	now := time.Now().UTC()
-	if err := repo.CreateProject(context.Background(), driven.ProjectRow{
+	if err := repo.CreateProject(context.Background(), domainprojects.ProjectRow{
 		ID: id, OrganisationID: orgID, Name: name, Code: code, CreatedAt: now, UpdatedAt: now,
-	}, driven.ProjectMemberRow{
+	}, domainprojects.ProjectMemberRow{
 		ID: uuid.New(), ProjectID: id, UserID: userID, Role: "owner", CreatedAt: now, UpdatedAt: now,
 	}); err != nil {
 		t.Fatal(err)
@@ -1342,7 +1352,7 @@ func runHomeOverviewTimestampTests(t *testing.T, factory Factory) {
 		projectID := createProject(t, h.Repo, orgID, userID, "DC10", "Timestamps")
 
 		factID := uuid.New()
-		if err := h.Repo.CreateFact(ctx, driven.FactRow{
+		if err := h.Repo.CreateFact(ctx, domainfacts.FactRow{
 			ID: factID, OrganisationID: orgID, ProjectID: projectID,
 			SubjectKey: "pump.duty", Label: "Pump duty", CreatedAt: now, UpdatedAt: now,
 		}); err != nil {
@@ -1352,7 +1362,7 @@ func runHomeOverviewTimestampTests(t *testing.T, factory Factory) {
 		// Proposed a week ago, with no activation time.
 		proposed := now.Add(-7 * 24 * time.Hour)
 		verID := uuid.New()
-		if err := h.Repo.CreateFactVersion(ctx, driven.FactVersionRow{
+		if err := h.Repo.CreateFactVersion(ctx, domainfacts.FactVersionRow{
 			ID: verID, FactID: factID, Status: "proposed", ValueJSON: `{"amount":90}`,
 			ValueText: "90 kW", Source: "llm", CreatedAt: proposed,
 		}); err != nil {
@@ -1397,7 +1407,7 @@ func runHomeOverviewTimestampTests(t *testing.T, factory Factory) {
 		projectID := createProject(t, h.Repo, orgID, userID, "DC11", "Timestamps")
 
 		issueID := uuid.New()
-		if err := h.Repo.CreateIssue(ctx, driven.IssueRow{
+		if err := h.Repo.CreateIssue(ctx, domainissues.IssueRow{
 			ID: issueID, OrganisationID: orgID, ProjectID: projectID, Title: "Leak",
 			Status: "open", CreatedAt: now.Add(-48 * time.Hour), UpdatedAt: now.Add(-48 * time.Hour),
 		}); err != nil {
@@ -1452,7 +1462,7 @@ func runHomeOverviewTimestampTests(t *testing.T, factory Factory) {
 		projectID := createProject(t, h.Repo, orgID, userID, "DC12", "Provenance")
 
 		extracted := uuid.New()
-		if err := h.Repo.CreateIssue(ctx, driven.IssueRow{
+		if err := h.Repo.CreateIssue(ctx, domainissues.IssueRow{
 			ID: extracted, OrganisationID: orgID, ProjectID: projectID, Title: "Seal leak",
 			Status: "open", Source: "llm", CreatedAt: now, UpdatedAt: now,
 		}); err != nil {
@@ -1461,7 +1471,7 @@ func runHomeOverviewTimestampTests(t *testing.T, factory Factory) {
 		// A row written before the column existed reads as empty, not as an
 		// error, so the API can default it to human.
 		legacy := uuid.New()
-		if err := h.Repo.CreateIssue(ctx, driven.IssueRow{
+		if err := h.Repo.CreateIssue(ctx, domainissues.IssueRow{
 			ID: legacy, OrganisationID: orgID, ProjectID: projectID, Title: "Raised by hand",
 			Status: "open", CreatedAt: now, UpdatedAt: now,
 		}); err != nil {
@@ -1512,7 +1522,7 @@ func runHomeOverviewTimestampTests(t *testing.T, factory Factory) {
 		for id, pid := range map[uuid.UUID]uuid.UUID{
 			withEvidence: projectID, withoutEvidence: projectID, elsewhere: otherProjectID,
 		} {
-			if err := h.Repo.CreateIssue(ctx, driven.IssueRow{
+			if err := h.Repo.CreateIssue(ctx, domainissues.IssueRow{
 				ID: id, OrganisationID: orgID, ProjectID: pid, Title: "Issue",
 				Status: "open", CreatedAt: now, UpdatedAt: now,
 			}); err != nil {
@@ -1521,14 +1531,14 @@ func runHomeOverviewTimestampTests(t *testing.T, factory Factory) {
 		}
 		for i := 0; i < 2; i++ {
 			manualID := uuid.New()
-			if err := h.Repo.CreateManualItem(ctx, driven.ManualItemRow{
+			if err := h.Repo.CreateManualItem(ctx, domainprojects.ManualItemRow{
 				ID: manualID, OrganisationID: orgID, Channel: "note", OccurredAt: now,
 				Title: "Note", BodyText: "text", ProjectID: &projectID,
 				AssignmentStatus: "committed", CreatedByUserID: userID, CreatedAt: now,
 			}); err != nil {
 				t.Fatal(err)
 			}
-			if err := h.Repo.AddIssueItem(ctx, driven.IssueItemRow{
+			if err := h.Repo.AddIssueItem(ctx, domainissues.IssueItemRow{
 				ID: uuid.New(), IssueID: withEvidence, ManualItemID: &manualID, AddedAt: now,
 			}); err != nil {
 				t.Fatal(err)
@@ -1569,7 +1579,7 @@ func runHomeOverviewTimestampTests(t *testing.T, factory Factory) {
 		file := func(accountID, msg uuid.UUID, project uuid.UUID) {
 			m := msg
 			p := project
-			if err := h.Repo.UpsertMessageOverride(ctx, driven.AssignmentRow{
+			if err := h.Repo.UpsertMessageOverride(ctx, domainprojects.AssignmentRow{
 				ID: uuid.New(), OrganisationID: orgID, AccountID: accountID, MessageID: &m, ProjectID: &p,
 				Status: "committed", Reason: "seed", Source: string(domainprojects.SourceUser), CreatedAt: now, UpdatedAt: now,
 			}); err != nil {
@@ -1580,7 +1590,7 @@ func runHomeOverviewTimestampTests(t *testing.T, factory Factory) {
 			runID := uuid.New()
 			ensureLegacyJobRunIfPresent(t, h.DB, runID, accountID, now)
 			id := uuid.New()
-			if err := h.Repo.InsertActionItems(ctx, []driven.ActionItemRow{{
+			if err := h.Repo.InsertActionItems(ctx, []domainmessages.ActionItemRow{{
 				ID: id, UserID: userID, AccountID: accountID, MessageID: msg, RunID: runID,
 				Text: text, Status: status, CreatedAt: now, UpdatedAt: now,
 			}}); err != nil {
@@ -1605,12 +1615,12 @@ func runHomeOverviewTimestampTests(t *testing.T, factory Factory) {
 		// project's issues, so it belongs to the project.
 		mateOnIssue := insertMsg(t, h.Repo, mateAccount, "On issue", "m1", "b", now)
 		issueID := uuid.New()
-		if err := h.Repo.CreateIssue(ctx, driven.IssueRow{
+		if err := h.Repo.CreateIssue(ctx, domainissues.IssueRow{
 			ID: issueID, OrganisationID: orgID, ProjectID: projectID, Title: "Pump duty", Status: "open", CreatedAt: now, UpdatedAt: now,
 		}); err != nil {
 			t.Fatal(err)
 		}
-		if err := h.Repo.AddIssueItem(ctx, driven.IssueItemRow{ID: uuid.New(), IssueID: issueID, MessageID: &mateOnIssue, AddedAt: now}); err != nil {
+		if err := h.Repo.AddIssueItem(ctx, domainissues.IssueItemRow{ID: uuid.New(), IssueID: issueID, MessageID: &mateOnIssue, AddedAt: now}); err != nil {
 			t.Fatal(err)
 		}
 		mateTodo := todo(mateID, mateAccount, mateOnIssue, "Reply to Jan", "open")
@@ -1624,7 +1634,7 @@ func runHomeOverviewTimestampTests(t *testing.T, factory Factory) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		got := map[uuid.UUID]driven.ProjectTodoRow{}
+		got := map[uuid.UUID]domainmessages.ProjectTodoRow{}
 		for _, r := range rows {
 			got[r.Item.ID] = r
 		}
@@ -1678,7 +1688,7 @@ func runHomeOverviewTimestampTests(t *testing.T, factory Factory) {
 
 		openIssue, discarded := uuid.New(), uuid.New()
 		discardedAt := now
-		for _, row := range []driven.IssueRow{
+		for _, row := range []domainissues.IssueRow{
 			{ID: openIssue, OrganisationID: orgID, ProjectID: projectID, Title: "Pump duty", Status: "open", CreatedAt: now, UpdatedAt: now},
 			{ID: discarded, OrganisationID: orgID, ProjectID: projectID, Title: "Noise", Status: "open", CreatedAt: now, UpdatedAt: now, DiscardedAt: &discardedAt},
 		} {
@@ -1688,7 +1698,7 @@ func runHomeOverviewTimestampTests(t *testing.T, factory Factory) {
 		}
 		for msg, issue := range map[uuid.UUID]uuid.UUID{onIssue: openIssue, onDiscarded: discarded} {
 			m := msg
-			if err := h.Repo.AddIssueItem(ctx, driven.IssueItemRow{ID: uuid.New(), IssueID: issue, MessageID: &m, AddedAt: now}); err != nil {
+			if err := h.Repo.AddIssueItem(ctx, domainissues.IssueItemRow{ID: uuid.New(), IssueID: issue, MessageID: &m, AddedAt: now}); err != nil {
 				t.Fatal(err)
 			}
 		}
@@ -1744,10 +1754,10 @@ func runActivityFeedTests(t *testing.T, factory Factory) {
 			t.Fatal(err)
 		}
 		theirs := uuid.New()
-		if err := h.Repo.CreateProject(ctx, driven.ProjectRow{
+		if err := h.Repo.CreateProject(ctx, domainprojects.ProjectRow{
 			ID: theirs, OrganisationID: orgID, Name: "Theirs", Code: "DC21",
 			CreatedAt: now, UpdatedAt: now,
-		}, driven.ProjectMemberRow{
+		}, domainprojects.ProjectMemberRow{
 			ID: uuid.New(), ProjectID: theirs, UserID: stranger, Role: "owner",
 			CreatedAt: now, UpdatedAt: now,
 		}); err != nil {
@@ -1757,7 +1767,7 @@ func runActivityFeedTests(t *testing.T, factory Factory) {
 		// A decision proposed, then accepted: two events from one row.
 		decisionID := uuid.New()
 		decided := now.Add(-1 * time.Hour)
-		if err := h.Repo.CreateDecision(ctx, driven.DecisionRow{
+		if err := h.Repo.CreateDecision(ctx, domaindecisions.DecisionRow{
 			ID: decisionID, OrganisationID: orgID, ProjectID: mine,
 			Statement: "Proceed with 90 kW", Status: "accepted", Source: "llm",
 			DecidedAt: &decided, CreatedAt: now.Add(-6 * time.Hour), UpdatedAt: decided,
@@ -1765,7 +1775,7 @@ func runActivityFeedTests(t *testing.T, factory Factory) {
 			t.Fatal(err)
 		}
 		// The same shape on the project the caller cannot see.
-		if err := h.Repo.CreateDecision(ctx, driven.DecisionRow{
+		if err := h.Repo.CreateDecision(ctx, domaindecisions.DecisionRow{
 			ID: uuid.New(), OrganisationID: orgID, ProjectID: theirs,
 			Statement: "Invisible decision", Status: "accepted", Source: "user",
 			DecidedAt: &decided, CreatedAt: now.Add(-6 * time.Hour), UpdatedAt: decided,
@@ -1776,7 +1786,7 @@ func runActivityFeedTests(t *testing.T, factory Factory) {
 		// An issue opened and resolved.
 		issueID := uuid.New()
 		resolved := now.Add(-30 * time.Minute)
-		if err := h.Repo.CreateIssue(ctx, driven.IssueRow{
+		if err := h.Repo.CreateIssue(ctx, domainissues.IssueRow{
 			ID: issueID, OrganisationID: orgID, ProjectID: mine, Title: "Leak",
 			Status: "resolved", CreatedAt: now.Add(-5 * time.Hour),
 			UpdatedAt: resolved, ResolvedAt: &resolved,
@@ -1785,7 +1795,7 @@ func runActivityFeedTests(t *testing.T, factory Factory) {
 		}
 
 		// A contradiction, still open.
-		if err := h.Repo.CreateContradiction(ctx, driven.ContradictionRow{
+		if err := h.Repo.CreateContradiction(ctx, domaincontradictions.ContradictionRow{
 			ID: uuid.New(), OrganisationID: orgID, ProjectID: mine, Status: "open",
 			Summary: "Duty stated twice", CreatedAt: now.Add(-2 * time.Hour), UpdatedAt: now.Add(-2 * time.Hour),
 		}); err != nil {
@@ -1795,7 +1805,7 @@ func runActivityFeedTests(t *testing.T, factory Factory) {
 		// Correspondence filed onto the project: must NOT appear in the feed.
 		conv := "conv-activity"
 		insertMsg(t, h.Repo, accountID, "filed mail", conv, "body", now)
-		if err := h.Repo.UpsertThreadAssignment(ctx, driven.AssignmentRow{
+		if err := h.Repo.UpsertThreadAssignment(ctx, domainprojects.AssignmentRow{
 			ID: uuid.New(), OrganisationID: orgID, AccountID: accountID, ConversationID: conv,
 			ProjectID: &mine, Status: "provisional", Reason: "llm", Source: "llm",
 			CreatedAt: now, UpdatedAt: now,
@@ -1803,7 +1813,7 @@ func runActivityFeedTests(t *testing.T, factory Factory) {
 			t.Fatal(err)
 		}
 
-		items, err := h.Repo.ListActivity(ctx, userID, orgID, driven.ActivityFilter{Limit: 50})
+		items, err := h.Repo.ListActivity(ctx, userID, orgID, domainprojects.ActivityFilter{Limit: 50})
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -1855,7 +1865,7 @@ func runActivityFeedTests(t *testing.T, factory Factory) {
 			if i%3 == 0 {
 				at = now.Add(-time.Duration(i) * time.Minute)
 			}
-			if err := h.Repo.CreateIssue(ctx, driven.IssueRow{
+			if err := h.Repo.CreateIssue(ctx, domainissues.IssueRow{
 				ID: uuid.New(), OrganisationID: orgID, ProjectID: projectID,
 				Title: fmt.Sprintf("issue %d", i), Status: "open",
 				CreatedAt: at, UpdatedAt: at,
@@ -1868,7 +1878,7 @@ func runActivityFeedTests(t *testing.T, factory Factory) {
 		var before *time.Time
 		var beforeID *uuid.UUID
 		for page := 0; page < 10; page++ {
-			got, err := h.Repo.ListActivity(ctx, userID, orgID, driven.ActivityFilter{
+			got, err := h.Repo.ListActivity(ctx, userID, orgID, domainprojects.ActivityFilter{
 				Limit: 5, Before: before, BeforeID: beforeID,
 			})
 			if err != nil {
@@ -1904,13 +1914,13 @@ func runActivityFeedTests(t *testing.T, factory Factory) {
 		busy := createProject(t, h.Repo, orgID, userID, "DC23", "Busy")
 		createProject(t, h.Repo, orgID, userID, "DC24", "Quiet")
 
-		if err := h.Repo.CreateContradiction(ctx, driven.ContradictionRow{
+		if err := h.Repo.CreateContradiction(ctx, domaincontradictions.ContradictionRow{
 			ID: uuid.New(), OrganisationID: orgID, ProjectID: busy, Status: "open",
 			Summary: "conflict", CreatedAt: now.Add(-time.Hour), UpdatedAt: now.Add(-time.Hour),
 		}); err != nil {
 			t.Fatal(err)
 		}
-		if err := h.Repo.CreateDecision(ctx, driven.DecisionRow{
+		if err := h.Repo.CreateDecision(ctx, domaindecisions.DecisionRow{
 			ID: uuid.New(), OrganisationID: orgID, ProjectID: busy,
 			Statement: "Maybe", Status: "proposed", Source: "llm",
 			CreatedAt: now, UpdatedAt: now,
@@ -1918,7 +1928,7 @@ func runActivityFeedTests(t *testing.T, factory Factory) {
 			t.Fatal(err)
 		}
 		decided := now
-		if err := h.Repo.CreateDecision(ctx, driven.DecisionRow{
+		if err := h.Repo.CreateDecision(ctx, domaindecisions.DecisionRow{
 			ID: uuid.New(), OrganisationID: orgID, ProjectID: busy,
 			Statement: "Proceed with 90 kW", Status: "accepted", Source: "user",
 			DecidedAt: &decided, CreatedAt: now, UpdatedAt: now,
@@ -1976,7 +1986,7 @@ func runActivityFeedTests(t *testing.T, factory Factory) {
 		for i := 0; i < 12; i++ {
 			pid := createProject(t, h.Repo, orgID, userID, fmt.Sprintf("P%02d", i), "Project")
 			for j := 0; j < 4; j++ {
-				if err := h.Repo.CreateIssue(ctx, driven.IssueRow{
+				if err := h.Repo.CreateIssue(ctx, domainissues.IssueRow{
 					ID: uuid.New(), OrganisationID: orgID, ProjectID: pid,
 					Title: "issue", Status: "open",
 					CreatedAt: now.Add(-time.Duration(i*10+j) * time.Minute),
@@ -1988,7 +1998,7 @@ func runActivityFeedTests(t *testing.T, factory Factory) {
 		}
 
 		h.Counter.Reset()
-		if _, err := h.Repo.ListActivity(ctx, userID, orgID, driven.ActivityFilter{Limit: 25}); err != nil {
+		if _, err := h.Repo.ListActivity(ctx, userID, orgID, domainprojects.ActivityFilter{Limit: 25}); err != nil {
 			t.Fatal(err)
 		}
 		if n := h.Counter.Count(); n != 1 {
@@ -2026,44 +2036,44 @@ func runAttentionTests(t *testing.T, factory Factory) {
 		// A project the caller belongs to, with one of each pending kind.
 		mine := createProject(t, h.Repo, orgID, userID, "DC30", "Mine")
 		assigned := userID
-		if err := h.Repo.CreateIssue(ctx, driven.IssueRow{
+		if err := h.Repo.CreateIssue(ctx, domainissues.IssueRow{
 			ID: uuid.New(), OrganisationID: orgID, ProjectID: mine, Title: "Assigned to me",
 			Status: "open", AssigneeUserID: &assigned, CreatedAt: now, UpdatedAt: now,
 		}); err != nil {
 			t.Fatal(err)
 		}
-		if err := h.Repo.CreateIssue(ctx, driven.IssueRow{
+		if err := h.Repo.CreateIssue(ctx, domainissues.IssueRow{
 			ID: uuid.New(), OrganisationID: orgID, ProjectID: mine, Title: "Awaiting input",
 			Status: "awaiting_input", CreatedAt: now, UpdatedAt: now,
 		}); err != nil {
 			t.Fatal(err)
 		}
-		if err := h.Repo.CreateIssue(ctx, driven.IssueRow{
+		if err := h.Repo.CreateIssue(ctx, domainissues.IssueRow{
 			ID: uuid.New(), OrganisationID: orgID, ProjectID: mine, Title: "Already resolved",
 			Status: "resolved", CreatedAt: now, UpdatedAt: now,
 		}); err != nil {
 			t.Fatal(err)
 		}
-		if err := h.Repo.CreateContradiction(ctx, driven.ContradictionRow{
+		if err := h.Repo.CreateContradiction(ctx, domaincontradictions.ContradictionRow{
 			ID: uuid.New(), OrganisationID: orgID, ProjectID: mine, Status: "open",
 			Summary: "conflict", CreatedAt: now, UpdatedAt: now,
 		}); err != nil {
 			t.Fatal(err)
 		}
-		if err := h.Repo.CreateDecision(ctx, driven.DecisionRow{
+		if err := h.Repo.CreateDecision(ctx, domaindecisions.DecisionRow{
 			ID: uuid.New(), OrganisationID: orgID, ProjectID: mine, Statement: "Maybe",
 			Status: "proposed", Source: "llm", CreatedAt: now, UpdatedAt: now,
 		}); err != nil {
 			t.Fatal(err)
 		}
 		factID := uuid.New()
-		if err := h.Repo.CreateFact(ctx, driven.FactRow{
+		if err := h.Repo.CreateFact(ctx, domainfacts.FactRow{
 			ID: factID, OrganisationID: orgID, ProjectID: mine,
 			SubjectKey: "duty", Label: "Duty", CreatedAt: now, UpdatedAt: now,
 		}); err != nil {
 			t.Fatal(err)
 		}
-		if err := h.Repo.CreateFactVersion(ctx, driven.FactVersionRow{
+		if err := h.Repo.CreateFactVersion(ctx, domainfacts.FactVersionRow{
 			ID: uuid.New(), FactID: factID, Status: "proposed", ValueJSON: "{}",
 			ValueText: "90 kW", Source: "llm", CreatedAt: now,
 		}); err != nil {
@@ -2077,14 +2087,14 @@ func runAttentionTests(t *testing.T, factory Factory) {
 			t.Fatal(err)
 		}
 		theirs := uuid.New()
-		if err := h.Repo.CreateProject(ctx, driven.ProjectRow{
+		if err := h.Repo.CreateProject(ctx, domainprojects.ProjectRow{
 			ID: theirs, OrganisationID: orgID, Name: "Theirs", Code: "DC31", CreatedAt: now, UpdatedAt: now,
-		}, driven.ProjectMemberRow{
+		}, domainprojects.ProjectMemberRow{
 			ID: uuid.New(), ProjectID: theirs, UserID: stranger, Role: "owner", CreatedAt: now, UpdatedAt: now,
 		}); err != nil {
 			t.Fatal(err)
 		}
-		if err := h.Repo.CreateContradiction(ctx, driven.ContradictionRow{
+		if err := h.Repo.CreateContradiction(ctx, domaincontradictions.ContradictionRow{
 			ID: uuid.New(), OrganisationID: orgID, ProjectID: theirs, Status: "open",
 			Summary: "invisible", CreatedAt: now, UpdatedAt: now,
 		}); err != nil {
@@ -2139,7 +2149,7 @@ func runNotRelevantTests(t *testing.T, factory Factory) {
 
 	markThread := func(t *testing.T, h Handle, orgID, accountID uuid.UUID, conv string, at time.Time) {
 		t.Helper()
-		if err := h.Repo.UpsertThreadAssignment(context.Background(), driven.AssignmentRow{
+		if err := h.Repo.UpsertThreadAssignment(context.Background(), domainprojects.AssignmentRow{
 			ID: uuid.New(), OrganisationID: orgID, AccountID: accountID, ConversationID: conv,
 			Status: "committed", Reason: "not_relevant", Source: string(domainprojects.SourceUser),
 			CreatedAt: at, UpdatedAt: at, NotRelevantAt: &at,
@@ -2158,7 +2168,7 @@ func runNotRelevantTests(t *testing.T, factory Factory) {
 		insertMsg(t, h.Repo, accountID, "newsletter", "conv-dismiss", "body", now.Add(-time.Minute))
 		markThread(t, h, orgID, accountID, "conv-dismiss", now)
 
-		queue, err := h.Repo.ListUnassigned(ctx, userID, driven.UnassignedListFilter{Status: "all", Limit: 50})
+		queue, err := h.Repo.ListUnassigned(ctx, userID, domainprojects.UnassignedListFilter{Status: "all", Limit: 50})
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -2166,7 +2176,7 @@ func runNotRelevantTests(t *testing.T, factory Factory) {
 			t.Fatalf("queue = %d rows, want only the undismissed one: %+v", len(queue), queue)
 		}
 
-		dismissed, err := h.Repo.ListUnassigned(ctx, userID, driven.UnassignedListFilter{Status: "not_relevant", Limit: 50})
+		dismissed, err := h.Repo.ListUnassigned(ctx, userID, domainprojects.UnassignedListFilter{Status: "not_relevant", Limit: 50})
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -2206,7 +2216,7 @@ func runNotRelevantTests(t *testing.T, factory Factory) {
 		// A reply arrives after the decision.
 		insertMsg(t, h.Repo, accountID, "reply", "conv-news", "body", now)
 
-		queue, err := h.Repo.ListUnassigned(ctx, userID, driven.UnassignedListFilter{Status: "all", Limit: 50})
+		queue, err := h.Repo.ListUnassigned(ctx, userID, domainprojects.UnassignedListFilter{Status: "all", Limit: 50})
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -2215,7 +2225,7 @@ func runNotRelevantTests(t *testing.T, factory Factory) {
 		}
 
 		// And the scorer must not re-propose it either.
-		needing, err := h.Repo.ListMessagesNeedingAssign(ctx, userID, accountID, driven.AssignCandidateFilter{Limit: 100})
+		needing, err := h.Repo.ListMessagesNeedingAssign(ctx, userID, accountID, domainprojects.AssignCandidateFilter{Limit: 100})
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -2243,7 +2253,7 @@ func runNotRelevantTests(t *testing.T, factory Factory) {
 		since := at(50 * time.Hour)
 		rule := func(applyFrom *time.Time, enabled bool) uuid.UUID {
 			id := uuid.New()
-			if err := h.Repo.CreateForwardRule(ctx, driven.ForwardRuleRow{
+			if err := h.Repo.CreateForwardRule(ctx, domainmessages.ForwardRuleRow{
 				ID: id, UserID: userID, AccountID: accountID, Name: "r", Mode: "logic",
 				ConditionJSON: `{"all":[{"field":"subject","op":"contains","value":"x"}]}`, ForwardTo: "dest@example.com",
 				Enabled: enabled, ApplyFrom: applyFrom, CreatedAt: now, UpdatedAt: now,
@@ -2255,14 +2265,14 @@ func runNotRelevantTests(t *testing.T, factory Factory) {
 		everything := rule(&epoch, true)
 		scoped := rule(&since, true)
 
-		ids := func(msgs []driven.MessageRow) []uuid.UUID {
+		ids := func(msgs []domainmessages.MessageRow) []uuid.UUID {
 			out := []uuid.UUID{}
 			for _, m := range msgs {
 				out = append(out, m.ID)
 			}
 			return out
 		}
-		list := func(ruleIDs []uuid.UUID, after *driven.ForwardCandidateCursor, limit int) []driven.MessageRow {
+		list := func(ruleIDs []uuid.UUID, after *domainmessages.ForwardCandidateCursor, limit int) []domainmessages.MessageRow {
 			msgs, err := h.Repo.ListForwardCandidates(ctx, userID, accountID, ruleIDs, after, limit)
 			if err != nil {
 				t.Fatal(err)
@@ -2278,7 +2288,7 @@ func runNotRelevantTests(t *testing.T, factory Factory) {
 		if len(first) != 1 || first[0].ID != old {
 			t.Fatalf("first page = %v, want old", ids(first))
 		}
-		rest := list([]uuid.UUID{everything, scoped}, &driven.ForwardCandidateCursor{ReceivedAt: first[0].ReceivedAt, MessageID: first[0].ID}, 10)
+		rest := list([]uuid.UUID{everything, scoped}, &domainmessages.ForwardCandidateCursor{ReceivedAt: first[0].ReceivedAt, MessageID: first[0].ID}, 10)
 		if fmt.Sprint(ids(rest)) != fmt.Sprint([]uuid.UUID{mid, recent}) {
 			t.Fatalf("after cursor = %v, want mid, recent", ids(rest))
 		}
@@ -2289,7 +2299,7 @@ func runNotRelevantTests(t *testing.T, factory Factory) {
 		ensureLegacyJobRunIfPresent(t, h.DB, runID, accountID, now)
 		verdict := func(msg, rule uuid.UUID, status string, pending bool, attempts int) {
 			reason := status
-			if err := h.Repo.InsertForwardAudit(ctx, driven.ForwardAuditRow{
+			if err := h.Repo.InsertForwardAudit(ctx, domainmessages.ForwardAuditRow{
 				ID: uuid.New(), UserID: userID, AccountID: accountID, MessageID: msg, RuleID: rule, RunID: runID,
 				Status: status, Reason: &reason, Pending: pending, Attempts: attempts, CreatedAt: now,
 			}); err != nil {
@@ -2328,7 +2338,7 @@ func runNotRelevantTests(t *testing.T, factory Factory) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		byRule := map[uuid.UUID]driven.ForwardRuleStats{}
+		byRule := map[uuid.UUID]domainmessages.ForwardRuleStats{}
 		for _, s := range stats {
 			byRule[s.RuleID] = s
 		}
@@ -2382,8 +2392,8 @@ func runNotRelevantTests(t *testing.T, factory Factory) {
 			t.Fatal(err)
 		}
 		pid := project.ID
-		thread := func(conv, status, source string, projectID *uuid.UUID, dismissed bool) driven.AssignmentRow {
-			row := driven.AssignmentRow{
+		thread := func(conv, status, source string, projectID *uuid.UUID, dismissed bool) domainprojects.AssignmentRow {
+			row := domainprojects.AssignmentRow{
 				ID: uuid.New(), OrganisationID: orgID, AccountID: accountID, ConversationID: conv,
 				ProjectID: projectID, Status: status, Reason: "test", Source: source, CreatedAt: now, UpdatedAt: now,
 			}
@@ -2401,7 +2411,7 @@ func runNotRelevantTests(t *testing.T, factory Factory) {
 		insertMsg(t, h.Repo, accountID, "ruled", "c-ruled", "b", at(5))
 		overGuess := insertMsg(t, h.Repo, accountID, "override guess", "c-over-guess", "b", at(6))
 		overUser := insertMsg(t, h.Repo, accountID, "override user", "c-over-user", "b", at(7))
-		for _, row := range []driven.AssignmentRow{
+		for _, row := range []domainprojects.AssignmentRow{
 			thread("c-guessed", "provisional", "llm", &pid, false),
 			thread("c-filed", "committed", "user", &pid, false),
 			thread("c-dismissed", "committed", "user", nil, true),
@@ -2411,9 +2421,9 @@ func runNotRelevantTests(t *testing.T, factory Factory) {
 				t.Fatal(err)
 			}
 		}
-		override := func(id uuid.UUID, source string) driven.AssignmentRow {
+		override := func(id uuid.UUID, source string) domainprojects.AssignmentRow {
 			mid := id
-			return driven.AssignmentRow{
+			return domainprojects.AssignmentRow{
 				OrganisationID: orgID, AccountID: accountID, MessageID: &mid, ProjectID: &pid,
 				Status: "provisional", Reason: "test", Source: source, CreatedAt: now, UpdatedAt: now,
 			}
@@ -2428,7 +2438,7 @@ func runNotRelevantTests(t *testing.T, factory Factory) {
 		// Eligible: nothing decided, or only a machine's guess; paged two at a
 		// time, each exactly once, newest first.
 		var got []uuid.UUID
-		filter := driven.AssignCandidateFilter{Limit: 2}
+		filter := domainprojects.AssignCandidateFilter{Limit: 2}
 		for page := 0; page < 10; page++ {
 			msgs, err := h.Repo.ListMessagesNeedingAssign(ctx, userID, accountID, filter)
 			if err != nil {
@@ -2467,7 +2477,7 @@ func runNotRelevantTests(t *testing.T, factory Factory) {
 		if row, _ := h.Repo.GetMessageOverride(ctx, overUser); row == nil || row.Source != "user" {
 			t.Fatalf("user override overwritten: %+v", row)
 		}
-		queue, err := h.Repo.ListUnassigned(ctx, userID, driven.UnassignedListFilter{Status: "all", Limit: 50})
+		queue, err := h.Repo.ListUnassigned(ctx, userID, domainprojects.UnassignedListFilter{Status: "all", Limit: 50})
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -2511,7 +2521,7 @@ func runNotRelevantTests(t *testing.T, factory Factory) {
 		for i := 0; i < 3; i++ {
 			id := uuid.New()
 			ids = append(ids, id)
-			if err := h.Repo.UpsertMessage(ctx, driven.MessageRow{
+			if err := h.Repo.UpsertMessage(ctx, domainmessages.MessageRow{
 				ID: id, AccountID: accountID, ProviderMessageID: id.String(),
 				ReceivedAt: now.Add(-time.Duration(i) * time.Hour), Subject: "Hello",
 				FromJSON: `{"address":"a@example.com"}`, CreatedAt: now, UpdatedAt: now,
@@ -2567,7 +2577,7 @@ func runNotRelevantTests(t *testing.T, factory Factory) {
 		body := "You have a past due balance."
 		received := now.Add(-72 * time.Hour)
 		msgID := uuid.New()
-		if err := h.Repo.UpsertMessage(ctx, driven.MessageRow{
+		if err := h.Repo.UpsertMessage(ctx, domainmessages.MessageRow{
 			ID: msgID, AccountID: accountID, ProviderMessageID: "provider-1",
 			ReceivedAt: received, Subject: "Your online bill",
 			FromJSON: `{"name":"Microsoft","address":"billing@microsoft.com"}`,
@@ -2577,7 +2587,7 @@ func runNotRelevantTests(t *testing.T, factory Factory) {
 		}
 
 		// The same message arriving with nothing in it.
-		if err := h.Repo.UpsertMessage(ctx, driven.MessageRow{
+		if err := h.Repo.UpsertMessage(ctx, domainmessages.MessageRow{
 			ID: uuid.New(), AccountID: accountID, ProviderMessageID: "provider-1",
 			ReceivedAt: now, Subject: "", FromJSON: "",
 			CreatedAt: now, UpdatedAt: now,
@@ -2614,7 +2624,7 @@ func runNotRelevantTests(t *testing.T, factory Factory) {
 
 		mid := a
 		at := now
-		if err := h.Repo.UpsertMessageOverride(ctx, driven.AssignmentRow{
+		if err := h.Repo.UpsertMessageOverride(ctx, domainprojects.AssignmentRow{
 			OrganisationID: orgID, AccountID: accountID, MessageID: &mid,
 			Status: "committed", Reason: "not_relevant", Source: string(domainprojects.SourceUser),
 			CreatedAt: now, UpdatedAt: now, NotRelevantAt: &at,
@@ -2622,7 +2632,7 @@ func runNotRelevantTests(t *testing.T, factory Factory) {
 			t.Fatal(err)
 		}
 
-		queue, err := h.Repo.ListUnassigned(ctx, userID, driven.UnassignedListFilter{Status: "all", Limit: 50})
+		queue, err := h.Repo.ListUnassigned(ctx, userID, domainprojects.UnassignedListFilter{Status: "all", Limit: 50})
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -2657,7 +2667,7 @@ func runNotRelevantTests(t *testing.T, factory Factory) {
 		markThread(t, h, orgID, accountID, "conv-turn", now)
 
 		// Assigning writes the whole row, so the dismissal must not survive.
-		if err := h.Repo.UpsertThreadAssignment(ctx, driven.AssignmentRow{
+		if err := h.Repo.UpsertThreadAssignment(ctx, domainprojects.AssignmentRow{
 			ID: uuid.New(), OrganisationID: orgID, AccountID: accountID, ConversationID: "conv-turn",
 			ProjectID: &projectID, Status: "committed", Reason: "user_assign",
 			Source: string(domainprojects.SourceUser), CreatedAt: now, UpdatedAt: now,
@@ -2675,7 +2685,7 @@ func runNotRelevantTests(t *testing.T, factory Factory) {
 		if eff.NotRelevantAt != nil {
 			t.Error("assigning a project must clear the dismissal; an item cannot be both")
 		}
-		dismissed, err := h.Repo.ListUnassigned(ctx, userID, driven.UnassignedListFilter{Status: "not_relevant", Limit: 50})
+		dismissed, err := h.Repo.ListUnassigned(ctx, userID, domainprojects.UnassignedListFilter{Status: "not_relevant", Limit: 50})
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -2693,7 +2703,7 @@ func runExtractionDebounceTests(t *testing.T, factory Factory) {
 
 	assign := func(t *testing.T, h Handle, orgID, accountID, projectID uuid.UUID, conv string, at time.Time) {
 		t.Helper()
-		if err := h.Repo.UpsertThreadAssignment(context.Background(), driven.AssignmentRow{
+		if err := h.Repo.UpsertThreadAssignment(context.Background(), domainprojects.AssignmentRow{
 			ID: uuid.New(), OrganisationID: orgID, AccountID: accountID, ConversationID: conv,
 			ProjectID: &projectID, Status: "committed", Reason: "user_assign",
 			Source: string(domainprojects.SourceUser), CreatedAt: at, UpdatedAt: at,
@@ -2791,7 +2801,7 @@ func runExtractionDebounceTests(t *testing.T, factory Factory) {
 
 		// A dismissal carries no project, so it cannot make one due.
 		at := now.Add(-10 * time.Minute)
-		if err := h.Repo.UpsertThreadAssignment(context.Background(), driven.AssignmentRow{
+		if err := h.Repo.UpsertThreadAssignment(context.Background(), domainprojects.AssignmentRow{
 			ID: uuid.New(), OrganisationID: orgID, AccountID: accountID, ConversationID: "conv-dismissed",
 			Status: "committed", Reason: "not_relevant", Source: string(domainprojects.SourceUser),
 			CreatedAt: at, UpdatedAt: at, NotRelevantAt: &at,

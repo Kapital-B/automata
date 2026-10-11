@@ -7,8 +7,12 @@ import (
 	"strings"
 	"time"
 
-	"github.com/Kapital-B/automata/svc/internal/application/ports/driven"
+	domainauth "github.com/Kapital-B/automata/svc/internal/domain/auth"
 	domaindec "github.com/Kapital-B/automata/svc/internal/domain/decisions"
+	domaindecisions "github.com/Kapital-B/automata/svc/internal/domain/decisions"
+	domainissues "github.com/Kapital-B/automata/svc/internal/domain/issues"
+	domainmessages "github.com/Kapital-B/automata/svc/internal/domain/messages"
+	domainprojects "github.com/Kapital-B/automata/svc/internal/domain/projects"
 	"github.com/google/uuid"
 )
 
@@ -22,13 +26,13 @@ var (
 )
 
 type Service struct {
-	Users       driven.UserRepository
-	Projects    driven.ProjectRepository
-	Decisions   driven.DecisionRepository
-	Issues      driven.IssueRepository
-	Assignments driven.AssignmentRepository
-	Manuals     driven.ManualItemRepository
-	Messages    driven.MessageRepository
+	Users       domainauth.UserRepository
+	Projects    domainprojects.ProjectRepository
+	Decisions   domaindecisions.DecisionRepository
+	Issues      domainissues.IssueRepository
+	Assignments domainprojects.AssignmentRepository
+	Manuals     domainprojects.ManualItemRepository
+	Messages    domainmessages.MessageRepository
 }
 
 type EvidenceRef struct {
@@ -37,8 +41,8 @@ type EvidenceRef struct {
 }
 
 type DecisionView struct {
-	Decision driven.DecisionRow
-	Evidence []driven.DecisionEvidenceRow
+	Decision domaindecisions.DecisionRow
+	Evidence []domaindecisions.DecisionEvidenceRow
 }
 
 type CreateInput struct {
@@ -187,7 +191,7 @@ func (s *Service) Create(ctx context.Context, userID, projectID uuid.UUID, in Cr
 		decidedAt = &now
 	}
 	uid := userID
-	row := driven.DecisionRow{
+	row := domaindecisions.DecisionRow{
 		ID: uuid.New(), OrganisationID: orgID, ProjectID: projectID, IssueID: in.IssueID,
 		Statement: statement, Status: string(status), DecidedAt: decidedAt,
 		AssigneeUserID: in.AssigneeUserID, AssigneeContactID: in.AssigneeContactID,
@@ -209,7 +213,7 @@ func (s *Service) Create(ctx context.Context, userID, projectID uuid.UUID, in Cr
 		}
 	}
 	for _, ref := range in.Evidence {
-		_ = s.Decisions.AddDecisionEvidence(ctx, driven.DecisionEvidenceRow{
+		_ = s.Decisions.AddDecisionEvidence(ctx, domaindecisions.DecisionEvidenceRow{
 			ID: uuid.New(), DecisionID: row.ID, MessageID: ref.MessageID, ManualItemID: ref.ManualItemID, AddedAt: now,
 		})
 	}
@@ -304,7 +308,7 @@ func (s *Service) AddEvidence(ctx context.Context, userID, decisionID uuid.UUID,
 		return nil, err
 	}
 	now := time.Now().UTC()
-	if err := s.Decisions.AddDecisionEvidence(ctx, driven.DecisionEvidenceRow{
+	if err := s.Decisions.AddDecisionEvidence(ctx, domaindecisions.DecisionEvidenceRow{
 		ID: uuid.New(), DecisionID: decisionID, MessageID: ref.MessageID, ManualItemID: ref.ManualItemID, AddedAt: now,
 	}); err != nil {
 		return nil, err

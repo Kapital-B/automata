@@ -7,8 +7,10 @@ import (
 	"time"
 
 	"github.com/Kapital-B/automata/svc/internal/adapters/outbound/persistence/sqlite"
-	"github.com/Kapital-B/automata/svc/internal/application/ports/driven"
 	domainacc "github.com/Kapital-B/automata/svc/internal/domain/accounts"
+	domainaccounts "github.com/Kapital-B/automata/svc/internal/domain/accounts"
+	domainmessages "github.com/Kapital-B/automata/svc/internal/domain/messages"
+
 	"github.com/google/uuid"
 	_ "modernc.org/sqlite"
 )
@@ -27,7 +29,7 @@ func setupSummarizeRepo(t *testing.T) (*sql.DB, *sqlite.Repository, uuid.UUID, u
 	userID := uuid.MustParse("a0000001-0000-4000-8000-000000000001")
 	accountID := uuid.New()
 	msgID := uuid.New()
-	if err := repo.InsertAccount(context.Background(), driven.AccountRow{
+	if err := repo.InsertAccount(context.Background(), domainaccounts.AccountRow{
 		UserID:           userID,
 		ID:               accountID,
 		Label:            "Work",
@@ -39,7 +41,7 @@ func setupSummarizeRepo(t *testing.T) (*sql.DB, *sqlite.Repository, uuid.UUID, u
 		t.Fatal(err)
 	}
 	body := "Hi David,\n\nLet me know when you are available to meet on Friday?"
-	if err := repo.UpsertMessage(context.Background(), driven.MessageRow{
+	if err := repo.UpsertMessage(context.Background(), domainmessages.MessageRow{
 		ID:                msgID,
 		AccountID:         accountID,
 		ProviderMessageID: "provider-friday-1",
@@ -94,7 +96,7 @@ func TestSummarizeMarksExcludedBySettingsAsSeenWithoutLLM(t *testing.T) {
 		t.Fatalf("important category: %v", err)
 	}
 	runID := uuid.New()
-	if err := repo.UpsertMessageCategory(context.Background(), driven.MessageCategoryRow{
+	if err := repo.UpsertMessageCategory(context.Background(), domainmessages.MessageCategoryRow{
 		ID:         uuid.New(),
 		MessageID:  msgID,
 		AccountID:  accountID,
@@ -107,7 +109,7 @@ func TestSummarizeMarksExcludedBySettingsAsSeenWithoutLLM(t *testing.T) {
 	}); err != nil {
 		t.Fatal(err)
 	}
-	if err := repo.UpsertSummarySettings(context.Background(), driven.SummarySettingsRow{
+	if err := repo.UpsertSummarySettings(context.Background(), domainmessages.SummarySettingsRow{
 		UserID:               userID,
 		IncludeCategorySlugs: nil,
 		ExcludeCategorySlugs: []string{"important"},
@@ -156,7 +158,7 @@ func TestSummarizeSecondRunFindsNoUnseenMessages(t *testing.T) {
 	if _, err := svc.SummarizeAccount(context.Background(), userID, accountID, SummarizeOptions{Trigger: "schedule"}); err != nil {
 		t.Fatal(err)
 	}
-	rows, err := repo.ListMessages(context.Background(), userID, driven.MessageListFilter{
+	rows, err := repo.ListMessages(context.Background(), userID, domainmessages.MessageListFilter{
 		AccountID:         &accountID,
 		OnlySummaryUnseen: true,
 		Limit:             50,
@@ -172,7 +174,7 @@ func TestSummarizeSecondRunFindsNoUnseenMessages(t *testing.T) {
 func TestSummarizeDoesNotDuplicateOpenActionItem(t *testing.T) {
 	db, repo, userID, accountID, msgID := setupSummarizeRepo(t)
 	now := time.Now().UTC()
-	if err := repo.InsertActionItems(context.Background(), []driven.ActionItemRow{{
+	if err := repo.InsertActionItems(context.Background(), []domainmessages.ActionItemRow{{
 		ID:        uuid.New(),
 		UserID:    userID,
 		AccountID: accountID,

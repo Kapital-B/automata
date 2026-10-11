@@ -6,11 +6,11 @@ import (
 	"errors"
 	"time"
 
-	"github.com/Kapital-B/automata/svc/internal/application/ports/driven"
+	domaininterpretations "github.com/Kapital-B/automata/svc/internal/domain/interpretations"
 	"github.com/google/uuid"
 )
 
-func (r *Repository) CreateInterpretation(ctx context.Context, row driven.InterpretationRow) error {
+func (r *Repository) CreateInterpretation(ctx context.Context, row domaininterpretations.InterpretationRow) error {
 	var accountID, runID, conf any
 	if row.AccountID != nil {
 		accountID = row.AccountID.String()
@@ -32,7 +32,7 @@ func (r *Repository) CreateInterpretation(ctx context.Context, row driven.Interp
 	return err
 }
 
-func (r *Repository) AddInterpretationSource(ctx context.Context, row driven.InterpretationSourceRow) error {
+func (r *Repository) AddInterpretationSource(ctx context.Context, row domaininterpretations.InterpretationSourceRow) error {
 	var msgID, manualID, connectorMessageID any
 	if row.MessageID != nil {
 		msgID = row.MessageID.String()
@@ -50,7 +50,7 @@ func (r *Repository) AddInterpretationSource(ctx context.Context, row driven.Int
 	return err
 }
 
-func (r *Repository) GetInterpretation(ctx context.Context, organisationID, id uuid.UUID) (*driven.InterpretationRow, error) {
+func (r *Repository) GetInterpretation(ctx context.Context, organisationID, id uuid.UUID) (*domaininterpretations.InterpretationRow, error) {
 	row := r.db.QueryRowContext(ctx, `
 		SELECT id, organisation_id, project_id, account_id, run_id, status,
 			payload_json, confidence, reason, created_at, updated_at
@@ -63,7 +63,7 @@ func (r *Repository) GetInterpretation(ctx context.Context, organisationID, id u
 	return out, err
 }
 
-func (r *Repository) ListPendingInterpretations(ctx context.Context, organisationID, projectID uuid.UUID) ([]driven.InterpretationRow, error) {
+func (r *Repository) ListPendingInterpretations(ctx context.Context, organisationID, projectID uuid.UUID) ([]domaininterpretations.InterpretationRow, error) {
 	rows, err := r.db.QueryContext(ctx, `
 		SELECT id, organisation_id, project_id, account_id, run_id, status,
 			payload_json, confidence, reason, created_at, updated_at
@@ -75,7 +75,7 @@ func (r *Repository) ListPendingInterpretations(ctx context.Context, organisatio
 		return nil, err
 	}
 	defer rows.Close()
-	out := make([]driven.InterpretationRow, 0)
+	out := make([]domaininterpretations.InterpretationRow, 0)
 	for rows.Next() {
 		row, err := scanInterpretationRow(rows)
 		if err != nil {
@@ -101,7 +101,7 @@ func (r *Repository) UpdateInterpretationStatus(ctx context.Context, organisatio
 	return nil
 }
 
-func (r *Repository) ListInterpretationSources(ctx context.Context, interpretationID uuid.UUID) ([]driven.InterpretationSourceRow, error) {
+func (r *Repository) ListInterpretationSources(ctx context.Context, interpretationID uuid.UUID) ([]domaininterpretations.InterpretationSourceRow, error) {
 	rows, err := r.db.QueryContext(ctx, `
 		SELECT id, interpretation_id, message_id, manual_item_id, connector_message_id
 		FROM interpretation_sources WHERE interpretation_id = ?
@@ -110,7 +110,7 @@ func (r *Repository) ListInterpretationSources(ctx context.Context, interpretati
 		return nil, err
 	}
 	defer rows.Close()
-	out := make([]driven.InterpretationSourceRow, 0)
+	out := make([]domaininterpretations.InterpretationSourceRow, 0)
 	for rows.Next() {
 		src, err := scanInterpretationSource(rows)
 		if err != nil {
@@ -121,7 +121,7 @@ func (r *Repository) ListInterpretationSources(ctx context.Context, interpretati
 	return out, rows.Err()
 }
 
-func scanInterpretationRow(s rowScanner) (*driven.InterpretationRow, error) {
+func scanInterpretationRow(s rowScanner) (*domaininterpretations.InterpretationRow, error) {
 	var idStr, orgStr, projStr, status, payload, reason, createdAt, updatedAt string
 	var accountID, runID sql.NullString
 	var conf sql.NullFloat64
@@ -151,7 +151,7 @@ func scanInterpretationRow(s rowScanner) (*driven.InterpretationRow, error) {
 	if err != nil {
 		return nil, err
 	}
-	row := &driven.InterpretationRow{
+	row := &domaininterpretations.InterpretationRow{
 		ID: id, OrganisationID: orgID, ProjectID: projID, Status: status,
 		PayloadJSON: payload, Reason: reason, CreatedAt: cat, UpdatedAt: uat,
 	}
@@ -176,7 +176,7 @@ func scanInterpretationRow(s rowScanner) (*driven.InterpretationRow, error) {
 	return row, nil
 }
 
-func scanInterpretationSource(s rowScanner) (*driven.InterpretationSourceRow, error) {
+func scanInterpretationSource(s rowScanner) (*domaininterpretations.InterpretationSourceRow, error) {
 	var idStr, interpStr string
 	var msg, manual, connectorMessage sql.NullString
 	if err := s.Scan(&idStr, &interpStr, &msg, &manual, &connectorMessage); err != nil {
@@ -190,7 +190,7 @@ func scanInterpretationSource(s rowScanner) (*driven.InterpretationSourceRow, er
 	if err != nil {
 		return nil, err
 	}
-	row := &driven.InterpretationSourceRow{ID: id, InterpretationID: interpID}
+	row := &domaininterpretations.InterpretationSourceRow{ID: id, InterpretationID: interpID}
 	if msg.Valid && msg.String != "" {
 		mid, err := uuid.Parse(msg.String)
 		if err != nil {

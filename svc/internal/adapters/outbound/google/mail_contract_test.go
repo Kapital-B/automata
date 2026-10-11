@@ -17,7 +17,7 @@ import (
 
 	"github.com/Kapital-B/automata/svc/internal/adapters/outbound/mailboxtest"
 	"github.com/Kapital-B/automata/svc/internal/adapters/outbound/mailmime"
-	"github.com/Kapital-B/automata/svc/internal/application/ports/driven"
+	domainaccounts "github.com/Kapital-B/automata/svc/internal/domain/accounts"
 )
 
 type fakeGmailMsg struct {
@@ -251,8 +251,8 @@ func TestGmailMailboxContract(t *testing.T) {
 func TestGmailOpenReportsRejectedCredentials(t *testing.T) {
 	f := newFakeGmail(t)
 	cred, _ := json.Marshal(credential{Type: credentialType, RefreshToken: "revoked"})
-	_, _, err := f.provider().Open(context.Background(), driven.AccountRow{PrimaryEmail: "owner@example.org"}, cred)
-	if !errors.Is(err, driven.ErrCredentialsRejected) {
+	_, _, err := f.provider().Open(context.Background(), domainaccounts.AccountRow{PrimaryEmail: "owner@example.org"}, cred)
+	if !errors.Is(err, domainaccounts.ErrCredentialsRejected) {
 		t.Fatalf("err = %v, want ErrCredentialsRejected", err)
 	}
 }
@@ -260,7 +260,7 @@ func TestGmailOpenReportsRejectedCredentials(t *testing.T) {
 func TestGmailOpenDoesNotRewriteAnUnrotatedCredential(t *testing.T) {
 	f := newFakeGmail(t)
 	cred, _ := json.Marshal(credential{Type: credentialType, RefreshToken: "good-refresh"})
-	box, rotated, err := f.provider().Open(context.Background(), driven.AccountRow{PrimaryEmail: "owner@example.org"}, cred)
+	box, rotated, err := f.provider().Open(context.Background(), domainaccounts.AccountRow{PrimaryEmail: "owner@example.org"}, cred)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -273,7 +273,7 @@ func TestGmailOpenDoesNotRewriteAnUnrotatedCredential(t *testing.T) {
 // Google as if it were a refresh token.
 func TestGmailOpenRefusesAForeignCredential(t *testing.T) {
 	f := newFakeGmail(t)
-	_, _, err := f.provider().Open(context.Background(), driven.AccountRow{}, []byte(`{"refresh_token":"x","ms_account_kind":"work"}`))
+	_, _, err := f.provider().Open(context.Background(), domainaccounts.AccountRow{}, []byte(`{"refresh_token":"x","ms_account_kind":"work"}`))
 	if err == nil {
 		t.Fatal("expected a foreign credential to be refused")
 	}
@@ -281,7 +281,7 @@ func TestGmailOpenRefusesAForeignCredential(t *testing.T) {
 
 func TestGmailCompleteLearnsTheMailbox(t *testing.T) {
 	f := newFakeGmail(t)
-	got, err := f.provider().Complete(context.Background(), "code", driven.ConnectOptions{})
+	got, err := f.provider().Complete(context.Background(), "code", domainaccounts.ConnectOptions{})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -295,7 +295,7 @@ func TestGmailCompleteLearnsTheMailbox(t *testing.T) {
 }
 
 func TestGmailAuthorizationURLAsksForOfflineConsent(t *testing.T) {
-	u, err := (&MailProvider{ClientID: "cid", RedirectURI: "http://localhost/cb"}).AuthorizationURL(context.Background(), "st", driven.ConnectOptions{})
+	u, err := (&MailProvider{ClientID: "cid", RedirectURI: "http://localhost/cb"}).AuthorizationURL(context.Background(), "st", domainaccounts.ConnectOptions{})
 	if err != nil {
 		t.Fatal(err)
 	}

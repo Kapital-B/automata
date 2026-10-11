@@ -12,8 +12,9 @@ import (
 
 	"github.com/Kapital-B/automata/svc/internal/adapters/outbound/persistence/sqlite"
 	appaccounts "github.com/Kapital-B/automata/svc/internal/application/accounts"
-	"github.com/Kapital-B/automata/svc/internal/application/ports/driven"
 	domainacc "github.com/Kapital-B/automata/svc/internal/domain/accounts"
+	domainaccounts "github.com/Kapital-B/automata/svc/internal/domain/accounts"
+	domainjobs "github.com/Kapital-B/automata/svc/internal/domain/jobs"
 	"github.com/google/uuid"
 	_ "modernc.org/sqlite"
 )
@@ -26,9 +27,9 @@ func (v *passthroughVault) Decrypt(ciphertext []byte) ([]byte, error) { return c
 // fakeMailbox scripts ListChanges pages and records outbound calls. It stands
 // in for any provider: services only ever see the port.
 type fakeMailbox struct {
-	caps      driven.MailboxCapabilities
+	caps      domainaccounts.MailboxCapabilities
 	calls     []string
-	results   []*driven.MailChangePage
+	results   []*domainaccounts.MailChangePage
 	errByCall map[int]error
 	resultIdx int
 
@@ -39,9 +40,9 @@ type fakeMailbox struct {
 	replyErr     error
 }
 
-func (f *fakeMailbox) Capabilities() driven.MailboxCapabilities { return f.caps }
+func (f *fakeMailbox) Capabilities() domainaccounts.MailboxCapabilities { return f.caps }
 
-func (f *fakeMailbox) ListChanges(ctx context.Context, cursor string, pageSize int) (*driven.MailChangePage, error) {
+func (f *fakeMailbox) ListChanges(ctx context.Context, cursor string, pageSize int) (*domainaccounts.MailChangePage, error) {
 	f.calls = append(f.calls, cursor)
 	call := len(f.calls) - 1
 	if f.errByCall != nil {
@@ -50,7 +51,7 @@ func (f *fakeMailbox) ListChanges(ctx context.Context, cursor string, pageSize i
 		}
 	}
 	if f.resultIdx >= len(f.results) {
-		return &driven.MailChangePage{FinalCursor: "delta-empty"}, nil
+		return &domainaccounts.MailChangePage{FinalCursor: "delta-empty"}, nil
 	}
 	out := f.results[f.resultIdx]
 	f.resultIdx++
@@ -81,9 +82,9 @@ type fakeProvider struct {
 	opens   int
 }
 
-func (p *fakeProvider) Capabilities() driven.MailboxCapabilities { return p.box.Capabilities() }
+func (p *fakeProvider) Capabilities() domainaccounts.MailboxCapabilities { return p.box.Capabilities() }
 
-func (p *fakeProvider) Open(ctx context.Context, account driven.AccountRow, credential []byte) (driven.Mailbox, []byte, error) {
+func (p *fakeProvider) Open(ctx context.Context, account domainaccounts.AccountRow, credential []byte) (domainaccounts.Mailbox, []byte, error) {
 	p.opens++
 	if p.openErr != nil {
 		return nil, nil, p.openErr
@@ -91,11 +92,11 @@ func (p *fakeProvider) Open(ctx context.Context, account driven.AccountRow, cred
 	return p.box, nil, nil
 }
 
-func testOpener(accounts driven.AccountRepository, box *fakeMailbox) *appaccounts.MailboxOpener {
+func testOpener(accounts domainaccounts.AccountRepository, box *fakeMailbox) *appaccounts.MailboxOpener {
 	return &appaccounts.MailboxOpener{
 		Accounts:  accounts,
 		Vault:     &passthroughVault{},
-		Providers: map[string]driven.MailProvider{appaccounts.ProviderM365: &fakeProvider{box: box}},
+		Providers: map[string]domainaccounts.MailProvider{appaccounts.ProviderM365: &fakeProvider{box: box}},
 	}
 }
 
@@ -113,7 +114,7 @@ func setupSyncService(t *testing.T, graph *fakeMailbox) (*SyncService, *sqlite.R
 	userID := uuid.MustParse("a0000001-0000-4000-8000-000000000001")
 	accountID := uuid.New()
 	payload := []byte("credential")
-	if err := repo.InsertAccount(context.Background(), driven.AccountRow{
+	if err := repo.InsertAccount(context.Background(), domainaccounts.AccountRow{
 		UserID:           userID,
 		ID:               accountID,
 		Label:            "Work",
@@ -135,15 +136,15 @@ func setupSyncService(t *testing.T, graph *fakeMailbox) (*SyncService, *sqlite.R
 
 func TestSyncInboxUsesDeltaLinkAcrossRuns(t *testing.T) {
 	graph := &fakeMailbox{
-		results: []*driven.MailChangePage{
+		results: []*domainaccounts.MailChangePage{
 			{
-				Messages: []driven.MailMessage{
+				Messages: []domainaccounts.MailMessage{
 					{ID: "provider-1", Subject: "one", ReceivedDateTime: time.Now().UTC().Format(time.RFC3339), FromAddress: "a@example.com"},
 				},
 				FinalCursor: "delta-1",
 			},
 			{
-				Messages: []driven.MailMessage{
+				Messages: []domainaccounts.MailMessage{
 					{ID: "provider-2", Subject: "two", ReceivedDateTime: time.Now().UTC().Format(time.RFC3339), FromAddress: "b@example.com"},
 				},
 				FinalCursor: "delta-2",
@@ -183,9 +184,9 @@ func TestSyncInboxUsesDeltaLinkAcrossRuns(t *testing.T) {
 
 func TestSyncInboxFailsAndDoesNotOverwriteDeltaLink(t *testing.T) {
 	graph := &fakeMailbox{
-		results: []*driven.MailChangePage{
+		results: []*domainaccounts.MailChangePage{
 			{
-				Messages: []driven.MailMessage{
+				Messages: []domainaccounts.MailMessage{
 					{ID: "provider-1", Subject: "one", ReceivedDateTime: time.Now().UTC().Format(time.RFC3339), FromAddress: "a@example.com"},
 				},
 				FinalCursor: "delta-1",
@@ -212,13 +213,13 @@ func TestSyncInboxFailsAndDoesNotOverwriteDeltaLink(t *testing.T) {
 
 func TestSyncInboxResetsInvalidDeltaAndContinues(t *testing.T) {
 	graph := &fakeMailbox{
-		results: []*driven.MailChangePage{
+		results: []*domainaccounts.MailChangePage{
 			{
-				Messages:    []driven.MailMessage{{ID: "provider-1", Subject: "one", ReceivedDateTime: time.Now().UTC().Format(time.RFC3339), FromAddress: "a@example.com"}},
+				Messages:    []domainaccounts.MailMessage{{ID: "provider-1", Subject: "one", ReceivedDateTime: time.Now().UTC().Format(time.RFC3339), FromAddress: "a@example.com"}},
 				FinalCursor: "delta-1",
 			},
 			{
-				Messages:    []driven.MailMessage{{ID: "provider-2", Subject: "two", ReceivedDateTime: time.Now().UTC().Format(time.RFC3339), FromAddress: "b@example.com"}},
+				Messages:    []domainaccounts.MailMessage{{ID: "provider-2", Subject: "two", ReceivedDateTime: time.Now().UTC().Format(time.RFC3339), FromAddress: "b@example.com"}},
 				FinalCursor: "delta-2",
 			},
 		},
@@ -227,7 +228,7 @@ func TestSyncInboxResetsInvalidDeltaAndContinues(t *testing.T) {
 	if _, err := svc.SyncInbox(context.Background(), userID, accountID); err != nil {
 		t.Fatal(err)
 	}
-	graph.errByCall = map[int]error{1: fmt.Errorf("%w: graph 410 Gone: SyncStateNotFound", driven.ErrCursorExpired)}
+	graph.errByCall = map[int]error{1: fmt.Errorf("%w: graph 410 Gone: SyncStateNotFound", domainaccounts.ErrCursorExpired)}
 
 	res, err := svc.SyncInbox(context.Background(), userID, accountID)
 	if err != nil {
@@ -267,9 +268,9 @@ func TestSyncInboxResetsInvalidDeltaAndContinues(t *testing.T) {
 
 func TestSyncInboxWritesObservabilityMeta(t *testing.T) {
 	graph := &fakeMailbox{
-		results: []*driven.MailChangePage{
+		results: []*domainaccounts.MailChangePage{
 			{
-				Messages: []driven.MailMessage{
+				Messages: []domainaccounts.MailMessage{
 					{ID: "provider-1", Subject: "one", ReceivedDateTime: time.Now().UTC().Format(time.RFC3339), FromAddress: "a@example.com"},
 					{ID: "provider-2", Subject: "two", ReceivedDateTime: time.Now().UTC().Format(time.RFC3339), FromAddress: "b@example.com"},
 				},
@@ -312,9 +313,9 @@ func TestSyncInboxWritesObservabilityMeta(t *testing.T) {
 func TestSyncInboxDoesNotOverwriteAMessageWithAPartialDeltaRow(t *testing.T) {
 	received := time.Now().UTC().Add(-72 * time.Hour)
 	graph := &fakeMailbox{
-		results: []*driven.MailChangePage{
+		results: []*domainaccounts.MailChangePage{
 			{
-				Messages: []driven.MailMessage{{
+				Messages: []domainaccounts.MailMessage{{
 					ID:               "provider-1",
 					Subject:          "Your online bill",
 					ReceivedDateTime: received.Format(time.RFC3339),
@@ -326,7 +327,7 @@ func TestSyncInboxDoesNotOverwriteAMessageWithAPartialDeltaRow(t *testing.T) {
 			{
 				// A tombstone for the message synced above.
 				Removed: []string{"provider-1"},
-				Messages: []driven.MailMessage{
+				Messages: []domainaccounts.MailMessage{
 					// A changed-properties-only row: no timestamp.
 					{ID: "provider-2"},
 				},
@@ -370,9 +371,9 @@ func TestSyncInboxDoesNotOverwriteAMessageWithAPartialDeltaRow(t *testing.T) {
 // stored delta link and refetches full payloads.
 func TestSyncInboxForceIgnoresTheStoredDeltaLink(t *testing.T) {
 	graph := &fakeMailbox{
-		results: []*driven.MailChangePage{
+		results: []*domainaccounts.MailChangePage{
 			{
-				Messages: []driven.MailMessage{{
+				Messages: []domainaccounts.MailMessage{{
 					ID: "provider-1", Subject: "one",
 					ReceivedDateTime: time.Now().UTC().Format(time.RFC3339),
 					FromAddress:      "a@example.com",
@@ -419,7 +420,7 @@ func TestSyncInboxForceIgnoresTheStoredDeltaLink(t *testing.T) {
 // sync, not to every page, or a multi-page run would restart on each chunk.
 func TestSyncChunkForceResetsOnlyAtTheStart(t *testing.T) {
 	graph := &fakeMailbox{
-		results: []*driven.MailChangePage{
+		results: []*domainaccounts.MailChangePage{
 			{Messages: nil, FinalCursor: "delta-1"},
 			{Messages: nil, FinalCursor: "delta-2"},
 			{Messages: nil, FinalCursor: "delta-3"},
@@ -434,9 +435,9 @@ func TestSyncChunkForceResetsOnlyAtTheStart(t *testing.T) {
 	}
 
 	// No cursor yet and Force set: start from scratch.
-	if _, err := svc.SyncChunk(ctx, driven.RunContext{
+	if _, err := svc.SyncChunk(ctx, domainjobs.RunContext{
 		UserID: userID, AccountID: &accountID, JobType: "sync",
-		Payload: driven.JobPayload{Force: true},
+		Payload: domainjobs.JobPayload{Force: true},
 	}); err != nil {
 		t.Fatal(err)
 	}
@@ -445,10 +446,10 @@ func TestSyncChunkForceResetsOnlyAtTheStart(t *testing.T) {
 	}
 
 	// Mid-pagination the cursor wins, so the run advances instead of looping.
-	if _, err := svc.SyncChunk(ctx, driven.RunContext{
+	if _, err := svc.SyncChunk(ctx, domainjobs.RunContext{
 		UserID: userID, AccountID: &accountID, JobType: "sync",
-		Payload: driven.JobPayload{Force: true},
-		Cursor:  &driven.JobCursor{Value: "page-2"},
+		Payload: domainjobs.JobPayload{Force: true},
+		Cursor:  &domainjobs.JobCursor{Value: "page-2"},
 	}); err != nil {
 		t.Fatal(err)
 	}
@@ -458,10 +459,10 @@ func TestSyncChunkForceResetsOnlyAtTheStart(t *testing.T) {
 
 	// Run detail is merged per chunk, so the last chunk is what the run
 	// reports. A forced run has to stay identifiable through pagination.
-	res, err := svc.SyncChunk(ctx, driven.RunContext{
+	res, err := svc.SyncChunk(ctx, domainjobs.RunContext{
 		UserID: userID, AccountID: &accountID, JobType: "sync",
-		Payload: driven.JobPayload{Force: true},
-		Cursor:  &driven.JobCursor{Value: "page-3"},
+		Payload: domainjobs.JobPayload{Force: true},
+		Cursor:  &domainjobs.JobCursor{Value: "page-3"},
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -476,15 +477,15 @@ func TestSyncChunkForceResetsOnlyAtTheStart(t *testing.T) {
 
 // recordingEnqueuer captures what sync queues as follow-up work.
 type recordingEnqueuer struct {
-	jobs []driven.CreateJobInput
+	jobs []domainjobs.CreateJobInput
 }
 
-func (r *recordingEnqueuer) Enqueue(ctx context.Context, in driven.CreateJobInput) (*driven.JobRecord, error) {
+func (r *recordingEnqueuer) Enqueue(ctx context.Context, in domainjobs.CreateJobInput) (*domainjobs.JobRecord, error) {
 	r.jobs = append(r.jobs, in)
-	return &driven.JobRecord{ID: uuid.New(), JobType: in.JobType}, nil
+	return &domainjobs.JobRecord{ID: uuid.New(), JobType: in.JobType}, nil
 }
 
-func (r *recordingEnqueuer) EnqueueChain(ctx context.Context, userID uuid.UUID, accountID *uuid.UUID, trigger string, chain []string, payload driven.JobPayload, scheduleID *uuid.UUID, scheduledFor *time.Time) (*driven.JobRecord, error) {
+func (r *recordingEnqueuer) EnqueueChain(ctx context.Context, userID uuid.UUID, accountID *uuid.UUID, trigger string, chain []string, payload domainjobs.JobPayload, scheduleID *uuid.UUID, scheduledFor *time.Time) (*domainjobs.JobRecord, error) {
 	return nil, errors.New("not implemented")
 }
 
@@ -503,9 +504,9 @@ func (r *recordingEnqueuer) countOf(jobType string) int {
 // inline either, so contacts were never extracted at all.
 func TestSyncChunkQueuesContactResolutionOnceTheMailboxIsCurrent(t *testing.T) {
 	graph := &fakeMailbox{
-		results: []*driven.MailChangePage{
+		results: []*domainaccounts.MailChangePage{
 			{
-				Messages: []driven.MailMessage{{
+				Messages: []domainaccounts.MailMessage{{
 					ID: "provider-1", Subject: "one",
 					ReceivedDateTime: time.Now().UTC().Format(time.RFC3339),
 					FromAddress:      "a@example.com",
@@ -521,7 +522,7 @@ func TestSyncChunkQueuesContactResolutionOnceTheMailboxIsCurrent(t *testing.T) {
 	ctx := context.Background()
 
 	// First chunk has more pages to fetch, so the mailbox is not current yet.
-	first, err := svc.SyncChunk(ctx, driven.RunContext{UserID: userID, AccountID: &accountID, JobType: "sync"})
+	first, err := svc.SyncChunk(ctx, domainjobs.RunContext{UserID: userID, AccountID: &accountID, JobType: "sync"})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -533,9 +534,9 @@ func TestSyncChunkQueuesContactResolutionOnceTheMailboxIsCurrent(t *testing.T) {
 	}
 
 	// Final chunk: now it is worth reading the mailbox.
-	last, err := svc.SyncChunk(ctx, driven.RunContext{
+	last, err := svc.SyncChunk(ctx, domainjobs.RunContext{
 		UserID: userID, AccountID: &accountID, JobType: "sync",
-		Cursor: &driven.JobCursor{Value: "page-2"},
+		Cursor: &domainjobs.JobCursor{Value: "page-2"},
 	})
 	if err != nil {
 		t.Fatal(err)

@@ -12,12 +12,16 @@ import (
 	appdecisions "github.com/Kapital-B/automata/svc/internal/application/decisions"
 	appfacts "github.com/Kapital-B/automata/svc/internal/application/facts"
 	appissues "github.com/Kapital-B/automata/svc/internal/application/issues"
-	"github.com/Kapital-B/automata/svc/internal/application/ports/driven"
+	domainauth "github.com/Kapital-B/automata/svc/internal/domain/auth"
 	domaincontr "github.com/Kapital-B/automata/svc/internal/domain/contradictions"
+	domaincontradictions "github.com/Kapital-B/automata/svc/internal/domain/contradictions"
 	domaindec "github.com/Kapital-B/automata/svc/internal/domain/decisions"
 	domainfacts "github.com/Kapital-B/automata/svc/internal/domain/facts"
 	domaininterp "github.com/Kapital-B/automata/svc/internal/domain/interpretations"
+	domaininterpretations "github.com/Kapital-B/automata/svc/internal/domain/interpretations"
 	domainissues "github.com/Kapital-B/automata/svc/internal/domain/issues"
+	domainjobs "github.com/Kapital-B/automata/svc/internal/domain/jobs"
+	domainprojects "github.com/Kapital-B/automata/svc/internal/domain/projects"
 	"github.com/google/uuid"
 )
 
@@ -30,17 +34,17 @@ var (
 
 // Service applies Stage B reconcile outcomes and manages contradictions.
 type Service struct {
-	Users           driven.UserRepository
-	Projects        driven.ProjectRepository
-	Interpretations driven.InterpretationRepository
-	FactsRepo       driven.FactRepository
+	Users           domainauth.UserRepository
+	Projects        domainprojects.ProjectRepository
+	Interpretations domaininterpretations.InterpretationRepository
+	FactsRepo       domainfacts.FactRepository
 	Facts           *appfacts.Service
 	Decisions       *appdecisions.Service
-	Contradictions  driven.ContradictionRepository
+	Contradictions  domaincontradictions.ContradictionRepository
 	// Issues is optional; without it issue candidates are ignored.
 	Issues     *appissues.Service
-	IssuesRepo driven.IssueRepository
-	JobRuns    driven.JobRunRepository
+	IssuesRepo domainissues.IssueRepository
+	JobRuns    domainjobs.JobRunRepository
 }
 
 type ReconcileInput struct {
@@ -66,8 +70,8 @@ type ReconcileResult struct {
 }
 
 type ContradictionView struct {
-	Contradiction driven.ContradictionRow
-	Sides         []driven.ContradictionSideRow
+	Contradiction domaincontradictions.ContradictionRow
+	Sides         []domaincontradictions.ContradictionSideRow
 }
 
 type ResolveInput struct {
@@ -130,7 +134,7 @@ func (s *Service) Run(ctx context.Context, userID, projectID uuid.UUID, in Recon
 	if err != nil {
 		return nil, err
 	}
-	selected := make([]driven.InterpretationRow, 0)
+	selected := make([]domaininterpretations.InterpretationRow, 0)
 	if len(in.InterpretationIDs) == 0 {
 		selected = pending
 	} else {
@@ -169,7 +173,7 @@ func (s *Service) Run(ctx context.Context, userID, projectID uuid.UUID, in Recon
 	return result, nil
 }
 
-func (s *Service) reconcileOne(ctx context.Context, userID, orgID, projectID uuid.UUID, interp driven.InterpretationRow) ([]CandidateOutcome, int, error) {
+func (s *Service) reconcileOne(ctx context.Context, userID, orgID, projectID uuid.UUID, interp domaininterpretations.InterpretationRow) ([]CandidateOutcome, int, error) {
 	var root payloadRoot
 	_ = json.Unmarshal([]byte(interp.PayloadJSON), &root)
 	outs := make([]CandidateOutcome, 0, len(root.Candidates))
@@ -266,7 +270,7 @@ func (s *Service) reconcileIssueCandidate(ctx context.Context, userID, orgID, pr
 }
 
 func (s *Service) addIssueEvidence(ctx context.Context, orgID, issueID uuid.UUID, ref appfacts.EvidenceRef) error {
-	return s.IssuesRepo.AddIssueItem(ctx, driven.IssueItemRow{
+	return s.IssuesRepo.AddIssueItem(ctx, domainissues.IssueItemRow{
 		ID: uuid.New(), IssueID: issueID, MessageID: ref.MessageID,
 		ManualItemID: ref.ManualItemID, AddedAt: time.Now().UTC(),
 	})
@@ -414,7 +418,7 @@ func (s *Service) reconcileFactCandidate(ctx context.Context, userID, orgID, pro
 	}
 
 	now := time.Now().UTC()
-	contr := driven.ContradictionRow{
+	contr := domaincontradictions.ContradictionRow{
 		ID: uuid.New(), OrganisationID: orgID, ProjectID: projectID,
 		Status:    string(domaincontr.StatusOpen),
 		Summary:   fmt.Sprintf("%s: active %q vs proposed %q", subject, active.ValueText, candText),
@@ -423,10 +427,10 @@ func (s *Service) reconcileFactCandidate(ctx context.Context, userID, orgID, pro
 	if err := s.Contradictions.CreateContradiction(ctx, contr); err != nil {
 		return CandidateOutcome{}, false, err
 	}
-	_ = s.Contradictions.AddContradictionSide(ctx, driven.ContradictionSideRow{
+	_ = s.Contradictions.AddContradictionSide(ctx, domaincontradictions.ContradictionSideRow{
 		ID: uuid.New(), ContradictionID: contr.ID, FactVersionID: &active.ID,
 	})
-	_ = s.Contradictions.AddContradictionSide(ctx, driven.ContradictionSideRow{
+	_ = s.Contradictions.AddContradictionSide(ctx, domaincontradictions.ContradictionSideRow{
 		ID: uuid.New(), ContradictionID: contr.ID, FactVersionID: &proposedID,
 	})
 	return CandidateOutcome{

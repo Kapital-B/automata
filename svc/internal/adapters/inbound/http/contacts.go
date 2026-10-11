@@ -4,14 +4,15 @@ import (
 	"database/sql"
 	"encoding/json"
 	"errors"
+	"github.com/go-chi/chi/v5"
 	"net/http"
 	"strconv"
 	"strings"
 	"time"
 
 	appcontacts "github.com/Kapital-B/automata/svc/internal/application/contacts"
-	"github.com/Kapital-B/automata/svc/internal/application/ports/driven"
-	"github.com/go-chi/chi/v5"
+	domaincontacts "github.com/Kapital-B/automata/svc/internal/domain/contacts"
+
 	"github.com/google/uuid"
 )
 
@@ -25,7 +26,7 @@ func (h *Handlers) listContacts(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusServiceUnavailable, map[string]string{"error": "contacts not configured"})
 		return
 	}
-	filter := driven.ContactListFilter{Query: strings.TrimSpace(r.URL.Query().Get("q"))}
+	filter := domaincontacts.ContactListFilter{Query: strings.TrimSpace(r.URL.Query().Get("q"))}
 	if v := r.URL.Query().Get("limit"); v != "" {
 		n, err := strconv.Atoi(v)
 		if err != nil {

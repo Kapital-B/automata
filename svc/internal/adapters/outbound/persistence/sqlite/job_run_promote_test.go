@@ -6,8 +6,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/Kapital-B/automata/svc/internal/application/ports/driven"
 	domainacc "github.com/Kapital-B/automata/svc/internal/domain/accounts"
+	domainaccounts "github.com/Kapital-B/automata/svc/internal/domain/accounts"
 	"github.com/google/uuid"
 	_ "modernc.org/sqlite"
 )
@@ -28,7 +28,7 @@ func TestPromoteJobRunToRunning(t *testing.T) {
 	runID := uuid.New()
 	startedPending := time.Now().UTC().Add(-time.Minute)
 
-	err = repo.InsertAccount(ctx, driven.AccountRow{
+	err = repo.InsertAccount(ctx, domainaccounts.AccountRow{
 		UserID:           userID,
 		ID:               accountID,
 		Label:            "t",

@@ -4,7 +4,7 @@ import (
 	"context"
 	"time"
 
-	"github.com/Kapital-B/automata/svc/internal/application/ports/driven"
+	domainai "github.com/Kapital-B/automata/svc/internal/domain/ai"
 	"github.com/google/uuid"
 )
 
@@ -15,7 +15,7 @@ const usageTimeLayout = "2006-01-02T15:04:05.000000000Z"
 
 func formatUsageTime(t time.Time) string { return t.UTC().Format(usageTimeLayout) }
 
-func (r *Repository) InsertLLMUsage(ctx context.Context, row driven.LLMUsageRow) error {
+func (r *Repository) InsertLLMUsage(ctx context.Context, row domainai.LLMUsageRow) error {
 	_, err := r.db.ExecContext(ctx, `
 		INSERT INTO llm_usage (id, user_id, account_id, feature, model,
 			input_tokens, output_tokens, cache_read_tokens, cache_write_tokens, created_at)
@@ -25,7 +25,7 @@ func (r *Repository) InsertLLMUsage(ctx context.Context, row driven.LLMUsageRow)
 	return err
 }
 
-func (r *Repository) SumLLMUsageByUser(ctx context.Context, userID uuid.UUID, from, to time.Time) ([]driven.LLMUsageTotal, error) {
+func (r *Repository) SumLLMUsageByUser(ctx context.Context, userID uuid.UUID, from, to time.Time) ([]domainai.LLMUsageTotal, error) {
 	rows, err := r.db.QueryContext(ctx, `
 		SELECT feature, model, COUNT(*),
 			COALESCE(SUM(input_tokens), 0), COALESCE(SUM(output_tokens), 0),
@@ -39,9 +39,9 @@ func (r *Repository) SumLLMUsageByUser(ctx context.Context, userID uuid.UUID, fr
 		return nil, err
 	}
 	defer rows.Close()
-	var out []driven.LLMUsageTotal
+	var out []domainai.LLMUsageTotal
 	for rows.Next() {
-		var t driven.LLMUsageTotal
+		var t domainai.LLMUsageTotal
 		if err := rows.Scan(&t.Feature, &t.Model, &t.Calls, &t.InputTokens, &t.OutputTokens, &t.CacheReadTokens, &t.CacheWriteTokens); err != nil {
 			return nil, err
 		}

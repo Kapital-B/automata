@@ -2,12 +2,14 @@ package sqlite_test
 
 import (
 	"context"
+	domainmessages "github.com/Kapital-B/automata/svc/internal/domain/messages"
 	"testing"
 	"time"
 
 	"github.com/Kapital-B/automata/svc/internal/adapters/outbound/persistence/sqlite"
-	"github.com/Kapital-B/automata/svc/internal/application/ports/driven"
 	appprojects "github.com/Kapital-B/automata/svc/internal/application/projects"
+	domainaccounts "github.com/Kapital-B/automata/svc/internal/domain/accounts"
+	domaincontacts "github.com/Kapital-B/automata/svc/internal/domain/contacts"
 	domainprojects "github.com/Kapital-B/automata/svc/internal/domain/projects"
 	"github.com/google/uuid"
 )
@@ -22,7 +24,7 @@ func seedUserAccount(t *testing.T, repo *sqlite.Repository) (userID, orgID, acco
 		t.Fatal(err)
 	}
 	accountID = uuid.New()
-	if err := repo.InsertAccount(ctx, driven.AccountRow{
+	if err := repo.InsertAccount(ctx, domainaccounts.AccountRow{
 		UserID: userID, ID: accountID, Label: "Work", Provider: "m365",
 		MsAccountKind: "work", PrimaryEmail: userID.String() + "@ex.com", ConnectionStatus: "connected",
 	}, []byte("tok")); err != nil {
@@ -37,7 +39,7 @@ func insertMsg(t *testing.T, repo *sqlite.Repository, accountID uuid.UUID, subje
 	now := time.Now().UTC()
 	convPtr := &conv
 	bodyPtr := &body
-	if err := repo.UpsertMessage(context.Background(), driven.MessageRow{
+	if err := repo.UpsertMessage(context.Background(), domainmessages.MessageRow{
 		ID: id, AccountID: accountID, ProviderMessageID: id.String(),
 		Subject: subject, FromJSON: `{"address":"a@b.com"}`, BodyText: bodyPtr,
 		ConversationID: convPtr, ReceivedAt: now, HasAttachments: false,
@@ -186,16 +188,16 @@ func TestEffectiveProjectIDsForMessagesMatchesIndividualAssignments(t *testing.T
 		t.Fatal(err)
 	}
 	now := time.Now().UTC()
-	if err := repo.UpsertMessageOverride(ctx, driven.AssignmentRow{
+	if err := repo.UpsertMessageOverride(ctx, domainprojects.AssignmentRow{
 		ID: uuid.New(), OrganisationID: orgID, AccountID: accountID, MessageID: &cleared,
 		Status: "committed", Source: "user", CreatedAt: now, UpdatedAt: now,
 	}); err != nil {
 		t.Fatal(err)
 	}
 	messageIDs := []uuid.UUID{thread, override, cleared, unassigned, foreign}
-	messages := make([]driven.MessageRow, 0, len(messageIDs))
+	messages := make([]domainmessages.MessageRow, 0, len(messageIDs))
 	for _, id := range messageIDs {
-		messages = append(messages, driven.MessageRow{ID: id})
+		messages = append(messages, domainmessages.MessageRow{ID: id})
 	}
 	got, err := repo.EffectiveProjectIDsForMessages(ctx, userID, messages)
 	if err != nil {
@@ -228,7 +230,7 @@ func TestAssignDoesNotCreateProjectMembers(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	_ = repo.UpsertParticipant(ctx, driven.CorrespondenceParticipantRow{
+	_ = repo.UpsertParticipant(ctx, domaincontacts.CorrespondenceParticipantRow{
 		ID: uuid.New(), OrganisationID: orgID, ContactID: contactID, Role: "from", MessageID: &m1,
 	})
 	_, err = svc.AssignMessage(ctx, userID, m1, appprojects.AssignInput{

@@ -3,12 +3,11 @@ package messages
 import (
 	"encoding/json"
 	"fmt"
+	domainmessages "github.com/Kapital-B/automata/svc/internal/domain/messages"
 	"net/mail"
 	"strings"
 	"time"
 	"unicode/utf8"
-
-	"github.com/Kapital-B/automata/svc/internal/application/ports/driven"
 )
 
 // Forward rule modes.
@@ -173,7 +172,7 @@ type ruleVerdict struct {
 }
 
 // evaluateLogic applies a normalized logic condition.
-func evaluateLogic(conditionJSON string, msg driven.MessageRow, now time.Time) (ruleVerdict, error) {
+func evaluateLogic(conditionJSON string, msg domainmessages.MessageRow, now time.Time) (ruleVerdict, error) {
 	var c forwardLogicCondition
 	if err := json.Unmarshal([]byte(conditionJSON), &c); err != nil {
 		return ruleVerdict{}, err
@@ -202,7 +201,7 @@ func senderOf(fromJSON string) (name, address string) {
 	return from.Name, strings.ToLower(strings.TrimSpace(from.Address))
 }
 
-func predicateMatches(msg driven.MessageRow, p forwardPredicate) bool {
+func predicateMatches(msg domainmessages.MessageRow, p forwardPredicate) bool {
 	switch p.Field {
 	case ForwardFieldHasAttachments:
 		want, ok := p.Value.(bool)

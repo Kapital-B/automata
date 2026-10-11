@@ -7,19 +7,21 @@ import (
 	"time"
 
 	"github.com/Kapital-B/automata/svc/internal/adapters/outbound/memoryjobs"
-	"github.com/Kapital-B/automata/svc/internal/application/ports/driven"
+	domainaccounts "github.com/Kapital-B/automata/svc/internal/domain/accounts"
+	domainjobs "github.com/Kapital-B/automata/svc/internal/domain/jobs"
+	domainmessages "github.com/Kapital-B/automata/svc/internal/domain/messages"
 	"github.com/google/uuid"
 )
 
 func TestSyncExecutorReplayKeepsSingleMessageUpsert(t *testing.T) {
 	graph := &fakeMailbox{
-		results: []*driven.MailChangePage{
+		results: []*domainaccounts.MailChangePage{
 			{
-				Messages:    []driven.MailMessage{{ID: "provider-1", Subject: "one", ReceivedDateTime: time.Now().UTC().Format(time.RFC3339), FromAddress: "a@example.com"}},
+				Messages:    []domainaccounts.MailMessage{{ID: "provider-1", Subject: "one", ReceivedDateTime: time.Now().UTC().Format(time.RFC3339), FromAddress: "a@example.com"}},
 				FinalCursor: "delta-1",
 			},
 			{
-				Messages:    []driven.MailMessage{{ID: "provider-1", Subject: "one", ReceivedDateTime: time.Now().UTC().Format(time.RFC3339), FromAddress: "a@example.com"}},
+				Messages:    []domainaccounts.MailMessage{{ID: "provider-1", Subject: "one", ReceivedDateTime: time.Now().UTC().Format(time.RFC3339), FromAddress: "a@example.com"}},
 				FinalCursor: "delta-1",
 			},
 		},
@@ -27,12 +29,12 @@ func TestSyncExecutorReplayKeepsSingleMessageUpsert(t *testing.T) {
 	svc, repo, userID, accountID := setupSyncService(t, graph)
 	svc.JobRuns = nil
 	exec := &SyncExecutor{Service: svc}
-	run := driven.RunContext{
+	run := domainjobs.RunContext{
 		RunID:     uuid.New(),
 		AttemptID: uuid.New(),
 		UserID:    userID,
 		AccountID: &accountID,
-		Cursor:    &driven.JobCursor{Kind: "graph_next_link", Value: "delta-replay"},
+		Cursor:    &domainjobs.JobCursor{Kind: "graph_next_link", Value: "delta-replay"},
 	}
 	if _, err := exec.ExecuteChunk(context.Background(), run); err != nil {
 		t.Fatal(err)
@@ -40,7 +42,7 @@ func TestSyncExecutorReplayKeepsSingleMessageUpsert(t *testing.T) {
 	if _, err := exec.ExecuteChunk(context.Background(), run); err != nil {
 		t.Fatal(err)
 	}
-	rows, err := repo.ListMessages(context.Background(), userID, driven.MessageListFilter{AccountID: &accountID, Limit: 50})
+	rows, err := repo.ListMessages(context.Background(), userID, domainmessages.MessageListFilter{AccountID: &accountID, Limit: 50})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -59,12 +61,12 @@ func TestCategorizeExecutorReplayKeepsSingleCategoryState(t *testing.T) {
 		}},
 	}
 	exec := &CategorizeExecutor{Service: svc}
-	run := driven.RunContext{
+	run := domainjobs.RunContext{
 		RunID:     uuid.New(),
 		AttemptID: uuid.New(),
 		UserID:    userID,
 		AccountID: &accountID,
-		Payload:   driven.JobPayload{Recategorize: true},
+		Payload:   domainjobs.JobPayload{Recategorize: true},
 	}
 	if _, err := exec.ExecuteChunk(context.Background(), run); err != nil {
 		t.Fatal(err)
@@ -72,7 +74,7 @@ func TestCategorizeExecutorReplayKeepsSingleCategoryState(t *testing.T) {
 	if _, err := exec.ExecuteChunk(context.Background(), run); err != nil {
 		t.Fatal(err)
 	}
-	rows, err := repo.ListMessages(context.Background(), userID, driven.MessageListFilter{AccountID: &accountID, Category: "finance"})
+	rows, err := repo.ListMessages(context.Background(), userID, domainmessages.MessageListFilter{AccountID: &accountID, Category: "finance"})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -84,7 +86,7 @@ func TestCategorizeExecutorReplayKeepsSingleCategoryState(t *testing.T) {
 func TestDraftSuggestExecutorReplayKeepsSingleDraft(t *testing.T) {
 	db, repo, userID, accountID, msgID := setupSummarizeRepo(t)
 	now := time.Now().UTC()
-	if err := repo.InsertActionItems(context.Background(), []driven.ActionItemRow{{
+	if err := repo.InsertActionItems(context.Background(), []domainmessages.ActionItemRow{{
 		ID:        uuid.New(),
 		UserID:    userID,
 		AccountID: accountID,
@@ -104,12 +106,12 @@ func TestDraftSuggestExecutorReplayKeepsSingleDraft(t *testing.T) {
 		ModelLabel: "test-model",
 	}
 	exec := &DraftSuggestExecutor{Service: svc}
-	run := driven.RunContext{
+	run := domainjobs.RunContext{
 		RunID:     uuid.New(),
 		AttemptID: uuid.New(),
 		UserID:    userID,
 		AccountID: &accountID,
-		Payload:   driven.JobPayload{MessageID: &msgID, Force: true},
+		Payload:   domainjobs.JobPayload{MessageID: &msgID, Force: true},
 	}
 	if _, err := exec.ExecuteChunk(context.Background(), run); err != nil {
 		t.Fatal(err)
@@ -138,7 +140,7 @@ func TestForwardRulesExecutorEffectClaimPreventsDuplicateSend(t *testing.T) {
 	svc.Mailboxes = testOpener(repo, graph)
 	store := memoryjobs.NewStore()
 	exec := &ForwardRulesExecutor{Service: svc, Store: store}
-	run := driven.RunContext{
+	run := domainjobs.RunContext{
 		RunID:     uuid.New(),
 		AttemptID: uuid.New(),
 		UserID:    userID,
@@ -165,7 +167,7 @@ func TestForwardRulesExecutorEffectClaimPreventsDuplicateSend(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if effect == nil || effect.State != driven.EffectSucceededPendingAudit {
+	if effect == nil || effect.State != domainjobs.EffectSucceededPendingAudit {
 		t.Fatalf("effect = %+v, want a recorded send", effect)
 	}
 }

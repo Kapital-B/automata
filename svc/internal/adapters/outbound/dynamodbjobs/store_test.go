@@ -9,7 +9,7 @@ import (
 	"github.com/Kapital-B/automata/svc/internal/adapters/outbound/dynamodbjobs"
 	"github.com/Kapital-B/automata/svc/internal/adapters/outbound/jobstoretest"
 	"github.com/Kapital-B/automata/svc/internal/application/jobs"
-	"github.com/Kapital-B/automata/svc/internal/application/ports/driven"
+	domainjobs "github.com/Kapital-B/automata/svc/internal/domain/jobs"
 	"github.com/aws/aws-sdk-go-v2/aws"
 	"github.com/aws/aws-sdk-go-v2/config"
 	"github.com/aws/aws-sdk-go-v2/credentials"
@@ -35,7 +35,7 @@ func TestJobStoreCrashWindows(t *testing.T) {
 func newDynamoFactory(t *testing.T) jobstoretest.Factory {
 	t.Helper()
 	endpoint := os.Getenv("AUTOMATA_TEST_DDB_ENDPOINT")
-	return func(t *testing.T) (driven.JobStore, func()) {
+	return func(t *testing.T) (domainjobs.JobStore, func()) {
 		t.Helper()
 		client := newDynamoClient(t, endpoint)
 		tableName := "automata-jobs-test-" + uuid.NewString()
@@ -163,8 +163,8 @@ func TestCompletedChainDeletesItsLockRow(t *testing.T) {
 	user := uuid.New()
 	account := uuid.New()
 	enq := &jobs.Enqueuer{Store: store}
-	first, err := enq.EnqueueChain(ctx, user, &account, driven.JobTriggerAPI,
-		[]string{jobs.TypeSync, jobs.TypeResolveContacts}, driven.JobPayload{}, nil, nil)
+	first, err := enq.EnqueueChain(ctx, user, &account, domainjobs.JobTriggerAPI,
+		[]string{jobs.TypeSync, jobs.TypeResolveContacts}, domainjobs.JobPayload{}, nil, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -187,9 +187,9 @@ func TestCompletedChainDeletesItsLockRow(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		var next *driven.CreateJobInput
+		var next *domainjobs.CreateJobInput
 		if len(running.RemainingJobs) > 0 {
-			next = &driven.CreateJobInput{
+			next = &domainjobs.CreateJobInput{
 				ID:            jobs.DeterministicJobID(running.ChainID, running.StepIndex+1, running.RemainingJobs[0]),
 				JobType:       running.RemainingJobs[0],
 				UserID:        running.UserID,
@@ -203,7 +203,7 @@ func TestCompletedChainDeletesItsLockRow(t *testing.T) {
 			}
 		}
 		if _, err := store.CompleteStep(ctx, running.ID, running.Revision, *running.AttemptID,
-			driven.JobProgress{Processed: 1}, next, now, time.Hour); err != nil {
+			domainjobs.JobProgress{Processed: 1}, next, now, time.Hour); err != nil {
 			t.Fatal(err)
 		}
 		step = nil

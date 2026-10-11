@@ -16,8 +16,10 @@ import (
 	"github.com/Kapital-B/automata/svc/internal/adapters/outbound/memoryjobs"
 	"github.com/Kapital-B/automata/svc/internal/adapters/outbound/persistence/sqlite"
 	appmessages "github.com/Kapital-B/automata/svc/internal/application/messages"
-	"github.com/Kapital-B/automata/svc/internal/application/ports/driven"
 	domainacc "github.com/Kapital-B/automata/svc/internal/domain/accounts"
+	domainaccounts "github.com/Kapital-B/automata/svc/internal/domain/accounts"
+	domainmessages "github.com/Kapital-B/automata/svc/internal/domain/messages"
+
 	"github.com/google/uuid"
 )
 
@@ -42,7 +44,7 @@ func newForwardAPI(t *testing.T) *forwardAPI {
 	}
 	repo := sqlite.NewRepository(db, 15*time.Minute)
 	a := &forwardAPI{t: t, repo: repo, userID: uuid.MustParse("a0000001-0000-4000-8000-000000000001"), accountID: uuid.New()}
-	if err := repo.InsertAccount(ctx, driven.AccountRow{
+	if err := repo.InsertAccount(ctx, domainaccounts.AccountRow{
 		UserID: a.userID, ID: a.accountID, Label: "Work", Provider: "m365", MsAccountKind: domainacc.KindWork,
 		PrimaryEmail: "work@example.com", ConnectionStatus: "connected",
 	}, []byte("tok")); err != nil {
@@ -132,7 +134,7 @@ func TestCreateForwardRuleRefusesInvalidRules(t *testing.T) {
 func TestCreateForwardRuleOnAnotherUsersAccountIsNotFound(t *testing.T) {
 	a := newForwardAPI(t)
 	other := uuid.New()
-	if err := a.repo.InsertAccount(context.Background(), driven.AccountRow{
+	if err := a.repo.InsertAccount(context.Background(), domainaccounts.AccountRow{
 		UserID: uuid.New(), ID: other, Label: "Theirs", Provider: "m365", MsAccountKind: domainacc.KindWork,
 		PrimaryEmail: "them@example.com", ConnectionStatus: "connected",
 	}, []byte("tok")); err != nil {
@@ -213,7 +215,7 @@ func TestPreviewAndActivity(t *testing.T) {
 	ctx := context.Background()
 	msgID := uuid.New()
 	body := "Invoice attached"
-	if err := a.repo.UpsertMessage(ctx, driven.MessageRow{
+	if err := a.repo.UpsertMessage(ctx, domainmessages.MessageRow{
 		ID: msgID, AccountID: a.accountID, ProviderMessageID: "p1", ReceivedAt: time.Now().UTC(), Subject: "Invoice 7",
 		FromJSON: `{"name":"Vendor","address":"billing@vendor.example"}`, BodyText: &body, CreatedAt: time.Now().UTC(), UpdatedAt: time.Now().UTC(),
 	}); err != nil {
@@ -232,7 +234,7 @@ func TestPreviewAndActivity(t *testing.T) {
 
 	_, _, id := a.create(`{"name":"t","mode":"logic","condition_json":` + financeCondition + `,"forward_to":"dest@example.com"}`)
 	reason := "forwarded to dest@example.com"
-	if err := a.repo.InsertForwardAudit(ctx, driven.ForwardAuditRow{
+	if err := a.repo.InsertForwardAudit(ctx, domainmessages.ForwardAuditRow{
 		ID: uuid.New(), UserID: a.userID, AccountID: a.accountID, MessageID: msgID, RuleID: uuid.MustParse(id),
 		RunID: uuid.New(), Status: "forwarded", Reason: &reason, CreatedAt: time.Now().UTC(),
 	}); err != nil {

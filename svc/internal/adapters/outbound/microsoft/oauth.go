@@ -10,14 +10,14 @@ import (
 	"net/url"
 	"strings"
 
-	"github.com/Kapital-B/automata/svc/internal/application/ports/driven"
 	"github.com/Kapital-B/automata/svc/internal/domain/accounts"
+	domainaccounts "github.com/Kapital-B/automata/svc/internal/domain/accounts"
 )
 
 // Space-separated v2 scopes: include openid/offline_access explicitly (Microsoft v2.0 guidance).
 const graphScope = "openid offline_access https://graph.microsoft.com/Mail.Read https://graph.microsoft.com/Mail.Send https://graph.microsoft.com/User.Read"
 
-// OAuth implements driven.MicrosoftOAuth using the v2.0 token endpoint.
+// OAuth implements domainaccounts.MicrosoftOAuth using the v2.0 token endpoint.
 type OAuth struct {
 	ClientID     string
 	ClientSecret string
@@ -88,7 +88,7 @@ type tokenResponse struct {
 }
 
 // ExchangeCode exchanges an authorization code for tokens.
-func (o *OAuth) ExchangeCode(ctx context.Context, kind accounts.MsAccountKind, code string) (driven.TokenPair, error) {
+func (o *OAuth) ExchangeCode(ctx context.Context, kind accounts.MsAccountKind, code string) (domainaccounts.TokenPair, error) {
 	return o.postToken(ctx, kind, url.Values{
 		"client_id":     {o.ClientID},
 		"client_secret": {o.ClientSecret},
@@ -111,7 +111,7 @@ func (e *tokenError) Error() string { return fmt.Sprintf("token error %s: %s", e
 // the refresh token is revoked or expired: retrying cannot fix it, so it is
 // reported as rejected credentials and the account can be marked for
 // reconnection instead of failing every sync the same way.
-func (o *OAuth) RefreshAccessToken(ctx context.Context, kind accounts.MsAccountKind, refreshToken string) (driven.TokenPair, error) {
+func (o *OAuth) RefreshAccessToken(ctx context.Context, kind accounts.MsAccountKind, refreshToken string) (domainaccounts.TokenPair, error) {
 	tok, err := o.postToken(ctx, kind, url.Values{
 		"client_id":     {o.ClientID},
 		"client_secret": {o.ClientSecret},
@@ -121,36 +121,36 @@ func (o *OAuth) RefreshAccessToken(ctx context.Context, kind accounts.MsAccountK
 	})
 	var te *tokenError
 	if errors.As(err, &te) && te.Code == "invalid_grant" {
-		return tok, fmt.Errorf("%w: %v", driven.ErrCredentialsRejected, err)
+		return tok, fmt.Errorf("%w: %v", domainaccounts.ErrCredentialsRejected, err)
 	}
 	return tok, err
 }
 
-func (o *OAuth) postToken(ctx context.Context, kind accounts.MsAccountKind, form url.Values) (driven.TokenPair, error) {
+func (o *OAuth) postToken(ctx context.Context, kind accounts.MsAccountKind, form url.Values) (domainaccounts.TokenPair, error) {
 	endpoint := o.authorityHost(kind) + "/oauth2/v2.0/token"
 	req, err := http.NewRequestWithContext(ctx, http.MethodPost, endpoint, strings.NewReader(form.Encode()))
 	if err != nil {
-		return driven.TokenPair{}, err
+		return domainaccounts.TokenPair{}, err
 	}
 	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
 	resp, err := o.client().Do(req)
 	if err != nil {
-		return driven.TokenPair{}, err
+		return domainaccounts.TokenPair{}, err
 	}
 	defer resp.Body.Close()
 	body, err := io.ReadAll(io.LimitReader(resp.Body, 1<<20))
 	if err != nil {
-		return driven.TokenPair{}, err
+		return domainaccounts.TokenPair{}, err
 	}
 	var tr tokenResponse
 	if err := json.Unmarshal(body, &tr); err != nil {
-		return driven.TokenPair{}, fmt.Errorf("token json: %w", err)
+		return domainaccounts.TokenPair{}, fmt.Errorf("token json: %w", err)
 	}
 	if tr.Error != "" {
-		return driven.TokenPair{}, &tokenError{Code: tr.Error, Desc: tr.ErrorDesc}
+		return domainaccounts.TokenPair{}, &tokenError{Code: tr.Error, Desc: tr.ErrorDesc}
 	}
 	if tr.AccessToken == "" {
-		return driven.TokenPair{}, fmt.Errorf("empty access_token")
+		return domainaccounts.TokenPair{}, fmt.Errorf("empty access_token")
 	}
-	return driven.TokenPair{AccessToken: tr.AccessToken, RefreshToken: tr.RefreshToken, ExpiresIn: tr.ExpiresIn}, nil
+	return domainaccounts.TokenPair{AccessToken: tr.AccessToken, RefreshToken: tr.RefreshToken, ExpiresIn: tr.ExpiresIn}, nil
 }

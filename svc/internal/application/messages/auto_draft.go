@@ -8,16 +8,19 @@ import (
 	"time"
 
 	"github.com/Kapital-B/automata/svc/internal/application/jobkit"
-	"github.com/Kapital-B/automata/svc/internal/application/ports/driven"
+	domainai "github.com/Kapital-B/automata/svc/internal/domain/ai"
+	domainjobs "github.com/Kapital-B/automata/svc/internal/domain/jobs"
 	"github.com/Kapital-B/automata/svc/internal/domain/mailtext"
+	domainmessages "github.com/Kapital-B/automata/svc/internal/domain/messages"
+
 	"github.com/google/uuid"
 )
 
 type AutoDraftService struct {
-	Messages   driven.MessageRepository
-	Summaries  driven.SummaryRepository
-	LLM        driven.LLMClient
-	JobRuns    driven.JobRunRepository
+	Messages   domainmessages.MessageRepository
+	Summaries  domainmessages.SummaryRepository
+	LLM        domainai.LLMClient
+	JobRuns    domainjobs.JobRunRepository
 	ModelLabel string
 }
 
@@ -85,7 +88,7 @@ func (s *AutoDraftService) GenerateForAccount(ctx context.Context, userID, accou
 
 	now := time.Now().UTC()
 	seenIDs := make([]uuid.UUID, 0, len(items))
-	drafts := make([]driven.DraftSuggestionRow, 0, len(items))
+	drafts := make([]domainmessages.DraftSuggestionRow, 0, len(items))
 	replyCandidates := 0
 	for idx, item := range items {
 		if opts.MessageID != nil && item.MessageID != *opts.MessageID {
@@ -105,7 +108,7 @@ func (s *AutoDraftService) GenerateForAccount(ctx context.Context, userID, accou
 		if err != nil {
 			continue
 		}
-		drafts = append(drafts, driven.DraftSuggestionRow{
+		drafts = append(drafts, domainmessages.DraftSuggestionRow{
 			ID:           uuid.New(),
 			UserID:       userID,
 			AccountID:    accountID,
@@ -130,7 +133,7 @@ func (s *AutoDraftService) GenerateForAccount(ctx context.Context, userID, accou
 	return &AutoDraftResult{JobRunID: runID, ActionItemsSeen: len(seenIDs), DraftsGenerated: len(drafts)}, nil
 }
 
-func (s *AutoDraftService) GenerateChunk(ctx context.Context, run driven.RunContext) (*AutoDraftChunkResult, error) {
+func (s *AutoDraftService) GenerateChunk(ctx context.Context, run domainjobs.RunContext) (*AutoDraftChunkResult, error) {
 	if s == nil || s.Messages == nil || s.Summaries == nil || s.LLM == nil {
 		return nil, fmt.Errorf("auto-draft service not configured")
 	}
@@ -147,7 +150,7 @@ func (s *AutoDraftService) GenerateChunk(ctx context.Context, run driven.RunCont
 	}
 	now := time.Now().UTC()
 	seenIDs := make([]uuid.UUID, 0, len(items))
-	drafts := make([]driven.DraftSuggestionRow, 0, len(items))
+	drafts := make([]domainmessages.DraftSuggestionRow, 0, len(items))
 	for _, item := range items {
 		if item.MessageID != *run.Payload.MessageID {
 			continue
@@ -164,7 +167,7 @@ func (s *AutoDraftService) GenerateChunk(ctx context.Context, run driven.RunCont
 		if err != nil {
 			continue
 		}
-		drafts = append(drafts, driven.DraftSuggestionRow{
+		drafts = append(drafts, domainmessages.DraftSuggestionRow{
 			ID:           jobkit.DeterministicID(run.RunID, "draft_suggest", item.ID.String(), item.MessageID.String()),
 			UserID:       run.UserID,
 			AccountID:    *run.AccountID,
@@ -191,7 +194,7 @@ func (s *AutoDraftService) GenerateChunk(ctx context.Context, run driven.RunCont
 	}, nil
 }
 
-func (s *AutoDraftService) generateDraft(ctx context.Context, item driven.ActionItemRow, msg driven.MessageRow) (*autoDraftPayload, error) {
+func (s *AutoDraftService) generateDraft(ctx context.Context, item domainmessages.ActionItemRow, msg domainmessages.MessageRow) (*autoDraftPayload, error) {
 	body := derefStr(msg.BodyText)
 	if mailtext.LooksLikeHTML(body) {
 		body = mailtext.StripHTML(body)
@@ -201,7 +204,7 @@ func (s *AutoDraftService) generateDraft(ctx context.Context, item driven.Action
 		"Action item: " + clampText(item.Text, 300) + "\n" +
 		"Original subject: " + clampText(msg.Subject, 180) + "\n" +
 		"Original body: " + clampText(body, 1200)
-	resp, err := s.LLM.ChatCompletion(ctx, []driven.LLMMessage{
+	resp, err := s.LLM.ChatCompletion(ctx, []domainai.LLMMessage{
 		{Role: "system", Content: "You write helpful short email replies. Return JSON only."},
 		{Role: "user", Content: prompt},
 	})

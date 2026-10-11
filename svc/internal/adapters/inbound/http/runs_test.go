@@ -17,8 +17,8 @@ import (
 	appaccounts "github.com/Kapital-B/automata/svc/internal/application/accounts"
 	"github.com/Kapital-B/automata/svc/internal/application/auth"
 	appmessages "github.com/Kapital-B/automata/svc/internal/application/messages"
-	"github.com/Kapital-B/automata/svc/internal/application/ports/driven"
 	domainacc "github.com/Kapital-B/automata/svc/internal/domain/accounts"
+	domainaccounts "github.com/Kapital-B/automata/svc/internal/domain/accounts"
 	"github.com/google/uuid"
 	_ "modernc.org/sqlite"
 )
@@ -64,7 +64,7 @@ func newRunsTestServer(t *testing.T) (*httptest.Server, *sqlite.Repository, uuid
 
 func insertAccountForUser(t *testing.T, repo *sqlite.Repository, userID, accountID uuid.UUID, label string) {
 	t.Helper()
-	err := repo.InsertAccount(context.Background(), driven.AccountRow{
+	err := repo.InsertAccount(context.Background(), domainaccounts.AccountRow{
 		UserID:           userID,
 		ID:               accountID,
 		Label:            label,

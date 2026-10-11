@@ -4,12 +4,13 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	domainmessages "github.com/Kapital-B/automata/svc/internal/domain/messages"
 	"testing"
 	"time"
 
 	appissues "github.com/Kapital-B/automata/svc/internal/application/issues"
-	"github.com/Kapital-B/automata/svc/internal/application/ports/driven"
 	appprojects "github.com/Kapital-B/automata/svc/internal/application/projects"
+	domainai "github.com/Kapital-B/automata/svc/internal/domain/ai"
 	domainprojects "github.com/Kapital-B/automata/svc/internal/domain/projects"
 	"github.com/google/uuid"
 )
@@ -20,12 +21,12 @@ type fakeLLM struct {
 	calls   int
 }
 
-func (f *fakeLLM) ChatCompletion(ctx context.Context, messages []driven.LLMMessage) (*driven.LLMResponse, error) {
+func (f *fakeLLM) ChatCompletion(ctx context.Context, messages []domainai.LLMMessage) (*domainai.LLMResponse, error) {
 	f.calls++
 	if f.err != nil {
 		return nil, f.err
 	}
-	return &driven.LLMResponse{Content: f.content}, nil
+	return &domainai.LLMResponse{Content: f.content}, nil
 }
 
 func TestSuggestReturnsProposalWithoutCreating(t *testing.T) {
@@ -41,7 +42,7 @@ func TestSuggestReturnsProposalWithoutCreating(t *testing.T) {
 	msgID := uuid.New()
 	conv := "conv-sug"
 	body := "pump sizing P-03"
-	if err := repo.UpsertMessage(ctx, driven.MessageRow{
+	if err := repo.UpsertMessage(ctx, domainmessages.MessageRow{
 		ID: msgID, AccountID: accountID, ProviderMessageID: msgID.String(),
 		ReceivedAt: time.Now().UTC(), Subject: "Outlook: P-03", BodyText: &body,
 		FromJSON: `{}`, ConversationID: &conv,
@@ -91,7 +92,7 @@ func TestSuggestRejectsForeignIDsAndSingleAccount(t *testing.T) {
 	ctx := context.Background()
 	msgID := uuid.New()
 	conv := "conv-a"
-	if err := repo.UpsertMessage(ctx, driven.MessageRow{
+	if err := repo.UpsertMessage(ctx, domainmessages.MessageRow{
 		ID: msgID, AccountID: accountID, ProviderMessageID: msgID.String(),
 		ReceivedAt: time.Now().UTC(), Subject: "A", FromJSON: `{}`, ConversationID: &conv,
 	}); err != nil {

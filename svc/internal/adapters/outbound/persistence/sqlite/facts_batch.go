@@ -4,12 +4,12 @@ import (
 	"context"
 
 	"github.com/Kapital-B/automata/svc/internal/adapters/outbound/persistence/sqlkit"
-	"github.com/Kapital-B/automata/svc/internal/application/ports/driven"
+	domainfacts "github.com/Kapital-B/automata/svc/internal/domain/facts"
 	"github.com/google/uuid"
 )
 
-func (r *Repository) ListActiveFactVersionsForFacts(ctx context.Context, factIDs []uuid.UUID) ([]driven.FactVersionRow, error) {
-	out := make([]driven.FactVersionRow, 0, len(factIDs))
+func (r *Repository) ListActiveFactVersionsForFacts(ctx context.Context, factIDs []uuid.UUID) ([]domainfacts.FactVersionRow, error) {
+	out := make([]domainfacts.FactVersionRow, 0, len(factIDs))
 	for _, chunk := range sqlkit.ChunkUUIDs(sqlkit.DedupeUUIDs(factIDs), timelineHydrateChunk) {
 		rows, err := r.db.QueryContext(ctx, `
 			SELECT id, fact_id, status, value_json, value_text, unit, source, confidence, interpretation_id,
@@ -36,8 +36,8 @@ func (r *Repository) ListActiveFactVersionsForFacts(ctx context.Context, factIDs
 	return out, nil
 }
 
-func (r *Repository) ListFactEvidenceForVersions(ctx context.Context, versionIDs []uuid.UUID) ([]driven.FactEvidenceRow, error) {
-	out := make([]driven.FactEvidenceRow, 0)
+func (r *Repository) ListFactEvidenceForVersions(ctx context.Context, versionIDs []uuid.UUID) ([]domainfacts.FactEvidenceRow, error) {
+	out := make([]domainfacts.FactEvidenceRow, 0)
 	for _, chunk := range sqlkit.ChunkUUIDs(sqlkit.DedupeUUIDs(versionIDs), timelineHydrateChunk) {
 		rows, err := r.db.QueryContext(ctx, `
 			SELECT id, fact_version_id, message_id, manual_item_id, added_at

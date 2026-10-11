@@ -8,7 +8,7 @@ import (
 	"time"
 
 	"github.com/Kapital-B/automata/svc/internal/adapters/outbound/security"
-	"github.com/Kapital-B/automata/svc/internal/application/ports/driven"
+	domainai "github.com/Kapital-B/automata/svc/internal/domain/ai"
 	"github.com/google/uuid"
 )
 
@@ -141,7 +141,7 @@ func TestAuthMiddlewareSetsUsageScope(t *testing.T) {
 	userID := uuid.New()
 	var got *uuid.UUID
 	h := authMiddleware(testJWTSecret)(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		got, _ = driven.UsageScopeFrom(r.Context())
+		got, _ = domainai.UsageScopeFrom(r.Context())
 	}))
 	req := httptest.NewRequest(http.MethodGet, "/api/messages", nil)
 	req.Header.Set("Authorization", "Bearer "+testBearerToken(t, userID))

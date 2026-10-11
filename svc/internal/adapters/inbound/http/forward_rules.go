@@ -3,6 +3,7 @@ package http
 import (
 	"encoding/json"
 	"errors"
+	"github.com/go-chi/chi/v5"
 	"net/http"
 	"sort"
 	"strconv"
@@ -10,8 +11,8 @@ import (
 	"time"
 
 	appmessages "github.com/Kapital-B/automata/svc/internal/application/messages"
-	"github.com/Kapital-B/automata/svc/internal/application/ports/driven"
-	"github.com/go-chi/chi/v5"
+	domainmessages "github.com/Kapital-B/automata/svc/internal/domain/messages"
+
 	"github.com/google/uuid"
 )
 
@@ -154,7 +155,7 @@ func (h *Handlers) listForwardRules(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	allowed := appmessages.AllowlistSet(allowRows)
-	stats := map[uuid.UUID]driven.ForwardRuleStats{}
+	stats := map[uuid.UUID]domainmessages.ForwardRuleStats{}
 	if st, err := h.Forwards.ForwardRuleStats(r.Context(), uid, accountID); err == nil {
 		for _, s := range st {
 			stats[s.RuleID] = s
@@ -223,7 +224,7 @@ func (h *Handlers) createForwardRule(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 	}
-	row := driven.ForwardRuleRow{
+	row := domainmessages.ForwardRuleRow{
 		ID: uuid.New(), UserID: uid, AccountID: accountID, Name: strings.TrimSpace(body.Name),
 		Mode: mode, ConditionJSON: cond, ForwardTo: forwardTo, Enabled: enabled, ApplyFrom: applyFrom,
 		CreatedAt: now, UpdatedAt: now,
@@ -261,7 +262,7 @@ func (h *Handlers) updateForwardRule(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 	}
-	row := driven.ForwardRuleRow{
+	row := domainmessages.ForwardRuleRow{
 		ID: ruleID, UserID: uid, Name: strings.TrimSpace(body.Name), Mode: mode, ConditionJSON: cond,
 		ForwardTo: forwardTo, Enabled: enabled, ApplyFrom: applyFrom, UpdatedAt: time.Now().UTC(),
 	}

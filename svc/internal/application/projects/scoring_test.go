@@ -1,18 +1,19 @@
 package projects
 
 import (
+	domainmessages "github.com/Kapital-B/automata/svc/internal/domain/messages"
 	"testing"
 
-	"github.com/Kapital-B/automata/svc/internal/application/ports/driven"
+	domainprojects "github.com/Kapital-B/automata/svc/internal/domain/projects"
 	"github.com/google/uuid"
 )
 
-func proj(code, name string, keywords ...string) driven.ProjectRow {
-	return driven.ProjectRow{ID: uuid.New(), Code: code, Name: name, Keywords: keywords}
+func proj(code, name string, keywords ...string) domainprojects.ProjectRow {
+	return domainprojects.ProjectRow{ID: uuid.New(), Code: code, Name: name, Keywords: keywords}
 }
 
-func msgWith(subject, body, fromJSON string) driven.MessageRow {
-	return driven.MessageRow{ID: uuid.New(), Subject: subject, BodyText: &body, FromJSON: fromJSON}
+func msgWith(subject, body, fromJSON string) domainmessages.MessageRow {
+	return domainmessages.MessageRow{ID: uuid.New(), Subject: subject, BodyText: &body, FromJSON: fromJSON}
 }
 
 // A project code is the one signal allowed to commit without the operator, so
@@ -20,7 +21,7 @@ func msgWith(subject, body, fromJSON string) driven.MessageRow {
 func TestCodeTokenHitNeedsExactlyOneProject(t *testing.T) {
 	dc01 := proj("DC01", "Cooling Upgrade")
 	ot02 := proj("OT02", "Other")
-	all := []driven.ProjectRow{dc01, ot02}
+	all := []domainprojects.ProjectRow{dc01, ot02}
 
 	got, ok := codeTokenHit(msgWith("Regarding DC01", "chiller work", ""), all)
 	if !ok || got.ID != dc01.ID {
@@ -37,7 +38,7 @@ func TestCodeTokenHitNeedsExactlyOneProject(t *testing.T) {
 
 func TestCodeTokenHitReadsTheBody(t *testing.T) {
 	dc01 := proj("DC01", "Cooling Upgrade")
-	got, ok := codeTokenHit(msgWith("no code here", "raised under DC01 last week", ""), []driven.ProjectRow{dc01})
+	got, ok := codeTokenHit(msgWith("no code here", "raised under DC01 last week", ""), []domainprojects.ProjectRow{dc01})
 	if !ok || got.ID != dc01.ID {
 		t.Fatalf("body match = %v/%s, want DC01", ok, got.Code)
 	}

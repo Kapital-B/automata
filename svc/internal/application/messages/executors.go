@@ -9,7 +9,10 @@ import (
 	"time"
 
 	"github.com/Kapital-B/automata/svc/internal/application/jobkit"
-	"github.com/Kapital-B/automata/svc/internal/application/ports/driven"
+	domainai "github.com/Kapital-B/automata/svc/internal/domain/ai"
+	domainjobs "github.com/Kapital-B/automata/svc/internal/domain/jobs"
+	domainmessages "github.com/Kapital-B/automata/svc/internal/domain/messages"
+
 	"github.com/google/uuid"
 )
 
@@ -19,14 +22,14 @@ type SyncExecutor struct {
 
 func (e *SyncExecutor) JobType() string { return "sync" }
 
-func (e *SyncExecutor) ExecuteChunk(ctx context.Context, run driven.RunContext) (driven.ChunkResult, error) {
+func (e *SyncExecutor) ExecuteChunk(ctx context.Context, run domainjobs.RunContext) (domainjobs.ChunkResult, error) {
 	res, err := e.Service.SyncChunk(ctx, run)
 	if err != nil {
-		return driven.ChunkResult{}, err
+		return domainjobs.ChunkResult{}, err
 	}
-	return driven.ChunkResult{
+	return domainjobs.ChunkResult{
 		NextCursor: res.NextCursor,
-		ProgressDelta: driven.JobProgress{
+		ProgressDelta: domainjobs.JobProgress{
 			Processed: res.MessagesUpserted,
 			Detail: map[string]interface{}{
 				"fetched":            res.Fetched,
@@ -45,14 +48,14 @@ type CategorizeExecutor struct {
 
 func (e *CategorizeExecutor) JobType() string { return "categorize" }
 
-func (e *CategorizeExecutor) ExecuteChunk(ctx context.Context, run driven.RunContext) (driven.ChunkResult, error) {
+func (e *CategorizeExecutor) ExecuteChunk(ctx context.Context, run domainjobs.RunContext) (domainjobs.ChunkResult, error) {
 	res, err := e.Service.CategorizeChunk(ctx, run)
 	if err != nil {
-		return driven.ChunkResult{}, err
+		return domainjobs.ChunkResult{}, err
 	}
-	return driven.ChunkResult{
+	return domainjobs.ChunkResult{
 		NextCursor: res.NextCursor,
-		ProgressDelta: driven.JobProgress{
+		ProgressDelta: domainjobs.JobProgress{
 			Processed: res.MessagesScanned,
 			Detail: map[string]interface{}{
 				"messages_categorized": res.MessagesCategorized,
@@ -68,13 +71,13 @@ type DraftSuggestExecutor struct {
 
 func (e *DraftSuggestExecutor) JobType() string { return "draft_suggest" }
 
-func (e *DraftSuggestExecutor) ExecuteChunk(ctx context.Context, run driven.RunContext) (driven.ChunkResult, error) {
+func (e *DraftSuggestExecutor) ExecuteChunk(ctx context.Context, run domainjobs.RunContext) (domainjobs.ChunkResult, error) {
 	res, err := e.Service.GenerateChunk(ctx, run)
 	if err != nil {
-		return driven.ChunkResult{}, err
+		return domainjobs.ChunkResult{}, err
 	}
-	return driven.ChunkResult{
-		ProgressDelta: driven.JobProgress{
+	return domainjobs.ChunkResult{
+		ProgressDelta: domainjobs.JobProgress{
 			Processed: res.ActionItemsSeen,
 			Detail: map[string]interface{}{
 				"drafts_generated":  res.DraftsGenerated,
@@ -91,27 +94,27 @@ type SummarizeExecutor struct {
 
 func (e *SummarizeExecutor) JobType() string { return "summarize" }
 
-func (e *SummarizeExecutor) ExecuteChunk(ctx context.Context, run driven.RunContext) (driven.ChunkResult, error) {
+func (e *SummarizeExecutor) ExecuteChunk(ctx context.Context, run domainjobs.RunContext) (domainjobs.ChunkResult, error) {
 	if e == nil || e.Service == nil || e.Service.Messages == nil || e.Service.Summaries == nil || e.Service.LLM == nil {
-		return driven.ChunkResult{}, fmt.Errorf("summarize service not configured")
+		return domainjobs.ChunkResult{}, fmt.Errorf("summarize service not configured")
 	}
 	if run.AccountID == nil || *run.AccountID == uuid.Nil {
-		return driven.ChunkResult{}, fmt.Errorf("account_id is required")
+		return domainjobs.ChunkResult{}, fmt.Errorf("account_id is required")
 	}
 	offset := jobkit.DecodeOffsetCursor(run.Cursor)
-	rows, err := e.Service.Messages.ListMessages(ctx, run.UserID, driven.MessageListFilter{
+	rows, err := e.Service.Messages.ListMessages(ctx, run.UserID, domainmessages.MessageListFilter{
 		AccountID: run.AccountID,
 		Limit:     241,
 		Offset:    offset,
 	})
 	if err != nil {
-		return driven.ChunkResult{}, err
+		return domainjobs.ChunkResult{}, err
 	}
 	done := len(rows) <= 240
 	if len(rows) > 240 {
 		rows = rows[:240]
 	}
-	candidates := make([]driven.MessageRow, 0, len(rows))
+	candidates := make([]domainmessages.MessageRow, 0, len(rows))
 	for _, row := range rows {
 		if row.SummarySeenAt == nil {
 			candidates = append(candidates, row)
@@ -119,12 +122,12 @@ func (e *SummarizeExecutor) ExecuteChunk(ctx context.Context, run driven.RunCont
 	}
 	settings, err := e.Service.Summaries.GetSummarySettings(ctx, run.UserID)
 	if err != nil {
-		return driven.ChunkResult{}, err
+		return domainjobs.ChunkResult{}, err
 	}
 	filtered := applySummarySettings(candidates, settings)
 	if len(filtered) == 0 {
-		result := driven.ChunkResult{
-			ProgressDelta: driven.JobProgress{Processed: len(rows)},
+		result := domainjobs.ChunkResult{
+			ProgressDelta: domainjobs.JobProgress{Processed: len(rows)},
 			Done:          done,
 		}
 		if !done {
@@ -145,7 +148,7 @@ func (e *SummarizeExecutor) ExecuteChunk(ctx context.Context, run driven.RunCont
 		}
 		part, err := e.Service.summarizeMessages(ctx, filtered[i:end])
 		if err != nil {
-			return driven.ChunkResult{}, err
+			return domainjobs.ChunkResult{}, err
 		}
 		raw, _ := json.Marshal(part)
 		messageIDs := make([]uuid.UUID, 0, end-i)
@@ -153,7 +156,7 @@ func (e *SummarizeExecutor) ExecuteChunk(ctx context.Context, run driven.RunCont
 			messageIDs = append(messageIDs, msg.ID)
 		}
 		now := time.Now().UTC()
-		if err := e.Service.Summaries.UpsertSummaryJobChunk(ctx, driven.SummaryJobChunkRow{
+		if err := e.Service.Summaries.UpsertSummaryJobChunk(ctx, domainmessages.SummaryJobChunkRow{
 			ID:          jobkit.DeterministicID(run.RunID, "summary_job_chunk", strconv.Itoa(i/chunkSize)),
 			RunID:       run.RunID,
 			AccountID:   *run.AccountID,
@@ -164,7 +167,7 @@ func (e *SummarizeExecutor) ExecuteChunk(ctx context.Context, run driven.RunCont
 			CreatedAt:   now,
 			UpdatedAt:   now,
 		}); err != nil {
-			return driven.ChunkResult{}, err
+			return domainjobs.ChunkResult{}, err
 		}
 		partials = append(partials, *part)
 		if text := strings.TrimSpace(part.GeneralSummary); text != "" {
@@ -179,7 +182,7 @@ func (e *SummarizeExecutor) ExecuteChunk(ctx context.Context, run driven.RunCont
 		}
 	}
 	now := time.Now().UTC()
-	if err := e.Service.Summaries.InsertSummarySnapshot(ctx, driven.SummarySnapshotRow{
+	if err := e.Service.Summaries.InsertSummarySnapshot(ctx, domainmessages.SummarySnapshotRow{
 		ID:             jobkit.DeterministicID(run.RunID, "summary_snapshot"),
 		UserID:         run.UserID,
 		AccountID:      run.AccountID,
@@ -189,17 +192,17 @@ func (e *SummarizeExecutor) ExecuteChunk(ctx context.Context, run driven.RunCont
 		GeneralSummary: firstNonEmpty(strings.TrimSpace(reduced.GeneralSummary), combineChunkSummaries(chunkSummaries)),
 		CreatedAt:      now,
 	}); err != nil {
-		return driven.ChunkResult{}, err
+		return domainjobs.ChunkResult{}, err
 	}
 	openItems, err := e.Service.Summaries.ListOpenActionItems(ctx, run.UserID, run.AccountID)
 	if err != nil {
-		return driven.ChunkResult{}, err
+		return domainjobs.ChunkResult{}, err
 	}
 	openByMessage := make(map[string]bool, len(openItems))
 	for _, item := range openItems {
 		openByMessage[item.MessageID.String()] = true
 	}
-	toInsert := make([]driven.ActionItemRow, 0, len(reduced.ActionItems))
+	toInsert := make([]domainmessages.ActionItemRow, 0, len(reduced.ActionItems))
 	for _, item := range reduced.ActionItems {
 		mid, err := uuid.Parse(strings.TrimSpace(item.MessageID))
 		if err != nil || openByMessage[mid.String()] {
@@ -212,7 +215,7 @@ func (e *SummarizeExecutor) ExecuteChunk(ctx context.Context, run driven.RunCont
 				dueAt = &ut
 			}
 		}
-		toInsert = append(toInsert, driven.ActionItemRow{
+		toInsert = append(toInsert, domainmessages.ActionItemRow{
 			ID:        jobkit.DeterministicID(run.RunID, "action_item", mid.String()),
 			UserID:    run.UserID,
 			AccountID: *run.AccountID,
@@ -226,17 +229,17 @@ func (e *SummarizeExecutor) ExecuteChunk(ctx context.Context, run driven.RunCont
 		})
 	}
 	if err := e.Service.Summaries.InsertActionItems(ctx, toInsert); err != nil {
-		return driven.ChunkResult{}, err
+		return domainjobs.ChunkResult{}, err
 	}
 	existingFYI, err := e.Service.Summaries.ListFYIByRun(ctx, run.UserID, run.RunID)
 	if err != nil {
-		return driven.ChunkResult{}, err
+		return domainjobs.ChunkResult{}, err
 	}
 	existingFYIByMessage := map[string]struct{}{}
 	for _, item := range existingFYI {
 		existingFYIByMessage[item.MessageID.String()] = struct{}{}
 	}
-	fyiRows := make([]driven.FYIRow, 0, len(reduced.FYI))
+	fyiRows := make([]domainmessages.FYIRow, 0, len(reduced.FYI))
 	for _, item := range reduced.FYI {
 		mid, err := uuid.Parse(strings.TrimSpace(item.MessageID))
 		if err != nil {
@@ -245,7 +248,7 @@ func (e *SummarizeExecutor) ExecuteChunk(ctx context.Context, run driven.RunCont
 		if _, ok := existingFYIByMessage[mid.String()]; ok {
 			continue
 		}
-		fyiRows = append(fyiRows, driven.FYIRow{
+		fyiRows = append(fyiRows, domainmessages.FYIRow{
 			ID:        jobkit.DeterministicID(run.RunID, "fyi", mid.String()),
 			UserID:    run.UserID,
 			AccountID: *run.AccountID,
@@ -256,17 +259,17 @@ func (e *SummarizeExecutor) ExecuteChunk(ctx context.Context, run driven.RunCont
 		})
 	}
 	if err := e.Service.Summaries.InsertFYI(ctx, fyiRows); err != nil {
-		return driven.ChunkResult{}, err
+		return domainjobs.ChunkResult{}, err
 	}
 	markSeen := make([]uuid.UUID, 0, len(filtered))
 	for _, msg := range filtered {
 		markSeen = append(markSeen, msg.ID)
 	}
 	if err := e.Service.Messages.MarkMessagesSummarySeen(ctx, run.UserID, markSeen, now); err != nil {
-		return driven.ChunkResult{}, err
+		return domainjobs.ChunkResult{}, err
 	}
-	result := driven.ChunkResult{
-		ProgressDelta: driven.JobProgress{
+	result := domainjobs.ChunkResult{
+		ProgressDelta: domainjobs.JobProgress{
 			Processed: len(rows),
 			Detail: map[string]interface{}{
 				"summarize_candidates": len(filtered),
@@ -288,10 +291,10 @@ func (e *SummarizeExecutor) reducePartials(ctx context.Context, partials []summa
 		raw, _ := json.Marshal(part)
 		lines = append(lines, fmt.Sprintf("partial_%d=%s", i+1, string(raw)))
 	}
-	resp, err := driven.ChatCompletion(ctx, e.Service.LLM, []driven.LLMMessage{
+	resp, err := domainai.ChatCompletion(ctx, e.Service.LLM, []domainai.LLMMessage{
 		{Role: "system", Content: "You reduce summary partials into one JSON object. Return JSON only."},
 		{Role: "user", Content: "Reduce these summary partials into one JSON payload matching the existing schema.\n" + strings.Join(lines, "\n")},
-	}, driven.LLMRequestOptions{MaxOutputTokens: 1200, ReasoningHint: "low"})
+	}, domainai.LLMRequestOptions{MaxOutputTokens: 1200, ReasoningHint: "low"})
 	if err != nil {
 		return nil, err
 	}
@@ -350,7 +353,7 @@ func reduceSummaryPartials(partials []summarizePayload) summarizePayload {
 
 type ForwardRulesExecutor struct {
 	Service *ForwardRulesService
-	Store   driven.JobStore
+	Store   domainjobs.JobStore
 }
 
 func (e *ForwardRulesExecutor) JobType() string { return "forward_rules" }
@@ -358,22 +361,22 @@ func (e *ForwardRulesExecutor) JobType() string { return "forward_rules" }
 // forwardChunkJob is how many candidates one job chunk handles.
 const forwardChunkJob = 10
 
-func (e *ForwardRulesExecutor) ExecuteChunk(ctx context.Context, run driven.RunContext) (driven.ChunkResult, error) {
+func (e *ForwardRulesExecutor) ExecuteChunk(ctx context.Context, run domainjobs.RunContext) (domainjobs.ChunkResult, error) {
 	if e == nil || e.Service == nil || e.Store == nil {
-		return driven.ChunkResult{}, fmt.Errorf("forward rules executor not configured")
+		return domainjobs.ChunkResult{}, fmt.Errorf("forward rules executor not configured")
 	}
-	var after *driven.ForwardCandidateCursor
+	var after *domainmessages.ForwardCandidateCursor
 	// A cursor from before the keyset (an offset) does not decode; starting
 	// over is safe because finished verdicts are skipped.
 	if at, id, ok := jobkit.DecodeKeysetCursor(run.Cursor); ok {
-		after = &driven.ForwardCandidateCursor{ReceivedAt: at, MessageID: id}
+		after = &domainmessages.ForwardCandidateCursor{ReceivedAt: at, MessageID: id}
 	}
 	res, err := e.Service.RunChunk(ctx, run, e.Store, after, forwardChunkJob)
 	if err != nil {
-		return driven.ChunkResult{}, err
+		return domainjobs.ChunkResult{}, err
 	}
-	result := driven.ChunkResult{
-		ProgressDelta: driven.JobProgress{
+	result := domainjobs.ChunkResult{
+		ProgressDelta: domainjobs.JobProgress{
 			Processed: res.Processed,
 			Failed:    res.Failed,
 			Detail: map[string]interface{}{

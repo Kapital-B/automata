@@ -8,9 +8,13 @@ import (
 	"strings"
 	"time"
 
-	"github.com/Kapital-B/automata/svc/internal/application/ports/driven"
 	apptodos "github.com/Kapital-B/automata/svc/internal/application/todos"
+	domainai "github.com/Kapital-B/automata/svc/internal/domain/ai"
+	domainauth "github.com/Kapital-B/automata/svc/internal/domain/auth"
+	domaincontacts "github.com/Kapital-B/automata/svc/internal/domain/contacts"
 	domainissues "github.com/Kapital-B/automata/svc/internal/domain/issues"
+	domainmessages "github.com/Kapital-B/automata/svc/internal/domain/messages"
+	domainprojects "github.com/Kapital-B/automata/svc/internal/domain/projects"
 	"github.com/google/uuid"
 )
 
@@ -25,15 +29,15 @@ var (
 
 // Service handles issue CRUD and trail links.
 type Service struct {
-	Users       driven.UserRepository
-	Projects    driven.ProjectRepository
-	Issues      driven.IssueRepository
-	Assignments driven.AssignmentRepository
-	Manuals     driven.ManualItemRepository
-	Contacts    driven.ContactRepository
-	Messages    driven.MessageRepository
-	Timeline    driven.TimelineRepository
-	LLM         driven.LLMClient
+	Users       domainauth.UserRepository
+	Projects    domainprojects.ProjectRepository
+	Issues      domainissues.IssueRepository
+	Assignments domainprojects.AssignmentRepository
+	Manuals     domainprojects.ManualItemRepository
+	Contacts    domaincontacts.ContactRepository
+	Messages    domainmessages.MessageRepository
+	Timeline    domainprojects.TimelineRepository
+	LLM         domainai.LLMClient
 	// Todos supplies the project's to-dos from mail on an issue's trail.
 	// Optional: without it an issue shows no to-dos.
 	Todos *apptodos.Service
@@ -49,7 +53,7 @@ func (s *Service) HasLLM() bool {
 }
 
 type IssueView struct {
-	Issue         driven.IssueRow
+	Issue         domainissues.IssueRow
 	AwaitingMe    bool
 	AssigneeLabel string
 	Items         []TrailItem
@@ -63,7 +67,7 @@ type IssueView struct {
 }
 
 type TrailItem struct {
-	Item        driven.IssueItemRow
+	Item        domainissues.IssueItemRow
 	Source      string // mail | manual
 	Title       string
 	OccurredAt  *time.Time
@@ -227,7 +231,7 @@ func (s *Service) Create(ctx context.Context, userID, projectID uuid.UUID, in Cr
 		return nil, err
 	}
 	now := time.Now().UTC()
-	row := driven.IssueRow{
+	row := domainissues.IssueRow{
 		ID: uuid.New(), OrganisationID: orgID, ProjectID: projectID,
 		Title: title, CurrentPositionNote: strings.TrimSpace(in.CurrentPositionNote),
 		Status:         string(domainissues.StatusOpen),
@@ -341,7 +345,7 @@ func (s *Service) RemoveItem(ctx context.Context, userID, issueID, itemID uuid.U
 	return s.Get(ctx, userID, issueID)
 }
 
-func (s *Service) addItemInternal(ctx context.Context, userID, orgID uuid.UUID, issue driven.IssueRow, ref ItemRef) error {
+func (s *Service) addItemInternal(ctx context.Context, userID, orgID uuid.UUID, issue domainissues.IssueRow, ref ItemRef) error {
 	hasMsg := ref.MessageID != nil
 	hasManual := ref.ManualItemID != nil
 	if hasMsg == hasManual {
@@ -379,7 +383,7 @@ func (s *Service) addItemInternal(ctx context.Context, userID, orgID uuid.UUID, 
 		}
 	}
 	now := time.Now().UTC()
-	return s.Issues.AddIssueItem(ctx, driven.IssueItemRow{
+	return s.Issues.AddIssueItem(ctx, domainissues.IssueItemRow{
 		ID: uuid.New(), IssueID: issue.ID,
 		MessageID: ref.MessageID, ManualItemID: ref.ManualItemID, AddedAt: now,
 	})
@@ -410,12 +414,12 @@ func (s *Service) validateAssignee(ctx context.Context, orgID, projectID uuid.UU
 	return nil
 }
 
-func awaitingMe(row driven.IssueRow, caller uuid.UUID) bool {
+func awaitingMe(row domainissues.IssueRow, caller uuid.UUID) bool {
 	return row.Status == string(domainissues.StatusAwaitingInput) &&
 		row.AssigneeUserID != nil && *row.AssigneeUserID == caller
 }
 
-func (s *Service) assigneeLabel(ctx context.Context, orgID, caller uuid.UUID, row driven.IssueRow) string {
+func (s *Service) assigneeLabel(ctx context.Context, orgID, caller uuid.UUID, row domainissues.IssueRow) string {
 	if row.AssigneeUserID != nil {
 		if *row.AssigneeUserID == caller {
 			return "You"
@@ -432,7 +436,7 @@ func (s *Service) assigneeLabel(ctx context.Context, orgID, caller uuid.UUID, ro
 	return "Unassigned"
 }
 
-func (s *Service) enrichTrailItem(ctx context.Context, userID, orgID uuid.UUID, it driven.IssueItemRow) TrailItem {
+func (s *Service) enrichTrailItem(ctx context.Context, userID, orgID uuid.UUID, it domainissues.IssueItemRow) TrailItem {
 	out := TrailItem{Item: it}
 	if it.MessageID != nil {
 		out.Source = "mail"

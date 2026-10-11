@@ -9,14 +9,15 @@ import (
 	appcontacts "github.com/Kapital-B/automata/svc/internal/application/contacts"
 	appinterpret "github.com/Kapital-B/automata/svc/internal/application/interpret"
 	appmessages "github.com/Kapital-B/automata/svc/internal/application/messages"
-	"github.com/Kapital-B/automata/svc/internal/application/ports/driven"
 	appprojectai "github.com/Kapital-B/automata/svc/internal/application/projectai"
 	appprojects "github.com/Kapital-B/automata/svc/internal/application/projects"
 	appreconcile "github.com/Kapital-B/automata/svc/internal/application/reconcile"
+	domainjobs "github.com/Kapital-B/automata/svc/internal/domain/jobs"
+	domainprojects "github.com/Kapital-B/automata/svc/internal/domain/projects"
 )
 
 type ExecutorDeps struct {
-	Store            driven.JobStore
+	Store            domainjobs.JobStore
 	Sync             *appmessages.SyncService
 	SyncSlack        *appconnectors.Service
 	Categorize       *appmessages.CategorizeService
@@ -28,7 +29,7 @@ type ExecutorDeps struct {
 	InterpretProject *appinterpret.Service
 	ReconcileProject *appreconcile.Service
 	// Projects records the extraction watermark when a chain completes.
-	Projects  driven.ProjectRepository
+	Projects  domainprojects.ProjectRepository
 	ProjectAI *appprojectai.Service
 }
 
@@ -76,26 +77,26 @@ type interpretProjectExecutor struct {
 
 func (e *interpretProjectExecutor) JobType() string { return TypeInterpretProject }
 
-func (e *interpretProjectExecutor) ExecuteChunk(ctx context.Context, run driven.RunContext) (driven.ChunkResult, error) {
+func (e *interpretProjectExecutor) ExecuteChunk(ctx context.Context, run domainjobs.RunContext) (domainjobs.ChunkResult, error) {
 	if e == nil || e.service == nil {
-		return driven.ChunkResult{}, fmt.Errorf("interpret project executor not configured")
+		return domainjobs.ChunkResult{}, fmt.Errorf("interpret project executor not configured")
 	}
 	if run.Payload.ProjectID == nil {
-		return driven.ChunkResult{}, fmt.Errorf("project_id is required")
+		return domainjobs.ChunkResult{}, fmt.Errorf("project_id is required")
 	}
 	view, err := e.service.Run(ctx, run.UserID, *run.Payload.ProjectID, appinterpret.RunInput{
 		AccountID: run.AccountID,
 		Trigger:   run.JobType,
 	})
 	if err != nil {
-		return driven.ChunkResult{}, err
+		return domainjobs.ChunkResult{}, err
 	}
 	count := 0
 	if view != nil {
 		count = len(view.Candidates)
 	}
-	return driven.ChunkResult{
-		ProgressDelta: driven.JobProgress{
+	return domainjobs.ChunkResult{
+		ProgressDelta: domainjobs.JobProgress{
 			Processed: 1,
 			Detail: map[string]interface{}{
 				"candidate_count": count,
@@ -107,31 +108,31 @@ func (e *interpretProjectExecutor) ExecuteChunk(ctx context.Context, run driven.
 
 type reconcileProjectExecutor struct {
 	service  *appreconcile.Service
-	projects driven.ProjectRepository
+	projects domainprojects.ProjectRepository
 }
 
 func (e *reconcileProjectExecutor) JobType() string { return TypeReconcileProject }
 
-func (e *reconcileProjectExecutor) ExecuteChunk(ctx context.Context, run driven.RunContext) (driven.ChunkResult, error) {
+func (e *reconcileProjectExecutor) ExecuteChunk(ctx context.Context, run domainjobs.RunContext) (domainjobs.ChunkResult, error) {
 	if e == nil || e.service == nil {
-		return driven.ChunkResult{}, fmt.Errorf("reconcile project executor not configured")
+		return domainjobs.ChunkResult{}, fmt.Errorf("reconcile project executor not configured")
 	}
 	if run.Payload.ProjectID == nil {
-		return driven.ChunkResult{}, fmt.Errorf("project_id is required")
+		return domainjobs.ChunkResult{}, fmt.Errorf("project_id is required")
 	}
 	res, err := e.service.Run(ctx, run.UserID, *run.Payload.ProjectID, appreconcile.ReconcileInput{})
 	if err != nil {
-		return driven.ChunkResult{}, err
+		return domainjobs.ChunkResult{}, err
 	}
 	// Advance the extraction watermark only on success, so a failed run is
 	// retried rather than skipping the correspondence it never reached.
 	if e.projects != nil {
 		if err := e.projects.MarkProjectExtracted(ctx, *run.Payload.ProjectID, time.Now().UTC()); err != nil {
-			return driven.ChunkResult{}, err
+			return domainjobs.ChunkResult{}, err
 		}
 	}
-	return driven.ChunkResult{
-		ProgressDelta: driven.JobProgress{
+	return domainjobs.ChunkResult{
+		ProgressDelta: domainjobs.JobProgress{
 			Processed: res.ProcessedInterpretations,
 			Detail: map[string]interface{}{
 				"contradictions_opened": res.ContradictionsOpened,
@@ -147,21 +148,21 @@ type projectAIExecutor struct {
 
 func (e *projectAIExecutor) JobType() string { return TypeProjectAI }
 
-func (e *projectAIExecutor) ExecuteChunk(ctx context.Context, run driven.RunContext) (driven.ChunkResult, error) {
+func (e *projectAIExecutor) ExecuteChunk(ctx context.Context, run domainjobs.RunContext) (domainjobs.ChunkResult, error) {
 	if e == nil || e.service == nil {
-		return driven.ChunkResult{}, fmt.Errorf("project ai executor not configured")
+		return domainjobs.ChunkResult{}, fmt.Errorf("project ai executor not configured")
 	}
 	question := "Provide a concise project audit covering open issues, important facts, and recent correspondence."
 	if run.Payload.ProjectID != nil {
 		_, err := e.service.Ask(ctx, run.UserID, *run.Payload.ProjectID, question)
 		if err != nil {
-			return driven.ChunkResult{}, err
+			return domainjobs.ChunkResult{}, err
 		}
-		return driven.ChunkResult{ProgressDelta: driven.JobProgress{Processed: 1}, Done: true}, nil
+		return domainjobs.ChunkResult{ProgressDelta: domainjobs.JobProgress{Processed: 1}, Done: true}, nil
 	}
 	_, err := e.service.AskAcross(ctx, run.UserID, question)
 	if err != nil {
-		return driven.ChunkResult{}, err
+		return domainjobs.ChunkResult{}, err
 	}
-	return driven.ChunkResult{ProgressDelta: driven.JobProgress{Processed: 1}, Done: true}, nil
+	return domainjobs.ChunkResult{ProgressDelta: domainjobs.JobProgress{Processed: 1}, Done: true}, nil
 }

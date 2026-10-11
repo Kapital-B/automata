@@ -10,12 +10,12 @@ import (
 	"net/url"
 	"strings"
 
-	"github.com/Kapital-B/automata/svc/internal/application/ports/driven"
+	domainauth "github.com/Kapital-B/automata/svc/internal/domain/auth"
 )
 
 const signInScope = "openid email profile"
 
-// OAuth implements driven.GoogleOAuth.
+// OAuth implements domainauth.GoogleOAuth.
 type OAuth struct {
 	ClientID     string
 	ClientSecret string
@@ -55,8 +55,8 @@ type idClaims struct {
 	Email string `json:"email"`
 }
 
-func (o *OAuth) ExchangeCode(ctx context.Context, code string) (driven.GoogleTokenResult, error) {
-	out := driven.GoogleTokenResult{}
+func (o *OAuth) ExchangeCode(ctx context.Context, code string) (domainauth.GoogleTokenResult, error) {
+	out := domainauth.GoogleTokenResult{}
 	form := url.Values{}
 	form.Set("code", code)
 	form.Set("client_id", o.ClientID)

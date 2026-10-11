@@ -8,7 +8,8 @@ import (
 	"time"
 
 	"github.com/Kapital-B/automata/svc/internal/application/jobkit"
-	"github.com/Kapital-B/automata/svc/internal/application/ports/driven"
+	domainconnectors "github.com/Kapital-B/automata/svc/internal/domain/connectors"
+	domainjobs "github.com/Kapital-B/automata/svc/internal/domain/jobs"
 	"github.com/google/uuid"
 )
 
@@ -24,7 +25,7 @@ type SyncOptions struct {
 
 type ConnectorSyncChunkResult struct {
 	MessagesUpserted int
-	NextCursor       *driven.JobCursor
+	NextCursor       *domainjobs.JobCursor
 	Done             bool
 }
 
@@ -32,7 +33,7 @@ func (s *Service) SyncConnector(ctx context.Context, userID, connectorAccountID 
 	return s.SyncConnectorWithOptions(ctx, userID, connectorAccountID, SyncOptions{})
 }
 
-func (s *Service) SyncConnectorChunk(ctx context.Context, run driven.RunContext) (*ConnectorSyncChunkResult, error) {
+func (s *Service) SyncConnectorChunk(ctx context.Context, run domainjobs.RunContext) (*ConnectorSyncChunkResult, error) {
 	if s == nil || s.Connectors == nil || s.Slack == nil || s.Vault == nil {
 		return nil, fmt.Errorf("connector sync not configured")
 	}
@@ -90,7 +91,7 @@ func (s *Service) SyncConnectorChunk(ctx context.Context, run driven.RunContext)
 			"provider":   "slack",
 			"channel_id": binding.ExternalChannelID,
 		})
-		if err := s.Connectors.UpsertConnectorMessage(ctx, driven.ConnectorMessageRow{
+		if err := s.Connectors.UpsertConnectorMessage(ctx, domainconnectors.ConnectorMessageRow{
 			ID:                 uuid.New(),
 			ConnectorAccountID: connectorAccountID,
 			OrganisationID:     binding.OrganisationID,
@@ -111,7 +112,7 @@ func (s *Service) SyncConnectorChunk(ctx context.Context, run driven.RunContext)
 	}
 	out := &ConnectorSyncChunkResult{MessagesUpserted: upserted}
 	if strings.TrimSpace(page.NextCursor) != "" {
-		out.NextCursor = &driven.JobCursor{Kind: "slack_history", Value: fmt.Sprintf("%d|%s", offset, strings.TrimSpace(page.NextCursor))}
+		out.NextCursor = &domainjobs.JobCursor{Kind: "slack_history", Value: fmt.Sprintf("%d|%s", offset, strings.TrimSpace(page.NextCursor))}
 		return out, nil
 	}
 	nextOffset := offset + 1
@@ -125,7 +126,7 @@ func (s *Service) SyncConnectorChunk(ctx context.Context, run driven.RunContext)
 		out.Done = true
 		return out, nil
 	}
-	out.NextCursor = &driven.JobCursor{Kind: "slack_history", Value: fmt.Sprintf("%d|", nextOffset)}
+	out.NextCursor = &domainjobs.JobCursor{Kind: "slack_history", Value: fmt.Sprintf("%d|", nextOffset)}
 	return out, nil
 }
 
@@ -203,7 +204,7 @@ func (s *Service) SyncConnectorWithOptions(
 					"provider":   "slack",
 					"channel_id": binding.ExternalChannelID,
 				})
-				if err := s.Connectors.UpsertConnectorMessage(ctx, driven.ConnectorMessageRow{
+				if err := s.Connectors.UpsertConnectorMessage(ctx, domainconnectors.ConnectorMessageRow{
 					ID: uuid.New(), ConnectorAccountID: connectorAccountID,
 					OrganisationID: binding.OrganisationID, ProjectID: binding.ProjectID,
 					ProviderEventID: message.ProviderEventID, ExternalChannelID: binding.ExternalChannelID,
@@ -249,7 +250,7 @@ func (s *Service) SyncConnectorWithOptions(
 func (s *Service) failSync(
 	ctx context.Context,
 	runID uuid.UUID,
-	account *driven.ConnectorAccountRow,
+	account *domainconnectors.ConnectorAccountRow,
 	cipher []byte,
 	syncErr error,
 ) {

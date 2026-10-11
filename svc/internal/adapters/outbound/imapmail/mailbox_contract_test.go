@@ -7,6 +7,9 @@ import (
 	"crypto/x509"
 	"encoding/json"
 	"errors"
+	"github.com/emersion/go-imap"
+	"github.com/emersion/go-sasl"
+	"github.com/emersion/go-smtp"
 	"io"
 	"net"
 	"net/http/httptest"
@@ -15,17 +18,15 @@ import (
 	"testing"
 	"time"
 
-	"github.com/emersion/go-imap"
 	"github.com/emersion/go-imap/backend"
 	"github.com/emersion/go-imap/backend/memory"
 	imapserver "github.com/emersion/go-imap/server"
-	"github.com/emersion/go-sasl"
-	"github.com/emersion/go-smtp"
+
 	"github.com/google/uuid"
 
 	"github.com/Kapital-B/automata/svc/internal/adapters/outbound/mailboxtest"
 	"github.com/Kapital-B/automata/svc/internal/adapters/outbound/mailmime"
-	"github.com/Kapital-B/automata/svc/internal/application/ports/driven"
+	domainaccounts "github.com/Kapital-B/automata/svc/internal/domain/accounts"
 )
 
 const (
@@ -43,7 +44,7 @@ type fakeServers struct {
 	messages []*memory.Message
 	sent     []mailboxtest.Sent
 
-	imap, smtp driven.MailServer
+	imap, smtp domainaccounts.MailServer
 	tls        *tls.Config
 }
 
@@ -67,7 +68,7 @@ func newFakeServers(t *testing.T, smtpMaxBytes int64) *fakeServers {
 	}
 	go func() { _ = is.Serve(il) }()
 	t.Cleanup(func() { _ = is.Close() })
-	f.imap = driven.MailServer{Host: "127.0.0.1", Port: il.Addr().(*net.TCPAddr).Port, Security: SecurityTLS}
+	f.imap = domainaccounts.MailServer{Host: "127.0.0.1", Port: il.Addr().(*net.TCPAddr).Port, Security: SecurityTLS}
 
 	ss := smtp.NewServer(smtpBackend{f: f})
 	ss.Domain = "localhost"
@@ -79,7 +80,7 @@ func newFakeServers(t *testing.T, smtpMaxBytes int64) *fakeServers {
 	}
 	go func() { _ = ss.Serve(sl) }()
 	t.Cleanup(func() { _ = ss.Close() })
-	f.smtp = driven.MailServer{Host: "127.0.0.1", Port: sl.Addr().(*net.TCPAddr).Port, Security: SecurityTLS}
+	f.smtp = domainaccounts.MailServer{Host: "127.0.0.1", Port: sl.Addr().(*net.TCPAddr).Port, Security: SecurityTLS}
 	return f
 }
 
@@ -303,17 +304,17 @@ func (f *fakeServers) provider() *Provider {
 	return &Provider{TLSConfig: f.tls, DialTimeout: 5 * time.Second, CommandTimeout: 10 * time.Second}
 }
 
-func (f *fakeServers) request(password string) driven.PasswordConnectRequest {
-	return driven.PasswordConnectRequest{Email: testUser, Password: password, IMAP: f.imap, SMTP: f.smtp}
+func (f *fakeServers) request(password string) domainaccounts.PasswordConnectRequest {
+	return domainaccounts.PasswordConnectRequest{Email: testUser, Password: password, IMAP: f.imap, SMTP: f.smtp}
 }
 
-func (f *fakeServers) open(t *testing.T, p *Provider) driven.Mailbox {
+func (f *fakeServers) open(t *testing.T, p *Provider) domainaccounts.Mailbox {
 	t.Helper()
 	connected, err := p.Connect(context.Background(), f.request(testPassword))
 	if err != nil {
 		t.Fatal(err)
 	}
-	box, rotated, err := p.Open(context.Background(), driven.AccountRow{ID: uuid.New(), PrimaryEmail: connected.Email}, connected.Credential)
+	box, rotated, err := p.Open(context.Background(), domainaccounts.AccountRow{ID: uuid.New(), PrimaryEmail: connected.Email}, connected.Credential)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -378,7 +379,7 @@ func TestMessageWithoutMessageIDFallsBackToUID(t *testing.T) {
 func TestConnectRejectsAWrongPasswordNamingTheCause(t *testing.T) {
 	f := newFakeServers(t, 0)
 	_, err := f.provider().Connect(context.Background(), f.request("wrong"))
-	var rejected *driven.ConnectRejectedError
+	var rejected *domainaccounts.ConnectRejectedError
 	if !errors.As(err, &rejected) {
 		t.Fatalf("err = %v, want a ConnectRejectedError", err)
 	}
@@ -398,7 +399,7 @@ func TestConnectNamesAnUnreachableServer(t *testing.T) {
 	req := f.request(testPassword)
 	req.SMTP.Port = dead
 	_, err = f.provider().Connect(context.Background(), req)
-	var rejected *driven.ConnectRejectedError
+	var rejected *domainaccounts.ConnectRejectedError
 	if !errors.As(err, &rejected) || !strings.Contains(rejected.Reason, "SMTP server") {
 		t.Fatalf("err = %v, want a rejection naming the SMTP server", err)
 	}
@@ -409,7 +410,7 @@ func TestConnectRefusesUnencryptedServers(t *testing.T) {
 	req := f.request(testPassword)
 	req.IMAP.Security = "none"
 	_, err := f.provider().Connect(context.Background(), req)
-	if !errors.Is(err, driven.ErrConnectRejected) || !strings.Contains(err.Error(), "unencrypted") {
+	if !errors.Is(err, domainaccounts.ErrConnectRejected) || !strings.Contains(err.Error(), "unencrypted") {
 		t.Fatalf("err = %v, want a refusal of plaintext", err)
 	}
 }
@@ -437,8 +438,8 @@ func TestConnectStoresATaggedCredentialWithUsernameDefaultingToEmail(t *testing.
 func TestOpenReportsAChangedPasswordAsRejectedCredentials(t *testing.T) {
 	f := newFakeServers(t, 0)
 	blob, _ := json.Marshal(credential{Type: credentialType, Username: testUser, Password: "old", IMAP: f.imap, SMTP: f.smtp})
-	_, _, err := f.provider().Open(context.Background(), driven.AccountRow{PrimaryEmail: testUser}, blob)
-	if !errors.Is(err, driven.ErrCredentialsRejected) {
+	_, _, err := f.provider().Open(context.Background(), domainaccounts.AccountRow{PrimaryEmail: testUser}, blob)
+	if !errors.Is(err, domainaccounts.ErrCredentialsRejected) {
 		t.Fatalf("err = %v, want ErrCredentialsRejected", err)
 	}
 }
@@ -446,7 +447,7 @@ func TestOpenReportsAChangedPasswordAsRejectedCredentials(t *testing.T) {
 func TestOpenRefusesAnotherProvidersCredential(t *testing.T) {
 	f := newFakeServers(t, 0)
 	blob, _ := json.Marshal(map[string]string{"type": "google_oauth", "refresh_token": "x"})
-	if _, _, err := f.provider().Open(context.Background(), driven.AccountRow{}, blob); err == nil {
+	if _, _, err := f.provider().Open(context.Background(), domainaccounts.AccountRow{}, blob); err == nil {
 		t.Fatal("opened a google credential as imap")
 	}
 }
@@ -465,7 +466,7 @@ func TestForwardOverTheServersSizeLimitIsTooLarge(t *testing.T) {
 	p, _ := mailmime.Parse(raw)
 	f.deliver(raw)
 	err = box.Forward(context.Background(), "mid:"+p.MessageID, "bills@example.net", "")
-	if !errors.Is(err, driven.ErrMailTooLarge) || !errors.Is(err, driven.ErrMailNotSent) {
+	if !errors.Is(err, domainaccounts.ErrMailTooLarge) || !errors.Is(err, domainaccounts.ErrMailNotSent) {
 		t.Fatalf("err = %v, want too large (and so not sent)", err)
 	}
 	if sent := f.sentMail(); len(sent) != 0 {
@@ -480,7 +481,7 @@ func TestGetRawMessageRefusesOversizedMessages(t *testing.T) {
 	box := f.open(t, p)
 	raw := []byte("From: pat@example.com\r\nSubject: Big\r\nMessage-ID: <big@example.com>\r\n\r\n" + strings.Repeat("x", 1024))
 	f.deliver(raw)
-	if _, err := box.GetRawMessage(context.Background(), "mid:big@example.com"); !errors.Is(err, driven.ErrMailTooLarge) {
+	if _, err := box.GetRawMessage(context.Background(), "mid:big@example.com"); !errors.Is(err, domainaccounts.ErrMailTooLarge) {
 		t.Fatalf("err = %v, want ErrMailTooLarge", err)
 	}
 }

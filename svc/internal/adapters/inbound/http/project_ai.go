@@ -3,11 +3,12 @@ package http
 import (
 	"encoding/json"
 	"errors"
+	"github.com/go-chi/chi/v5"
 	"net/http"
 	"strings"
 
 	appprojectai "github.com/Kapital-B/automata/svc/internal/application/projectai"
-	"github.com/go-chi/chi/v5"
+
 	"github.com/google/uuid"
 )
 

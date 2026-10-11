@@ -3,12 +3,15 @@ package contacts_test
 import (
 	"context"
 	"database/sql"
+	domainmessages "github.com/Kapital-B/automata/svc/internal/domain/messages"
 	"testing"
 	"time"
 
 	"github.com/Kapital-B/automata/svc/internal/adapters/outbound/persistence/sqlite"
 	appcontacts "github.com/Kapital-B/automata/svc/internal/application/contacts"
-	"github.com/Kapital-B/automata/svc/internal/application/ports/driven"
+	domainaccounts "github.com/Kapital-B/automata/svc/internal/domain/accounts"
+	domainjobs "github.com/Kapital-B/automata/svc/internal/domain/jobs"
+
 	"github.com/google/uuid"
 	_ "modernc.org/sqlite"
 )
@@ -33,14 +36,14 @@ func TestResolveMessageCreatesParticipants(t *testing.T) {
 		t.Fatal(err)
 	}
 	accountID := uuid.New()
-	if err := repo.InsertAccount(ctx, driven.AccountRow{
+	if err := repo.InsertAccount(ctx, domainaccounts.AccountRow{
 		UserID: userID, ID: accountID, Label: "Work", Provider: "m365",
 		MsAccountKind: "work", PrimaryEmail: "u@example.com", ConnectionStatus: "connected",
 	}, []byte("tok")); err != nil {
 		t.Fatal(err)
 	}
 	msgID := uuid.New()
-	if err := repo.UpsertMessage(ctx, driven.MessageRow{
+	if err := repo.UpsertMessage(ctx, domainmessages.MessageRow{
 		ID: msgID, AccountID: accountID, ProviderMessageID: "g1",
 		ReceivedAt: now, Subject: "Hello",
 		FromJSON:  `{"name":"From","address":"from@acme.com"}`,
@@ -108,7 +111,7 @@ func setupResolve(t *testing.T, name string) (*sqlite.Repository, *sql.DB, uuid.
 		t.Fatal(err)
 	}
 	accountID := uuid.New()
-	if err := repo.InsertAccount(ctx, driven.AccountRow{
+	if err := repo.InsertAccount(ctx, domainaccounts.AccountRow{
 		UserID: userID, ID: accountID, Label: "Work", Provider: "m365",
 		MsAccountKind: "work", PrimaryEmail: name + "@example.com", ConnectionStatus: "connected",
 	}, []byte("tok")); err != nil {
@@ -126,7 +129,7 @@ func TestResolveAccountChunkDrainsAndConverges(t *testing.T) {
 
 	for i := 0; i < 3; i++ {
 		id := uuid.New()
-		if err := repo.UpsertMessage(ctx, driven.MessageRow{
+		if err := repo.UpsertMessage(ctx, domainmessages.MessageRow{
 			ID: id, AccountID: accountID, ProviderMessageID: id.String(),
 			ReceivedAt: now.Add(-time.Duration(i) * time.Hour), Subject: "Hello",
 			FromJSON:  `{"name":"Sender","address":"sender@acme.com"}`,
@@ -138,7 +141,7 @@ func TestResolveAccountChunkDrainsAndConverges(t *testing.T) {
 	}
 
 	svc := &appcontacts.ResolveService{Users: repo, Messages: repo, Contacts: repo}
-	res, err := svc.ResolveAccountChunk(ctx, driven.RunContext{UserID: userID, AccountID: &accountID})
+	res, err := svc.ResolveAccountChunk(ctx, domainjobs.RunContext{UserID: userID, AccountID: &accountID})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -154,7 +157,7 @@ func TestResolveAccountChunkDrainsAndConverges(t *testing.T) {
 	}
 
 	// Nothing left to do: the watermark is what stops the rescan.
-	again, err := svc.ResolveAccountChunk(ctx, driven.RunContext{UserID: userID, AccountID: &accountID})
+	again, err := svc.ResolveAccountChunk(ctx, domainjobs.RunContext{UserID: userID, AccountID: &accountID})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -171,7 +174,7 @@ func TestResolveAccountChunkMarksAMessageWithNoAddresses(t *testing.T) {
 	now := time.Now().UTC()
 
 	id := uuid.New()
-	if err := repo.UpsertMessage(ctx, driven.MessageRow{
+	if err := repo.UpsertMessage(ctx, domainmessages.MessageRow{
 		ID: id, AccountID: accountID, ProviderMessageID: id.String(),
 		ReceivedAt: now, Subject: "", FromJSON: `{}`, ToJSON: `[]`, CcJSON: `[]`,
 		CreatedAt: now, UpdatedAt: now,
@@ -180,10 +183,10 @@ func TestResolveAccountChunkMarksAMessageWithNoAddresses(t *testing.T) {
 	}
 
 	svc := &appcontacts.ResolveService{Users: repo, Messages: repo, Contacts: repo}
-	if _, err := svc.ResolveAccountChunk(ctx, driven.RunContext{UserID: userID, AccountID: &accountID}); err != nil {
+	if _, err := svc.ResolveAccountChunk(ctx, domainjobs.RunContext{UserID: userID, AccountID: &accountID}); err != nil {
 		t.Fatal(err)
 	}
-	again, err := svc.ResolveAccountChunk(ctx, driven.RunContext{UserID: userID, AccountID: &accountID})
+	again, err := svc.ResolveAccountChunk(ctx, domainjobs.RunContext{UserID: userID, AccountID: &accountID})
 	if err != nil {
 		t.Fatal(err)
 	}

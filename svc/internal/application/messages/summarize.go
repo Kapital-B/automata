@@ -7,15 +7,18 @@ import (
 	"strings"
 	"time"
 
-	"github.com/Kapital-B/automata/svc/internal/application/ports/driven"
+	domainai "github.com/Kapital-B/automata/svc/internal/domain/ai"
+	domainjobs "github.com/Kapital-B/automata/svc/internal/domain/jobs"
+	domainmessages "github.com/Kapital-B/automata/svc/internal/domain/messages"
+
 	"github.com/google/uuid"
 )
 
 type SummarizeService struct {
-	Messages  driven.MessageRepository
-	Summaries driven.SummaryRepository
-	LLM       driven.LLMClient
-	JobRuns   driven.JobRunRepository
+	Messages  domainmessages.MessageRepository
+	Summaries domainmessages.SummaryRepository
+	LLM       domainai.LLMClient
+	JobRuns   domainjobs.JobRunRepository
 }
 
 type SummarizeOptions struct {
@@ -86,7 +89,7 @@ func (s *SummarizeService) SummarizeAccount(ctx context.Context, userID uuid.UUI
 
 	chainMeta := summarizeChainMetaJSON(opts.Since)
 
-	filter := driven.MessageListFilter{
+	filter := domainmessages.MessageListFilter{
 		AccountID:         &accountID,
 		Limit:             200,
 		OnlySummaryUnseen: true,
@@ -97,7 +100,7 @@ func (s *SummarizeService) SummarizeAccount(ctx context.Context, userID uuid.UUI
 	}
 	if len(msgs) == 0 {
 		now := time.Now().UTC()
-		snapshot := driven.SummarySnapshotRow{
+		snapshot := domainmessages.SummarySnapshotRow{
 			ID:             uuid.New(),
 			UserID:         userID,
 			AccountID:      &accountID,
@@ -132,7 +135,7 @@ func (s *SummarizeService) SummarizeAccount(ctx context.Context, userID uuid.UUI
 	}
 
 	now := time.Now().UTC()
-	snapshot := driven.SummarySnapshotRow{
+	snapshot := domainmessages.SummarySnapshotRow{
 		ID:             uuid.New(),
 		UserID:         userID,
 		AccountID:      &accountID,
@@ -153,7 +156,7 @@ func (s *SummarizeService) SummarizeAccount(ctx context.Context, userID uuid.UUI
 	for _, it := range openItems {
 		openByMessage[it.MessageID.String()] = true
 	}
-	toInsert := make([]driven.ActionItemRow, 0, len(p.ActionItems))
+	toInsert := make([]domainmessages.ActionItemRow, 0, len(p.ActionItems))
 	for _, a := range p.ActionItems {
 		mid, err := uuid.Parse(strings.TrimSpace(a.MessageID))
 		if err != nil || openByMessage[mid.String()] {
@@ -166,7 +169,7 @@ func (s *SummarizeService) SummarizeAccount(ctx context.Context, userID uuid.UUI
 				dueAt = &ut
 			}
 		}
-		toInsert = append(toInsert, driven.ActionItemRow{
+		toInsert = append(toInsert, domainmessages.ActionItemRow{
 			ID:        uuid.New(),
 			UserID:    userID,
 			AccountID: accountID,
@@ -184,13 +187,13 @@ func (s *SummarizeService) SummarizeAccount(ctx context.Context, userID uuid.UUI
 			return fail(err)
 		}
 	}
-	fyiRows := make([]driven.FYIRow, 0, len(p.FYI))
+	fyiRows := make([]domainmessages.FYIRow, 0, len(p.FYI))
 	for _, f := range p.FYI {
 		mid, err := uuid.Parse(strings.TrimSpace(f.MessageID))
 		if err != nil {
 			continue
 		}
-		fyiRows = append(fyiRows, driven.FYIRow{
+		fyiRows = append(fyiRows, domainmessages.FYIRow{
 			ID:        uuid.New(),
 			UserID:    userID,
 			AccountID: accountID,
@@ -217,7 +220,7 @@ func (s *SummarizeService) SummarizeAccount(ctx context.Context, userID uuid.UUI
 	return &SummarizeResult{JobRunID: runID, ActionItems: len(toInsert), FYIItems: len(fyiRows)}, nil
 }
 
-func (s *SummarizeService) summarizeMessages(ctx context.Context, msgs []driven.MessageRow) (*summarizePayload, error) {
+func (s *SummarizeService) summarizeMessages(ctx context.Context, msgs []domainmessages.MessageRow) (*summarizePayload, error) {
 	out, err := s.summarizeMessagesWithClamp(ctx, msgs, maxSubjectCharsDefault, maxFromCharsDefault, maxBodyCharsDefault)
 	if err == nil {
 		return out, nil
@@ -239,7 +242,7 @@ func (s *SummarizeService) summarizeMessages(ctx context.Context, msgs []driven.
 
 func (s *SummarizeService) summarizeMessagesWithClamp(
 	ctx context.Context,
-	msgs []driven.MessageRow,
+	msgs []domainmessages.MessageRow,
 	subjectLimit int,
 	fromLimit int,
 	bodyLimit int,
@@ -255,7 +258,7 @@ func (s *SummarizeService) summarizeMessagesWithClamp(
 	}
 	prompt := "Return JSON only: {\"general_summary\":\"...\",\"action_items\":[{\"message_id\":\"uuid\",\"text\":\"...\",\"due_at\":\"RFC3339 optional\"}],\"fyi\":[{\"message_id\":\"uuid\",\"text\":\"...\"}]}. " +
 		"Use only listed message ids.\n" + strings.Join(lines, "\n")
-	resp, err := s.LLM.ChatCompletion(ctx, []driven.LLMMessage{
+	resp, err := s.LLM.ChatCompletion(ctx, []domainai.LLMMessage{
 		{Role: "system", Content: "Email summarizer. JSON output only."},
 		{Role: "user", Content: prompt},
 	})
@@ -281,7 +284,7 @@ func isContextExceededError(err error) bool {
 		strings.Contains(msg, "n_tokens")
 }
 
-func (s *SummarizeService) summarizeMessagesInChunks(ctx context.Context, msgs []driven.MessageRow, runID uuid.UUID, chunkSize int) (*summarizePayload, error) {
+func (s *SummarizeService) summarizeMessagesInChunks(ctx context.Context, msgs []domainmessages.MessageRow, runID uuid.UUID, chunkSize int) (*summarizePayload, error) {
 	if len(msgs) == 0 {
 		return &summarizePayload{
 			GeneralSummary: "No matching emails in the selected window and category filters.",
@@ -370,7 +373,7 @@ func combineChunkSummaries(chunkSummaries []string) string {
 	return strings.TrimSpace(joined[:maxCombinedSummaryLen]) + "..."
 }
 
-func applySummarySettings(msgs []driven.MessageRow, settings *driven.SummarySettingsRow) []driven.MessageRow {
+func applySummarySettings(msgs []domainmessages.MessageRow, settings *domainmessages.SummarySettingsRow) []domainmessages.MessageRow {
 	if settings == nil {
 		return msgs
 	}
@@ -382,7 +385,7 @@ func applySummarySettings(msgs []driven.MessageRow, settings *driven.SummarySett
 	for _, v := range settings.ExcludeCategorySlugs {
 		exclude[strings.TrimSpace(strings.ToLower(v))] = struct{}{}
 	}
-	out := make([]driven.MessageRow, 0, len(msgs))
+	out := make([]domainmessages.MessageRow, 0, len(msgs))
 	for _, m := range msgs {
 		slug := ""
 		if m.CategorySlug != nil {

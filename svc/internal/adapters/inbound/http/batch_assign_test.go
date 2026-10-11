@@ -5,6 +5,7 @@ import (
 	"context"
 	"database/sql"
 	"encoding/json"
+	domainmessages "github.com/Kapital-B/automata/svc/internal/domain/messages"
 	"log/slog"
 	"net/http"
 	"net/http/httptest"
@@ -14,8 +15,9 @@ import (
 
 	"github.com/Kapital-B/automata/svc/internal/adapters/outbound/persistence/sqlite"
 	"github.com/Kapital-B/automata/svc/internal/application/auth"
-	"github.com/Kapital-B/automata/svc/internal/application/ports/driven"
 	appprojects "github.com/Kapital-B/automata/svc/internal/application/projects"
+	domainaccounts "github.com/Kapital-B/automata/svc/internal/domain/accounts"
+	domainprojects "github.com/Kapital-B/automata/svc/internal/domain/projects"
 	"github.com/google/uuid"
 	_ "modernc.org/sqlite"
 )
@@ -65,7 +67,7 @@ func newBatchFixture(t *testing.T, dbName string) batchFixture {
 
 	userID, tokens := registerAndLogin(t, authSvc, dbName+"@example.com", "password123")
 	accountID := uuid.New()
-	if err := repo.InsertAccount(context.Background(), driven.AccountRow{
+	if err := repo.InsertAccount(context.Background(), domainaccounts.AccountRow{
 		UserID: userID, ID: accountID, Label: "Work", Provider: "m365",
 		MsAccountKind: "work", PrimaryEmail: dbName + "@example.com", ConnectionStatus: "connected",
 	}, []byte("tok")); err != nil {
@@ -80,7 +82,7 @@ func newBatchFixture(t *testing.T, dbName string) batchFixture {
 func (f batchFixture) insertMessage(t *testing.T, subject, conv string, at time.Time) uuid.UUID {
 	t.Helper()
 	id := uuid.New()
-	row := driven.MessageRow{
+	row := domainmessages.MessageRow{
 		ID: id, AccountID: f.accountID, ProviderMessageID: id.String(),
 		ReceivedAt: at, Subject: subject, FromJSON: `{"address":"a@b.com"}`,
 	}
@@ -233,7 +235,7 @@ func TestAssignBatchIsIdempotent(t *testing.T) {
 			t.Fatalf("attempt %d: status=%d out=%v", attempt, status, out)
 		}
 	}
-	items2, err := f.repo.ListUnassigned(ctx, f.userID, driven.UnassignedListFilter{Status: "all", Limit: 50})
+	items2, err := f.repo.ListUnassigned(ctx, f.userID, domainprojects.UnassignedListFilter{Status: "all", Limit: 50})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -391,7 +393,7 @@ func TestBatchMarksAndRestoresNotRelevant(t *testing.T) {
 		t.Fatalf("mark status=%d out=%v", status, out)
 	}
 
-	queue, err := f.repo.ListUnassigned(ctx, f.userID, driven.UnassignedListFilter{Status: "all", Limit: 50})
+	queue, err := f.repo.ListUnassigned(ctx, f.userID, domainprojects.UnassignedListFilter{Status: "all", Limit: 50})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -399,7 +401,7 @@ func TestBatchMarksAndRestoresNotRelevant(t *testing.T) {
 		t.Fatalf("queue should hold only the kept message, got %+v", queue)
 	}
 
-	dismissed, err := f.repo.ListUnassigned(ctx, f.userID, driven.UnassignedListFilter{Status: "not_relevant", Limit: 50})
+	dismissed, err := f.repo.ListUnassigned(ctx, f.userID, domainprojects.UnassignedListFilter{Status: "not_relevant", Limit: 50})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -415,7 +417,7 @@ func TestBatchMarksAndRestoresNotRelevant(t *testing.T) {
 	if status != http.StatusOK || int(out["assigned"].(float64)) != 1 {
 		t.Fatalf("restore status=%d out=%v", status, out)
 	}
-	queue, err = f.repo.ListUnassigned(ctx, f.userID, driven.UnassignedListFilter{Status: "all", Limit: 50})
+	queue, err = f.repo.ListUnassigned(ctx, f.userID, domainprojects.UnassignedListFilter{Status: "all", Limit: 50})
 	if err != nil {
 		t.Fatal(err)
 	}

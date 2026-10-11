@@ -5,11 +5,11 @@ import (
 	"database/sql"
 	"errors"
 
-	"github.com/Kapital-B/automata/svc/internal/application/ports/driven"
+	domaindecisions "github.com/Kapital-B/automata/svc/internal/domain/decisions"
 	"github.com/google/uuid"
 )
 
-func (r *Repository) CreateDecision(ctx context.Context, row driven.DecisionRow) error {
+func (r *Repository) CreateDecision(ctx context.Context, row domaindecisions.DecisionRow) error {
 	var issueID, decidedAt, assigneeUser, assigneeContact, conf, supersedes, createdBy any
 	if row.IssueID != nil {
 		issueID = row.IssueID.String()
@@ -44,7 +44,7 @@ func (r *Repository) CreateDecision(ctx context.Context, row driven.DecisionRow)
 	return err
 }
 
-func (r *Repository) GetDecision(ctx context.Context, organisationID, id uuid.UUID) (*driven.DecisionRow, error) {
+func (r *Repository) GetDecision(ctx context.Context, organisationID, id uuid.UUID) (*domaindecisions.DecisionRow, error) {
 	row := r.db.QueryRowContext(ctx, `
 		SELECT id, organisation_id, project_id, issue_id, statement, status, decided_at,
 			assignee_user_id, assignee_contact_id, source, confidence, supersedes_decision_id,
@@ -58,7 +58,7 @@ func (r *Repository) GetDecision(ctx context.Context, organisationID, id uuid.UU
 	return out, err
 }
 
-func (r *Repository) ListDecisionsByProject(ctx context.Context, organisationID, projectID uuid.UUID, status string) ([]driven.DecisionRow, error) {
+func (r *Repository) ListDecisionsByProject(ctx context.Context, organisationID, projectID uuid.UUID, status string) ([]domaindecisions.DecisionRow, error) {
 	q := `
 		SELECT id, organisation_id, project_id, issue_id, statement, status, decided_at,
 			assignee_user_id, assignee_contact_id, source, confidence, supersedes_decision_id,
@@ -75,7 +75,7 @@ func (r *Repository) ListDecisionsByProject(ctx context.Context, organisationID,
 		return nil, err
 	}
 	defer rows.Close()
-	out := make([]driven.DecisionRow, 0)
+	out := make([]domaindecisions.DecisionRow, 0)
 	for rows.Next() {
 		d, err := scanDecision(rows)
 		if err != nil {
@@ -86,7 +86,7 @@ func (r *Repository) ListDecisionsByProject(ctx context.Context, organisationID,
 	return out, rows.Err()
 }
 
-func (r *Repository) UpdateDecision(ctx context.Context, row driven.DecisionRow) error {
+func (r *Repository) UpdateDecision(ctx context.Context, row domaindecisions.DecisionRow) error {
 	var issueID, decidedAt, assigneeUser, assigneeContact, conf, supersedes, createdBy any
 	if row.IssueID != nil {
 		issueID = row.IssueID.String()
@@ -126,7 +126,7 @@ func (r *Repository) UpdateDecision(ctx context.Context, row driven.DecisionRow)
 	return nil
 }
 
-func (r *Repository) AddDecisionEvidence(ctx context.Context, row driven.DecisionEvidenceRow) error {
+func (r *Repository) AddDecisionEvidence(ctx context.Context, row domaindecisions.DecisionEvidenceRow) error {
 	var msgID, manualID any
 	if row.MessageID != nil {
 		msgID = row.MessageID.String()
@@ -157,7 +157,7 @@ func (r *Repository) RemoveDecisionEvidence(ctx context.Context, organisationID,
 	return nil
 }
 
-func (r *Repository) ListDecisionEvidence(ctx context.Context, decisionID uuid.UUID) ([]driven.DecisionEvidenceRow, error) {
+func (r *Repository) ListDecisionEvidence(ctx context.Context, decisionID uuid.UUID) ([]domaindecisions.DecisionEvidenceRow, error) {
 	rows, err := r.db.QueryContext(ctx, `
 		SELECT id, decision_id, message_id, manual_item_id, added_at
 		FROM decision_evidence WHERE decision_id = ?
@@ -167,7 +167,7 @@ func (r *Repository) ListDecisionEvidence(ctx context.Context, decisionID uuid.U
 		return nil, err
 	}
 	defer rows.Close()
-	out := make([]driven.DecisionEvidenceRow, 0)
+	out := make([]domaindecisions.DecisionEvidenceRow, 0)
 	for rows.Next() {
 		ev, err := scanDecisionEvidence(rows)
 		if err != nil {
@@ -178,7 +178,7 @@ func (r *Repository) ListDecisionEvidence(ctx context.Context, decisionID uuid.U
 	return out, rows.Err()
 }
 
-func scanDecision(s rowScanner) (*driven.DecisionRow, error) {
+func scanDecision(s rowScanner) (*domaindecisions.DecisionRow, error) {
 	var idStr, orgStr, projStr, statement, status, source, createdAt, updatedAt string
 	var issueID, decidedAt, assigneeUser, assigneeContact, supersedes, createdBy sql.NullString
 	var conf sql.NullFloat64
@@ -206,7 +206,7 @@ func scanDecision(s rowScanner) (*driven.DecisionRow, error) {
 	if err != nil {
 		return nil, err
 	}
-	row := &driven.DecisionRow{
+	row := &domaindecisions.DecisionRow{
 		ID: id, OrganisationID: orgID, ProjectID: projID, Statement: statement,
 		Status: status, Source: source, CreatedAt: cat, UpdatedAt: uat,
 	}
@@ -259,7 +259,7 @@ func scanDecision(s rowScanner) (*driven.DecisionRow, error) {
 	return row, nil
 }
 
-func scanDecisionEvidence(s rowScanner) (*driven.DecisionEvidenceRow, error) {
+func scanDecisionEvidence(s rowScanner) (*domaindecisions.DecisionEvidenceRow, error) {
 	var idStr, didStr, addedAt string
 	var msgID, manualID sql.NullString
 	if err := s.Scan(&idStr, &didStr, &msgID, &manualID, &addedAt); err != nil {
@@ -277,7 +277,7 @@ func scanDecisionEvidence(s rowScanner) (*driven.DecisionEvidenceRow, error) {
 	if err != nil {
 		return nil, err
 	}
-	row := &driven.DecisionEvidenceRow{ID: id, DecisionID: did, AddedAt: at}
+	row := &domaindecisions.DecisionEvidenceRow{ID: id, DecisionID: did, AddedAt: at}
 	if msgID.Valid && msgID.String != "" {
 		v, err := uuid.Parse(msgID.String)
 		if err != nil {

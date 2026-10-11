@@ -5,7 +5,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/Kapital-B/automata/svc/internal/application/ports/driven"
+	domainmessages "github.com/Kapital-B/automata/svc/internal/domain/messages"
 	"github.com/google/uuid"
 )
 
@@ -92,7 +92,7 @@ func TestLikeContainsEscapesWildcards(t *testing.T) {
 }
 
 func TestMessageSearchQueryNeedsSomethingToSearchBy(t *testing.T) {
-	q, args := MessageSearchQuery(uuid.New(), driven.MessageSearchFilter{Terms: []string{" ", ""}}, func(t time.Time) any { return t })
+	q, args := MessageSearchQuery(uuid.New(), domainmessages.MessageSearchFilter{Terms: []string{" ", ""}}, func(t time.Time) any { return t })
 	if q != "" || args != nil {
 		t.Fatalf("empty filter built a query: %q %v", q, args)
 	}
@@ -100,7 +100,7 @@ func TestMessageSearchQueryNeedsSomethingToSearchBy(t *testing.T) {
 
 func TestMessageSearchQueryArgsMatchPlaceholders(t *testing.T) {
 	since := time.Now()
-	q, args := MessageSearchQuery(uuid.New(), driven.MessageSearchFilter{
+	q, args := MessageSearchQuery(uuid.New(), domainmessages.MessageSearchFilter{
 		Terms:      []string{"Seal", "seal", "p-03"},
 		ProjectIDs: []uuid.UUID{uuid.New(), uuid.New()},
 		ContactIDs: []uuid.UUID{uuid.New()},

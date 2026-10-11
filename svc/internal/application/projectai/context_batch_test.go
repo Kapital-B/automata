@@ -10,17 +10,19 @@ import (
 	"github.com/Kapital-B/automata/svc/internal/adapters/outbound/persistence/sqlite"
 	"github.com/Kapital-B/automata/svc/internal/adapters/outbound/persistencetest"
 	"github.com/Kapital-B/automata/svc/internal/application/auth"
-	"github.com/Kapital-B/automata/svc/internal/application/ports/driven"
 	appprojectai "github.com/Kapital-B/automata/svc/internal/application/projectai"
 	appprojects "github.com/Kapital-B/automata/svc/internal/application/projects"
+	domainai "github.com/Kapital-B/automata/svc/internal/domain/ai"
+	domainfacts "github.com/Kapital-B/automata/svc/internal/domain/facts"
+	domainprojects "github.com/Kapital-B/automata/svc/internal/domain/projects"
 	"github.com/google/uuid"
 )
 
 type promptCapturingLLM struct{ prompt string }
 
-func (c *promptCapturingLLM) ChatCompletion(ctx context.Context, messages []driven.LLMMessage) (*driven.LLMResponse, error) {
+func (c *promptCapturingLLM) ChatCompletion(ctx context.Context, messages []domainai.LLMMessage) (*domainai.LLMResponse, error) {
 	c.prompt = messages[len(messages)-1].Content
-	return &driven.LLMResponse{Content: `{"schema_version":1,"answer":"ok","citations":[],"confidence":0.1}`}, nil
+	return &domainai.LLMResponse{Content: `{"schema_version":1,"answer":"ok","citations":[],"confidence":0.1}`}, nil
 }
 
 // The context for a question must cost a fixed number of statements however
@@ -64,8 +66,8 @@ func TestAskContextStatementsDoNotGrowWithFacts(t *testing.T) {
 	}
 	now := time.Now().UTC()
 	hidden := uuid.New()
-	if err := repo.CreateProject(ctx, driven.ProjectRow{ID: hidden, OrganisationID: orgID, Name: "Hidden", Code: "HX99", CreatedAt: now, UpdatedAt: now},
-		driven.ProjectMemberRow{ID: uuid.New(), ProjectID: hidden, UserID: otherID, Role: "owner", CreatedAt: now, UpdatedAt: now}); err != nil {
+	if err := repo.CreateProject(ctx, domainprojects.ProjectRow{ID: hidden, OrganisationID: orgID, Name: "Hidden", Code: "HX99", CreatedAt: now, UpdatedAt: now},
+		domainprojects.ProjectMemberRow{ID: uuid.New(), ProjectID: hidden, UserID: otherID, Role: "owner", CreatedAt: now, UpdatedAt: now}); err != nil {
 		t.Fatal(err)
 	}
 
@@ -75,15 +77,15 @@ func TestAskContextStatementsDoNotGrowWithFacts(t *testing.T) {
 		for i := 0; i < n; i++ {
 			added++
 			factID, verID, evidence := uuid.New(), uuid.New(), uuid.New()
-			if err := repo.CreateFact(ctx, driven.FactRow{ID: factID, OrganisationID: orgID, ProjectID: proj.ID,
+			if err := repo.CreateFact(ctx, domainfacts.FactRow{ID: factID, OrganisationID: orgID, ProjectID: proj.ID,
 				SubjectKey: fmt.Sprintf("s%02d", added), Label: fmt.Sprintf("Fact %02d", added), CreatedAt: now, UpdatedAt: now}); err != nil {
 				t.Fatal(err)
 			}
-			if err := repo.CreateFactVersion(ctx, driven.FactVersionRow{ID: verID, FactID: factID, Status: "active",
+			if err := repo.CreateFactVersion(ctx, domainfacts.FactVersionRow{ID: verID, FactID: factID, Status: "active",
 				ValueJSON: `{}`, ValueText: fmt.Sprintf("v%02d", added), Source: "user", CreatedAt: now}); err != nil {
 				t.Fatal(err)
 			}
-			if err := repo.AddFactEvidence(ctx, driven.FactEvidenceRow{ID: uuid.New(), FactVersionID: verID,
+			if err := repo.AddFactEvidence(ctx, domainfacts.FactEvidenceRow{ID: uuid.New(), FactVersionID: verID,
 				ManualItemID: &evidence, AddedAt: now}); err != nil {
 				t.Fatal(err)
 			}

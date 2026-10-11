@@ -19,7 +19,7 @@ import (
 	"github.com/emersion/go-message/charset"
 
 	"github.com/Kapital-B/automata/svc/internal/adapters/outbound/mailmime"
-	"github.com/Kapital-B/automata/svc/internal/application/ports/driven"
+	domainaccounts "github.com/Kapital-B/automata/svc/internal/domain/accounts"
 )
 
 const (
@@ -56,8 +56,8 @@ type MailProvider struct {
 }
 
 var (
-	_ driven.MailProvider       = (*MailProvider)(nil)
-	_ driven.OAuthMailConnector = (*MailProvider)(nil)
+	_ domainaccounts.MailProvider       = (*MailProvider)(nil)
+	_ domainaccounts.OAuthMailConnector = (*MailProvider)(nil)
 )
 
 // credential is the stored form of a Gmail mailbox credential. Unlike the
@@ -90,7 +90,7 @@ func (p *MailProvider) maxRaw() int64 {
 	return DefaultMaxRawMessageBytes
 }
 
-func (p *MailProvider) AuthorizationURL(_ context.Context, state string, _ driven.ConnectOptions) (string, error) {
+func (p *MailProvider) AuthorizationURL(_ context.Context, state string, _ domainaccounts.ConnectOptions) (string, error) {
 	v := url.Values{}
 	v.Set("client_id", p.ClientID)
 	v.Set("redirect_uri", p.RedirectURI)
@@ -135,7 +135,7 @@ func (p *MailProvider) token(ctx context.Context, form url.Values) (*tokenRespon
 		// expired — including the 7-day expiry of a Testing-mode client.
 		// Retrying cannot fix it; the account needs reconnecting.
 		if tr.Error == "invalid_grant" {
-			return nil, fmt.Errorf("%w: google token error %s: %s", driven.ErrCredentialsRejected, tr.Error, tr.ErrorDesc)
+			return nil, fmt.Errorf("%w: google token error %s: %s", domainaccounts.ErrCredentialsRejected, tr.Error, tr.ErrorDesc)
 		}
 		return nil, fmt.Errorf("google token error %s (%s): %s", tr.Error, resp.Status, tr.ErrorDesc)
 	}
@@ -145,7 +145,7 @@ func (p *MailProvider) token(ctx context.Context, form url.Values) (*tokenRespon
 	return &tr, nil
 }
 
-func (p *MailProvider) Complete(ctx context.Context, code string, _ driven.ConnectOptions) (*driven.ConnectedMailbox, error) {
+func (p *MailProvider) Complete(ctx context.Context, code string, _ domainaccounts.ConnectOptions) (*domainaccounts.ConnectedMailbox, error) {
 	form := url.Values{}
 	form.Set("code", code)
 	form.Set("redirect_uri", p.RedirectURI)
@@ -170,10 +170,10 @@ func (p *MailProvider) Complete(ctx context.Context, code string, _ driven.Conne
 	if label == "" {
 		label = "Google"
 	}
-	return &driven.ConnectedMailbox{Email: prof.EmailAddress, DefaultLabel: label, Credential: cred}, nil
+	return &domainaccounts.ConnectedMailbox{Email: prof.EmailAddress, DefaultLabel: label, Credential: cred}, nil
 }
 
-func (p *MailProvider) Open(ctx context.Context, account driven.AccountRow, raw []byte) (driven.Mailbox, []byte, error) {
+func (p *MailProvider) Open(ctx context.Context, account domainaccounts.AccountRow, raw []byte) (domainaccounts.Mailbox, []byte, error) {
 	var c credential
 	if err := json.Unmarshal(raw, &c); err != nil {
 		return nil, nil, err
@@ -283,7 +283,7 @@ func (m *gmailMailbox) do(ctx context.Context, method, path string, q url.Values
 			return &apiError{Status: resp.StatusCode, Body: b}
 		}
 		if int64(len(data)) > limit {
-			return driven.TooLarge(limit)
+			return domainaccounts.TooLarge(limit)
 		}
 		if out != nil {
 			return json.Unmarshal(data, out)
@@ -307,7 +307,7 @@ func (m *gmailMailbox) profile(ctx context.Context) (*profileResponse, error) {
 	return &p, nil
 }
 
-var capabilities = driven.MailboxCapabilities{
+var capabilities = domainaccounts.MailboxCapabilities{
 	IncrementalSync:   true,
 	ServerSideForward: false,
 	ServerSideReply:   false,
@@ -315,9 +315,9 @@ var capabilities = driven.MailboxCapabilities{
 	StableMessageIDs:  true,
 }
 
-func (p *MailProvider) Capabilities() driven.MailboxCapabilities { return capabilities }
+func (p *MailProvider) Capabilities() domainaccounts.MailboxCapabilities { return capabilities }
 
-func (m *gmailMailbox) Capabilities() driven.MailboxCapabilities { return capabilities }
+func (m *gmailMailbox) Capabilities() domainaccounts.MailboxCapabilities { return capabilities }
 
 // Cursors are opaque to callers:
 //
@@ -350,7 +350,7 @@ func clampPage(n int) int {
 	return n
 }
 
-func (m *gmailMailbox) ListChanges(ctx context.Context, cursor string, pageSize int) (*driven.MailChangePage, error) {
+func (m *gmailMailbox) ListChanges(ctx context.Context, cursor string, pageSize int) (*domainaccounts.MailChangePage, error) {
 	pageSize = clampPage(pageSize)
 	kind, history, token := parseCursor(cursor)
 	switch kind {
@@ -367,7 +367,7 @@ func (m *gmailMailbox) ListChanges(ctx context.Context, cursor string, pageSize 
 	case "hist":
 		return m.listHistory(ctx, history, token, pageSize)
 	}
-	return nil, fmt.Errorf("%w: unrecognised cursor", driven.ErrCursorExpired)
+	return nil, fmt.Errorf("%w: unrecognised cursor", domainaccounts.ErrCursorExpired)
 }
 
 type listResponse struct {
@@ -377,7 +377,7 @@ type listResponse struct {
 	NextPageToken string `json:"nextPageToken"`
 }
 
-func (m *gmailMailbox) listFull(ctx context.Context, history, token string, pageSize int) (*driven.MailChangePage, error) {
+func (m *gmailMailbox) listFull(ctx context.Context, history, token string, pageSize int) (*domainaccounts.MailChangePage, error) {
 	q := url.Values{}
 	q.Set("labelIds", inboxLabel)
 	q.Set("maxResults", strconv.Itoa(pageSize))
@@ -388,7 +388,7 @@ func (m *gmailMailbox) listFull(ctx context.Context, history, token string, page
 	if err := m.do(ctx, http.MethodGet, "/messages", q, nil, jsonLimit, &lr); err != nil {
 		return nil, err
 	}
-	page := &driven.MailChangePage{}
+	page := &domainaccounts.MailChangePage{}
 	for _, ref := range lr.Messages {
 		msg, err := m.fetch(ctx, ref.ID)
 		if statusOf(err) == http.StatusNotFound {
@@ -442,7 +442,7 @@ func hasInbox(labels []string) bool {
 	return false
 }
 
-func (m *gmailMailbox) listHistory(ctx context.Context, start, token string, pageSize int) (*driven.MailChangePage, error) {
+func (m *gmailMailbox) listHistory(ctx context.Context, start, token string, pageSize int) (*domainaccounts.MailChangePage, error) {
 	q := url.Values{}
 	q.Set("startHistoryId", start)
 	q.Set("maxResults", strconv.Itoa(pageSize))
@@ -456,7 +456,7 @@ func (m *gmailMailbox) listHistory(ctx context.Context, start, token string, pag
 	if err := m.do(ctx, http.MethodGet, "/history", q, nil, jsonLimit, &hr); err != nil {
 		// Google answers 404 once a start id is older than it keeps.
 		if statusOf(err) == http.StatusNotFound {
-			return nil, fmt.Errorf("%w: %v", driven.ErrCursorExpired, err)
+			return nil, fmt.Errorf("%w: %v", domainaccounts.ErrCursorExpired, err)
 		}
 		return nil, err
 	}
@@ -490,7 +490,7 @@ func (m *gmailMailbox) listHistory(ctx context.Context, start, token string, pag
 			mark(d.Message.ID, false)
 		}
 	}
-	page := &driven.MailChangePage{}
+	page := &domainaccounts.MailChangePage{}
 	for _, id := range order {
 		if !touched[id] {
 			page.Removed = append(page.Removed, id)
@@ -600,8 +600,8 @@ func decodeText(p *gmailPart) string {
 	return string(data)
 }
 
-func (msg *gmailMessage) toMailMessage() driven.MailMessage {
-	out := driven.MailMessage{ID: msg.ID, ConversationID: msg.ThreadID, ChangeKey: msg.HistoryID, BodyPreview: msg.Snippet}
+func (msg *gmailMessage) toMailMessage() domainaccounts.MailMessage {
+	out := domainaccounts.MailMessage{ID: msg.ID, ConversationID: msg.ThreadID, ChangeKey: msg.HistoryID, BodyPreview: msg.Snippet}
 	if ms, err := strconv.ParseInt(msg.InternalDate, 10, 64); err == nil {
 		out.ReceivedDateTime = time.UnixMilli(ms).UTC().Format(time.RFC3339)
 	}
@@ -620,7 +620,7 @@ func (msg *gmailMessage) toMailMessage() driven.MailMessage {
 			continue
 		}
 		for _, a := range list {
-			r := driven.MailRecipient{Name: a.Name, Address: a.Address}
+			r := domainaccounts.MailRecipient{Name: a.Name, Address: a.Address}
 			if key == "To" {
 				out.ToRecipients = append(out.ToRecipients, r)
 			} else {
@@ -672,7 +672,7 @@ func (m *gmailMailbox) raw(ctx context.Context, id string) ([]byte, string, erro
 		return nil, "", fmt.Errorf("gmail returned no raw message for %s", id)
 	}
 	if int64(len(data)) > m.maxRaw {
-		return nil, "", driven.TooLarge(m.maxRaw)
+		return nil, "", domainaccounts.TooLarge(m.maxRaw)
 	}
 	return data, msg.ThreadID, nil
 }
@@ -684,17 +684,17 @@ func (m *gmailMailbox) GetRawMessage(ctx context.Context, id string) ([]byte, er
 
 // notSent marks a failure that happened before Gmail accepted anything.
 func notSent(err error) error {
-	if errors.Is(err, driven.ErrMailNotSent) {
+	if errors.Is(err, domainaccounts.ErrMailNotSent) {
 		return err
 	}
-	return fmt.Errorf("%w: %v", driven.ErrMailNotSent, err)
+	return fmt.Errorf("%w: %v", domainaccounts.ErrMailNotSent, err)
 }
 
 // send hands a composed message to Gmail. A 4xx is Gmail refusing it, so
 // nothing was sent; a transport failure or 5xx leaves the outcome unknown.
 func (m *gmailMailbox) send(ctx context.Context, raw []byte, threadID string) error {
 	if int64(len(raw)) > m.maxRaw {
-		return driven.TooLarge(m.maxRaw)
+		return domainaccounts.TooLarge(m.maxRaw)
 	}
 	body := map[string]string{"raw": base64.RawURLEncoding.EncodeToString(raw)}
 	if threadID != "" {

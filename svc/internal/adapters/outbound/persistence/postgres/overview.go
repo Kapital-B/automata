@@ -8,7 +8,7 @@ import (
 	"time"
 
 	"github.com/Kapital-B/automata/svc/internal/adapters/outbound/persistence/sqlkit"
-	"github.com/Kapital-B/automata/svc/internal/application/ports/driven"
+	domainprojects "github.com/Kapital-B/automata/svc/internal/domain/projects"
 	"github.com/google/uuid"
 )
 
@@ -100,7 +100,7 @@ func activityUserArgs(userID uuid.UUID) []any {
 	return args
 }
 
-func (r *Repository) ListActivity(ctx context.Context, userID, organisationID uuid.UUID, filter driven.ActivityFilter) ([]driven.ActivityItem, error) {
+func (r *Repository) ListActivity(ctx context.Context, userID, organisationID uuid.UUID, filter domainprojects.ActivityFilter) ([]domainprojects.ActivityItem, error) {
 	limit := filter.Limit
 	if limit <= 0 {
 		limit = 25
@@ -152,8 +152,8 @@ func (r *Repository) ListActivity(ctx context.Context, userID, organisationID uu
 	return scanActivityRows(rows)
 }
 
-func scanActivityRows(rows *sql.Rows) ([]driven.ActivityItem, error) {
-	out := make([]driven.ActivityItem, 0)
+func scanActivityRows(rows *sql.Rows) ([]domainprojects.ActivityItem, error) {
+	out := make([]domainprojects.ActivityItem, 0)
 	for rows.Next() {
 		var kind, projectStr, code, name, title, refType, refStr string
 		var source sql.NullString
@@ -169,7 +169,7 @@ func scanActivityRows(rows *sql.Rows) ([]driven.ActivityItem, error) {
 		if err != nil {
 			return nil, err
 		}
-		out = append(out, driven.ActivityItem{
+		out = append(out, domainprojects.ActivityItem{
 			Kind: kind, OccurredAt: occurredAt.UTC(), ProjectID: projectID,
 			ProjectCode: code, ProjectName: name, Title: title,
 			RefType: refType, RefID: refID, Source: source.String,
@@ -178,8 +178,8 @@ func scanActivityRows(rows *sql.Rows) ([]driven.ActivityItem, error) {
 	return out, rows.Err()
 }
 
-func (r *Repository) CountOverview(ctx context.Context, userID, organisationID uuid.UUID) (driven.OverviewCounts, error) {
-	var out driven.OverviewCounts
+func (r *Repository) CountOverview(ctx context.Context, userID, organisationID uuid.UUID) (domainprojects.OverviewCounts, error) {
+	var out domainprojects.OverviewCounts
 	row := r.queryRowContext(ctx, `
 		SELECT
 			(SELECT COUNT(*) FROM contradictions c
@@ -205,7 +205,7 @@ func (r *Repository) CountOverview(ctx context.Context, userID, organisationID u
 		userID.String(), organisationID.String(),
 	)
 	if err := row.Scan(&out.OpenContradictions, &out.ProvisionalFacts, &out.ProposedDecisions, &out.ActiveProjects); err != nil {
-		return driven.OverviewCounts{}, err
+		return domainprojects.OverviewCounts{}, err
 	}
 	return out, nil
 }
@@ -215,7 +215,7 @@ func (r *Repository) CountOverview(ctx context.Context, userID, organisationID u
 // There is deliberately no projects.last_activity_at column: it would need a
 // write on every path that touches a fact, decision, contradiction or issue,
 // and would drift the moment one was missed.
-func (r *Repository) ListOverviewProjects(ctx context.Context, userID, organisationID uuid.UUID, limit int) ([]driven.OverviewProject, error) {
+func (r *Repository) ListOverviewProjects(ctx context.Context, userID, organisationID uuid.UUID, limit int) ([]domainprojects.OverviewProject, error) {
 	if limit <= 0 {
 		limit = 8
 	}
@@ -261,8 +261,8 @@ func (r *Repository) ListOverviewProjects(ctx context.Context, userID, organisat
 	return scanOverviewProjects(rows)
 }
 
-func scanOverviewProjects(rows *sql.Rows) ([]driven.OverviewProject, error) {
-	out := make([]driven.OverviewProject, 0)
+func scanOverviewProjects(rows *sql.Rows) ([]domainprojects.OverviewProject, error) {
+	out := make([]domainprojects.OverviewProject, 0)
 	for rows.Next() {
 		var idStr, code, name, teaser string
 		var lastActivity sql.NullTime
@@ -273,7 +273,7 @@ func scanOverviewProjects(rows *sql.Rows) ([]driven.OverviewProject, error) {
 		if err != nil {
 			return nil, fmt.Errorf("parse project id: %w", err)
 		}
-		item := driven.OverviewProject{ID: id, Code: code, Name: name, Teaser: teaser}
+		item := domainprojects.OverviewProject{ID: id, Code: code, Name: name, Teaser: teaser}
 		if lastActivity.Valid {
 			t := lastActivity.Time.UTC()
 			item.LastActivityAt = &t
@@ -325,7 +325,7 @@ const attentionRowsSQL = `
 	WHERE c.status = 'open'
 `
 
-func (r *Repository) ListAttention(ctx context.Context, userID, organisationID uuid.UUID) ([]driven.AttentionRow, error) {
+func (r *Repository) ListAttention(ctx context.Context, userID, organisationID uuid.UUID) ([]domainprojects.AttentionRow, error) {
 	uid := userID.String()
 	args := []any{uid, uid, uid, uid, uid, uid, uid, organisationID.String()}
 	q := `
@@ -341,8 +341,8 @@ func (r *Repository) ListAttention(ctx context.Context, userID, organisationID u
 	return scanAttentionRows(rows)
 }
 
-func scanAttentionRows(rows *sql.Rows) ([]driven.AttentionRow, error) {
-	out := make([]driven.AttentionRow, 0)
+func scanAttentionRows(rows *sql.Rows) ([]domainprojects.AttentionRow, error) {
+	out := make([]domainprojects.AttentionRow, 0)
 	for rows.Next() {
 		var kind, title, projectStr, projectName, refType, refStr string
 		var occurredAt time.Time
@@ -357,7 +357,7 @@ func scanAttentionRows(rows *sql.Rows) ([]driven.AttentionRow, error) {
 		if err != nil {
 			return nil, err
 		}
-		out = append(out, driven.AttentionRow{
+		out = append(out, domainprojects.AttentionRow{
 			Kind: kind, Title: title, ProjectID: projectID, ProjectName: projectName,
 			RefType: refType, RefID: refID, OccurredAt: occurredAt.UTC(),
 		})
@@ -392,7 +392,7 @@ const projectAssignmentTimesSQL = `
 // from inside a job holding its own lock: ScheduledFor is not a claim-time gate
 // and RetryNotBefore is set only by retry backoff. Deriving on a tick is
 // idempotent and self-healing — a missed tick simply runs the next minute.
-func (r *Repository) ListProjectsDueForExtraction(ctx context.Context, now time.Time, quietFor, ceiling time.Duration, limit int) ([]driven.DueProject, error) {
+func (r *Repository) ListProjectsDueForExtraction(ctx context.Context, now time.Time, quietFor, ceiling time.Duration, limit int) ([]domainprojects.DueProject, error) {
 	if limit <= 0 {
 		limit = 50
 	}
@@ -426,8 +426,8 @@ func (r *Repository) ListProjectsDueForExtraction(ctx context.Context, now time.
 	return scanDueProjects(rows)
 }
 
-func scanDueProjects(rows *sql.Rows) ([]driven.DueProject, error) {
-	out := make([]driven.DueProject, 0)
+func scanDueProjects(rows *sql.Rows) ([]domainprojects.DueProject, error) {
+	out := make([]domainprojects.DueProject, 0)
 	for rows.Next() {
 		var projectStr string
 		var ownerStr sql.NullString
@@ -447,7 +447,7 @@ func scanDueProjects(rows *sql.Rows) ([]driven.DueProject, error) {
 		if err != nil {
 			return nil, err
 		}
-		out = append(out, driven.DueProject{ProjectID: projectID, OwnerUserID: ownerID})
+		out = append(out, domainprojects.DueProject{ProjectID: projectID, OwnerUserID: ownerID})
 	}
 	return out, rows.Err()
 }

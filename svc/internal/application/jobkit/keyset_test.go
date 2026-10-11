@@ -4,7 +4,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/Kapital-B/automata/svc/internal/application/ports/driven"
+	domainjobs "github.com/Kapital-B/automata/svc/internal/domain/jobs"
 	"github.com/google/uuid"
 )
 
@@ -24,7 +24,7 @@ func TestKeysetCursorRoundTrip(t *testing.T) {
 }
 
 func TestKeysetCursorRejectsGarbage(t *testing.T) {
-	for _, cursor := range []*driven.JobCursor{
+	for _, cursor := range []*domainjobs.JobCursor{
 		nil,
 		{Kind: "message_keyset", Value: ""},
 		{Kind: "message_keyset", Value: "nope"},

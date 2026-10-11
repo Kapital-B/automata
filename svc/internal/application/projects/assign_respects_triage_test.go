@@ -4,6 +4,7 @@ import (
 	"context"
 	"database/sql"
 	"fmt"
+	domainmessages "github.com/Kapital-B/automata/svc/internal/domain/messages"
 	"strings"
 	"testing"
 	"time"
@@ -12,8 +13,11 @@ import (
 	_ "modernc.org/sqlite"
 
 	"github.com/Kapital-B/automata/svc/internal/adapters/outbound/persistence/sqlite"
-	"github.com/Kapital-B/automata/svc/internal/application/ports/driven"
 	appprojects "github.com/Kapital-B/automata/svc/internal/application/projects"
+	domainaccounts "github.com/Kapital-B/automata/svc/internal/domain/accounts"
+	domainai "github.com/Kapital-B/automata/svc/internal/domain/ai"
+	domainjobs "github.com/Kapital-B/automata/svc/internal/domain/jobs"
+	domainprojects "github.com/Kapital-B/automata/svc/internal/domain/projects"
 )
 
 // placeEverythingLLM files every thread it is shown under one project, as a
@@ -23,7 +27,7 @@ type placeEverythingLLM struct {
 	shown []string
 }
 
-func (l *placeEverythingLLM) ChatCompletion(ctx context.Context, msgs []driven.LLMMessage) (*driven.LLMResponse, error) {
+func (l *placeEverythingLLM) ChatCompletion(ctx context.Context, msgs []domainai.LLMMessage) (*domainai.LLMResponse, error) {
 	var refs []string
 	for _, m := range msgs {
 		if m.Role != "user" {
@@ -41,7 +45,7 @@ func (l *placeEverythingLLM) ChatCompletion(ctx context.Context, msgs []driven.L
 	for _, r := range refs {
 		parts = append(parts, fmt.Sprintf(`{"ref":%q,"project_code":%q,"confidence":0.8,"reason":"looks related"}`, r, l.code))
 	}
-	return &driven.LLMResponse{Content: `{"schema_version":1,"assignments":[` + strings.Join(parts, ",") + `]}`}, nil
+	return &domainai.LLMResponse{Content: `{"schema_version":1,"assignments":[` + strings.Join(parts, ",") + `]}`}, nil
 }
 
 // Triaged mail kept coming back: every sync queued the assign_projects job,
@@ -64,7 +68,7 @@ func TestAssignJobLeavesTriagedThreadsAlone(t *testing.T) {
 		t.Fatal(err)
 	}
 	accountID := uuid.New()
-	if err := repo.InsertAccount(ctx, driven.AccountRow{UserID: userID, ID: accountID, Label: "Work", Provider: "m365", MsAccountKind: "work", PrimaryEmail: "u@ex.com", ConnectionStatus: "connected"}, []byte("tok")); err != nil {
+	if err := repo.InsertAccount(ctx, domainaccounts.AccountRow{UserID: userID, ID: accountID, Label: "Work", Provider: "m365", MsAccountKind: "work", PrimaryEmail: "u@ex.com", ConnectionStatus: "connected"}, []byte("tok")); err != nil {
 		t.Fatal(err)
 	}
 	svc := &appprojects.Service{Users: repo, Projects: repo, Assignments: repo, Manuals: repo, Timeline: repo, Contacts: repo, Messages: repo}
@@ -79,7 +83,7 @@ func TestAssignJobLeavesTriagedThreadsAlone(t *testing.T) {
 		id := uuid.New()
 		body := subject + " body"
 		c := conv
-		if err := repo.UpsertMessage(ctx, driven.MessageRow{
+		if err := repo.UpsertMessage(ctx, domainmessages.MessageRow{
 			ID: id, AccountID: accountID, ProviderMessageID: id.String(), Subject: subject,
 			FromJSON: `{"address":"someone@x.com"}`, BodyText: &body, ConversationID: &c,
 			ReceivedAt: now.Add(-age), CreatedAt: now, UpdatedAt: now,
@@ -104,7 +108,7 @@ func TestAssignJobLeavesTriagedThreadsAlone(t *testing.T) {
 
 	llm := &placeEverythingLLM{code: "OF02"}
 	assign := &appprojects.AssignService{Users: repo, Projects: repo, Assignments: repo, Contacts: repo, Messages: repo, LLM: llm}
-	run := driven.RunContext{RunID: uuid.New(), UserID: userID, AccountID: &accountID}
+	run := domainjobs.RunContext{RunID: uuid.New(), UserID: userID, AccountID: &accountID}
 	for i := 0; ; i++ {
 		out, err := assign.AssignAccountChunk(ctx, run)
 		if err != nil {
@@ -130,7 +134,7 @@ func TestAssignJobLeavesTriagedThreadsAlone(t *testing.T) {
 		t.Errorf("filing lost: %+v", row)
 	}
 	// ...and only the undecided thread is in triage, with the model's guess.
-	queue, err := repo.ListUnassigned(ctx, userID, driven.UnassignedListFilter{Status: "all", Limit: 50})
+	queue, err := repo.ListUnassigned(ctx, userID, domainprojects.UnassignedListFilter{Status: "all", Limit: 50})
 	if err != nil {
 		t.Fatal(err)
 	}

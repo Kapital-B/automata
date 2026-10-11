@@ -5,16 +5,19 @@ import (
 	"database/sql"
 	"encoding/json"
 	"fmt"
+	domainmessages "github.com/Kapital-B/automata/svc/internal/domain/messages"
 	"strings"
 	"testing"
 	"time"
 
 	"github.com/Kapital-B/automata/svc/internal/adapters/outbound/persistence/sqlite"
 	"github.com/Kapital-B/automata/svc/internal/application/auth"
-	"github.com/Kapital-B/automata/svc/internal/application/ports/driven"
 	appprojectai "github.com/Kapital-B/automata/svc/internal/application/projectai"
 	appprojects "github.com/Kapital-B/automata/svc/internal/application/projects"
 	appretrieval "github.com/Kapital-B/automata/svc/internal/application/retrieval"
+	domainaccounts "github.com/Kapital-B/automata/svc/internal/domain/accounts"
+	domainai "github.com/Kapital-B/automata/svc/internal/domain/ai"
+	domaincontacts "github.com/Kapital-B/automata/svc/internal/domain/contacts"
 	domainprojects "github.com/Kapital-B/automata/svc/internal/domain/projects"
 	"github.com/google/uuid"
 )
@@ -26,14 +29,14 @@ type scriptedLLM struct {
 	citations []map[string]string
 }
 
-func (s *scriptedLLM) ChatCompletion(ctx context.Context, messages []driven.LLMMessage) (*driven.LLMResponse, error) {
+func (s *scriptedLLM) ChatCompletion(ctx context.Context, messages []domainai.LLMMessage) (*domainai.LLMResponse, error) {
 	s.prompt = messages[len(messages)-1].Content
 	cites := s.citations
 	if cites == nil {
 		cites = []map[string]string{}
 	}
 	out, _ := json.Marshal(map[string]any{"schema_version": 1, "answer": "ok", "citations": cites, "confidence": 0.5})
-	return &driven.LLMResponse{Content: string(out)}, nil
+	return &domainai.LLMResponse{Content: string(out)}, nil
 }
 
 type retrievalFixture struct {
@@ -91,7 +94,7 @@ func (f *retrievalFixture) register() uuid.UUID {
 func (f *retrievalFixture) account(userID uuid.UUID) uuid.UUID {
 	f.t.Helper()
 	id := uuid.New()
-	if err := f.repo.InsertAccount(f.ctx, driven.AccountRow{
+	if err := f.repo.InsertAccount(f.ctx, domainaccounts.AccountRow{
 		UserID: userID, ID: id, Label: "Work", Provider: "m365", MsAccountKind: "work",
 		PrimaryEmail: id.String() + "@example.com", ConnectionStatus: "connected",
 	}, []byte("tok")); err != nil {
@@ -113,14 +116,14 @@ func (f *retrievalFixture) message(account uuid.UUID, subject, body string, at t
 	f.t.Helper()
 	id := uuid.New()
 	conv := "conv-" + id.String()
-	if err := f.repo.UpsertMessage(f.ctx, driven.MessageRow{
+	if err := f.repo.UpsertMessage(f.ctx, domainmessages.MessageRow{
 		ID: id, AccountID: account, ProviderMessageID: id.String(), Subject: subject, FromJSON: `{}`,
 		BodyText: &body, ConversationID: &conv, ReceivedAt: at, CreatedAt: at, UpdatedAt: at,
 	}); err != nil {
 		f.t.Fatal(err)
 	}
 	if project != nil {
-		if err := f.repo.UpsertThreadAssignment(f.ctx, driven.AssignmentRow{
+		if err := f.repo.UpsertThreadAssignment(f.ctx, domainprojects.AssignmentRow{
 			ID: uuid.New(), OrganisationID: f.orgID, AccountID: account, ConversationID: conv, ProjectID: project,
 			Status: "committed", Reason: "test", Source: string(domainprojects.SourceUser), CreatedAt: at, UpdatedAt: at,
 		}); err != nil {
@@ -142,8 +145,8 @@ func TestAskAcrossIncludesNamedProjectBeyondTheUsualEight(t *testing.T) {
 	other := f.register()
 	hidden := uuid.New()
 	now := time.Now().UTC()
-	if err := f.repo.CreateProject(f.ctx, driven.ProjectRow{ID: hidden, OrganisationID: f.orgID, Name: "Hidden", Code: "HX99", CreatedAt: now, UpdatedAt: now},
-		driven.ProjectMemberRow{ID: uuid.New(), ProjectID: hidden, UserID: other, Role: "owner", CreatedAt: now, UpdatedAt: now}); err != nil {
+	if err := f.repo.CreateProject(f.ctx, domainprojects.ProjectRow{ID: hidden, OrganisationID: f.orgID, Name: "Hidden", Code: "HX99", CreatedAt: now, UpdatedAt: now},
+		domainprojects.ProjectMemberRow{ID: uuid.New(), ProjectID: hidden, UserID: other, Role: "owner", CreatedAt: now, UpdatedAt: now}); err != nil {
 		t.Fatal(err)
 	}
 
@@ -201,7 +204,7 @@ func TestAskAcrossFindsUnfiledMailFromNamedContact(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := f.repo.UpsertParticipant(f.ctx, driven.CorrespondenceParticipantRow{
+	if err := f.repo.UpsertParticipant(f.ctx, domaincontacts.CorrespondenceParticipantRow{
 		ID: uuid.New(), OrganisationID: f.orgID, ContactID: jan, Role: "from", MessageID: &fromJan,
 	}); err != nil {
 		t.Fatal(err)

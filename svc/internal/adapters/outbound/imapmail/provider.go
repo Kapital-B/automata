@@ -9,6 +9,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"github.com/emersion/go-imap"
 	"io"
 	"log"
 	"net"
@@ -17,11 +18,10 @@ import (
 	"strings"
 	"time"
 
-	"github.com/emersion/go-imap"
 	"github.com/emersion/go-imap/client"
 	"github.com/emersion/go-imap/commands"
 
-	"github.com/Kapital-B/automata/svc/internal/application/ports/driven"
+	domainaccounts "github.com/Kapital-B/automata/svc/internal/domain/accounts"
 )
 
 const (
@@ -54,8 +54,8 @@ type Provider struct {
 }
 
 var (
-	_ driven.MailProvider          = (*Provider)(nil)
-	_ driven.PasswordMailConnector = (*Provider)(nil)
+	_ domainaccounts.MailProvider          = (*Provider)(nil)
+	_ domainaccounts.PasswordMailConnector = (*Provider)(nil)
 )
 
 // credential is the stored form: both transports and the secret, tagged so
@@ -63,11 +63,11 @@ var (
 // the encrypted envelope rather than a column, since the accounts table has
 // nowhere else to put them and they are only ever read alongside the secret.
 type credential struct {
-	Type     string            `json:"type"`
-	Username string            `json:"username"`
-	Password string            `json:"password"`
-	IMAP     driven.MailServer `json:"imap"`
-	SMTP     driven.MailServer `json:"smtp"`
+	Type     string                    `json:"type"`
+	Username string                    `json:"username"`
+	Password string                    `json:"password"`
+	IMAP     domainaccounts.MailServer `json:"imap"`
+	SMTP     domainaccounts.MailServer `json:"smtp"`
 }
 
 func (p *Provider) maxRaw() int64 {
@@ -100,13 +100,13 @@ func (p *Provider) tlsConfig(host string) *tls.Config {
 	return cfg
 }
 
-func addr(s driven.MailServer) string {
+func addr(s domainaccounts.MailServer) string {
 	return net.JoinHostPort(s.Host, strconv.Itoa(s.Port))
 }
 
 // validServer refuses anything but an encrypted transport: the password is a
 // long-lived secret and never crosses the wire in the clear.
-func validServer(kind string, s driven.MailServer) error {
+func validServer(kind string, s domainaccounts.MailServer) error {
 	if strings.TrimSpace(s.Host) == "" {
 		return fmt.Errorf("%s host is required", kind)
 	}
@@ -122,7 +122,7 @@ func validServer(kind string, s driven.MailServer) error {
 }
 
 // dial opens a TCP connection, wrapped in TLS for implicit-TLS servers.
-func (p *Provider) dial(ctx context.Context, s driven.MailServer) (net.Conn, error) {
+func (p *Provider) dial(ctx context.Context, s domainaccounts.MailServer) (net.Conn, error) {
 	d := net.Dialer{Timeout: p.dialTimeout()}
 	conn, err := d.DialContext(ctx, "tcp", addr(s))
 	if err != nil {
@@ -210,7 +210,7 @@ func decodeCredential(raw []byte) (credential, error) {
 
 // Open checks the stored password still works, so a changed or revoked one
 // marks the account for reconnecting instead of failing every sync.
-func (p *Provider) Open(ctx context.Context, account driven.AccountRow, raw []byte) (driven.Mailbox, []byte, error) {
+func (p *Provider) Open(ctx context.Context, account domainaccounts.AccountRow, raw []byte) (domainaccounts.Mailbox, []byte, error) {
 	c, err := decodeCredential(raw)
 	if err != nil {
 		return nil, nil, err
@@ -218,7 +218,7 @@ func (p *Provider) Open(ctx context.Context, account driven.AccountRow, raw []by
 	cl, _, err := p.imapSession(ctx, c)
 	if err != nil {
 		if errors.Is(err, errLoginRefused) {
-			return nil, nil, fmt.Errorf("%w: %v", driven.ErrCredentialsRejected, err)
+			return nil, nil, fmt.Errorf("%w: %v", domainaccounts.ErrCredentialsRejected, err)
 		}
 		return nil, nil, err
 	}
@@ -228,20 +228,20 @@ func (p *Provider) Open(ctx context.Context, account driven.AccountRow, raw []by
 
 // Connect verifies both transports before anything is stored. Every failure
 // the user can fix comes back as a ConnectRejectedError naming the cause.
-func (p *Provider) Connect(ctx context.Context, req driven.PasswordConnectRequest) (*driven.ConnectedMailbox, error) {
+func (p *Provider) Connect(ctx context.Context, req domainaccounts.PasswordConnectRequest) (*domainaccounts.ConnectedMailbox, error) {
 	email := strings.TrimSpace(req.Email)
 	if a, err := mail.ParseAddress(email); err != nil || a.Address != email {
-		return nil, driven.ConnectRejected("%q is not an email address", req.Email)
+		return nil, domainaccounts.ConnectRejected("%q is not an email address", req.Email)
 	}
 	if req.Password == "" {
-		return nil, driven.ConnectRejected("a password is required")
+		return nil, domainaccounts.ConnectRejected("a password is required")
 	}
 	for _, s := range []struct {
 		kind string
-		srv  driven.MailServer
+		srv  domainaccounts.MailServer
 	}{{"IMAP", req.IMAP}, {"SMTP", req.SMTP}} {
 		if err := validServer(s.kind, s.srv); err != nil {
-			return nil, driven.ConnectRejected("%s", err.Error())
+			return nil, domainaccounts.ConnectRejected("%s", err.Error())
 		}
 	}
 	username := strings.TrimSpace(req.Username)
@@ -259,18 +259,18 @@ func (p *Provider) Connect(ctx context.Context, req driven.PasswordConnectReques
 	cl, _, err := p.imapSession(ctx, c)
 	if err != nil {
 		if errors.Is(err, errLoginRefused) {
-			return nil, driven.ConnectRejected("the IMAP server at %s refused the username or password (%s). Providers that use two-factor sign-in, such as Gmail and iCloud, need an app password here", c.IMAP.Host, strings.TrimPrefix(err.Error(), errLoginRefused.Error()+": "))
+			return nil, domainaccounts.ConnectRejected("the IMAP server at %s refused the username or password (%s). Providers that use two-factor sign-in, such as Gmail and iCloud, need an app password here", c.IMAP.Host, strings.TrimPrefix(err.Error(), errLoginRefused.Error()+": "))
 		}
-		return nil, driven.ConnectRejected("could not use the IMAP server at %s: %v", addr(c.IMAP), err)
+		return nil, domainaccounts.ConnectRejected("could not use the IMAP server at %s: %v", addr(c.IMAP), err)
 	}
 	_ = cl.Logout()
 
 	sc, err := p.smtpSession(ctx, c)
 	if err != nil {
 		if errors.Is(err, errLoginRefused) {
-			return nil, driven.ConnectRejected("the SMTP server at %s refused the username or password: %v", c.SMTP.Host, err)
+			return nil, domainaccounts.ConnectRejected("the SMTP server at %s refused the username or password: %v", c.SMTP.Host, err)
 		}
-		return nil, driven.ConnectRejected("could not use the SMTP server at %s: %v", addr(c.SMTP), err)
+		return nil, domainaccounts.ConnectRejected("could not use the SMTP server at %s: %v", addr(c.SMTP), err)
 	}
 	_ = sc.Quit()
 
@@ -278,10 +278,10 @@ func (p *Provider) Connect(ctx context.Context, req driven.PasswordConnectReques
 	if err != nil {
 		return nil, err
 	}
-	return &driven.ConnectedMailbox{Email: email, DefaultLabel: email, Credential: blob}, nil
+	return &domainaccounts.ConnectedMailbox{Email: email, DefaultLabel: email, Credential: blob}, nil
 }
 
-func normalise(s driven.MailServer) driven.MailServer {
+func normalise(s domainaccounts.MailServer) domainaccounts.MailServer {
 	s.Host = strings.ToLower(strings.TrimSpace(s.Host))
 	return s
 }

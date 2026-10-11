@@ -14,9 +14,10 @@ import (
 	"github.com/Kapital-B/automata/svc/internal/application/auth"
 	appdecisions "github.com/Kapital-B/automata/svc/internal/application/decisions"
 	appfacts "github.com/Kapital-B/automata/svc/internal/application/facts"
-	"github.com/Kapital-B/automata/svc/internal/application/ports/driven"
 	appprojectai "github.com/Kapital-B/automata/svc/internal/application/projectai"
 	appprojects "github.com/Kapital-B/automata/svc/internal/application/projects"
+	domainai "github.com/Kapital-B/automata/svc/internal/domain/ai"
+	domainprojects "github.com/Kapital-B/automata/svc/internal/domain/projects"
 	"github.com/google/uuid"
 	_ "modernc.org/sqlite"
 )
@@ -25,9 +26,9 @@ func TestSelectAskAcrossProjectsPrefersAttentionThenRecent(t *testing.T) {
 	base := time.Date(2026, 8, 1, 0, 0, 0, 0, time.UTC)
 	attentionID := uuid.MustParse("aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa")
 	oldQuietID := uuid.MustParse("bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb")
-	projects := make([]driven.ProjectRow, 0, 10)
+	projects := make([]domainprojects.ProjectRow, 0, 10)
 	for i := 0; i < 8; i++ {
-		projects = append(projects, driven.ProjectRow{
+		projects = append(projects, domainprojects.ProjectRow{
 			ID:        uuid.New(),
 			Code:      fmt.Sprintf("R%02d", i),
 			Name:      fmt.Sprintf("Recent %d", i),
@@ -35,8 +36,8 @@ func TestSelectAskAcrossProjectsPrefersAttentionThenRecent(t *testing.T) {
 		})
 	}
 	projects = append(projects,
-		driven.ProjectRow{ID: attentionID, Code: "DC01", Name: "Cooling", UpdatedAt: base.Add(-48 * time.Hour)},
-		driven.ProjectRow{ID: oldQuietID, Code: "ZZ99", Name: "Archive", UpdatedAt: base.Add(-72 * time.Hour)},
+		domainprojects.ProjectRow{ID: attentionID, Code: "DC01", Name: "Cooling", UpdatedAt: base.Add(-48 * time.Hour)},
+		domainprojects.ProjectRow{ID: oldQuietID, Code: "ZZ99", Name: "Archive", UpdatedAt: base.Add(-72 * time.Hour)},
 	)
 	selected := appprojectai.SelectAskAcrossProjects(projects, map[uuid.UUID]struct{}{attentionID: {}}, 8)
 	if len(selected) != 8 {
@@ -57,13 +58,13 @@ type capturingLLM struct {
 	content  string
 }
 
-func (c *capturingLLM) ChatCompletion(_ context.Context, messages []driven.LLMMessage) (*driven.LLMResponse, error) {
+func (c *capturingLLM) ChatCompletion(_ context.Context, messages []domainai.LLMMessage) (*domainai.LLMResponse, error) {
 	for _, m := range messages {
 		if m.Role == "user" {
 			c.lastUser = m.Content
 		}
 	}
-	return &driven.LLMResponse{Content: c.content}, nil
+	return &domainai.LLMResponse{Content: c.content}, nil
 }
 
 func TestAskAcrossEvalCapsContextToAttentionAndRecent(t *testing.T) {

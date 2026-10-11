@@ -8,7 +8,7 @@ import (
 	"time"
 
 	"github.com/Kapital-B/automata/svc/internal/application/joblistcursor"
-	"github.com/Kapital-B/automata/svc/internal/application/ports/driven"
+	domainjobs "github.com/Kapital-B/automata/svc/internal/domain/jobs"
 	"github.com/aws/aws-sdk-go-v2/feature/dynamodb/attributevalue"
 	"github.com/aws/aws-sdk-go-v2/service/dynamodb"
 	"github.com/aws/aws-sdk-go-v2/service/dynamodb/types"
@@ -35,52 +35,52 @@ type Store struct {
 }
 
 type jobItem struct {
-	PK                string             `dynamodbav:"pk"`
-	SK                string             `dynamodbav:"sk"`
-	EntityType        string             `dynamodbav:"entity_type"`
-	SchemaVersion     int                `dynamodbav:"schema_version"`
-	JobID             string             `dynamodbav:"job_id"`
-	JobType           string             `dynamodbav:"job_type"`
-	Status            string             `dynamodbav:"status"`
-	UserID            string             `dynamodbav:"user_id"`
-	AccountID         *string            `dynamodbav:"account_id,omitempty"`
-	AccountLabel      *string            `dynamodbav:"account_label,omitempty"`
-	TriggerKind       string             `dynamodbav:"trigger_kind"`
-	ChainID           string             `dynamodbav:"chain_id"`
-	StepIndex         int                `dynamodbav:"step_index"`
-	RemainingJobs     []string           `dynamodbav:"remaining_jobs,omitempty"`
-	ScheduleID        *string            `dynamodbav:"schedule_id,omitempty"`
-	ScheduledFor      *string            `dynamodbav:"scheduled_for,omitempty"`
-	ChainStartedAt    *string            `dynamodbav:"chain_started_at,omitempty"`
-	Cursor            *driven.JobCursor  `dynamodbav:"cursor,omitempty"`
-	Progress          driven.JobProgress `dynamodbav:"progress"`
-	Payload           jobPayloadItem     `dynamodbav:"payload"`
-	ErrorMessage      *string            `dynamodbav:"error_message,omitempty"`
-	ErrorCount        int                `dynamodbav:"error_count"`
-	CancelRequestedAt *string            `dynamodbav:"cancel_requested_at,omitempty"`
-	RetryNotBefore    *string            `dynamodbav:"retry_not_before,omitempty"`
-	Revision          int64              `dynamodbav:"revision"`
-	AttemptID         *string            `dynamodbav:"attempt_id,omitempty"`
-	LeaseOwner        *string            `dynamodbav:"lease_owner,omitempty"`
-	LeaseUntil        *string            `dynamodbav:"lease_until,omitempty"`
-	WakeToken         string             `dynamodbav:"wake_token"`
-	CreatedAt         string             `dynamodbav:"created_at"`
-	StartedAt         *string            `dynamodbav:"started_at,omitempty"`
-	UpdatedAt         string             `dynamodbav:"updated_at"`
-	FinishedAt        *string            `dynamodbav:"finished_at,omitempty"`
-	ExpiresAt         *int64             `dynamodbav:"expires_at,omitempty"`
-	LockScope         *string            `dynamodbav:"lock_scope,omitempty"`
-	LockKey           *string            `dynamodbav:"lock_key,omitempty"`
-	GSI1PK            *string            `dynamodbav:"gsi1pk,omitempty"`
-	GSI1SK            *string            `dynamodbav:"gsi1sk,omitempty"`
-	GSI2PK            *string            `dynamodbav:"gsi2pk,omitempty"`
-	GSI2SK            *string            `dynamodbav:"gsi2sk,omitempty"`
-	GSI3PK            *string            `dynamodbav:"gsi3pk,omitempty"`
-	GSI3SK            *string            `dynamodbav:"gsi3sk,omitempty"`
-	GSI4PK            *string            `dynamodbav:"gsi4pk,omitempty"`
-	GSI4SK            *string            `dynamodbav:"gsi4sk,omitempty"`
-	GSI5PK            *string            `dynamodbav:"gsi5pk,omitempty"`
-	GSI5SK            *string            `dynamodbav:"gsi5sk,omitempty"`
+	PK                string                 `dynamodbav:"pk"`
+	SK                string                 `dynamodbav:"sk"`
+	EntityType        string                 `dynamodbav:"entity_type"`
+	SchemaVersion     int                    `dynamodbav:"schema_version"`
+	JobID             string                 `dynamodbav:"job_id"`
+	JobType           string                 `dynamodbav:"job_type"`
+	Status            string                 `dynamodbav:"status"`
+	UserID            string                 `dynamodbav:"user_id"`
+	AccountID         *string                `dynamodbav:"account_id,omitempty"`
+	AccountLabel      *string                `dynamodbav:"account_label,omitempty"`
+	TriggerKind       string                 `dynamodbav:"trigger_kind"`
+	ChainID           string                 `dynamodbav:"chain_id"`
+	StepIndex         int                    `dynamodbav:"step_index"`
+	RemainingJobs     []string               `dynamodbav:"remaining_jobs,omitempty"`
+	ScheduleID        *string                `dynamodbav:"schedule_id,omitempty"`
+	ScheduledFor      *string                `dynamodbav:"scheduled_for,omitempty"`
+	ChainStartedAt    *string                `dynamodbav:"chain_started_at,omitempty"`
+	Cursor            *domainjobs.JobCursor  `dynamodbav:"cursor,omitempty"`
+	Progress          domainjobs.JobProgress `dynamodbav:"progress"`
+	Payload           jobPayloadItem         `dynamodbav:"payload"`
+	ErrorMessage      *string                `dynamodbav:"error_message,omitempty"`
+	ErrorCount        int                    `dynamodbav:"error_count"`
+	CancelRequestedAt *string                `dynamodbav:"cancel_requested_at,omitempty"`
+	RetryNotBefore    *string                `dynamodbav:"retry_not_before,omitempty"`
+	Revision          int64                  `dynamodbav:"revision"`
+	AttemptID         *string                `dynamodbav:"attempt_id,omitempty"`
+	LeaseOwner        *string                `dynamodbav:"lease_owner,omitempty"`
+	LeaseUntil        *string                `dynamodbav:"lease_until,omitempty"`
+	WakeToken         string                 `dynamodbav:"wake_token"`
+	CreatedAt         string                 `dynamodbav:"created_at"`
+	StartedAt         *string                `dynamodbav:"started_at,omitempty"`
+	UpdatedAt         string                 `dynamodbav:"updated_at"`
+	FinishedAt        *string                `dynamodbav:"finished_at,omitempty"`
+	ExpiresAt         *int64                 `dynamodbav:"expires_at,omitempty"`
+	LockScope         *string                `dynamodbav:"lock_scope,omitempty"`
+	LockKey           *string                `dynamodbav:"lock_key,omitempty"`
+	GSI1PK            *string                `dynamodbav:"gsi1pk,omitempty"`
+	GSI1SK            *string                `dynamodbav:"gsi1sk,omitempty"`
+	GSI2PK            *string                `dynamodbav:"gsi2pk,omitempty"`
+	GSI2SK            *string                `dynamodbav:"gsi2sk,omitempty"`
+	GSI3PK            *string                `dynamodbav:"gsi3pk,omitempty"`
+	GSI3SK            *string                `dynamodbav:"gsi3sk,omitempty"`
+	GSI4PK            *string                `dynamodbav:"gsi4pk,omitempty"`
+	GSI4SK            *string                `dynamodbav:"gsi4sk,omitempty"`
+	GSI5PK            *string                `dynamodbav:"gsi5pk,omitempty"`
+	GSI5SK            *string                `dynamodbav:"gsi5sk,omitempty"`
 }
 
 type jobPayloadItem struct {
@@ -125,7 +125,7 @@ func NewStore(client *dynamodb.Client, tableName string, cursorKey []byte) *Stor
 	return &Store{client: client, tableName: tableName, cursorKey: append([]byte(nil), cursorKey...)}
 }
 
-func (s *Store) CreatePending(ctx context.Context, in driven.CreateJobInput) (*driven.JobRecord, error) {
+func (s *Store) CreatePending(ctx context.Context, in domainjobs.CreateJobInput) (*domainjobs.JobRecord, error) {
 	now := in.Now.UTC()
 	if now.IsZero() {
 		now = time.Now().UTC()
@@ -192,7 +192,7 @@ func (s *Store) CreatePending(ctx context.Context, in driven.CreateJobInput) (*d
 			return nil, rerr
 		}
 		if !reclaimable {
-			return nil, fmt.Errorf("%w: owner=%s", driven.ErrJobLockHeld, holder.OwnerJobID)
+			return nil, fmt.Errorf("%w: owner=%s", domainjobs.ErrJobLockHeld, holder.OwnerJobID)
 		}
 		return s.takeOverLock(ctx, job, jobAV, lock, holder)
 	}
@@ -212,7 +212,7 @@ func (s *Store) lockReclaimable(ctx context.Context, lk *lockItem, now time.Time
 		return true, nil
 	}
 	owner, err := s.GetByID(ctx, ownerID)
-	if errors.Is(err, driven.ErrJobNotFound) {
+	if errors.Is(err, domainjobs.ErrJobNotFound) {
 		// The owner is gone — terminal jobs carry a TTL, the lock does not.
 		return true, nil
 	}
@@ -222,7 +222,7 @@ func (s *Store) lockReclaimable(ctx context.Context, lk *lockItem, now time.Time
 	if isTerminal(owner.Status) {
 		return true, nil
 	}
-	if owner.Status != driven.JobStatusPending {
+	if owner.Status != domainjobs.JobStatusPending {
 		// A running owner is RecoverExpiredLease's to resolve: a chunk may
 		// still be in flight, and taking the lock here could double-execute it.
 		return false, nil
@@ -237,7 +237,7 @@ func (s *Store) lockReclaimable(ctx context.Context, lk *lockItem, now time.Time
 
 // takeOverLock rewrites the lock to a new owner, conditional on the holder's
 // revision so two callers racing to reclaim cannot both win.
-func (s *Store) takeOverLock(ctx context.Context, job *jobItem, jobAV map[string]types.AttributeValue, lock, holder *lockItem) (*driven.JobRecord, error) {
+func (s *Store) takeOverLock(ctx context.Context, job *jobItem, jobAV map[string]types.AttributeValue, lock, holder *lockItem) (*domainjobs.JobRecord, error) {
 	lock.Revision = holder.Revision + 1
 	lockAV, err := attributevalue.MarshalMap(lock)
 	if err != nil {
@@ -268,23 +268,23 @@ func (s *Store) takeOverLock(ctx context.Context, job *jobItem, jobAV map[string
 	})
 	if err != nil {
 		// Lost the race, or the owner released it underneath us.
-		return nil, fmt.Errorf("%w: owner=%s", driven.ErrJobLockHeld, holder.OwnerJobID)
+		return nil, fmt.Errorf("%w: owner=%s", domainjobs.ErrJobLockHeld, holder.OwnerJobID)
 	}
 	return job.record()
 }
 
-func (s *Store) Get(ctx context.Context, userID, jobID uuid.UUID) (*driven.JobRecord, error) {
+func (s *Store) Get(ctx context.Context, userID, jobID uuid.UUID) (*domainjobs.JobRecord, error) {
 	job, err := s.GetByID(ctx, jobID)
 	if err != nil {
 		return nil, err
 	}
 	if job.UserID != userID {
-		return nil, driven.ErrJobNotFound
+		return nil, domainjobs.ErrJobNotFound
 	}
 	return job, nil
 }
 
-func (s *Store) GetByID(ctx context.Context, jobID uuid.UUID) (*driven.JobRecord, error) {
+func (s *Store) GetByID(ctx context.Context, jobID uuid.UUID) (*domainjobs.JobRecord, error) {
 	item, err := s.getJobItem(ctx, jobID)
 	if err != nil {
 		return nil, err
@@ -292,16 +292,16 @@ func (s *Store) GetByID(ctx context.Context, jobID uuid.UUID) (*driven.JobRecord
 	return item.record()
 }
 
-func (s *Store) List(ctx context.Context, filter driven.JobListFilter) (*driven.JobListPage, error) {
+func (s *Store) List(ctx context.Context, filter domainjobs.JobListFilter) (*domainjobs.JobListPage, error) {
 	if filter.Offset > 0 {
-		return nil, driven.ErrOffsetNotSupported
+		return nil, domainjobs.ErrOffsetNotSupported
 	}
 	limit := clampLimit(filter.Limit)
 	spec, err := s.listQuerySpec(filter)
 	if err != nil {
 		return nil, err
 	}
-	page := &driven.JobListPage{Jobs: make([]driven.JobRecord, 0, limit)}
+	page := &domainjobs.JobListPage{Jobs: make([]domainjobs.JobRecord, 0, limit)}
 	startKey := spec.startKey
 	for len(page.Jobs) < limit {
 		out, err := s.client.Query(ctx, &dynamodb.QueryInput{
@@ -353,13 +353,13 @@ func (s *Store) List(ctx context.Context, filter driven.JobListFilter) (*driven.
 	return page, nil
 }
 
-func (s *Store) KickPending(ctx context.Context, jobID uuid.UUID, expectedRevision int64, leaseOwner string, leaseUntil, now time.Time) (*driven.JobRecord, error) {
+func (s *Store) KickPending(ctx context.Context, jobID uuid.UUID, expectedRevision int64, leaseOwner string, leaseUntil, now time.Time) (*domainjobs.JobRecord, error) {
 	current, err := s.getJobItem(ctx, jobID)
 	if err != nil {
 		return nil, err
 	}
-	if current.Status != driven.JobStatusPending || current.Revision != expectedRevision {
-		return nil, driven.ErrJobConflict
+	if current.Status != domainjobs.JobStatusPending || current.Revision != expectedRevision {
+		return nil, domainjobs.ErrJobConflict
 	}
 	if current.RetryNotBefore != nil {
 		retryNotBefore, err := parseTimePtr(current.RetryNotBefore)
@@ -367,15 +367,15 @@ func (s *Store) KickPending(ctx context.Context, jobID uuid.UUID, expectedRevisi
 			return nil, err
 		}
 		if retryNotBefore != nil && retryNotBefore.After(now) {
-			return nil, driven.ErrJobConflict
+			return nil, domainjobs.ErrJobConflict
 		}
 	}
 	if current.CancelRequestedAt != nil {
-		return s.finishJob(ctx, current, driven.JobStatusCancelled, nil, now, 30*24*time.Hour, nil)
+		return s.finishJob(ctx, current, domainjobs.JobStatusCancelled, nil, now, 30*24*time.Hour, nil)
 	}
 	attemptID := uuid.New()
 	next := *current
-	next.Status = driven.JobStatusRunning
+	next.Status = domainjobs.JobStatusRunning
 	next.AttemptID = stringPtr(attemptID.String())
 	next.LeaseOwner = stringPtr(leaseOwner)
 	next.LeaseUntil = stringPtr(formatTime(leaseUntil))
@@ -391,13 +391,13 @@ func (s *Store) KickPending(ctx context.Context, jobID uuid.UUID, expectedRevisi
 	return s.replaceJob(ctx, current, &next, false)
 }
 
-func (s *Store) AdvanceRunning(ctx context.Context, jobID uuid.UUID, expectedRevision int64, attemptID uuid.UUID, cursor *driven.JobCursor, progress driven.JobProgress, leaseUntil, now time.Time) (*driven.JobRecord, error) {
+func (s *Store) AdvanceRunning(ctx context.Context, jobID uuid.UUID, expectedRevision int64, attemptID uuid.UUID, cursor *domainjobs.JobCursor, progress domainjobs.JobProgress, leaseUntil, now time.Time) (*domainjobs.JobRecord, error) {
 	current, err := s.mustRunningAttempt(ctx, jobID, expectedRevision, attemptID)
 	if err != nil {
 		return nil, err
 	}
 	if current.CancelRequestedAt != nil {
-		return s.finishJob(ctx, current, driven.JobStatusCancelled, nil, now, 30*24*time.Hour, &attemptID)
+		return s.finishJob(ctx, current, domainjobs.JobStatusCancelled, nil, now, 30*24*time.Hour, &attemptID)
 	}
 	next := *current
 	if cursor != nil {
@@ -415,14 +415,14 @@ func (s *Store) AdvanceRunning(ctx context.Context, jobID uuid.UUID, expectedRev
 	return s.replaceJob(ctx, current, &next, true)
 }
 
-func (s *Store) CompleteStep(ctx context.Context, jobID uuid.UUID, expectedRevision int64, attemptID uuid.UUID, progress driven.JobProgress, nextInput *driven.CreateJobInput, now time.Time, terminalTTL time.Duration) (*driven.JobRecord, error) {
+func (s *Store) CompleteStep(ctx context.Context, jobID uuid.UUID, expectedRevision int64, attemptID uuid.UUID, progress domainjobs.JobProgress, nextInput *domainjobs.CreateJobInput, now time.Time, terminalTTL time.Duration) (*domainjobs.JobRecord, error) {
 	current, err := s.mustRunningAttempt(ctx, jobID, expectedRevision, attemptID)
 	if err != nil {
 		return nil, err
 	}
 	done := *current
 	done.Progress = progress
-	done.Status = driven.JobStatusSuccess
+	done.Status = domainjobs.JobStatusSuccess
 	done.FinishedAt = stringPtr(formatTime(now))
 	done.UpdatedAt = formatTime(now)
 	done.AttemptID = nil
@@ -431,7 +431,7 @@ func (s *Store) CompleteStep(ctx context.Context, jobID uuid.UUID, expectedRevis
 	done.Revision++
 	done.setTerminalIndexes(now, terminalTTL)
 	if nextInput == nil {
-		return s.finishJob(ctx, current, driven.JobStatusSuccess, nil, now, terminalTTL, &attemptID)
+		return s.finishJob(ctx, current, domainjobs.JobStatusSuccess, nil, now, terminalTTL, &attemptID)
 	}
 	if nextInput.ID == uuid.Nil {
 		nextInput.ID = uuid.New()
@@ -440,15 +440,15 @@ func (s *Store) CompleteStep(ctx context.Context, jobID uuid.UUID, expectedRevis
 	return s.completeWithNext(ctx, current, &done, nextJob, attemptID)
 }
 
-func (s *Store) FailJob(ctx context.Context, jobID uuid.UUID, expectedRevision int64, attemptID uuid.UUID, errMsg string, now time.Time, terminalTTL time.Duration) (*driven.JobRecord, error) {
+func (s *Store) FailJob(ctx context.Context, jobID uuid.UUID, expectedRevision int64, attemptID uuid.UUID, errMsg string, now time.Time, terminalTTL time.Duration) (*domainjobs.JobRecord, error) {
 	current, err := s.mustRunningAttempt(ctx, jobID, expectedRevision, attemptID)
 	if err != nil {
 		return nil, err
 	}
-	return s.finishJob(ctx, current, driven.JobStatusFailed, stringPtr(errMsg), now, terminalTTL, &attemptID)
+	return s.finishJob(ctx, current, domainjobs.JobStatusFailed, stringPtr(errMsg), now, terminalTTL, &attemptID)
 }
 
-func (s *Store) RequestCancel(ctx context.Context, userID, jobID uuid.UUID, now time.Time, terminalTTL time.Duration) (*driven.JobRecord, error) {
+func (s *Store) RequestCancel(ctx context.Context, userID, jobID uuid.UUID, now time.Time, terminalTTL time.Duration) (*domainjobs.JobRecord, error) {
 	current, err := s.getJobItem(ctx, jobID)
 	if err != nil {
 		return nil, err
@@ -458,13 +458,13 @@ func (s *Store) RequestCancel(ctx context.Context, userID, jobID uuid.UUID, now 
 		return nil, err
 	}
 	if rec.UserID != userID {
-		return nil, driven.ErrJobNotFound
+		return nil, domainjobs.ErrJobNotFound
 	}
 	if isTerminal(current.Status) {
 		return rec, nil
 	}
-	if current.Status == driven.JobStatusPending {
-		return s.finishJob(ctx, current, driven.JobStatusCancelled, nil, now, terminalTTL, nil)
+	if current.Status == domainjobs.JobStatusPending {
+		return s.finishJob(ctx, current, domainjobs.JobStatusCancelled, nil, now, terminalTTL, nil)
 	}
 	next := *current
 	next.CancelRequestedAt = stringPtr(formatTime(now))
@@ -473,21 +473,21 @@ func (s *Store) RequestCancel(ctx context.Context, userID, jobID uuid.UUID, now 
 	return s.replaceJob(ctx, current, &next, false)
 }
 
-func (s *Store) CancelRunning(ctx context.Context, jobID uuid.UUID, expectedRevision int64, attemptID uuid.UUID, now time.Time, terminalTTL time.Duration) (*driven.JobRecord, error) {
+func (s *Store) CancelRunning(ctx context.Context, jobID uuid.UUID, expectedRevision int64, attemptID uuid.UUID, now time.Time, terminalTTL time.Duration) (*domainjobs.JobRecord, error) {
 	current, err := s.mustRunningAttempt(ctx, jobID, expectedRevision, attemptID)
 	if err != nil {
 		return nil, err
 	}
-	return s.finishJob(ctx, current, driven.JobStatusCancelled, nil, now, terminalTTL, &attemptID)
+	return s.finishJob(ctx, current, domainjobs.JobStatusCancelled, nil, now, terminalTTL, &attemptID)
 }
 
-func (s *Store) DeferRetry(ctx context.Context, jobID uuid.UUID, expectedRevision int64, attemptID uuid.UUID, retryNotBefore time.Time, errMsg string, now time.Time) (*driven.JobRecord, error) {
+func (s *Store) DeferRetry(ctx context.Context, jobID uuid.UUID, expectedRevision int64, attemptID uuid.UUID, retryNotBefore time.Time, errMsg string, now time.Time) (*domainjobs.JobRecord, error) {
 	current, err := s.mustRunningAttempt(ctx, jobID, expectedRevision, attemptID)
 	if err != nil {
 		return nil, err
 	}
 	next := *current
-	next.Status = driven.JobStatusPending
+	next.Status = domainjobs.JobStatusPending
 	next.AttemptID = nil
 	next.LeaseOwner = nil
 	next.LeaseUntil = nil
@@ -506,13 +506,13 @@ func (s *Store) DeferRetry(ctx context.Context, jobID uuid.UUID, expectedRevisio
 	return s.replaceJob(ctx, current, &next, true)
 }
 
-func (s *Store) ReWakePending(ctx context.Context, jobID uuid.UUID, expectedRevision int64, now time.Time) (*driven.JobRecord, error) {
+func (s *Store) ReWakePending(ctx context.Context, jobID uuid.UUID, expectedRevision int64, now time.Time) (*domainjobs.JobRecord, error) {
 	current, err := s.getJobItem(ctx, jobID)
 	if err != nil {
 		return nil, err
 	}
-	if current.Status != driven.JobStatusPending || current.Revision != expectedRevision {
-		return nil, driven.ErrJobConflict
+	if current.Status != domainjobs.JobStatusPending || current.Revision != expectedRevision {
+		return nil, domainjobs.ErrJobConflict
 	}
 	next := *current
 	next.WakeToken = uuid.NewString()
@@ -525,7 +525,7 @@ func (s *Store) ReWakePending(ctx context.Context, jobID uuid.UUID, expectedRevi
 	return s.replaceJob(ctx, current, &next, false)
 }
 
-func (s *Store) RecoverExpiredLease(ctx context.Context, jobID uuid.UUID, expectedRevision int64, expectedAttemptID uuid.UUID, now time.Time) (*driven.JobRecord, error) {
+func (s *Store) RecoverExpiredLease(ctx context.Context, jobID uuid.UUID, expectedRevision int64, expectedAttemptID uuid.UUID, now time.Time) (*domainjobs.JobRecord, error) {
 	current, err := s.mustRunningAttempt(ctx, jobID, expectedRevision, expectedAttemptID)
 	if err != nil {
 		return nil, err
@@ -535,10 +535,10 @@ func (s *Store) RecoverExpiredLease(ctx context.Context, jobID uuid.UUID, expect
 		return nil, err
 	}
 	if leaseUntil != nil && leaseUntil.After(now) {
-		return nil, driven.ErrJobConflict
+		return nil, domainjobs.ErrJobConflict
 	}
 	next := *current
-	next.Status = driven.JobStatusPending
+	next.Status = domainjobs.JobStatusPending
 	next.AttemptID = nil
 	next.LeaseOwner = nil
 	next.LeaseUntil = nil
@@ -553,12 +553,12 @@ func (s *Store) RecoverExpiredLease(ctx context.Context, jobID uuid.UUID, expect
 	return s.replaceJob(ctx, current, &next, true)
 }
 
-func (s *Store) ListStalePending(ctx context.Context, olderThan time.Time, limit int) ([]driven.JobRecord, error) {
-	out, err := s.queryJobsByState(ctx, driven.JobStatusPending, "UPDATED#"+formatTime(olderThan), clampLimit(limit))
+func (s *Store) ListStalePending(ctx context.Context, olderThan time.Time, limit int) ([]domainjobs.JobRecord, error) {
+	out, err := s.queryJobsByState(ctx, domainjobs.JobStatusPending, "UPDATED#"+formatTime(olderThan), clampLimit(limit))
 	if err != nil {
 		return nil, err
 	}
-	filtered := make([]driven.JobRecord, 0, len(out))
+	filtered := make([]domainjobs.JobRecord, 0, len(out))
 	for _, job := range out {
 		if job.RetryNotBefore != nil && job.RetryNotBefore.After(olderThan) {
 			continue
@@ -568,12 +568,12 @@ func (s *Store) ListStalePending(ctx context.Context, olderThan time.Time, limit
 	return filtered, nil
 }
 
-func (s *Store) ListExpiredLeases(ctx context.Context, now time.Time, limit int) ([]driven.JobRecord, error) {
-	out, err := s.queryJobsByState(ctx, driven.JobStatusRunning, "LEASE#"+formatTime(now), clampLimit(limit))
+func (s *Store) ListExpiredLeases(ctx context.Context, now time.Time, limit int) ([]domainjobs.JobRecord, error) {
+	out, err := s.queryJobsByState(ctx, domainjobs.JobStatusRunning, "LEASE#"+formatTime(now), clampLimit(limit))
 	if err != nil {
 		return nil, err
 	}
-	filtered := make([]driven.JobRecord, 0, len(out))
+	filtered := make([]domainjobs.JobRecord, 0, len(out))
 	for _, job := range out {
 		if job.LeaseUntil == nil || job.LeaseUntil.After(now) {
 			continue
@@ -583,7 +583,7 @@ func (s *Store) ListExpiredLeases(ctx context.Context, now time.Time, limit int)
 	return filtered, nil
 }
 
-func (s *Store) ClaimEffect(ctx context.Context, in driven.ClaimEffectInput) (*driven.EffectRecord, error) {
+func (s *Store) ClaimEffect(ctx context.Context, in domainjobs.ClaimEffectInput) (*domainjobs.EffectRecord, error) {
 	now := in.Now.UTC()
 	if now.IsZero() {
 		now = time.Now().UTC()
@@ -594,7 +594,7 @@ func (s *Store) ClaimEffect(ctx context.Context, in driven.ClaimEffectInput) (*d
 		EntityType:    "effect",
 		AccountID:     in.AccountID.String(),
 		EffectKey:     in.EffectKey,
-		State:         driven.EffectClaimed,
+		State:         domainjobs.EffectClaimed,
 		JobID:         in.JobID.String(),
 		AttemptID:     in.AttemptID.String(),
 		CreatedAt:     formatTime(now),
@@ -615,20 +615,20 @@ func (s *Store) ClaimEffect(ctx context.Context, in driven.ClaimEffectInput) (*d
 	if err != nil {
 		existing, getErr := s.GetEffect(ctx, in.AccountID, in.EffectKey)
 		if getErr == nil {
-			return existing, driven.ErrEffectAlreadyClaimed
+			return existing, domainjobs.ErrEffectAlreadyClaimed
 		}
 		return nil, mapConflict(err)
 	}
 	return item.record()
 }
 
-func (s *Store) UpdateEffect(ctx context.Context, accountID uuid.UUID, effectKey string, expectedRevision int64, state string, auditJSON string, now time.Time) (*driven.EffectRecord, error) {
+func (s *Store) UpdateEffect(ctx context.Context, accountID uuid.UUID, effectKey string, expectedRevision int64, state string, auditJSON string, now time.Time) (*domainjobs.EffectRecord, error) {
 	current, err := s.getEffectItem(ctx, accountID, effectKey)
 	if err != nil {
 		return nil, err
 	}
 	if current.Revision != expectedRevision {
-		return nil, driven.ErrJobConflict
+		return nil, domainjobs.ErrJobConflict
 	}
 	next := *current
 	next.State = state
@@ -657,7 +657,7 @@ func (s *Store) UpdateEffect(ctx context.Context, accountID uuid.UUID, effectKey
 	return next.record()
 }
 
-func (s *Store) GetEffect(ctx context.Context, accountID uuid.UUID, effectKey string) (*driven.EffectRecord, error) {
+func (s *Store) GetEffect(ctx context.Context, accountID uuid.UUID, effectKey string) (*domainjobs.EffectRecord, error) {
 	item, err := s.getEffectItem(ctx, accountID, effectKey)
 	if err != nil {
 		return nil, err
@@ -665,7 +665,7 @@ func (s *Store) GetEffect(ctx context.Context, accountID uuid.UUID, effectKey st
 	return item.record()
 }
 
-func (s *Store) ListEffectsByState(ctx context.Context, state string, updatedBefore time.Time, limit int) ([]driven.EffectRecord, error) {
+func (s *Store) ListEffectsByState(ctx context.Context, state string, updatedBefore time.Time, limit int) ([]domainjobs.EffectRecord, error) {
 	out, err := s.client.Query(ctx, &dynamodb.QueryInput{
 		TableName:              &s.tableName,
 		IndexName:              strPtr(gsiActiveState),
@@ -680,7 +680,7 @@ func (s *Store) ListEffectsByState(ctx context.Context, state string, updatedBef
 	if err != nil {
 		return nil, err
 	}
-	items := make([]driven.EffectRecord, 0, len(out.Items))
+	items := make([]domainjobs.EffectRecord, 0, len(out.Items))
 	for _, raw := range out.Items {
 		var item effectItem
 		if err := attributevalue.UnmarshalMap(raw, &item); err != nil {
@@ -695,7 +695,7 @@ func (s *Store) ListEffectsByState(ctx context.Context, state string, updatedBef
 	return items, nil
 }
 
-func (s *Store) finishJob(ctx context.Context, current *jobItem, status string, errMsg *string, now time.Time, ttl time.Duration, attemptID *uuid.UUID) (*driven.JobRecord, error) {
+func (s *Store) finishJob(ctx context.Context, current *jobItem, status string, errMsg *string, now time.Time, ttl time.Duration, attemptID *uuid.UUID) (*domainjobs.JobRecord, error) {
 	next := *current
 	next.Status = status
 	next.FinishedAt = stringPtr(formatTime(now))
@@ -715,7 +715,7 @@ func (s *Store) finishJob(ctx context.Context, current *jobItem, status string, 
 	return s.replaceJob(ctx, current, &next, false)
 }
 
-func (s *Store) completeWithNext(ctx context.Context, current, done *jobItem, nextJob *jobItem, attemptID uuid.UUID) (*driven.JobRecord, error) {
+func (s *Store) completeWithNext(ctx context.Context, current, done *jobItem, nextJob *jobItem, attemptID uuid.UUID) (*domainjobs.JobRecord, error) {
 	doneAV, err := attributevalue.MarshalMap(done)
 	if err != nil {
 		return nil, err
@@ -744,7 +744,7 @@ func (s *Store) completeWithNext(ctx context.Context, current, done *jobItem, ne
 				},
 				ExpressionAttributeValues: map[string]types.AttributeValue{
 					":entity":   &types.AttributeValueMemberS{Value: "job"},
-					":status":   &types.AttributeValueMemberS{Value: driven.JobStatusRunning},
+					":status":   &types.AttributeValueMemberS{Value: domainjobs.JobStatusRunning},
 					":revision": &types.AttributeValueMemberN{Value: fmt.Sprintf("%d", current.Revision)},
 					":attempt":  &types.AttributeValueMemberS{Value: attemptID.String()},
 				},
@@ -793,7 +793,7 @@ func (s *Store) completeWithNext(ctx context.Context, current, done *jobItem, ne
 	return done.record()
 }
 
-func (s *Store) putJobWithLock(ctx context.Context, current, next *jobItem, expectedAttempt *uuid.UUID, newAttempt uuid.UUID, resetPendingLease bool) (*driven.JobRecord, error) {
+func (s *Store) putJobWithLock(ctx context.Context, current, next *jobItem, expectedAttempt *uuid.UUID, newAttempt uuid.UUID, resetPendingLease bool) (*domainjobs.JobRecord, error) {
 	lock, err := s.getLock(ctx, derefString(current.LockScope), derefString(current.LockKey))
 	if err != nil {
 		return nil, err
@@ -867,7 +867,7 @@ func (s *Store) putJobWithLock(ctx context.Context, current, next *jobItem, expe
 	return next.record()
 }
 
-func (s *Store) replaceJobAndDeleteLock(ctx context.Context, current, next *jobItem, expectedAttempt *uuid.UUID) (*driven.JobRecord, error) {
+func (s *Store) replaceJobAndDeleteLock(ctx context.Context, current, next *jobItem, expectedAttempt *uuid.UUID) (*domainjobs.JobRecord, error) {
 	lock, err := s.getLock(ctx, derefString(current.LockScope), derefString(current.LockKey))
 	if err != nil {
 		return nil, err
@@ -914,7 +914,7 @@ func (s *Store) replaceJobAndDeleteLock(ctx context.Context, current, next *jobI
 	return next.record()
 }
 
-func (s *Store) replaceJob(ctx context.Context, current, next *jobItem, requireAttempt bool) (*driven.JobRecord, error) {
+func (s *Store) replaceJob(ctx context.Context, current, next *jobItem, requireAttempt bool) (*domainjobs.JobRecord, error) {
 	item, err := attributevalue.MarshalMap(next)
 	if err != nil {
 		return nil, err
@@ -954,13 +954,13 @@ func (s *Store) mustRunningAttempt(ctx context.Context, jobID uuid.UUID, expecte
 	if err != nil {
 		return nil, err
 	}
-	if current.Status != driven.JobStatusRunning || current.Revision != expectedRevision || current.AttemptID == nil || *current.AttemptID != attemptID.String() {
-		return nil, driven.ErrJobConflict
+	if current.Status != domainjobs.JobStatusRunning || current.Revision != expectedRevision || current.AttemptID == nil || *current.AttemptID != attemptID.String() {
+		return nil, domainjobs.ErrJobConflict
 	}
 	return current, nil
 }
 
-func (s *Store) queryJobsByState(ctx context.Context, state, upperBound string, limit int) ([]driven.JobRecord, error) {
+func (s *Store) queryJobsByState(ctx context.Context, state, upperBound string, limit int) ([]domainjobs.JobRecord, error) {
 	out, err := s.client.Query(ctx, &dynamodb.QueryInput{
 		TableName:              &s.tableName,
 		IndexName:              strPtr(gsiActiveState),
@@ -975,7 +975,7 @@ func (s *Store) queryJobsByState(ctx context.Context, state, upperBound string, 
 	if err != nil {
 		return nil, err
 	}
-	records := make([]driven.JobRecord, 0, len(out.Items))
+	records := make([]domainjobs.JobRecord, 0, len(out.Items))
 	for _, raw := range out.Items {
 		var item jobItem
 		if err := attributevalue.UnmarshalMap(raw, &item); err != nil {
@@ -990,7 +990,7 @@ func (s *Store) queryJobsByState(ctx context.Context, state, upperBound string, 
 	return records, nil
 }
 
-func (s *Store) listQuerySpec(filter driven.JobListFilter) (*listSpec, error) {
+func (s *Store) listQuerySpec(filter domainjobs.JobListFilter) (*listSpec, error) {
 	spec := &listSpec{
 		values: map[string]types.AttributeValue{
 			":user": &types.AttributeValueMemberS{Value: "USER#" + filter.UserID.String()},
@@ -1064,14 +1064,14 @@ func (s *Store) getJobItem(ctx context.Context, jobID uuid.UUID) (*jobItem, erro
 		return nil, err
 	}
 	if len(out.Item) == 0 {
-		return nil, driven.ErrJobNotFound
+		return nil, domainjobs.ErrJobNotFound
 	}
 	var item jobItem
 	if err := attributevalue.UnmarshalMap(out.Item, &item); err != nil {
 		return nil, err
 	}
 	if item.EntityType != "job" {
-		return nil, driven.ErrJobNotFound
+		return nil, domainjobs.ErrJobNotFound
 	}
 	return &item, nil
 }
@@ -1088,7 +1088,7 @@ func (s *Store) getLock(ctx context.Context, scope, key string) (*lockItem, erro
 		return nil, err
 	}
 	if len(out.Item) == 0 {
-		return nil, driven.ErrJobNotFound
+		return nil, domainjobs.ErrJobNotFound
 	}
 	var item lockItem
 	if err := attributevalue.UnmarshalMap(out.Item, &item); err != nil {
@@ -1109,7 +1109,7 @@ func (s *Store) getEffectItem(ctx context.Context, accountID uuid.UUID, effectKe
 		return nil, err
 	}
 	if len(out.Item) == 0 {
-		return nil, driven.ErrJobNotFound
+		return nil, domainjobs.ErrJobNotFound
 	}
 	var item effectItem
 	if err := attributevalue.UnmarshalMap(out.Item, &item); err != nil {
@@ -1118,7 +1118,7 @@ func (s *Store) getEffectItem(ctx context.Context, accountID uuid.UUID, effectKe
 	return &item, nil
 }
 
-func newJobItem(in driven.CreateJobInput, now time.Time) *jobItem {
+func newJobItem(in domainjobs.CreateJobInput, now time.Time) *jobItem {
 	item := &jobItem{
 		PK:             jobPK(in.ID),
 		SK:             "METADATA",
@@ -1126,7 +1126,7 @@ func newJobItem(in driven.CreateJobInput, now time.Time) *jobItem {
 		SchemaVersion:  tableSchemaVersion,
 		JobID:          in.ID.String(),
 		JobType:        in.JobType,
-		Status:         driven.JobStatusPending,
+		Status:         domainjobs.JobStatusPending,
 		UserID:         in.UserID.String(),
 		AccountID:      uuidPtrString(in.AccountID),
 		TriggerKind:    in.TriggerKind,
@@ -1136,7 +1136,7 @@ func newJobItem(in driven.CreateJobInput, now time.Time) *jobItem {
 		ScheduleID:     uuidPtrString(in.ScheduleID),
 		ScheduledFor:   timePtrString(in.ScheduledFor),
 		ChainStartedAt: timePtrString(in.ChainStartedAt),
-		Progress:       driven.JobProgress{},
+		Progress:       domainjobs.JobProgress{},
 		Payload:        payloadToItem(in.Payload),
 		Revision:       1,
 		WakeToken:      uuid.NewString(),
@@ -1180,10 +1180,10 @@ func (i *jobItem) setActiveIndexes() {
 	i.GSI5PK = stringPtr(userPK + "#TYPE#" + i.JobType)
 	i.GSI5SK = stringPtr(created)
 	switch i.Status {
-	case driven.JobStatusPending:
+	case domainjobs.JobStatusPending:
 		i.GSI3PK = stringPtr("STATUS#" + i.Status)
 		i.GSI3SK = stringPtr("UPDATED#" + i.UpdatedAt + "#JOB#" + i.JobID)
-	case driven.JobStatusRunning:
+	case domainjobs.JobStatusRunning:
 		lease := ""
 		if i.LeaseUntil != nil {
 			lease = *i.LeaseUntil
@@ -1210,7 +1210,7 @@ func (i *jobItem) requiresLock() bool {
 	return i.LockScope != nil && i.LockKey != nil && *i.LockScope != "" && *i.LockKey != ""
 }
 
-func (i *jobItem) record() (*driven.JobRecord, error) {
+func (i *jobItem) record() (*domainjobs.JobRecord, error) {
 	id, err := uuid.Parse(i.JobID)
 	if err != nil {
 		return nil, err
@@ -1231,7 +1231,7 @@ func (i *jobItem) record() (*driven.JobRecord, error) {
 	if err != nil {
 		return nil, err
 	}
-	rec := &driven.JobRecord{
+	rec := &domainjobs.JobRecord{
 		ID:            id,
 		JobType:       i.JobType,
 		Status:        i.Status,
@@ -1291,8 +1291,8 @@ func (i *jobItem) record() (*driven.JobRecord, error) {
 	return rec, nil
 }
 
-func (p jobPayloadItem) record() driven.JobPayload {
-	return driven.JobPayload{
+func (p jobPayloadItem) record() domainjobs.JobPayload {
+	return domainjobs.JobPayload{
 		ConnectorAccountID: parseUUIDPtr(p.ConnectorAccountID),
 		MessageID:          parseUUIDPtr(p.MessageID),
 		ProjectID:          parseUUIDPtr(p.ProjectID),
@@ -1303,7 +1303,7 @@ func (p jobPayloadItem) record() driven.JobPayload {
 	}
 }
 
-func payloadToItem(p driven.JobPayload) jobPayloadItem {
+func payloadToItem(p domainjobs.JobPayload) jobPayloadItem {
 	return jobPayloadItem{
 		ConnectorAccountID: uuidPtrString(p.ConnectorAccountID),
 		MessageID:          uuidPtrString(p.MessageID),
@@ -1317,7 +1317,7 @@ func payloadToItem(p driven.JobPayload) jobPayloadItem {
 
 func (i *effectItem) setStateIndex() {
 	switch i.State {
-	case driven.EffectClaimed, driven.EffectUnknown, driven.EffectSucceededPendingAudit:
+	case domainjobs.EffectClaimed, domainjobs.EffectUnknown, domainjobs.EffectSucceededPendingAudit:
 		i.GSI3PK = stringPtr("EFFECTSTATE#" + i.State)
 		i.GSI3SK = stringPtr("UPDATED#" + i.UpdatedAt + "#EFFECT#" + i.EffectKey)
 	default:
@@ -1326,7 +1326,7 @@ func (i *effectItem) setStateIndex() {
 	}
 }
 
-func (i *effectItem) record() (*driven.EffectRecord, error) {
+func (i *effectItem) record() (*domainjobs.EffectRecord, error) {
 	accountID, err := uuid.Parse(i.AccountID)
 	if err != nil {
 		return nil, err
@@ -1347,7 +1347,7 @@ func (i *effectItem) record() (*driven.EffectRecord, error) {
 	if err != nil {
 		return nil, err
 	}
-	return &driven.EffectRecord{
+	return &domainjobs.EffectRecord{
 		AccountID: accountID,
 		EffectKey: i.EffectKey,
 		State:     i.State,
@@ -1366,13 +1366,13 @@ func mapConflict(err error) error {
 	}
 	msg := strings.ToLower(err.Error())
 	if strings.Contains(msg, "conditionalcheckfailed") || strings.Contains(msg, "transactioncanceled") {
-		return driven.ErrJobConflict
+		return domainjobs.ErrJobConflict
 	}
 	return err
 }
 
 func isTerminal(status string) bool {
-	return status == driven.JobStatusSuccess || status == driven.JobStatusFailed || status == driven.JobStatusCancelled
+	return status == domainjobs.JobStatusSuccess || status == domainjobs.JobStatusFailed || status == domainjobs.JobStatusCancelled
 }
 
 func jobPK(id uuid.UUID) string { return "JOB#" + id.String() }
@@ -1454,7 +1454,7 @@ func timeFromString(v string) time.Time {
 	return t
 }
 
-func cloneCursor(v *driven.JobCursor) *driven.JobCursor {
+func cloneCursor(v *domainjobs.JobCursor) *domainjobs.JobCursor {
 	if v == nil {
 		return nil
 	}
@@ -1523,4 +1523,4 @@ func int32Ptr(v int32) *int32 { return &v }
 
 func boolPtr(v bool) *bool { return &v }
 
-var _ driven.JobStore = (*Store)(nil)
+var _ domainjobs.JobStore = (*Store)(nil)

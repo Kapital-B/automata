@@ -11,9 +11,9 @@ import (
 	"github.com/Kapital-B/automata/svc/internal/adapters/outbound/persistence/sqlite"
 	"github.com/Kapital-B/automata/svc/internal/application/auth"
 	appfacts "github.com/Kapital-B/automata/svc/internal/application/facts"
-	"github.com/Kapital-B/automata/svc/internal/application/ports/driven"
 	appprojectai "github.com/Kapital-B/automata/svc/internal/application/projectai"
 	appprojects "github.com/Kapital-B/automata/svc/internal/application/projects"
+	domainai "github.com/Kapital-B/automata/svc/internal/domain/ai"
 	_ "modernc.org/sqlite"
 )
 
@@ -21,8 +21,8 @@ type fakeLLM struct {
 	content string
 }
 
-func (f *fakeLLM) ChatCompletion(ctx context.Context, messages []driven.LLMMessage) (*driven.LLMResponse, error) {
-	return &driven.LLMResponse{Content: f.content}, nil
+func (f *fakeLLM) ChatCompletion(ctx context.Context, messages []domainai.LLMMessage) (*domainai.LLMResponse, error) {
+	return &domainai.LLMResponse{Content: f.content}, nil
 }
 
 func TestAskCitesActiveFact(t *testing.T) {

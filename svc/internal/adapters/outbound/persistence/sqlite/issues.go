@@ -6,11 +6,11 @@ import (
 	"errors"
 	"strings"
 
-	"github.com/Kapital-B/automata/svc/internal/application/ports/driven"
+	domainissues "github.com/Kapital-B/automata/svc/internal/domain/issues"
 	"github.com/google/uuid"
 )
 
-func (r *Repository) CreateIssue(ctx context.Context, row driven.IssueRow) error {
+func (r *Repository) CreateIssue(ctx context.Context, row domainissues.IssueRow) error {
 	var assigneeUser, assigneeContact any
 	if row.AssigneeUserID != nil {
 		assigneeUser = row.AssigneeUserID.String()
@@ -29,7 +29,7 @@ func (r *Repository) CreateIssue(ctx context.Context, row driven.IssueRow) error
 	return err
 }
 
-func (r *Repository) GetIssue(ctx context.Context, organisationID, issueID uuid.UUID) (*driven.IssueRow, error) {
+func (r *Repository) GetIssue(ctx context.Context, organisationID, issueID uuid.UUID) (*domainissues.IssueRow, error) {
 	row := r.db.QueryRowContext(ctx, `
 		SELECT id, organisation_id, project_id, title, current_position_note, status,
 			assignee_user_id, assignee_contact_id, created_at, updated_at, resolved_at, discarded_at, source
@@ -42,7 +42,7 @@ func (r *Repository) GetIssue(ctx context.Context, organisationID, issueID uuid.
 	return iss, err
 }
 
-func (r *Repository) ListIssuesByProject(ctx context.Context, organisationID, projectID uuid.UUID) ([]driven.IssueRow, error) {
+func (r *Repository) ListIssuesByProject(ctx context.Context, organisationID, projectID uuid.UUID) ([]domainissues.IssueRow, error) {
 	rows, err := r.db.QueryContext(ctx, `
 		SELECT id, organisation_id, project_id, title, current_position_note, status,
 			assignee_user_id, assignee_contact_id, created_at, updated_at, resolved_at, discarded_at, source
@@ -53,7 +53,7 @@ func (r *Repository) ListIssuesByProject(ctx context.Context, organisationID, pr
 		return nil, err
 	}
 	defer rows.Close()
-	out := make([]driven.IssueRow, 0)
+	out := make([]domainissues.IssueRow, 0)
 	for rows.Next() {
 		iss, err := scanIssueRow(rows)
 		if err != nil {
@@ -64,7 +64,7 @@ func (r *Repository) ListIssuesByProject(ctx context.Context, organisationID, pr
 	return out, rows.Err()
 }
 
-func (r *Repository) UpdateIssue(ctx context.Context, row driven.IssueRow) error {
+func (r *Repository) UpdateIssue(ctx context.Context, row domainissues.IssueRow) error {
 	var assigneeUser, assigneeContact any
 	if row.AssigneeUserID != nil {
 		assigneeUser = row.AssigneeUserID.String()
@@ -88,7 +88,7 @@ func (r *Repository) UpdateIssue(ctx context.Context, row driven.IssueRow) error
 	return nil
 }
 
-func (r *Repository) AddIssueItem(ctx context.Context, row driven.IssueItemRow) error {
+func (r *Repository) AddIssueItem(ctx context.Context, row domainissues.IssueItemRow) error {
 	var msgID, manualID any
 	if row.MessageID != nil {
 		msgID = row.MessageID.String()
@@ -119,7 +119,7 @@ func (r *Repository) RemoveIssueItem(ctx context.Context, organisationID, issueI
 	return nil
 }
 
-func (r *Repository) GetIssueItem(ctx context.Context, organisationID, itemID uuid.UUID) (*driven.IssueItemRow, error) {
+func (r *Repository) GetIssueItem(ctx context.Context, organisationID, itemID uuid.UUID) (*domainissues.IssueItemRow, error) {
 	row := r.db.QueryRowContext(ctx, `
 		SELECT ii.id, ii.issue_id, ii.message_id, ii.manual_item_id, ii.added_at
 		FROM issue_items ii
@@ -133,7 +133,7 @@ func (r *Repository) GetIssueItem(ctx context.Context, organisationID, itemID uu
 	return item, err
 }
 
-func (r *Repository) ListIssueItems(ctx context.Context, issueID uuid.UUID) ([]driven.IssueItemRow, error) {
+func (r *Repository) ListIssueItems(ctx context.Context, issueID uuid.UUID) ([]domainissues.IssueItemRow, error) {
 	rows, err := r.db.QueryContext(ctx, `
 		SELECT id, issue_id, message_id, manual_item_id, added_at
 		FROM issue_items WHERE issue_id = ?
@@ -143,7 +143,7 @@ func (r *Repository) ListIssueItems(ctx context.Context, issueID uuid.UUID) ([]d
 		return nil, err
 	}
 	defer rows.Close()
-	out := make([]driven.IssueItemRow, 0)
+	out := make([]domainissues.IssueItemRow, 0)
 	for rows.Next() {
 		item, err := scanIssueItem(rows)
 		if err != nil {
@@ -173,8 +173,8 @@ func (r *Repository) FindIssueIDByMessage(ctx context.Context, messageID uuid.UU
 }
 
 // ListIssueLinksForMessages resolves the issue for many messages in one query.
-func (r *Repository) ListIssueLinksForMessages(ctx context.Context, organisationID uuid.UUID, messageIDs []uuid.UUID) (map[uuid.UUID]driven.IssueLink, error) {
-	out := make(map[uuid.UUID]driven.IssueLink, len(messageIDs))
+func (r *Repository) ListIssueLinksForMessages(ctx context.Context, organisationID uuid.UUID, messageIDs []uuid.UUID) (map[uuid.UUID]domainissues.IssueLink, error) {
+	out := make(map[uuid.UUID]domainissues.IssueLink, len(messageIDs))
 	if len(messageIDs) == 0 {
 		return out, nil
 	}
@@ -215,7 +215,7 @@ func (r *Repository) ListIssueLinksForMessages(ctx context.Context, organisation
 		if err != nil {
 			return nil, err
 		}
-		out[mid] = driven.IssueLink{IssueID: iid, ProjectID: pid, Title: title, Status: status}
+		out[mid] = domainissues.IssueLink{IssueID: iid, ProjectID: pid, Title: title, Status: status}
 	}
 	return out, rows.Err()
 }
@@ -238,7 +238,7 @@ func (r *Repository) FindIssueIDByManualItem(ctx context.Context, manualItemID u
 	return &id, nil
 }
 
-func scanIssueRow(s rowScanner) (*driven.IssueRow, error) {
+func scanIssueRow(s rowScanner) (*domainissues.IssueRow, error) {
 	var idStr, orgStr, projStr, title, note, status, createdAt, updatedAt string
 	var assigneeUser, assigneeContact, resolvedAt, discardedAt, source sql.NullString
 	if err := s.Scan(&idStr, &orgStr, &projStr, &title, &note, &status, &assigneeUser, &assigneeContact, &createdAt, &updatedAt, &resolvedAt, &discardedAt, &source); err != nil {
@@ -264,7 +264,7 @@ func scanIssueRow(s rowScanner) (*driven.IssueRow, error) {
 	if err != nil {
 		return nil, err
 	}
-	row := &driven.IssueRow{
+	row := &domainissues.IssueRow{
 		ID: id, OrganisationID: orgID, ProjectID: projID, Title: title,
 		CurrentPositionNote: note, Status: status, CreatedAt: cat, UpdatedAt: uat,
 		Source: source.String,
@@ -300,7 +300,7 @@ func scanIssueRow(s rowScanner) (*driven.IssueRow, error) {
 	return row, nil
 }
 
-func scanIssueItem(s rowScanner) (*driven.IssueItemRow, error) {
+func scanIssueItem(s rowScanner) (*domainissues.IssueItemRow, error) {
 	var idStr, issueStr, addedAt string
 	var msg, manual sql.NullString
 	if err := s.Scan(&idStr, &issueStr, &msg, &manual, &addedAt); err != nil {
@@ -318,7 +318,7 @@ func scanIssueItem(s rowScanner) (*driven.IssueItemRow, error) {
 	if err != nil {
 		return nil, err
 	}
-	row := &driven.IssueItemRow{ID: id, IssueID: issueID, AddedAt: at}
+	row := &domainissues.IssueItemRow{ID: id, IssueID: issueID, AddedAt: at}
 	if msg.Valid && msg.String != "" {
 		mid, err := uuid.Parse(msg.String)
 		if err != nil {

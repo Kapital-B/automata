@@ -7,7 +7,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/Kapital-B/automata/svc/internal/application/ports/driven"
+	domainaccounts "github.com/Kapital-B/automata/svc/internal/domain/accounts"
 	"github.com/google/uuid"
 	_ "modernc.org/sqlite"
 )
@@ -39,7 +39,7 @@ func TestForwardScopeMigrationContinuesWhereForwardingLeftOff(t *testing.T) {
 	}
 	for _, acc := range []string{accountA, accountB} {
 		id, _ := uuid.Parse(acc)
-		if err := repo.InsertAccount(context.Background(), driven.AccountRow{
+		if err := repo.InsertAccount(context.Background(), domainaccounts.AccountRow{
 			UserID: uid, ID: id, Label: "x", Provider: "m365", MsAccountKind: "work", PrimaryEmail: "x@example.com", ConnectionStatus: "connected",
 		}, []byte{0}); err != nil {
 			t.Fatal(err)

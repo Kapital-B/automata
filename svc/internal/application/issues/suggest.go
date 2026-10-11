@@ -7,7 +7,8 @@ import (
 	"fmt"
 	"strings"
 
-	"github.com/Kapital-B/automata/svc/internal/application/ports/driven"
+	domainai "github.com/Kapital-B/automata/svc/internal/domain/ai"
+	domainprojects "github.com/Kapital-B/automata/svc/internal/domain/projects"
 	"github.com/google/uuid"
 )
 
@@ -71,7 +72,7 @@ func (s *Service) Suggest(ctx context.Context, userID, projectID uuid.UUID, in S
 		return nil, ErrNotFound
 	}
 
-	items, err := s.Timeline.ListProjectTimeline(ctx, userID, orgID, projectID, driven.TimelineFilter{
+	items, err := s.Timeline.ListProjectTimeline(ctx, userID, orgID, projectID, domainprojects.TimelineFilter{
 		Source: "all", UnassignedToIssue: true, Limit: 40,
 	})
 	if err != nil {
@@ -143,7 +144,7 @@ func (s *Service) Suggest(ctx context.Context, userID, projectID uuid.UUID, in S
 	}, nil
 }
 
-func buildSuggestCandidates(items []driven.TimelineItem, accountFilter *uuid.UUID) []suggestCandidate {
+func buildSuggestCandidates(items []domainprojects.TimelineItem, accountFilter *uuid.UUID) []suggestCandidate {
 	manuals := make([]suggestCandidate, 0)
 	mailByAccount := map[uuid.UUID][]suggestCandidate{}
 	accountOrder := make([]uuid.UUID, 0)
@@ -221,7 +222,7 @@ func (s *Service) callSuggestLLM(ctx context.Context, prompt string) (*suggestLL
 		out.Reason = strings.TrimSpace(out.Reason)
 		return &out, nil
 	}
-	resp, err := s.LLM.ChatCompletion(ctx, []driven.LLMMessage{
+	resp, err := s.LLM.ChatCompletion(ctx, []domainai.LLMMessage{
 		{Role: "system", Content: "You group project correspondence into issues. Return JSON only."},
 		{Role: "user", Content: prompt},
 	})
@@ -232,7 +233,7 @@ func (s *Service) callSuggestLLM(ctx context.Context, prompt string) (*suggestLL
 	if err == nil {
 		return parsed, nil
 	}
-	resp2, err2 := s.LLM.ChatCompletion(ctx, []driven.LLMMessage{
+	resp2, err2 := s.LLM.ChatCompletion(ctx, []domainai.LLMMessage{
 		{Role: "system", Content: "Fix the following into valid JSON only. Keep semantic meaning."},
 		{Role: "user", Content: resp.Content},
 	})

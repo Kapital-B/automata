@@ -3,7 +3,7 @@ package contacts
 import (
 	"context"
 
-	"github.com/Kapital-B/automata/svc/internal/application/ports/driven"
+	domainjobs "github.com/Kapital-B/automata/svc/internal/domain/jobs"
 )
 
 type ResolveContactsExecutor struct {
@@ -12,14 +12,14 @@ type ResolveContactsExecutor struct {
 
 func (e *ResolveContactsExecutor) JobType() string { return "resolve_contacts" }
 
-func (e *ResolveContactsExecutor) ExecuteChunk(ctx context.Context, run driven.RunContext) (driven.ChunkResult, error) {
+func (e *ResolveContactsExecutor) ExecuteChunk(ctx context.Context, run domainjobs.RunContext) (domainjobs.ChunkResult, error) {
 	res, err := e.Service.ResolveAccountChunk(ctx, run)
 	if err != nil {
-		return driven.ChunkResult{}, err
+		return domainjobs.ChunkResult{}, err
 	}
-	return driven.ChunkResult{
+	return domainjobs.ChunkResult{
 		NextCursor: res.NextCursor,
-		ProgressDelta: driven.JobProgress{
+		ProgressDelta: domainjobs.JobProgress{
 			Processed: res.MessagesProcessed,
 		},
 		Done: res.Done,

@@ -4,11 +4,10 @@ import (
 	"context"
 	"errors"
 	"fmt"
-
 	"github.com/emersion/go-sasl"
 	"github.com/emersion/go-smtp"
 
-	"github.com/Kapital-B/automata/svc/internal/application/ports/driven"
+	domainaccounts "github.com/Kapital-B/automata/svc/internal/domain/accounts"
 )
 
 // smtpSession dials, secures and authenticates, ready for MAIL FROM.
@@ -48,10 +47,10 @@ func (p *Provider) smtpSession(ctx context.Context, c credential) (*smtp.Client,
 
 // notSent marks a failure that happened before the server accepted anything.
 func notSent(err error) error {
-	if errors.Is(err, driven.ErrMailNotSent) {
+	if errors.Is(err, domainaccounts.ErrMailNotSent) {
 		return err
 	}
-	return fmt.Errorf("%w: %v", driven.ErrMailNotSent, err)
+	return fmt.Errorf("%w: %v", domainaccounts.ErrMailNotSent, err)
 }
 
 // send submits a composed message. SMTP makes the not-sent boundary exact:
@@ -60,7 +59,7 @@ func notSent(err error) error {
 // connection lost while waiting for the answer leaves the outcome unknown.
 func (p *Provider) send(ctx context.Context, c credential, from string, to []string, raw []byte) error {
 	if int64(len(raw)) > p.maxRaw() {
-		return driven.TooLarge(p.maxRaw())
+		return domainaccounts.TooLarge(p.maxRaw())
 	}
 	if len(to) == 0 {
 		return notSent(fmt.Errorf("no recipients"))
@@ -71,7 +70,7 @@ func (p *Provider) send(ctx context.Context, c credential, from string, to []str
 	}
 	defer sc.Close()
 	if limit, ok := sc.MaxMessageSize(); ok && limit > 0 && len(raw) > limit {
-		return driven.TooLarge(int64(limit))
+		return domainaccounts.TooLarge(int64(limit))
 	}
 	if err := sc.Mail(from, &smtp.MailOptions{Size: int64(len(raw))}); err != nil {
 		return notSent(fmt.Errorf("smtp mail from: %w", err))
@@ -94,7 +93,7 @@ func (p *Provider) send(ctx context.Context, c credential, from string, to []str
 		if errors.As(err, &se) {
 			if se.Code == 552 {
 				// 552 at end of data is the server's size limit.
-				return fmt.Errorf("%w: %w: %s", driven.ErrMailNotSent, driven.ErrMailTooLarge, se.Message)
+				return fmt.Errorf("%w: %w: %s", domainaccounts.ErrMailNotSent, domainaccounts.ErrMailTooLarge, se.Message)
 			}
 			return notSent(fmt.Errorf("smtp refused message: %w", err))
 		}

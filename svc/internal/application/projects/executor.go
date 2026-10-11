@@ -3,7 +3,7 @@ package projects
 import (
 	"context"
 
-	"github.com/Kapital-B/automata/svc/internal/application/ports/driven"
+	domainjobs "github.com/Kapital-B/automata/svc/internal/domain/jobs"
 )
 
 type AssignProjectsExecutor struct {
@@ -12,14 +12,14 @@ type AssignProjectsExecutor struct {
 
 func (e *AssignProjectsExecutor) JobType() string { return "assign_projects" }
 
-func (e *AssignProjectsExecutor) ExecuteChunk(ctx context.Context, run driven.RunContext) (driven.ChunkResult, error) {
+func (e *AssignProjectsExecutor) ExecuteChunk(ctx context.Context, run domainjobs.RunContext) (domainjobs.ChunkResult, error) {
 	res, err := e.Service.AssignAccountChunk(ctx, run)
 	if err != nil {
-		return driven.ChunkResult{}, err
+		return domainjobs.ChunkResult{}, err
 	}
-	return driven.ChunkResult{
+	return domainjobs.ChunkResult{
 		NextCursor: res.NextCursor,
-		ProgressDelta: driven.JobProgress{
+		ProgressDelta: domainjobs.JobProgress{
 			Processed: res.MessagesProcessed,
 			Detail: map[string]interface{}{
 				"assigned": res.MessagesAssigned,

@@ -2,11 +2,13 @@ package contacts_test
 
 import (
 	"context"
+	domainmessages "github.com/Kapital-B/automata/svc/internal/domain/messages"
 	"testing"
 	"time"
 
 	appcontacts "github.com/Kapital-B/automata/svc/internal/application/contacts"
-	"github.com/Kapital-B/automata/svc/internal/application/ports/driven"
+	domaincontacts "github.com/Kapital-B/automata/svc/internal/domain/contacts"
+
 	"github.com/google/uuid"
 )
 
@@ -17,7 +19,7 @@ func TestContactDetailDescribesRecentMessages(t *testing.T) {
 	ctx := context.Background()
 	received := time.Date(2026, 9, 20, 9, 30, 0, 0, time.UTC)
 	msgID := uuid.New()
-	if err := repo.UpsertMessage(ctx, driven.MessageRow{
+	if err := repo.UpsertMessage(ctx, domainmessages.MessageRow{
 		ID: msgID, AccountID: accountID, ProviderMessageID: "d1",
 		ReceivedAt: received, Subject: "Pump sizing",
 		FromJSON:  `{"name":"Sarah Ng","address":"sarah@acme.com"}`,
@@ -31,7 +33,7 @@ func TestContactDetailDescribesRecentMessages(t *testing.T) {
 		t.Fatal(err)
 	}
 	svc := &appcontacts.Service{Users: repo, Contacts: repo, Messages: repo}
-	list, err := svc.List(ctx, userID, driven.ContactListFilter{Query: "sarah"})
+	list, err := svc.List(ctx, userID, domaincontacts.ContactListFilter{Query: "sarah"})
 	if err != nil {
 		t.Fatal(err)
 	}

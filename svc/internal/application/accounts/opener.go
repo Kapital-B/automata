@@ -6,7 +6,8 @@ import (
 	"fmt"
 	"strings"
 
-	"github.com/Kapital-B/automata/svc/internal/application/ports/driven"
+	domainaccounts "github.com/Kapital-B/automata/svc/internal/domain/accounts"
+	domainshared "github.com/Kapital-B/automata/svc/internal/domain/shared"
 	"github.com/google/uuid"
 )
 
@@ -34,13 +35,13 @@ func ProviderKey(provider string) string {
 // and that a provider may hand back rotated credentials to persist. Services
 // above it never see a token.
 type MailboxOpener struct {
-	Accounts  driven.AccountRepository
-	Vault     driven.TokenVault
-	Providers map[string]driven.MailProvider
+	Accounts  domainaccounts.AccountRepository
+	Vault     domainshared.TokenVault
+	Providers map[string]domainaccounts.MailProvider
 }
 
 // Open returns a ready mailbox and the account it belongs to.
-func (o *MailboxOpener) Open(ctx context.Context, userID, accountID uuid.UUID) (driven.Mailbox, *driven.AccountRow, error) {
+func (o *MailboxOpener) Open(ctx context.Context, userID, accountID uuid.UUID) (domainaccounts.Mailbox, *domainaccounts.AccountRow, error) {
 	if o == nil || o.Accounts == nil || o.Vault == nil {
 		return nil, nil, fmt.Errorf("mailbox opener not configured")
 	}
@@ -56,14 +57,14 @@ func (o *MailboxOpener) Open(ctx context.Context, userID, accountID uuid.UUID) (
 	}
 	provider, ok := o.Providers[ProviderKey(row.Provider)]
 	if !ok {
-		return nil, row, fmt.Errorf("%w: %s", driven.ErrUnsupportedProvider, row.Provider)
+		return nil, row, fmt.Errorf("%w: %s", domainaccounts.ErrUnsupportedProvider, row.Provider)
 	}
 	raw, err := o.Vault.Decrypt(cipher)
 	if err != nil {
 		return nil, row, err
 	}
 	box, rotated, err := provider.Open(ctx, *row, raw)
-	if errors.Is(err, driven.ErrCredentialsRejected) {
+	if errors.Is(err, domainaccounts.ErrCredentialsRejected) {
 		// Say so on the account rather than let every sync fail the same
 		// way: expired is what the UI turns into a Reconnect prompt. The
 		// stored credential is kept; a reconnect replaces it.
@@ -88,7 +89,7 @@ func (o *MailboxOpener) Open(ctx context.Context, userID, accountID uuid.UUID) (
 
 // Capabilities reports what a provider's mailboxes can do, without opening
 // one. ok is false for a provider with no adapter registered.
-func (o *MailboxOpener) Capabilities(provider string) (caps driven.MailboxCapabilities, ok bool) {
+func (o *MailboxOpener) Capabilities(provider string) (caps domainaccounts.MailboxCapabilities, ok bool) {
 	if o == nil {
 		return caps, false
 	}

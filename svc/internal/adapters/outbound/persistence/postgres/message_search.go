@@ -6,11 +6,11 @@ import (
 	"time"
 
 	"github.com/Kapital-B/automata/svc/internal/adapters/outbound/persistence/sqlkit"
-	"github.com/Kapital-B/automata/svc/internal/application/ports/driven"
+	domainmessages "github.com/Kapital-B/automata/svc/internal/domain/messages"
 	"github.com/google/uuid"
 )
 
-func (r *Repository) SearchMessages(ctx context.Context, userID uuid.UUID, filter driven.MessageSearchFilter) ([]driven.MessageSearchHit, error) {
+func (r *Repository) SearchMessages(ctx context.Context, userID uuid.UUID, filter domainmessages.MessageSearchFilter) ([]domainmessages.MessageSearchHit, error) {
 	q, args := sqlkit.MessageSearchQuery(userID, filter, func(t time.Time) any { return t })
 	if q == "" {
 		return nil, nil
@@ -20,9 +20,9 @@ func (r *Repository) SearchMessages(ctx context.Context, userID uuid.UUID, filte
 		return nil, err
 	}
 	defer rows.Close()
-	var out []driven.MessageSearchHit
+	var out []domainmessages.MessageSearchHit
 	for rows.Next() {
-		var h driven.MessageSearchHit
+		var h domainmessages.MessageSearchHit
 		var id, account string
 		var conv, body sql.NullString
 		if err := rows.Scan(&id, &account, &conv, &h.ReceivedAt, &h.Subject, &h.FromJSON, &body, &h.Score); err != nil {

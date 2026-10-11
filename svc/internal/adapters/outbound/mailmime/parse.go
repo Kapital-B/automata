@@ -8,7 +8,7 @@ import (
 
 	"github.com/emersion/go-message/mail"
 
-	"github.com/Kapital-B/automata/svc/internal/application/ports/driven"
+	domainaccounts "github.com/Kapital-B/automata/svc/internal/domain/accounts"
 )
 
 // maxBodyBytes bounds how much of a body part is read into memory.
@@ -23,22 +23,22 @@ type Parsed struct {
 	FromName       string
 	FromAddress    string
 	ReplyTo        string
-	To             []driven.MailRecipient
-	Cc             []driven.MailRecipient
+	To             []domainaccounts.MailRecipient
+	Cc             []domainaccounts.MailRecipient
 	Date           time.Time
 	TextBody       string
 	HTMLBody       string
 	HasAttachments bool
 }
 
-func recipients(h mail.Header, key string) []driven.MailRecipient {
+func recipients(h mail.Header, key string) []domainaccounts.MailRecipient {
 	list, err := h.AddressList(key)
 	if err != nil || len(list) == 0 {
 		return nil
 	}
-	out := make([]driven.MailRecipient, 0, len(list))
+	out := make([]domainaccounts.MailRecipient, 0, len(list))
 	for _, a := range list {
-		out = append(out, driven.MailRecipient{Name: a.Name, Address: a.Address})
+		out = append(out, domainaccounts.MailRecipient{Name: a.Name, Address: a.Address})
 	}
 	return out
 }
@@ -111,7 +111,7 @@ func (p *Parsed) Preview() string {
 
 // ToMailMessage maps a parsed message onto the port's shape. id and
 // conversationID come from the provider, since only it knows them.
-func (p *Parsed) ToMailMessage(id, conversationID string, received time.Time) driven.MailMessage {
+func (p *Parsed) ToMailMessage(id, conversationID string, received time.Time) domainaccounts.MailMessage {
 	body, contentType := p.TextBody, "Text"
 	if p.HTMLBody != "" {
 		body, contentType = p.HTMLBody, "HTML"
@@ -119,7 +119,7 @@ func (p *Parsed) ToMailMessage(id, conversationID string, received time.Time) dr
 	if received.IsZero() {
 		received = p.Date
 	}
-	return driven.MailMessage{
+	return domainaccounts.MailMessage{
 		ID:               id,
 		ConversationID:   conversationID,
 		ReceivedDateTime: received.UTC().Format(time.RFC3339),

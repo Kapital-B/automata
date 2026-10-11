@@ -3,11 +3,14 @@ package sqlite_test
 import (
 	"context"
 	"database/sql"
+	domainmessages "github.com/Kapital-B/automata/svc/internal/domain/messages"
 	"testing"
 	"time"
 
 	"github.com/Kapital-B/automata/svc/internal/adapters/outbound/persistence/sqlite"
-	"github.com/Kapital-B/automata/svc/internal/application/ports/driven"
+	domainaccounts "github.com/Kapital-B/automata/svc/internal/domain/accounts"
+	domaincontacts "github.com/Kapital-B/automata/svc/internal/domain/contacts"
+
 	"github.com/google/uuid"
 	_ "modernc.org/sqlite"
 )
@@ -117,14 +120,14 @@ func TestMessageDeleteDropsParticipantsKeepsContact(t *testing.T) {
 		t.Fatal(err)
 	}
 	accountID := uuid.New()
-	if err := repo.InsertAccount(ctx, driven.AccountRow{
+	if err := repo.InsertAccount(ctx, domainaccounts.AccountRow{
 		UserID: userID, ID: accountID, Label: "Work", Provider: "m365",
 		MsAccountKind: "work", PrimaryEmail: "owner@example.com", ConnectionStatus: "connected",
 	}, []byte("tok")); err != nil {
 		t.Fatal(err)
 	}
 	msgID := uuid.New()
-	if err := repo.UpsertMessage(ctx, driven.MessageRow{
+	if err := repo.UpsertMessage(ctx, domainmessages.MessageRow{
 		ID: msgID, AccountID: accountID, ProviderMessageID: "p1",
 		ReceivedAt: now, Subject: "hi", FromJSON: `{"name":"S","address":"sarah@acme.com"}`,
 		ToJSON: "[]", CcJSON: "[]", CreatedAt: now, UpdatedAt: now,
@@ -135,7 +138,7 @@ func TestMessageDeleteDropsParticipantsKeepsContact(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := repo.UpsertParticipant(ctx, driven.CorrespondenceParticipantRow{
+	if err := repo.UpsertParticipant(ctx, domaincontacts.CorrespondenceParticipantRow{
 		ID: uuid.New(), OrganisationID: orgID, ContactID: contactID, Role: "from", MessageID: &msgID,
 	}); err != nil {
 		t.Fatal(err)
@@ -177,7 +180,7 @@ func TestMergeContactsHidesLoser(t *testing.T) {
 	if err := repo.MergeContacts(ctx, orgID, a, b, now); err != nil {
 		t.Fatal(err)
 	}
-	list, err := repo.ListContacts(ctx, orgID, driven.ContactListFilter{})
+	list, err := repo.ListContacts(ctx, orgID, domaincontacts.ContactListFilter{})
 	if err != nil {
 		t.Fatal(err)
 	}

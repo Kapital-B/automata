@@ -9,8 +9,9 @@ import (
 
 	"github.com/Kapital-B/automata/svc/internal/adapters/outbound/memoryjobs"
 	"github.com/Kapital-B/automata/svc/internal/adapters/outbound/persistence/sqlite"
-	"github.com/Kapital-B/automata/svc/internal/application/ports/driven"
 	domainacc "github.com/Kapital-B/automata/svc/internal/domain/accounts"
+	domainaccounts "github.com/Kapital-B/automata/svc/internal/domain/accounts"
+	domainjobs "github.com/Kapital-B/automata/svc/internal/domain/jobs"
 	"github.com/google/uuid"
 	_ "modernc.org/sqlite"
 )
@@ -32,7 +33,7 @@ type effectRecorder struct {
 	seen []string
 }
 
-func (r *effectRecorder) BackfillEffectAudit(_ context.Context, effect driven.EffectRecord, _ time.Time) (bool, error) {
+func (r *effectRecorder) BackfillEffectAudit(_ context.Context, effect domainjobs.EffectRecord, _ time.Time) (bool, error) {
 	r.seen = append(r.seen, effect.State+":"+effect.EffectKey)
 	return true, nil
 }
@@ -46,7 +47,7 @@ func TestSchedulerTickEnqueuesDueSchedules(t *testing.T) {
 	accountID := uuid.New()
 	insertSchedulerAccount(t, repo, userID, accountID, "mailbox")
 	scheduleID := uuid.New()
-	if err := repo.ReplaceSchedulesByUser(ctx, userID, []driven.ScheduleChainRow{{
+	if err := repo.ReplaceSchedulesByUser(ctx, userID, []domainjobs.ScheduleChainRow{{
 		ID:              scheduleID,
 		UserID:          userID,
 		Name:            "nightly",
@@ -77,7 +78,7 @@ func TestSchedulerTickEnqueuesDueSchedules(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if job.Status != driven.JobStatusPending {
+	if job.Status != domainjobs.JobStatusPending {
 		t.Fatalf("expected pending scheduled job, got %s", job.Status)
 	}
 	rows, err := repo.ListSchedulesByUser(ctx, userID)
@@ -102,7 +103,7 @@ func TestSchedulerScheduleCreationCrashWindow(t *testing.T) {
 	accountID := uuid.New()
 	insertSchedulerAccount(t, baseRepo, userID, accountID, "mailbox")
 	scheduleID := uuid.New()
-	if err := baseRepo.ReplaceSchedulesByUser(ctx, userID, []driven.ScheduleChainRow{{
+	if err := baseRepo.ReplaceSchedulesByUser(ctx, userID, []domainjobs.ScheduleChainRow{{
 		ID:              scheduleID,
 		UserID:          userID,
 		Name:            "nightly",
@@ -129,7 +130,7 @@ func TestSchedulerScheduleCreationCrashWindow(t *testing.T) {
 	if err := service.Tick(ctx, now.Add(time.Minute)); err != nil {
 		t.Fatal(err)
 	}
-	page, err := store.List(ctx, driven.JobListFilter{UserID: userID, AccountID: &accountID, Limit: 10})
+	page, err := store.List(ctx, domainjobs.JobListFilter{UserID: userID, AccountID: &accountID, Limit: 10})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -145,9 +146,9 @@ func TestSchedulerRewakesPendingRecoversLeaseAndReconcilesEffects(t *testing.T) 
 	userID := uuid.New()
 	accountID := uuid.New()
 
-	pending, err := store.CreatePending(ctx, driven.CreateJobInput{
+	pending, err := store.CreatePending(ctx, domainjobs.CreateJobInput{
 		ID: uuid.New(), JobType: TypeSync, UserID: userID, AccountID: &accountID,
-		TriggerKind: driven.JobTriggerAPI, ChainID: uuid.New(), AcquireLock: true, LockScope: "mailbox", LockKey: accountID.String(),
+		TriggerKind: domainjobs.JobTriggerAPI, ChainID: uuid.New(), AcquireLock: true, LockScope: "mailbox", LockKey: accountID.String(),
 		Now: now.Add(-10 * time.Minute),
 	})
 	if err != nil {
@@ -158,9 +159,9 @@ func TestSchedulerRewakesPendingRecoversLeaseAndReconcilesEffects(t *testing.T) 
 		t.Fatal(err)
 	}
 
-	expired, err := store.CreatePending(ctx, driven.CreateJobInput{
+	expired, err := store.CreatePending(ctx, domainjobs.CreateJobInput{
 		ID: uuid.New(), JobType: TypeCategorize, UserID: userID,
-		TriggerKind: driven.JobTriggerAPI, ChainID: uuid.New(), Now: now.Add(-20 * time.Minute),
+		TriggerKind: domainjobs.JobTriggerAPI, ChainID: uuid.New(), Now: now.Add(-20 * time.Minute),
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -172,17 +173,17 @@ func TestSchedulerRewakesPendingRecoversLeaseAndReconcilesEffects(t *testing.T) 
 
 	effectID := uuid.New()
 	effectAttempt := uuid.New()
-	effect, err := store.ClaimEffect(ctx, driven.ClaimEffectInput{
+	effect, err := store.ClaimEffect(ctx, domainjobs.ClaimEffectInput{
 		AccountID: accountID, EffectKey: "FORWARD#msg#rule", JobID: effectID, AttemptID: effectAttempt, Now: now.Add(-10 * time.Minute),
 	})
 	if err != nil {
 		t.Fatal(err)
 	}
-	_, err = store.UpdateEffect(ctx, accountID, effect.EffectKey, effect.Revision, driven.EffectSucceededPendingAudit, `{"status":"sent"}`, now.Add(-9*time.Minute))
+	_, err = store.UpdateEffect(ctx, accountID, effect.EffectKey, effect.Revision, domainjobs.EffectSucceededPendingAudit, `{"status":"sent"}`, now.Add(-9*time.Minute))
 	if err != nil {
 		t.Fatal(err)
 	}
-	claimed, err := store.ClaimEffect(ctx, driven.ClaimEffectInput{
+	claimed, err := store.ClaimEffect(ctx, domainjobs.ClaimEffectInput{
 		AccountID: accountID, EffectKey: "FORWARD#msg2#rule", JobID: uuid.New(), AttemptID: uuid.New(), Now: now.Add(-8 * time.Minute),
 	})
 	if err != nil {
@@ -211,7 +212,7 @@ func TestSchedulerRewakesPendingRecoversLeaseAndReconcilesEffects(t *testing.T) 
 	if err != nil {
 		t.Fatal(err)
 	}
-	if recovered.Status != driven.JobStatusPending || recovered.AttemptID != nil {
+	if recovered.Status != domainjobs.JobStatusPending || recovered.AttemptID != nil {
 		t.Fatalf("expected recovered pending job, got %+v", recovered)
 	}
 
@@ -219,7 +220,7 @@ func TestSchedulerRewakesPendingRecoversLeaseAndReconcilesEffects(t *testing.T) 
 	if err != nil {
 		t.Fatal(err)
 	}
-	if succeededEffect.State != driven.EffectSucceeded {
+	if succeededEffect.State != domainjobs.EffectSucceeded {
 		t.Fatalf("expected effect settled to succeeded, got %s", succeededEffect.State)
 	}
 
@@ -227,7 +228,7 @@ func TestSchedulerRewakesPendingRecoversLeaseAndReconcilesEffects(t *testing.T) 
 	if err != nil {
 		t.Fatal(err)
 	}
-	if unknownEffect.State != driven.EffectUnknown {
+	if unknownEffect.State != domainjobs.EffectUnknown {
 		t.Fatalf("expected stale claimed effect to become unknown, got %s", unknownEffect.State)
 	}
 	if len(recorder.seen) < 2 {
@@ -250,7 +251,7 @@ func newSchedulerSQLiteRepo(t *testing.T) *sqlite.Repository {
 
 func insertSchedulerAccount(t *testing.T, repo *sqlite.Repository, userID, accountID uuid.UUID, label string) {
 	t.Helper()
-	err := repo.InsertAccount(context.Background(), driven.AccountRow{
+	err := repo.InsertAccount(context.Background(), domainaccounts.AccountRow{
 		UserID:           userID,
 		ID:               accountID,
 		Label:            label,
@@ -279,7 +280,7 @@ func TestSchedulerSkipsAChainItCannotRunWithoutStallingOthers(t *testing.T) {
 	bad, good := uuid.New(), uuid.New()
 	chain := func(user, account, id uuid.UUID, jobs []string, due time.Time) {
 		t.Helper()
-		if err := repo.ReplaceSchedulesByUser(ctx, user, []driven.ScheduleChainRow{{
+		if err := repo.ReplaceSchedulesByUser(ctx, user, []domainjobs.ScheduleChainRow{{
 			ID: id, UserID: user, Name: "c", AccountID: &account, Jobs: jobs, IntervalMinutes: 60,
 			Enabled: true, NextRunAt: due, CreatedAt: now.Add(-time.Hour), UpdatedAt: now.Add(-time.Hour),
 		}}); err != nil {

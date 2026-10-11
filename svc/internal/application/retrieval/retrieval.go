@@ -10,8 +10,9 @@ import (
 	"unicode"
 	"unicode/utf8"
 
-	"github.com/Kapital-B/automata/svc/internal/application/ports/driven"
+	domaincontacts "github.com/Kapital-B/automata/svc/internal/domain/contacts"
 	"github.com/Kapital-B/automata/svc/internal/domain/mailtext"
+	domainprojects "github.com/Kapital-B/automata/svc/internal/domain/projects"
 	"github.com/google/uuid"
 )
 
@@ -29,9 +30,9 @@ const (
 type Resolution struct {
 	// Projects the user is a member of, named in the question by code or by
 	// name. Code matches come first.
-	Projects []driven.ProjectRow
+	Projects []domainprojects.ProjectRow
 	// Contacts in the user's organisation named in the question.
-	Contacts []driven.ContactRow
+	Contacts []domaincontacts.ContactRow
 	// Terms are the remaining keywords, lowercased, for SearchMessages.
 	Terms []string
 }
@@ -60,8 +61,8 @@ func (r *Resolution) HasSearch() bool {
 }
 
 type Resolver struct {
-	Projects driven.ProjectRepository
-	Contacts driven.ContactRepository
+	Projects domainprojects.ProjectRepository
+	Contacts domaincontacts.ContactRepository
 }
 
 // Resolve finds the projects, contacts and keywords in question. Projects
@@ -69,10 +70,10 @@ type Resolver struct {
 // what the user sees. It issues one project query and at most
 // maxContactLookups small contact queries.
 func (r *Resolver) Resolve(ctx context.Context, userID, organisationID uuid.UUID, question string) (*Resolution, error) {
-	var projects []driven.ProjectRow
+	var projects []domainprojects.ProjectRow
 	if r.Projects != nil {
 		var err error
-		projects, err = r.Projects.ListProjects(ctx, organisationID, driven.ProjectListFilter{MemberUserID: &userID, Limit: memberProjectLimit})
+		projects, err = r.Projects.ListProjects(ctx, organisationID, domainprojects.ProjectListFilter{MemberUserID: &userID, Limit: memberProjectLimit})
 		if err != nil {
 			return nil, err
 		}
@@ -82,7 +83,7 @@ func (r *Resolver) Resolve(ctx context.Context, userID, organisationID uuid.UUID
 
 // ResolveAmong is Resolve for a caller that has already loaded the projects
 // the user may see. Only those projects can be matched.
-func (r *Resolver) ResolveAmong(ctx context.Context, organisationID uuid.UUID, projects []driven.ProjectRow, question string) (*Resolution, error) {
+func (r *Resolver) ResolveAmong(ctx context.Context, organisationID uuid.UUID, projects []domainprojects.ProjectRow, question string) (*Resolution, error) {
 	toks := tokenize(question)
 	res := &Resolution{}
 	used := map[int]bool{}
@@ -91,7 +92,7 @@ func (r *Resolver) ResolveAmong(ctx context.Context, organisationID uuid.UUID, p
 	if r.Contacts != nil {
 		seen := map[uuid.UUID]bool{}
 		for _, i := range contactCandidates(toks, used) {
-			rows, err := r.Contacts.ListContacts(ctx, organisationID, driven.ContactListFilter{Query: toks[i].lower, Limit: contactLookupLimit})
+			rows, err := r.Contacts.ListContacts(ctx, organisationID, domaincontacts.ContactListFilter{Query: toks[i].lower, Limit: contactLookupLimit})
 			if err != nil {
 				return nil, err
 			}
@@ -151,8 +152,8 @@ func normalize(s string) string {
 // matchProjects finds projects by code ("DC07", "dc-07") or by name as a
 // whole phrase. Names shorter than minProjectNameLen are ignored, since
 // short names collide with ordinary words.
-func matchProjects(projects []driven.ProjectRow, toks []token, used map[int]bool) []driven.ProjectRow {
-	var byCode, byName []driven.ProjectRow
+func matchProjects(projects []domainprojects.ProjectRow, toks []token, used map[int]bool) []domainprojects.ProjectRow {
+	var byCode, byName []domainprojects.ProjectRow
 	matched := map[uuid.UUID]bool{}
 	for _, p := range projects {
 		code := normalize(p.Code)

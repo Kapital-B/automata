@@ -12,8 +12,11 @@ import (
 
 	"github.com/Kapital-B/automata/svc/internal/adapters/outbound/memoryjobs"
 	"github.com/Kapital-B/automata/svc/internal/adapters/outbound/persistence/sqlite"
-	"github.com/Kapital-B/automata/svc/internal/application/ports/driven"
 	domainacc "github.com/Kapital-B/automata/svc/internal/domain/accounts"
+	domainaccounts "github.com/Kapital-B/automata/svc/internal/domain/accounts"
+	domainai "github.com/Kapital-B/automata/svc/internal/domain/ai"
+	domainmessages "github.com/Kapital-B/automata/svc/internal/domain/messages"
+
 	"github.com/google/uuid"
 	_ "modernc.org/sqlite"
 )
@@ -54,7 +57,7 @@ func newForwardFixture(t *testing.T, box *fakeMailbox) *forwardFixture {
 	if _, err := repo.CreateUserWithHomeOrg(ctx, f.userID, "u@example.com", nil, time.Now().UTC(), "password", f.userID.String(), "u@example.com"); err != nil {
 		t.Fatal(err)
 	}
-	if err := repo.InsertAccount(ctx, driven.AccountRow{
+	if err := repo.InsertAccount(ctx, domainaccounts.AccountRow{
 		UserID: f.userID, ID: f.accountID, Label: "Work", Provider: "m365",
 		MsAccountKind: domainacc.KindWork, PrimaryEmail: "work@example.com", ConnectionStatus: "connected",
 	}, []byte("credential")); err != nil {
@@ -77,7 +80,7 @@ func (f *forwardFixture) message(t *testing.T, subject string, received time.Tim
 	ctx := context.Background()
 	id := uuid.New()
 	body := subject + " body"
-	if err := f.repo.UpsertMessage(ctx, driven.MessageRow{
+	if err := f.repo.UpsertMessage(ctx, domainmessages.MessageRow{
 		ID: id, AccountID: f.accountID, ProviderMessageID: "p-" + id.String(), ReceivedAt: received,
 		Subject: subject, FromJSON: `{"name":"Vendor","address":"billing@vendor.example"}`, BodyText: &body,
 		CreatedAt: time.Now().UTC(), UpdatedAt: time.Now().UTC(),
@@ -98,7 +101,7 @@ func (f *forwardFixture) categorise(t *testing.T, id uuid.UUID, slug string) {
 		t.Fatal(err)
 	}
 	if def == nil {
-		d := driven.CategoryDefinitionRow{
+		d := domainmessages.CategoryDefinitionRow{
 			ID: uuid.New(), UserID: f.userID, Slug: slug, DisplayName: slug, Definition: slug,
 			SortOrder: 99, CreatedAt: time.Now().UTC(), UpdatedAt: time.Now().UTC(),
 		}
@@ -108,7 +111,7 @@ func (f *forwardFixture) categorise(t *testing.T, id uuid.UUID, slug string) {
 		def = &d
 	}
 	conf := 0.9
-	if err := f.repo.UpsertMessageCategory(ctx, driven.MessageCategoryRow{
+	if err := f.repo.UpsertMessageCategory(ctx, domainmessages.MessageCategoryRow{
 		ID: uuid.New(), MessageID: id, AccountID: f.accountID, CategoryID: def.ID, Source: "llm",
 		Confidence: &conf, RunID: uuid.New(), CreatedAt: time.Now().UTC(), UpdatedAt: time.Now().UTC(),
 	}); err != nil {
@@ -119,7 +122,7 @@ func (f *forwardFixture) categorise(t *testing.T, id uuid.UUID, slug string) {
 func (f *forwardFixture) rule(t *testing.T, condition, to string, applyFrom *time.Time) uuid.UUID {
 	t.Helper()
 	id := uuid.New()
-	if err := f.repo.CreateForwardRule(context.Background(), driven.ForwardRuleRow{
+	if err := f.repo.CreateForwardRule(context.Background(), domainmessages.ForwardRuleRow{
 		ID: id, UserID: f.userID, AccountID: f.accountID, Name: "rule", Mode: ForwardModeLogic,
 		ConditionJSON: condition, ForwardTo: to, Enabled: true, ApplyFrom: applyFrom,
 		CreatedAt: time.Now().UTC(), UpdatedAt: time.Now().UTC(),
@@ -136,7 +139,7 @@ func (f *forwardFixture) run(t *testing.T) {
 	}
 }
 
-func (f *forwardFixture) verdict(t *testing.T, messageID, ruleID uuid.UUID) *driven.ForwardAuditRow {
+func (f *forwardFixture) verdict(t *testing.T, messageID, ruleID uuid.UUID) *domainmessages.ForwardAuditRow {
 	t.Helper()
 	rows, err := f.repo.ListForwardAuditForMessages(context.Background(), f.userID, []uuid.UUID{messageID})
 	if err != nil {
@@ -216,7 +219,7 @@ func TestRuleAddedLaterCanCoverExistingMail(t *testing.T) {
 // Review finding 1: a send that failed without going out was recorded as
 // retryable, then treated as forwarded on the retry and never sent.
 func TestForwardThatDidNotGoOutIsRetried(t *testing.T) {
-	f := newForwardFixture(t, &fakeMailbox{forwardErr: fmt.Errorf("%w: transient", driven.ErrMailNotSent)})
+	f := newForwardFixture(t, &fakeMailbox{forwardErr: fmt.Errorf("%w: transient", domainaccounts.ErrMailNotSent)})
 	f.run(t)
 	if v := f.verdict(t, f.messageID, f.ruleID); v == nil || !v.Pending || v.Attempts != 1 {
 		t.Fatalf("after a failed send, verdict = %+v, want pending with one attempt", v)
@@ -234,7 +237,7 @@ func TestForwardThatDidNotGoOutIsRetried(t *testing.T) {
 // A message that can never be sent (moved out of the inbox, say) is given up
 // on and says so, instead of being retried every run.
 func TestForwardThatCanNeverGoOutIsGivenUp(t *testing.T) {
-	f := newForwardFixture(t, &fakeMailbox{forwardErr: fmt.Errorf("%w: message not in inbox", driven.ErrMailNotSent)})
+	f := newForwardFixture(t, &fakeMailbox{forwardErr: fmt.Errorf("%w: message not in inbox", domainaccounts.ErrMailNotSent)})
 	for i := 0; i < maxForwardAttempts+2; i++ {
 		f.run(t)
 	}
@@ -338,13 +341,13 @@ type scriptedLLM struct {
 	prompts []string
 }
 
-func (s *scriptedLLM) ChatCompletion(ctx context.Context, msgs []driven.LLMMessage) (*driven.LLMResponse, error) {
+func (s *scriptedLLM) ChatCompletion(ctx context.Context, msgs []domainai.LLMMessage) (*domainai.LLMResponse, error) {
 	for _, m := range msgs {
 		s.prompts = append(s.prompts, m.Role+": "+m.Content)
 	}
 	a := s.answers[min(s.calls, len(s.answers)-1)]
 	s.calls++
-	return &driven.LLMResponse{Content: a}, nil
+	return &domainai.LLMResponse{Content: a}, nil
 }
 
 func TestAIRuleTreatsTheEmailAsDataAndBoundsTheBody(t *testing.T) {
@@ -356,14 +359,14 @@ func TestAIRuleTreatsTheEmailAsDataAndBoundsTheBody(t *testing.T) {
 	}
 	big := strings.Repeat("x", forwardLLMBodyChars*3)
 	id := uuid.New()
-	if err := f.repo.UpsertMessage(context.Background(), driven.MessageRow{
+	if err := f.repo.UpsertMessage(context.Background(), domainmessages.MessageRow{
 		ID: id, AccountID: f.accountID, ProviderMessageID: "big", ReceivedAt: time.Now().UTC(), Subject: "Huge",
 		FromJSON: `{"address":"a@b.example"}`, BodyText: &big, CreatedAt: time.Now().UTC(), UpdatedAt: time.Now().UTC(),
 	}); err != nil {
 		t.Fatal(err)
 	}
 	rule := uuid.New()
-	if err := f.repo.CreateForwardRule(context.Background(), driven.ForwardRuleRow{
+	if err := f.repo.CreateForwardRule(context.Background(), domainmessages.ForwardRuleRow{
 		ID: rule, UserID: f.userID, AccountID: f.accountID, Name: "tax", Mode: ForwardModeLLM,
 		ConditionJSON: `{"prompt":"tax documents"}`, ForwardTo: "bills@example.com", Enabled: true, ApplyFrom: &epoch,
 		CreatedAt: time.Now().UTC(), UpdatedAt: time.Now().UTC(),
@@ -389,7 +392,7 @@ func TestAIRuleUnusableAnswersAreRetriedThenGivenUp(t *testing.T) {
 	llm := &scriptedLLM{answers: []string{"no idea"}}
 	f.svc.LLM = llm
 	rule := uuid.New()
-	if err := f.repo.CreateForwardRule(context.Background(), driven.ForwardRuleRow{
+	if err := f.repo.CreateForwardRule(context.Background(), domainmessages.ForwardRuleRow{
 		ID: rule, UserID: f.userID, AccountID: f.accountID, Name: "tax", Mode: ForwardModeLLM,
 		ConditionJSON: `{"prompt":"tax documents"}`, ForwardTo: "books@example.com", Enabled: true, ApplyFrom: &epoch,
 		CreatedAt: time.Now().UTC(), UpdatedAt: time.Now().UTC(),

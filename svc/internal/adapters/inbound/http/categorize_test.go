@@ -5,6 +5,7 @@ import (
 	"context"
 	"database/sql"
 	"encoding/json"
+	domainmessages "github.com/Kapital-B/automata/svc/internal/domain/messages"
 	"io"
 	"log/slog"
 	"net/http"
@@ -18,16 +19,18 @@ import (
 	appaccounts "github.com/Kapital-B/automata/svc/internal/application/accounts"
 	"github.com/Kapital-B/automata/svc/internal/application/auth"
 	appmessages "github.com/Kapital-B/automata/svc/internal/application/messages"
-	"github.com/Kapital-B/automata/svc/internal/application/ports/driven"
 	domainacc "github.com/Kapital-B/automata/svc/internal/domain/accounts"
+	domainaccounts "github.com/Kapital-B/automata/svc/internal/domain/accounts"
+	domainai "github.com/Kapital-B/automata/svc/internal/domain/ai"
+
 	"github.com/google/uuid"
 	_ "modernc.org/sqlite"
 )
 
 type fakeCategorizeLLM struct{}
 
-func (f *fakeCategorizeLLM) ChatCompletion(ctx context.Context, messages []driven.LLMMessage) (*driven.LLMResponse, error) {
-	return &driven.LLMResponse{Content: `{"schema_version":1,"category_slug":"important","confidence":0.91}`}, nil
+func (f *fakeCategorizeLLM) ChatCompletion(ctx context.Context, messages []domainai.LLMMessage) (*domainai.LLMResponse, error) {
+	return &domainai.LLMResponse{Content: `{"schema_version":1,"category_slug":"important","confidence":0.91}`}, nil
 }
 
 func newCategorizeTestServer(t *testing.T) (*httptest.Server, *sqlite.Repository, uuid.UUID, uuid.UUID) {
@@ -59,7 +62,7 @@ func newCategorizeTestServer(t *testing.T) (*httptest.Server, *sqlite.Repository
 	devUser := uuid.MustParse("a0000001-0000-4000-8000-000000000001")
 	authSvc := auth.NewService(repo, repo, repo, nil, nil, jwtSecret, time.Hour, 30*24*time.Hour)
 	accountID := uuid.New()
-	if err := repo.InsertAccount(context.Background(), driven.AccountRow{
+	if err := repo.InsertAccount(context.Background(), domainaccounts.AccountRow{
 		UserID:           devUser,
 		ID:               accountID,
 		Label:            "Work",
@@ -71,7 +74,7 @@ func newCategorizeTestServer(t *testing.T) (*httptest.Server, *sqlite.Repository
 		t.Fatal(err)
 	}
 	msgBody := "Need action soon."
-	if err := repo.UpsertMessage(context.Background(), driven.MessageRow{
+	if err := repo.UpsertMessage(context.Background(), domainmessages.MessageRow{
 		ID:                uuid.New(),
 		AccountID:         accountID,
 		ProviderMessageID: "provider-1",

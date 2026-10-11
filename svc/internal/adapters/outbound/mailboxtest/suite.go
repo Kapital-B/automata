@@ -12,7 +12,7 @@ import (
 	"time"
 
 	"github.com/Kapital-B/automata/svc/internal/adapters/outbound/mailmime"
-	"github.com/Kapital-B/automata/svc/internal/application/ports/driven"
+	domainaccounts "github.com/Kapital-B/automata/svc/internal/domain/accounts"
 )
 
 // Sent is one thing a provider was asked to deliver.
@@ -27,7 +27,7 @@ type Sent struct {
 
 // Harness drives one adapter against a fake of its provider.
 type Harness struct {
-	Box driven.Mailbox
+	Box domainaccounts.Mailbox
 	// Deliver puts a message in the inbox and returns its provider id.
 	Deliver func(t *testing.T, raw []byte) string
 	// Remove takes a message out of the inbox, as a move or delete would.
@@ -62,7 +62,7 @@ func message(t *testing.T, subject string, withAttachment bool) []byte {
 }
 
 // drain lists from cursor to completion, checking the page invariant.
-func drain(t *testing.T, box driven.Mailbox, cursor string, pageSize int) (msgs []driven.MailMessage, removed []string, final string) {
+func drain(t *testing.T, box domainaccounts.Mailbox, cursor string, pageSize int) (msgs []domainaccounts.MailMessage, removed []string, final string) {
 	t.Helper()
 	ctx := context.Background()
 	for i := 0; i < 100; i++ {
@@ -84,8 +84,8 @@ func drain(t *testing.T, box driven.Mailbox, cursor string, pageSize int) (msgs 
 	return nil, nil, ""
 }
 
-func byID(msgs []driven.MailMessage) map[string]driven.MailMessage {
-	out := map[string]driven.MailMessage{}
+func byID(msgs []domainaccounts.MailMessage) map[string]domainaccounts.MailMessage {
+	out := map[string]domainaccounts.MailMessage{}
 	for _, m := range msgs {
 		out[m.ID] = m
 	}
@@ -267,7 +267,7 @@ func RunContractTests(t *testing.T, factory Factory) {
 	t.Run("forwarding_a_missing_message_is_not_sent", func(t *testing.T) {
 		h := factory(t)
 		err := h.Box.Forward(context.Background(), "no-such-message", "bills@example.net", "")
-		if !errors.Is(err, driven.ErrMailNotSent) {
+		if !errors.Is(err, domainaccounts.ErrMailNotSent) {
 			t.Fatalf("err = %v, want ErrMailNotSent", err)
 		}
 		if sent := h.Sent(t); len(sent) != 0 {
@@ -284,7 +284,7 @@ func RunContractTests(t *testing.T, factory Factory) {
 		_, _, final := drain(t, h.Box, "", 10)
 		h.ExpireCursors(t)
 		_, err := h.Box.ListChanges(context.Background(), final, 10)
-		if !errors.Is(err, driven.ErrCursorExpired) {
+		if !errors.Is(err, domainaccounts.ErrCursorExpired) {
 			t.Fatalf("err = %v, want ErrCursorExpired", err)
 		}
 	})

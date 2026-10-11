@@ -7,8 +7,11 @@ import (
 	"time"
 
 	"github.com/Kapital-B/automata/svc/internal/adapters/outbound/persistence/sqlite"
-	"github.com/Kapital-B/automata/svc/internal/application/ports/driven"
 	domainacc "github.com/Kapital-B/automata/svc/internal/domain/accounts"
+	domainaccounts "github.com/Kapital-B/automata/svc/internal/domain/accounts"
+	domainai "github.com/Kapital-B/automata/svc/internal/domain/ai"
+	domainmessages "github.com/Kapital-B/automata/svc/internal/domain/messages"
+
 	"github.com/google/uuid"
 	_ "modernc.org/sqlite"
 )
@@ -19,16 +22,16 @@ type fakeLLM struct {
 	onCall    func()
 }
 
-func (f *fakeLLM) ChatCompletion(ctx context.Context, messages []driven.LLMMessage) (*driven.LLMResponse, error) {
+func (f *fakeLLM) ChatCompletion(ctx context.Context, messages []domainai.LLMMessage) (*domainai.LLMResponse, error) {
 	if f.onCall != nil {
 		f.onCall()
 	}
 	if f.idx >= len(f.responses) {
-		return &driven.LLMResponse{Content: `{"schema_version":1,"category_slug":"other"}`}, nil
+		return &domainai.LLMResponse{Content: `{"schema_version":1,"category_slug":"other"}`}, nil
 	}
 	out := f.responses[f.idx]
 	f.idx++
-	return &driven.LLMResponse{Content: out}, nil
+	return &domainai.LLMResponse{Content: out}, nil
 }
 
 func setupCategorizeRepo(t *testing.T) (*sqlite.Repository, uuid.UUID, uuid.UUID) {
@@ -44,7 +47,7 @@ func setupCategorizeRepo(t *testing.T) (*sqlite.Repository, uuid.UUID, uuid.UUID
 	repo := sqlite.NewRepository(db, 15*time.Minute)
 	userID := uuid.MustParse("a0000001-0000-4000-8000-000000000001")
 	accountID := uuid.New()
-	if err := repo.InsertAccount(context.Background(), driven.AccountRow{
+	if err := repo.InsertAccount(context.Background(), domainaccounts.AccountRow{
 		UserID:           userID,
 		ID:               accountID,
 		Label:            "Work",
@@ -56,7 +59,7 @@ func setupCategorizeRepo(t *testing.T) (*sqlite.Repository, uuid.UUID, uuid.UUID
 		t.Fatal(err)
 	}
 	msgBody := "please pay this invoice"
-	if err := repo.UpsertMessage(context.Background(), driven.MessageRow{
+	if err := repo.UpsertMessage(context.Background(), domainmessages.MessageRow{
 		ID:                uuid.New(),
 		AccountID:         accountID,
 		ProviderMessageID: "provider-1",
@@ -88,7 +91,7 @@ func TestCategorizeAccountValidJSON(t *testing.T) {
 	if res.MessagesCategorized != 1 {
 		t.Fatalf("expected one categorized message, got %d", res.MessagesCategorized)
 	}
-	rows, err := repo.ListMessages(context.Background(), userID, driven.MessageListFilter{AccountID: &accountID, Category: "finance"})
+	rows, err := repo.ListMessages(context.Background(), userID, domainmessages.MessageListFilter{AccountID: &accountID, Category: "finance"})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -110,7 +113,7 @@ func TestCategorizeAccountRetriesInvalidJSON(t *testing.T) {
 	if _, err := svc.CategorizeAccount(context.Background(), userID, accountID, CategorizeOptions{}); err != nil {
 		t.Fatal(err)
 	}
-	rows, err := repo.ListMessages(context.Background(), userID, driven.MessageListFilter{AccountID: &accountID, Category: "important"})
+	rows, err := repo.ListMessages(context.Background(), userID, domainmessages.MessageListFilter{AccountID: &accountID, Category: "important"})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -132,7 +135,7 @@ func TestCategorizeAccountFailsWhenInvalidTwice(t *testing.T) {
 	if _, err := svc.CategorizeAccount(context.Background(), userID, accountID, CategorizeOptions{}); err == nil {
 		t.Fatal("expected invalid JSON error")
 	}
-	rows, err := repo.ListMessages(context.Background(), userID, driven.MessageListFilter{AccountID: &accountID, Category: "important"})
+	rows, err := repo.ListMessages(context.Background(), userID, domainmessages.MessageListFilter{AccountID: &accountID, Category: "important"})
 	if err != nil {
 		t.Fatal(err)
 	}

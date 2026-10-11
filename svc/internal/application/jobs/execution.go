@@ -7,7 +7,8 @@ import (
 	"log/slog"
 	"time"
 
-	"github.com/Kapital-B/automata/svc/internal/application/ports/driven"
+	domainai "github.com/Kapital-B/automata/svc/internal/domain/ai"
+	domainjobs "github.com/Kapital-B/automata/svc/internal/domain/jobs"
 	"github.com/google/uuid"
 )
 
@@ -17,11 +18,11 @@ const (
 )
 
 // ExecutorRegistry maps job types to bounded chunk executors.
-type ExecutorRegistry map[string]driven.JobExecutor
+type ExecutorRegistry map[string]domainjobs.JobExecutor
 
 // ExecutionService owns job lifecycle transitions around chunk executors.
 type ExecutionService struct {
-	Store       driven.JobStore
+	Store       domainjobs.JobStore
 	Executors   ExecutorRegistry
 	LeaseOwner  string
 	LeaseFor    time.Duration
@@ -56,24 +57,24 @@ func (s *ExecutionService) HandleStreamRecord(ctx context.Context, jobID uuid.UU
 	}
 	job, err := s.Store.GetByID(ctx, jobID)
 	if err != nil {
-		if errors.Is(err, driven.ErrJobNotFound) {
+		if errors.Is(err, domainjobs.ErrJobNotFound) {
 			s.log().Info("execution skip missing job", "job_id", jobID)
 			return nil
 		}
 		return err
 	}
 	switch job.Status {
-	case driven.JobStatusSuccess, driven.JobStatusFailed, driven.JobStatusCancelled:
+	case domainjobs.JobStatusSuccess, domainjobs.JobStatusFailed, domainjobs.JobStatusCancelled:
 		s.log().Info("execution skip terminal job", "job_id", jobID, "job_type", job.JobType, "status", job.Status)
 		return nil
-	case driven.JobStatusPending:
+	case domainjobs.JobStatusPending:
 		owner := s.LeaseOwner
 		if owner == "" {
 			owner = "worker"
 		}
 		s.log().Info("execution kick pending", "job_id", jobID, "job_type", job.JobType, "revision", job.Revision, "owner", owner)
 		_, err := s.Store.KickPending(ctx, job.ID, job.Revision, owner, now.Add(s.leaseDuration()), now)
-		if errors.Is(err, driven.ErrJobConflict) {
+		if errors.Is(err, domainjobs.ErrJobConflict) {
 			s.log().Info("execution kick conflict", "job_id", jobID, "job_type", job.JobType)
 			return nil
 		}
@@ -82,10 +83,10 @@ func (s *ExecutionService) HandleStreamRecord(ctx context.Context, jobID uuid.UU
 		}
 		s.log().Info("execution kicked to running", "job_id", jobID, "job_type", job.JobType)
 		return nil
-	case driven.JobStatusRunning:
+	case domainjobs.JobStatusRunning:
 		s.log().Info("execution run chunk", "job_id", jobID, "job_type", job.JobType, "revision", job.Revision, "processed", job.Progress.Processed, "failed", job.Progress.Failed)
 		err := s.runChunk(ctx, job, now)
-		if errors.Is(err, driven.ErrJobConflict) {
+		if errors.Is(err, domainjobs.ErrJobConflict) {
 			s.log().Info("execution chunk conflict", "job_id", jobID, "job_type", job.JobType)
 			return nil
 		}
@@ -95,9 +96,9 @@ func (s *ExecutionService) HandleStreamRecord(ctx context.Context, jobID uuid.UU
 	}
 }
 
-func (s *ExecutionService) runChunk(ctx context.Context, job *driven.JobRecord, now time.Time) error {
+func (s *ExecutionService) runChunk(ctx context.Context, job *domainjobs.JobRecord, now time.Time) error {
 	if job.AttemptID == nil {
-		return driven.ErrJobConflict
+		return domainjobs.ErrJobConflict
 	}
 	attemptID := *job.AttemptID
 	if job.CancelRequestedAt != nil {
@@ -119,8 +120,8 @@ func (s *ExecutionService) runChunk(ctx context.Context, job *driven.JobRecord, 
 		}
 	}
 	// Model calls made by the executor are metered against the job's owner.
-	execCtx := driven.WithUsageScope(ctx, &job.UserID, job.AccountID)
-	result, err := exec.ExecuteChunk(execCtx, driven.RunContext{
+	execCtx := domainai.WithUsageScope(ctx, &job.UserID, job.AccountID)
+	result, err := exec.ExecuteChunk(execCtx, domainjobs.RunContext{
 		RunID:     job.ID,
 		AttemptID: attemptID,
 		UserID:    job.UserID,
@@ -178,12 +179,12 @@ func (s *ExecutionService) runChunk(ctx context.Context, job *driven.JobRecord, 
 		_, err := s.Store.AdvanceRunning(ctx, current.ID, current.Revision, attemptID, result.NextCursor, progress, now.Add(s.leaseDuration()), now)
 		return err
 	}
-	var next *driven.CreateJobInput
+	var next *domainjobs.CreateJobInput
 	if len(current.RemainingJobs) > 0 {
 		nextType := current.RemainingJobs[0]
 		remaining := append([]string(nil), current.RemainingJobs[1:]...)
 		nextID := DeterministicJobID(current.ChainID, current.StepIndex+1, nextType)
-		next = &driven.CreateJobInput{
+		next = &domainjobs.CreateJobInput{
 			ID:             nextID,
 			JobType:        nextType,
 			UserID:         current.UserID,
@@ -204,18 +205,18 @@ func (s *ExecutionService) runChunk(ctx context.Context, job *driven.JobRecord, 
 	return err
 }
 
-func (s *ExecutionService) currentAttempt(ctx context.Context, jobID, attemptID uuid.UUID) (*driven.JobRecord, error) {
+func (s *ExecutionService) currentAttempt(ctx context.Context, jobID, attemptID uuid.UUID) (*domainjobs.JobRecord, error) {
 	job, err := s.Store.GetByID(ctx, jobID)
 	if err != nil {
 		return nil, err
 	}
-	if job.Status != driven.JobStatusRunning || job.AttemptID == nil || *job.AttemptID != attemptID {
-		return nil, driven.ErrJobConflict
+	if job.Status != domainjobs.JobStatusRunning || job.AttemptID == nil || *job.AttemptID != attemptID {
+		return nil, domainjobs.ErrJobConflict
 	}
 	return job, nil
 }
 
-func (s *ExecutionService) RunSynchronous(ctx context.Context, in driven.CreateJobInput, exec driven.JobExecutor) (*driven.JobRecord, error) {
+func (s *ExecutionService) RunSynchronous(ctx context.Context, in domainjobs.CreateJobInput, exec domainjobs.JobExecutor) (*domainjobs.JobRecord, error) {
 	if s == nil || s.Store == nil {
 		return nil, fmt.Errorf("job execution service not configured")
 	}
@@ -257,4 +258,4 @@ func (s *ExecutionService) RunSynchronous(ctx context.Context, in driven.CreateJ
 	return s.Store.GetByID(ctx, running.ID)
 }
 
-var _ driven.JobExecutionPort = (*ExecutionService)(nil)
+var _ domainjobs.JobExecutionPort = (*ExecutionService)(nil)

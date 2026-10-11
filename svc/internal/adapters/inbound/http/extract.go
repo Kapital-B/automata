@@ -2,12 +2,13 @@ package http
 
 import (
 	"errors"
+	"github.com/go-chi/chi/v5"
 	"net/http"
 	"time"
 
 	appjobs "github.com/Kapital-B/automata/svc/internal/application/jobs"
-	"github.com/Kapital-B/automata/svc/internal/application/ports/driven"
-	"github.com/go-chi/chi/v5"
+	domainjobs "github.com/Kapital-B/automata/svc/internal/domain/jobs"
+
 	"github.com/google/uuid"
 )
 
@@ -42,12 +43,12 @@ func (h *Handlers) extractProject(w http.ResponseWriter, r *http.Request) {
 	}
 
 	pid := projectID
-	rec, err := h.JobEnqueuer.Enqueue(r.Context(), driven.CreateJobInput{
+	rec, err := h.JobEnqueuer.Enqueue(r.Context(), domainjobs.CreateJobInput{
 		JobType:       appjobs.TypeInterpretProject,
 		UserID:        uid,
-		TriggerKind:   driven.JobTriggerAPI,
+		TriggerKind:   domainjobs.JobTriggerAPI,
 		RemainingJobs: []string{appjobs.TypeReconcileProject},
-		Payload:       driven.JobPayload{ProjectID: &pid},
+		Payload:       domainjobs.JobPayload{ProjectID: &pid},
 		Now:           time.Now().UTC(),
 	})
 	switch {
@@ -58,7 +59,7 @@ func (h *Handlers) extractProject(w http.ResponseWriter, r *http.Request) {
 			out["chain_id"] = rec.ChainID.String()
 		}
 		writeJSON(w, http.StatusAccepted, out)
-	case errors.Is(err, driven.ErrJobLockHeld), errors.Is(err, driven.ErrJobConflict):
+	case errors.Is(err, domainjobs.ErrJobLockHeld), errors.Is(err, domainjobs.ErrJobConflict):
 		// Already running or already queued — the caller's intent is satisfied.
 		writeJSON(w, http.StatusAccepted, map[string]any{"status": "already_running"})
 	default:

@@ -9,7 +9,9 @@ import (
 	"errors"
 	"time"
 
-	"github.com/Kapital-B/automata/svc/internal/application/ports/driven"
+	domainauth "github.com/Kapital-B/automata/svc/internal/domain/auth"
+	domainmessages "github.com/Kapital-B/automata/svc/internal/domain/messages"
+	domainprojects "github.com/Kapital-B/automata/svc/internal/domain/projects"
 	"github.com/google/uuid"
 )
 
@@ -36,9 +38,9 @@ type Todo struct {
 }
 
 type Service struct {
-	Users     driven.UserRepository
-	Projects  driven.ProjectRepository
-	Summaries driven.SummaryRepository
+	Users     domainauth.UserRepository
+	Projects  domainprojects.ProjectRepository
+	Summaries domainmessages.SummaryRepository
 }
 
 // ForProject lists the project's open to-dos, the caller's first.
@@ -136,7 +138,7 @@ func (s *Service) member(ctx context.Context, caller, projectID uuid.UUID) (uuid
 	return orgID, nil
 }
 
-func view(caller uuid.UUID, r driven.ProjectTodoRow) Todo {
+func view(caller uuid.UUID, r domainmessages.ProjectTodoRow) Todo {
 	t := Todo{
 		ID:          r.Item.ID,
 		Text:        r.Item.Text,

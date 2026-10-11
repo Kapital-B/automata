@@ -11,8 +11,8 @@ import (
 	"github.com/Kapital-B/automata/svc/internal/adapters/outbound/security"
 	slackadapter "github.com/Kapital-B/automata/svc/internal/adapters/outbound/slack"
 	"github.com/Kapital-B/automata/svc/internal/application/connectors"
-	"github.com/Kapital-B/automata/svc/internal/application/ports/driven"
 	appprojects "github.com/Kapital-B/automata/svc/internal/application/projects"
+	domainprojects "github.com/Kapital-B/automata/svc/internal/domain/projects"
 	"github.com/google/uuid"
 	_ "modernc.org/sqlite"
 )
@@ -114,9 +114,9 @@ func slackTimeline(
 	ctx context.Context,
 	repo *sqlite.Repository,
 	userID, organisationID, projectID uuid.UUID,
-) []driven.TimelineItem {
+) []domainprojects.TimelineItem {
 	t.Helper()
-	items, err := repo.ListProjectTimeline(ctx, userID, organisationID, projectID, driven.TimelineFilter{
+	items, err := repo.ListProjectTimeline(ctx, userID, organisationID, projectID, domainprojects.TimelineFilter{
 		Source: "slack",
 	})
 	if err != nil {

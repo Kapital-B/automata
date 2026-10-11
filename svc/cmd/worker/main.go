@@ -8,9 +8,9 @@ import (
 	"sync"
 	"time"
 
-	"github.com/Kapital-B/automata/svc/internal/application/ports/driven"
 	"github.com/Kapital-B/automata/svc/internal/composition"
 	"github.com/Kapital-B/automata/svc/internal/configuration"
+	domainjobs "github.com/Kapital-B/automata/svc/internal/domain/jobs"
 	"github.com/aws/aws-lambda-go/events"
 	"github.com/aws/aws-lambda-go/lambda"
 	"github.com/google/uuid"
@@ -72,7 +72,7 @@ func handle(ctx context.Context, event events.DynamoDBEvent) (events.DynamoDBEve
 			"sequence", record.Change.SequenceNumber,
 		)
 		if err := rt.Execution.HandleStreamRecord(ctx, id, time.Now().UTC()); err != nil {
-			if errors.Is(err, driven.ErrJobConflict) {
+			if errors.Is(err, domainjobs.ErrJobConflict) {
 				conflicts++
 				log.Info("worker job conflict", "job_id", id, "status", status)
 				continue
@@ -139,7 +139,7 @@ func shouldHandleRecord(record events.DynamoDBEventRecord) bool {
 	if !ok {
 		return false
 	}
-	return status == driven.JobStatusPending || status == driven.JobStatusRunning
+	return status == domainjobs.JobStatusPending || status == domainjobs.JobStatusRunning
 }
 
 func streamString(values map[string]events.DynamoDBAttributeValue, key string) (string, bool) {

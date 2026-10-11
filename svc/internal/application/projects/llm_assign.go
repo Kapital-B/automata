@@ -4,10 +4,11 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	domainmessages "github.com/Kapital-B/automata/svc/internal/domain/messages"
 	"strings"
 	"time"
 
-	"github.com/Kapital-B/automata/svc/internal/application/ports/driven"
+	domainai "github.com/Kapital-B/automata/svc/internal/domain/ai"
 	domainprojects "github.com/Kapital-B/automata/svc/internal/domain/projects"
 	"github.com/google/uuid"
 )
@@ -27,7 +28,7 @@ type llmThread struct {
 	// ref is an opaque per-call label. The model never sees a uuid, which keeps
 	// the prompt small and removes uuid hallucination as a failure mode.
 	ref string
-	msg driven.MessageRow
+	msg domainmessages.MessageRow
 }
 
 type llmAssignPayload struct {
@@ -51,11 +52,11 @@ const (
 	maxConfidence    = 0.99
 )
 
-func (s *AssignService) scoreWithLLM(ctx context.Context, orgID, accountID uuid.UUID, msgs []driven.MessageRow, projects []driven.ProjectRow, runID *uuid.UUID, now time.Time) (int, error) {
+func (s *AssignService) scoreWithLLM(ctx context.Context, orgID, accountID uuid.UUID, msgs []domainmessages.MessageRow, projects []domainprojects.ProjectRow, runID *uuid.UUID, now time.Time) (int, error) {
 	if s.LLM == nil || len(msgs) == 0 {
 		return 0, nil
 	}
-	active := make([]driven.ProjectRow, 0, len(projects))
+	active := make([]domainprojects.ProjectRow, 0, len(projects))
 	for _, p := range projects {
 		if p.ArchivedAt == nil {
 			active = append(active, p)
@@ -81,11 +82,11 @@ func (s *AssignService) scoreWithLLM(ctx context.Context, orgID, accountID uuid.
 			// written; leave these threads unscored for the next run.
 			return assigned, err
 		}
-		byRef := map[string]driven.MessageRow{}
+		byRef := map[string]domainmessages.MessageRow{}
 		for _, t := range batch {
 			byRef[t.ref] = t.msg
 		}
-		byCode := map[string]driven.ProjectRow{}
+		byCode := map[string]domainprojects.ProjectRow{}
 		for _, p := range active {
 			byCode[strings.ToUpper(strings.TrimSpace(p.Code))] = p
 		}
@@ -128,7 +129,7 @@ func (s *AssignService) scoreWithLLM(ctx context.Context, orgID, accountID uuid.
 
 // dedupeThreads keeps one representative message per conversation and labels
 // each with a stable per-call ref.
-func dedupeThreads(msgs []driven.MessageRow) []llmThread {
+func dedupeThreads(msgs []domainmessages.MessageRow) []llmThread {
 	seen := map[string]struct{}{}
 	out := make([]llmThread, 0, len(msgs))
 	for _, m := range msgs {
@@ -145,7 +146,7 @@ func dedupeThreads(msgs []driven.MessageRow) []llmThread {
 	return out
 }
 
-func (s *AssignService) callAssignLLM(ctx context.Context, batch []llmThread, projects []driven.ProjectRow) (*llmAssignPayload, error) {
+func (s *AssignService) callAssignLLM(ctx context.Context, batch []llmThread, projects []domainprojects.ProjectRow) (*llmAssignPayload, error) {
 	var b strings.Builder
 	b.WriteString("PROJECTS (choose only from these codes):\n")
 	for _, p := range projects {
@@ -187,7 +188,7 @@ func (s *AssignService) callAssignLLM(ctx context.Context, batch []llmThread, pr
 		"Omit threads with no clear project.\n" +
 		`Return JSON: {"schema_version":1,"assignments":[{"ref":"t1","project_code":"DC01","confidence":0.0,"reason":""}]}`
 
-	resp, err := s.LLM.ChatCompletion(ctx, []driven.LLMMessage{
+	resp, err := s.LLM.ChatCompletion(ctx, []domainai.LLMMessage{
 		{Role: "system", Content: system},
 		{Role: "user", Content: user},
 	})
@@ -199,7 +200,7 @@ func (s *AssignService) callAssignLLM(ctx context.Context, batch []llmThread, pr
 		return parsed, nil
 	}
 	// One repair attempt, mirroring categorize/interpret.
-	resp2, err2 := s.LLM.ChatCompletion(ctx, []driven.LLMMessage{
+	resp2, err2 := s.LLM.ChatCompletion(ctx, []domainai.LLMMessage{
 		{Role: "system", Content: "Fix the following into valid JSON only. Keep semantic meaning."},
 		{Role: "user", Content: resp.Content},
 	})

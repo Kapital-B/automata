@@ -4,14 +4,15 @@ import (
 	"context"
 	"database/sql"
 	"errors"
+	domainmessages "github.com/Kapital-B/automata/svc/internal/domain/messages"
 	"testing"
 	"time"
 
 	"github.com/Kapital-B/automata/svc/internal/adapters/outbound/persistence/sqlite"
 	"github.com/Kapital-B/automata/svc/internal/application/auth"
 	appfacts "github.com/Kapital-B/automata/svc/internal/application/facts"
-	"github.com/Kapital-B/automata/svc/internal/application/ports/driven"
 	appprojects "github.com/Kapital-B/automata/svc/internal/application/projects"
+	domainaccounts "github.com/Kapital-B/automata/svc/internal/domain/accounts"
 	domainprojects "github.com/Kapital-B/automata/svc/internal/domain/projects"
 	"github.com/google/uuid"
 	_ "modernc.org/sqlite"
@@ -47,7 +48,7 @@ func setupFacts(t *testing.T, name string) (*sql.DB, *sqlite.Repository, *appfac
 		t.Fatal(err)
 	}
 	accountID := uuid.New()
-	if err := repo.InsertAccount(context.Background(), driven.AccountRow{
+	if err := repo.InsertAccount(context.Background(), domainaccounts.AccountRow{
 		UserID: userID, ID: accountID, Label: "Work", Provider: "m365",
 		MsAccountKind: "work", PrimaryEmail: name + "@example.com", ConnectionStatus: "connected",
 	}, []byte("tok")); err != nil {
@@ -158,7 +159,7 @@ func TestEvidenceCascadeLinkOnly(t *testing.T) {
 	msgID := uuid.New()
 	conv := "conv-fact"
 	body := "75 kW"
-	if err := repo.UpsertMessage(ctx, driven.MessageRow{
+	if err := repo.UpsertMessage(ctx, domainmessages.MessageRow{
 		ID: msgID, AccountID: accountID, ProviderMessageID: msgID.String(),
 		ReceivedAt: time.Now().UTC(), Subject: "duty", BodyText: &body,
 		FromJSON: `{}`, ConversationID: &conv,

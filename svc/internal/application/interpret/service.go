@@ -9,9 +9,15 @@ import (
 	"strings"
 	"time"
 
-	"github.com/Kapital-B/automata/svc/internal/application/ports/driven"
+	domainai "github.com/Kapital-B/automata/svc/internal/domain/ai"
+	domainauth "github.com/Kapital-B/automata/svc/internal/domain/auth"
+	domainconnectors "github.com/Kapital-B/automata/svc/internal/domain/connectors"
 	domainfacts "github.com/Kapital-B/automata/svc/internal/domain/facts"
 	domaininterp "github.com/Kapital-B/automata/svc/internal/domain/interpretations"
+	domaininterpretations "github.com/Kapital-B/automata/svc/internal/domain/interpretations"
+	domainjobs "github.com/Kapital-B/automata/svc/internal/domain/jobs"
+	domainmessages "github.com/Kapital-B/automata/svc/internal/domain/messages"
+	domainprojects "github.com/Kapital-B/automata/svc/internal/domain/projects"
 	"github.com/google/uuid"
 )
 
@@ -25,17 +31,17 @@ var (
 
 // Service runs Stage A interpret and manages pending candidates.
 type Service struct {
-	Users           driven.UserRepository
-	Projects        driven.ProjectRepository
-	Interpretations driven.InterpretationRepository
-	Facts           driven.FactRepository
-	Timeline        driven.TimelineRepository
-	Assignments     driven.AssignmentRepository
-	Manuals         driven.ManualItemRepository
-	Messages        driven.MessageRepository
-	Connectors      driven.ConnectorRepository
-	JobRuns         driven.JobRunRepository
-	LLM             driven.LLMClient
+	Users           domainauth.UserRepository
+	Projects        domainprojects.ProjectRepository
+	Interpretations domaininterpretations.InterpretationRepository
+	Facts           domainfacts.FactRepository
+	Timeline        domainprojects.TimelineRepository
+	Assignments     domainprojects.AssignmentRepository
+	Manuals         domainprojects.ManualItemRepository
+	Messages        domainmessages.MessageRepository
+	Connectors      domainconnectors.ConnectorRepository
+	JobRuns         domainjobs.JobRunRepository
+	LLM             domainai.LLMClient
 }
 
 func (s *Service) HasLLM() bool {
@@ -55,8 +61,8 @@ type RunInput struct {
 }
 
 type InterpretationView struct {
-	Interpretation driven.InterpretationRow
-	Sources        []driven.InterpretationSourceRow
+	Interpretation domaininterpretations.InterpretationRow
+	Sources        []domaininterpretations.InterpretationSourceRow
 	Candidates     []CandidateView
 }
 
@@ -267,7 +273,7 @@ func (s *Service) Run(ctx context.Context, userID, projectID uuid.UUID, in RunIn
 		_ = s.JobRuns.InsertJobRun(ctx, runID, accForJob, "interpret_project", trigger, "success", now, now, nil, string(meta))
 	}
 
-	row := driven.InterpretationRow{
+	row := domaininterpretations.InterpretationRow{
 		ID: uuid.New(), OrganisationID: orgID, ProjectID: projectID,
 		AccountID: accountID, RunID: &runID,
 		Status: string(domaininterp.StatusPending), PayloadJSON: string(payloadBytes),
@@ -277,7 +283,7 @@ func (s *Service) Run(ctx context.Context, userID, projectID uuid.UUID, in RunIn
 		return nil, err
 	}
 	for _, it := range items {
-		src := driven.InterpretationSourceRow{
+		src := domaininterpretations.InterpretationSourceRow{
 			ID: uuid.New(), InterpretationID: row.ID,
 			MessageID: it.MessageID, ManualItemID: it.ManualItemID,
 			ConnectorMessageID: it.ConnectorMessageID,
@@ -372,7 +378,7 @@ func (s *Service) resolveItems(ctx context.Context, userID, orgID, projectID uui
 	if s.Timeline == nil {
 		return nil, nil, ErrNothingToInterpret
 	}
-	timeline, err := s.Timeline.ListProjectTimeline(ctx, userID, orgID, projectID, driven.TimelineFilter{
+	timeline, err := s.Timeline.ListProjectTimeline(ctx, userID, orgID, projectID, domainprojects.TimelineFilter{
 		Source: "all", Limit: 40,
 	})
 	if err != nil {
@@ -462,7 +468,7 @@ func (s *Service) loadActiveFactContext(ctx context.Context, orgID, projectID uu
 	return out, nil
 }
 
-func (s *Service) buildView(ctx context.Context, row driven.InterpretationRow) (*InterpretationView, error) {
+func (s *Service) buildView(ctx context.Context, row domaininterpretations.InterpretationRow) (*InterpretationView, error) {
 	sources, err := s.Interpretations.ListInterpretationSources(ctx, row.ID)
 	if err != nil {
 		return nil, err
@@ -487,7 +493,7 @@ func (s *Service) buildView(ctx context.Context, row driven.InterpretationRow) (
 
 // bodyOrSnippet prefers the stored body, which manual and connector timeline
 // items carry in full, over the list-sized snippet beside it.
-func bodyOrSnippet(it driven.TimelineItem) string {
+func bodyOrSnippet(it domainprojects.TimelineItem) string {
 	if strings.TrimSpace(it.BodyText) != "" {
 		return it.BodyText
 	}
@@ -551,7 +557,7 @@ func (s *Service) callInterpretLLM(ctx context.Context, prompt string) (*interpr
 		}
 		return &out, nil
 	}
-	resp, err := s.LLM.ChatCompletion(ctx, []driven.LLMMessage{
+	resp, err := s.LLM.ChatCompletion(ctx, []domainai.LLMMessage{
 		{Role: "system", Content: "You extract project facts, decisions and issues from correspondence. Return JSON only."},
 		{Role: "user", Content: prompt},
 	})
@@ -562,7 +568,7 @@ func (s *Service) callInterpretLLM(ctx context.Context, prompt string) (*interpr
 	if err == nil {
 		return parsed, nil
 	}
-	resp2, err2 := s.LLM.ChatCompletion(ctx, []driven.LLMMessage{
+	resp2, err2 := s.LLM.ChatCompletion(ctx, []domainai.LLMMessage{
 		{Role: "system", Content: "Fix the following into valid JSON only. Keep semantic meaning."},
 		{Role: "user", Content: resp.Content},
 	})

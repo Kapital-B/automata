@@ -14,9 +14,12 @@ import (
 	"github.com/Kapital-B/automata/svc/internal/adapters/outbound/persistence/sqlite"
 	"github.com/Kapital-B/automata/svc/internal/application/auth"
 	appissues "github.com/Kapital-B/automata/svc/internal/application/issues"
-	"github.com/Kapital-B/automata/svc/internal/application/ports/driven"
 	appprojects "github.com/Kapital-B/automata/svc/internal/application/projects"
 	apptodos "github.com/Kapital-B/automata/svc/internal/application/todos"
+	domainaccounts "github.com/Kapital-B/automata/svc/internal/domain/accounts"
+	domainissues "github.com/Kapital-B/automata/svc/internal/domain/issues"
+	domainmessages "github.com/Kapital-B/automata/svc/internal/domain/messages"
+
 	"github.com/google/uuid"
 	_ "modernc.org/sqlite"
 )
@@ -62,14 +65,14 @@ func TestProjectAndIssueTodosHTTP(t *testing.T) {
 		t.Fatal(err)
 	}
 	accountID := uuid.New()
-	if err := repo.InsertAccount(ctx, driven.AccountRow{
+	if err := repo.InsertAccount(ctx, domainaccounts.AccountRow{
 		UserID: userID, ID: accountID, Label: "Work", Provider: "m365",
 		MsAccountKind: "work", PrimaryEmail: "todos@example.com", ConnectionStatus: "connected",
 	}, []byte("tok")); err != nil {
 		t.Fatal(err)
 	}
 	msgID := uuid.New()
-	if err := repo.UpsertMessage(ctx, driven.MessageRow{
+	if err := repo.UpsertMessage(ctx, domainmessages.MessageRow{
 		ID: msgID, AccountID: accountID, ProviderMessageID: msgID.String(),
 		ReceivedAt: now, Subject: "Pump duty", FromJSON: `{}`,
 	}); err != nil {
@@ -81,7 +84,7 @@ func TestProjectAndIssueTodosHTTP(t *testing.T) {
 	}
 	todoID := uuid.New()
 	due := now.Add(48 * time.Hour)
-	if err := repo.InsertActionItems(ctx, []driven.ActionItemRow{{
+	if err := repo.InsertActionItems(ctx, []domainmessages.ActionItemRow{{
 		ID: todoID, UserID: userID, AccountID: accountID, MessageID: msgID, RunID: runID,
 		Text: "Reply to Jan", DueAt: &due, Status: "open", CreatedAt: now, UpdatedAt: now,
 	}}); err != nil {
@@ -91,7 +94,7 @@ func TestProjectAndIssueTodosHTTP(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := repo.AddIssueItem(ctx, driven.IssueItemRow{ID: uuid.New(), IssueID: view.Issue.ID, MessageID: &msgID, AddedAt: now}); err != nil {
+	if err := repo.AddIssueItem(ctx, domainissues.IssueItemRow{ID: uuid.New(), IssueID: view.Issue.ID, MessageID: &msgID, AddedAt: now}); err != nil {
 		t.Fatal(err)
 	}
 
@@ -203,7 +206,7 @@ func TestProjectAndIssueTodosHTTP(t *testing.T) {
 
 	// Resolving with complete_todos closes what is on the issue.
 	second := uuid.New()
-	if err := repo.InsertActionItems(ctx, []driven.ActionItemRow{{
+	if err := repo.InsertActionItems(ctx, []domainmessages.ActionItemRow{{
 		ID: second, UserID: userID, AccountID: accountID, MessageID: msgID, RunID: runID,
 		Text: "Confirm the duty", Status: "open", CreatedAt: now, UpdatedAt: now,
 	}}); err != nil {

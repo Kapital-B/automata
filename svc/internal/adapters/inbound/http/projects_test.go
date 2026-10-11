@@ -5,6 +5,7 @@ import (
 	"context"
 	"database/sql"
 	"encoding/json"
+	domainmessages "github.com/Kapital-B/automata/svc/internal/domain/messages"
 	"log/slog"
 	"net/http"
 	"net/http/httptest"
@@ -13,8 +14,9 @@ import (
 
 	"github.com/Kapital-B/automata/svc/internal/adapters/outbound/persistence/sqlite"
 	"github.com/Kapital-B/automata/svc/internal/application/auth"
-	"github.com/Kapital-B/automata/svc/internal/application/ports/driven"
 	appprojects "github.com/Kapital-B/automata/svc/internal/application/projects"
+	domainaccounts "github.com/Kapital-B/automata/svc/internal/domain/accounts"
+
 	"github.com/google/uuid"
 	_ "modernc.org/sqlite"
 )
@@ -110,7 +112,7 @@ func TestAssignMessageHTTP(t *testing.T) {
 	ctx := context.Background()
 	now := time.Now().UTC()
 	accountID := uuid.New()
-	if err := repo.InsertAccount(ctx, driven.AccountRow{
+	if err := repo.InsertAccount(ctx, domainaccounts.AccountRow{
 		UserID: userID, ID: accountID, Label: "Work", Provider: "m365",
 		MsAccountKind: "work", PrimaryEmail: "assign@example.com", ConnectionStatus: "connected",
 	}, []byte("tok")); err != nil {
@@ -122,7 +124,7 @@ func TestAssignMessageHTTP(t *testing.T) {
 	}
 	conv := "thread-1"
 	msgID := uuid.New()
-	if err := repo.UpsertMessage(ctx, driven.MessageRow{
+	if err := repo.UpsertMessage(ctx, domainmessages.MessageRow{
 		ID: msgID, AccountID: accountID, ProviderMessageID: "pm1",
 		ReceivedAt: now, Subject: "hi", FromJSON: `{}`, ConversationID: &conv,
 	}); err != nil {

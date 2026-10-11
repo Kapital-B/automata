@@ -9,7 +9,8 @@ import (
 	"strings"
 	"time"
 
-	"github.com/Kapital-B/automata/svc/internal/application/ports/driven"
+	domainmessages "github.com/Kapital-B/automata/svc/internal/domain/messages"
+	domainprojects "github.com/Kapital-B/automata/svc/internal/domain/projects"
 	"github.com/google/uuid"
 )
 
@@ -55,7 +56,7 @@ func scanUUIDColumn(rows *sql.Rows) ([]uuid.UUID, error) {
 	return out, rows.Err()
 }
 
-func (r *Repository) ListProjects(ctx context.Context, organisationID uuid.UUID, filter driven.ProjectListFilter) ([]driven.ProjectRow, error) {
+func (r *Repository) ListProjects(ctx context.Context, organisationID uuid.UUID, filter domainprojects.ProjectListFilter) ([]domainprojects.ProjectRow, error) {
 	limit := filter.Limit
 	if limit <= 0 {
 		limit = 100
@@ -82,7 +83,7 @@ func (r *Repository) ListProjects(ctx context.Context, organisationID uuid.UUID,
 		return nil, err
 	}
 	defer rows.Close()
-	out := make([]driven.ProjectRow, 0)
+	out := make([]domainprojects.ProjectRow, 0)
 	for rows.Next() {
 		p, err := scanProjectRow(rows)
 		if err != nil {
@@ -93,7 +94,7 @@ func (r *Repository) ListProjects(ctx context.Context, organisationID uuid.UUID,
 	return out, rows.Err()
 }
 
-func (r *Repository) GetProject(ctx context.Context, organisationID, projectID uuid.UUID) (*driven.ProjectRow, error) {
+func (r *Repository) GetProject(ctx context.Context, organisationID, projectID uuid.UUID) (*domainprojects.ProjectRow, error) {
 	row := r.db.QueryRowContext(ctx, `
 		SELECT id, organisation_id, name, code, description, client, keywords_json, archived_at, created_at, updated_at, last_extracted_at
 		FROM projects WHERE id = ? AND organisation_id = ?
@@ -105,7 +106,7 @@ func (r *Repository) GetProject(ctx context.Context, organisationID, projectID u
 	return p, err
 }
 
-func (r *Repository) GetProjectByCode(ctx context.Context, organisationID uuid.UUID, code string) (*driven.ProjectRow, error) {
+func (r *Repository) GetProjectByCode(ctx context.Context, organisationID uuid.UUID, code string) (*domainprojects.ProjectRow, error) {
 	row := r.db.QueryRowContext(ctx, `
 		SELECT id, organisation_id, name, code, description, client, keywords_json, archived_at, created_at, updated_at, last_extracted_at
 		FROM projects WHERE organisation_id = ? AND code = ?
@@ -117,7 +118,7 @@ func (r *Repository) GetProjectByCode(ctx context.Context, organisationID uuid.U
 	return p, err
 }
 
-func (r *Repository) CreateProject(ctx context.Context, project driven.ProjectRow, member driven.ProjectMemberRow) error {
+func (r *Repository) CreateProject(ctx context.Context, project domainprojects.ProjectRow, member domainprojects.ProjectMemberRow) error {
 	tx, err := r.db.BeginTx(ctx, nil)
 	if err != nil {
 		return err
@@ -150,7 +151,7 @@ func (r *Repository) CreateProject(ctx context.Context, project driven.ProjectRo
 	return tx.Commit()
 }
 
-func (r *Repository) UpdateProject(ctx context.Context, project driven.ProjectRow) error {
+func (r *Repository) UpdateProject(ctx context.Context, project domainprojects.ProjectRow) error {
 	kw, _ := json.Marshal(project.Keywords)
 	if project.Keywords == nil {
 		kw = []byte("[]")
@@ -167,7 +168,7 @@ func (r *Repository) UpdateProject(ctx context.Context, project driven.ProjectRo
 	return err
 }
 
-func (r *Repository) GetProjectMember(ctx context.Context, projectID, userID uuid.UUID) (*driven.ProjectMemberRow, error) {
+func (r *Repository) GetProjectMember(ctx context.Context, projectID, userID uuid.UUID) (*domainprojects.ProjectMemberRow, error) {
 	row := r.db.QueryRowContext(ctx, `
 		SELECT id, project_id, user_id, role, discipline, responsibilities, current_scope, approval_authority, out_of_scope, created_at, updated_at
 		FROM project_members WHERE project_id = ? AND user_id = ?
@@ -179,7 +180,7 @@ func (r *Repository) GetProjectMember(ctx context.Context, projectID, userID uui
 	return m, err
 }
 
-func (r *Repository) UpdateProjectMember(ctx context.Context, member driven.ProjectMemberRow) error {
+func (r *Repository) UpdateProjectMember(ctx context.Context, member domainprojects.ProjectMemberRow) error {
 	_, err := r.db.ExecContext(ctx, `
 		UPDATE project_members
 		SET role = ?, discipline = ?, responsibilities = ?, current_scope = ?, approval_authority = ?, out_of_scope = ?, updated_at = ?
@@ -205,7 +206,7 @@ func (r *Repository) CountProjectMembers(ctx context.Context, projectID uuid.UUI
 	return n, err
 }
 
-func scanProjectRow(s rowScanner) (*driven.ProjectRow, error) {
+func scanProjectRow(s rowScanner) (*domainprojects.ProjectRow, error) {
 	var idStr, orgStr, name, code, kwJSON, createdAt, updatedAt string
 	var desc, client, archived, lastExtracted sql.NullString
 	if err := s.Scan(&idStr, &orgStr, &name, &code, &desc, &client, &kwJSON, &archived, &createdAt, &updatedAt, &lastExtracted); err != nil {
@@ -234,7 +235,7 @@ func scanProjectRow(s rowScanner) (*driven.ProjectRow, error) {
 	if keywords == nil {
 		keywords = []string{}
 	}
-	p := &driven.ProjectRow{
+	p := &domainprojects.ProjectRow{
 		ID: id, OrganisationID: orgID, Name: name, Code: code,
 		Description: nullStringPtr(desc), Client: nullStringPtr(client),
 		Keywords: keywords, CreatedAt: cat, UpdatedAt: uat,
@@ -256,7 +257,7 @@ func scanProjectRow(s rowScanner) (*driven.ProjectRow, error) {
 	return p, nil
 }
 
-func scanMemberRow(s rowScanner) (*driven.ProjectMemberRow, error) {
+func scanMemberRow(s rowScanner) (*domainprojects.ProjectMemberRow, error) {
 	var idStr, projStr, userStr, role, createdAt, updatedAt string
 	var discipline, resp, scope, approval, out sql.NullString
 	if err := s.Scan(&idStr, &projStr, &userStr, &role, &discipline, &resp, &scope, &approval, &out, &createdAt, &updatedAt); err != nil {
@@ -282,7 +283,7 @@ func scanMemberRow(s rowScanner) (*driven.ProjectMemberRow, error) {
 	if err != nil {
 		return nil, err
 	}
-	return &driven.ProjectMemberRow{
+	return &domainprojects.ProjectMemberRow{
 		ID: id, ProjectID: projID, UserID: userID, Role: role,
 		Discipline: nullStringPtr(discipline), Responsibilities: nullStringPtr(resp),
 		CurrentScope: nullStringPtr(scope), ApprovalAuthority: nullStringPtr(approval),
@@ -314,7 +315,7 @@ const upsertThreadAssignmentSQL = `
 			updated_at = excluded.updated_at
 		WHERE thread_assignments.source <> 'user' OR excluded.source = 'user'`
 
-func assignmentNullables(row driven.AssignmentRow) (proj, runID, assignedBy, conf any) {
+func assignmentNullables(row domainprojects.AssignmentRow) (proj, runID, assignedBy, conf any) {
 	if row.ProjectID != nil {
 		proj = row.ProjectID.String()
 	}
@@ -330,7 +331,7 @@ func assignmentNullables(row driven.AssignmentRow) (proj, runID, assignedBy, con
 	return proj, runID, assignedBy, conf
 }
 
-func threadAssignmentArgs(row driven.AssignmentRow) []any {
+func threadAssignmentArgs(row domainprojects.AssignmentRow) []any {
 	proj, runID, assignedBy, conf := assignmentNullables(row)
 	return []any{row.ID.String(), row.OrganisationID.String(), row.AccountID.String(), row.ConversationID,
 		proj, row.Status, conf, row.Reason, row.Source, runID, assignedBy,
@@ -338,18 +339,18 @@ func threadAssignmentArgs(row driven.AssignmentRow) []any {
 		nullTimeStr(row.NotRelevantAt)}
 }
 
-func (r *Repository) UpsertThreadAssignment(ctx context.Context, row driven.AssignmentRow) error {
+func (r *Repository) UpsertThreadAssignment(ctx context.Context, row domainprojects.AssignmentRow) error {
 	_, err := r.db.ExecContext(ctx, upsertThreadAssignmentSQL, threadAssignmentArgs(row)...)
 	return err
 }
 
-func (r *Repository) UpsertThreadAssignments(ctx context.Context, rows []driven.AssignmentRow) error {
+func (r *Repository) UpsertThreadAssignments(ctx context.Context, rows []domainprojects.AssignmentRow) error {
 	return r.chunkedAssignmentTx(ctx, rows, upsertThreadAssignmentSQL, threadAssignmentArgs)
 }
 
 // chunkedAssignmentTx applies the statement to every row, committing one
 // transaction per chunk.
-func (r *Repository) chunkedAssignmentTx(ctx context.Context, rows []driven.AssignmentRow, stmt string, args func(driven.AssignmentRow) []any) error {
+func (r *Repository) chunkedAssignmentTx(ctx context.Context, rows []domainprojects.AssignmentRow, stmt string, args func(domainprojects.AssignmentRow) []any) error {
 	for start := 0; start < len(rows); start += assignmentUpsertChunk {
 		end := start + assignmentUpsertChunk
 		if end > len(rows) {
@@ -373,7 +374,7 @@ func (r *Repository) chunkedAssignmentTx(ctx context.Context, rows []driven.Assi
 	return nil
 }
 
-func (r *Repository) GetThreadAssignment(ctx context.Context, accountID uuid.UUID, conversationID string) (*driven.AssignmentRow, error) {
+func (r *Repository) GetThreadAssignment(ctx context.Context, accountID uuid.UUID, conversationID string) (*domainprojects.AssignmentRow, error) {
 	row := r.db.QueryRowContext(ctx, `
 		SELECT id, organisation_id, account_id, conversation_id, project_id, status, confidence, reason, source,
 			run_id, assigned_by_user_id, created_at, updated_at, not_relevant_at
@@ -411,7 +412,7 @@ const upsertMessageOverrideSQL = `
 			updated_at = excluded.updated_at
 		WHERE message_assignment_overrides.source <> 'user' OR excluded.source = 'user'`
 
-func messageOverrideArgs(row driven.AssignmentRow) []any {
+func messageOverrideArgs(row domainprojects.AssignmentRow) []any {
 	proj, runID, assignedBy, conf := assignmentNullables(row)
 	return []any{row.MessageID.String(), row.OrganisationID.String(), row.AccountID.String(),
 		proj, row.Status, conf, row.Reason, row.Source, runID, assignedBy,
@@ -419,7 +420,7 @@ func messageOverrideArgs(row driven.AssignmentRow) []any {
 		nullTimeStr(row.NotRelevantAt)}
 }
 
-func (r *Repository) UpsertMessageOverride(ctx context.Context, row driven.AssignmentRow) error {
+func (r *Repository) UpsertMessageOverride(ctx context.Context, row domainprojects.AssignmentRow) error {
 	if row.MessageID == nil {
 		return fmt.Errorf("message override requires message_id")
 	}
@@ -427,7 +428,7 @@ func (r *Repository) UpsertMessageOverride(ctx context.Context, row driven.Assig
 	return err
 }
 
-func (r *Repository) UpsertMessageOverrides(ctx context.Context, rows []driven.AssignmentRow) error {
+func (r *Repository) UpsertMessageOverrides(ctx context.Context, rows []domainprojects.AssignmentRow) error {
 	for _, row := range rows {
 		if row.MessageID == nil {
 			return fmt.Errorf("message override requires message_id")
@@ -436,7 +437,7 @@ func (r *Repository) UpsertMessageOverrides(ctx context.Context, rows []driven.A
 	return r.chunkedAssignmentTx(ctx, rows, upsertMessageOverrideSQL, messageOverrideArgs)
 }
 
-func (r *Repository) GetMessageOverride(ctx context.Context, messageID uuid.UUID) (*driven.AssignmentRow, error) {
+func (r *Repository) GetMessageOverride(ctx context.Context, messageID uuid.UUID) (*domainprojects.AssignmentRow, error) {
 	row := r.db.QueryRowContext(ctx, `
 		SELECT message_id, organisation_id, account_id, project_id, status, confidence, reason, source,
 			run_id, assigned_by_user_id, created_at, updated_at, not_relevant_at
@@ -454,7 +455,7 @@ func (r *Repository) DeleteMessageOverride(ctx context.Context, messageID uuid.U
 	return err
 }
 
-func (r *Repository) EffectiveAssignment(ctx context.Context, userID, messageID uuid.UUID) (*driven.EffectiveAssignment, error) {
+func (r *Repository) EffectiveAssignment(ctx context.Context, userID, messageID uuid.UUID) (*domainprojects.EffectiveAssignment, error) {
 	msg, err := r.GetMessage(ctx, userID, messageID)
 	if err != nil {
 		return nil, err
@@ -462,7 +463,7 @@ func (r *Repository) EffectiveAssignment(ctx context.Context, userID, messageID 
 	if msg == nil {
 		return nil, nil
 	}
-	out := &driven.EffectiveAssignment{
+	out := &domainprojects.EffectiveAssignment{
 		Status:    "unassigned",
 		Scope:     "none",
 		AccountID: msg.AccountID,
@@ -509,7 +510,7 @@ func (r *Repository) EffectiveAssignment(ctx context.Context, userID, messageID 
 }
 
 // EffectiveProjectIDsForMessages resolves projects for a page of messages in one query.
-func (r *Repository) EffectiveProjectIDsForMessages(ctx context.Context, userID uuid.UUID, messages []driven.MessageRow) (map[uuid.UUID]*uuid.UUID, error) {
+func (r *Repository) EffectiveProjectIDsForMessages(ctx context.Context, userID uuid.UUID, messages []domainmessages.MessageRow) (map[uuid.UUID]*uuid.UUID, error) {
 	out := make(map[uuid.UUID]*uuid.UUID, len(messages))
 	if len(messages) == 0 {
 		return out, nil
@@ -639,7 +640,7 @@ func normalizeUnassignedStatus(status string) string {
 	return s
 }
 
-func (r *Repository) ListUnassigned(ctx context.Context, userID uuid.UUID, filter driven.UnassignedListFilter) ([]driven.UnassignedItem, error) {
+func (r *Repository) ListUnassigned(ctx context.Context, userID uuid.UUID, filter domainprojects.UnassignedListFilter) ([]domainprojects.UnassignedItem, error) {
 	limit := filter.Limit
 	if limit <= 0 {
 		limit = 50
@@ -701,8 +702,8 @@ func (r *Repository) ListUnassigned(ctx context.Context, userID uuid.UUID, filte
 	return scanUnassignedRows(rows)
 }
 
-func scanUnassignedRows(rows *sql.Rows) ([]driven.UnassignedItem, error) {
-	out := make([]driven.UnassignedItem, 0)
+func scanUnassignedRows(rows *sql.Rows) ([]domainprojects.UnassignedItem, error) {
+	out := make([]domainprojects.UnassignedItem, 0)
 	for rows.Next() {
 		var kind, idStr, accountLabel, subject, fromJSON, channel, status, reason, source string
 		var accountID, conversationID, projectID sql.NullString
@@ -726,7 +727,7 @@ func scanUnassignedRows(rows *sql.Rows) ([]driven.UnassignedItem, error) {
 		if threadCount < 1 {
 			threadCount = 1
 		}
-		item := driven.UnassignedItem{
+		item := domainprojects.UnassignedItem{
 			Kind:        kind,
 			Subject:     subject,
 			Channel:     channel,
@@ -776,8 +777,8 @@ func scanUnassignedRows(rows *sql.Rows) ([]driven.UnassignedItem, error) {
 	return out, rows.Err()
 }
 
-func (r *Repository) CountUnassignedSummary(ctx context.Context, userID uuid.UUID) (driven.UnassignedSummary, error) {
-	var sum driven.UnassignedSummary
+func (r *Repository) CountUnassignedSummary(ctx context.Context, userID uuid.UUID) (domainprojects.UnassignedSummary, error) {
+	var sum domainprojects.UnassignedSummary
 	orgID, err := r.GetHomeOrganisationID(ctx, userID)
 	if err != nil {
 		return sum, err
@@ -799,7 +800,7 @@ func (r *Repository) CountUnassignedSummary(ctx context.Context, userID uuid.UUI
 		var dismissed bool
 		var n int
 		if err := rows.Scan(&status, &dismissed, &n); err != nil {
-			return driven.UnassignedSummary{}, err
+			return domainprojects.UnassignedSummary{}, err
 		}
 		// Dismissed items are reported separately and never counted toward the
 		// badge, whatever status their row carries.
@@ -816,7 +817,7 @@ func (r *Repository) CountUnassignedSummary(ctx context.Context, userID uuid.UUI
 	return sum, rows.Err()
 }
 
-func (r *Repository) ListMessagesNeedingContactResolution(ctx context.Context, userID, accountID uuid.UUID, limit int) ([]driven.MessageRow, error) {
+func (r *Repository) ListMessagesNeedingContactResolution(ctx context.Context, userID, accountID uuid.UUID, limit int) ([]domainmessages.MessageRow, error) {
 	if limit <= 0 {
 		limit = 100
 	}
@@ -872,7 +873,7 @@ func (r *Repository) MarkContactsResolved(ctx context.Context, userID uuid.UUID,
 // ListMessagesNeedingAssign returns what automatic assignment may place:
 // messages with no assignment, or only a machine's provisional suggestion.
 // Rows a user wrote are excluded, so a triage decision is never re-scored.
-func (r *Repository) ListMessagesNeedingAssign(ctx context.Context, userID, accountID uuid.UUID, filter driven.AssignCandidateFilter) ([]driven.MessageRow, error) {
+func (r *Repository) ListMessagesNeedingAssign(ctx context.Context, userID, accountID uuid.UUID, filter domainprojects.AssignCandidateFilter) ([]domainmessages.MessageRow, error) {
 	limit := filter.Limit
 	if limit <= 0 {
 		limit = 500
@@ -918,7 +919,7 @@ func (r *Repository) FindCommittedSiblingProject(ctx context.Context, userID, ac
 	if strings.TrimSpace(conversationID) == "" {
 		return nil, nil
 	}
-	msgs, err := r.ListMessages(ctx, userID, driven.MessageListFilter{AccountID: &accountID, Limit: 200})
+	msgs, err := r.ListMessages(ctx, userID, domainmessages.MessageListFilter{AccountID: &accountID, Limit: 200})
 	if err != nil {
 		return nil, err
 	}
@@ -940,7 +941,7 @@ func (r *Repository) FindCommittedSiblingProject(ctx context.Context, userID, ac
 	return nil, nil
 }
 
-func scanThreadAssignment(s rowScanner) (*driven.AssignmentRow, error) {
+func scanThreadAssignment(s rowScanner) (*domainprojects.AssignmentRow, error) {
 	var idStr, orgStr, accStr, conv, status, reason, source, createdAt, updatedAt string
 	var proj, runID, assignedBy sql.NullString
 	var conf sql.NullFloat64
@@ -951,7 +952,7 @@ func scanThreadAssignment(s rowScanner) (*driven.AssignmentRow, error) {
 	return buildAssignmentRow(idStr, orgStr, accStr, conv, nil, proj, status, conf, reason, source, runID, assignedBy, createdAt, updatedAt, notRelevantAt)
 }
 
-func scanOverrideAssignment(s rowScanner) (*driven.AssignmentRow, error) {
+func scanOverrideAssignment(s rowScanner) (*domainprojects.AssignmentRow, error) {
 	var msgStr, orgStr, accStr, status, reason, source, createdAt, updatedAt string
 	var proj, runID, assignedBy sql.NullString
 	var conf sql.NullFloat64
@@ -966,7 +967,7 @@ func scanOverrideAssignment(s rowScanner) (*driven.AssignmentRow, error) {
 	return buildAssignmentRow(uuid.Nil.String(), orgStr, accStr, "", &msgID, proj, status, conf, reason, source, runID, assignedBy, createdAt, updatedAt, notRelevantAt)
 }
 
-func buildAssignmentRow(idStr, orgStr, accStr, conv string, messageID *uuid.UUID, proj sql.NullString, status string, conf sql.NullFloat64, reason, source string, runID, assignedBy sql.NullString, createdAt, updatedAt string, notRelevantAt sql.NullString) (*driven.AssignmentRow, error) {
+func buildAssignmentRow(idStr, orgStr, accStr, conv string, messageID *uuid.UUID, proj sql.NullString, status string, conf sql.NullFloat64, reason, source string, runID, assignedBy sql.NullString, createdAt, updatedAt string, notRelevantAt sql.NullString) (*domainprojects.AssignmentRow, error) {
 	var id uuid.UUID
 	var err error
 	if idStr != "" && idStr != uuid.Nil.String() {
@@ -993,7 +994,7 @@ func buildAssignmentRow(idStr, orgStr, accStr, conv string, messageID *uuid.UUID
 	if err != nil {
 		return nil, err
 	}
-	row := &driven.AssignmentRow{
+	row := &domainprojects.AssignmentRow{
 		ID: id, OrganisationID: orgID, AccountID: accID, ConversationID: conv,
 		MessageID: messageID, Status: status, Reason: reason, Source: source,
 		CreatedAt: cat, UpdatedAt: uat,

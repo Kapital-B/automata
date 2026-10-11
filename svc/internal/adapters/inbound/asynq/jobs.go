@@ -10,7 +10,7 @@ import (
 
 	appconnectors "github.com/Kapital-B/automata/svc/internal/application/connectors"
 	appmessages "github.com/Kapital-B/automata/svc/internal/application/messages"
-	"github.com/Kapital-B/automata/svc/internal/application/ports/driven"
+	domainjobs "github.com/Kapital-B/automata/svc/internal/domain/jobs"
 	"github.com/google/uuid"
 	"github.com/hibiken/asynq"
 )
@@ -116,8 +116,8 @@ type WorkerDeps struct {
 	AutoDraftSvc    *appmessages.AutoDraftService
 	ForwardRulesSvc *appmessages.ForwardRulesService
 	ConnectorSync   *appconnectors.Service
-	JobRuns         driven.JobRunRepository
-	Execution       driven.JobExecutionPort
+	JobRuns         domainjobs.JobRunRepository
+	Execution       domainjobs.JobExecutionPort
 	GlobalSemaphore chan struct{}
 	Queue           *QueueClient
 }

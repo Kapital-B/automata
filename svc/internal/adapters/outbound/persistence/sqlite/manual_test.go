@@ -2,11 +2,11 @@ package sqlite_test
 
 import (
 	"context"
+	domainmessages "github.com/Kapital-B/automata/svc/internal/domain/messages"
 	"testing"
 	"time"
 
 	"github.com/Kapital-B/automata/svc/internal/adapters/outbound/persistence/sqlite"
-	"github.com/Kapital-B/automata/svc/internal/application/ports/driven"
 	appprojects "github.com/Kapital-B/automata/svc/internal/application/projects"
 	domainprojects "github.com/Kapital-B/automata/svc/internal/domain/projects"
 	"github.com/google/uuid"
@@ -36,7 +36,7 @@ func TestManualCreateAndTimelineOrder(t *testing.T) {
 	conv := "conv-tl"
 	msgID := uuid.New()
 	body := "pump sizing"
-	if err := repo.UpsertMessage(ctx, driven.MessageRow{
+	if err := repo.UpsertMessage(ctx, domainmessages.MessageRow{
 		ID: msgID, AccountID: accountID, ProviderMessageID: "pm-tl",
 		ReceivedAt: early, Subject: "Outlook: pump", FromJSON: `{}`,
 		ConversationID: &conv, BodyText: &body,
@@ -60,7 +60,7 @@ func TestManualCreateAndTimelineOrder(t *testing.T) {
 		t.Fatalf("body=%q", manual.BodyText)
 	}
 
-	items, err := svc.GetTimeline(ctx, userID, p.ID, driven.TimelineFilter{Source: "all", Limit: 20})
+	items, err := svc.GetTimeline(ctx, userID, p.ID, domainprojects.TimelineFilter{Source: "all", Limit: 20})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -97,7 +97,7 @@ func TestManualUnassignedAndAssign(t *testing.T) {
 		t.Fatalf("manual=%+v", manual)
 	}
 
-	list, err := svc.ListUnassigned(ctx, userID, driven.UnassignedListFilter{Status: "all", Limit: 50})
+	list, err := svc.ListUnassigned(ctx, userID, domainprojects.UnassignedListFilter{Status: "all", Limit: 50})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -120,7 +120,7 @@ func TestManualUnassignedAndAssign(t *testing.T) {
 		t.Fatalf("updated=%+v", updated)
 	}
 
-	tl, err := svc.GetTimeline(ctx, userID, p.ID, driven.TimelineFilter{Source: "manual"})
+	tl, err := svc.GetTimeline(ctx, userID, p.ID, domainprojects.TimelineFilter{Source: "manual"})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -144,7 +144,7 @@ func TestManualOrgIsolation(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	got, err := svc.GetTimeline(ctx, u2, p1.ID, driven.TimelineFilter{})
+	got, err := svc.GetTimeline(ctx, u2, p1.ID, domainprojects.TimelineFilter{})
 	if err == nil {
 		t.Fatalf("user2 must not load user1 project, got %d items", len(got))
 	}

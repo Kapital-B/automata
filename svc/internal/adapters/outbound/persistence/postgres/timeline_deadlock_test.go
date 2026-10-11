@@ -3,6 +3,7 @@ package postgres_test
 import (
 	"context"
 	"database/sql"
+	domainmessages "github.com/Kapital-B/automata/svc/internal/domain/messages"
 	"os"
 	"strings"
 	"testing"
@@ -11,7 +12,8 @@ import (
 	"github.com/Kapital-B/automata/svc/internal/adapters/outbound/persistence/factory"
 	pgmigrate "github.com/Kapital-B/automata/svc/internal/adapters/outbound/persistence/migrate"
 	"github.com/Kapital-B/automata/svc/internal/adapters/outbound/persistence/postgres"
-	"github.com/Kapital-B/automata/svc/internal/application/ports/driven"
+	domainaccounts "github.com/Kapital-B/automata/svc/internal/domain/accounts"
+	domainprojects "github.com/Kapital-B/automata/svc/internal/domain/projects"
 	"github.com/google/uuid"
 )
 
@@ -68,16 +70,16 @@ func TestProjectTimelineOnSingleConnectionPool(t *testing.T) {
 		t.Fatal(err)
 	}
 	accountID := uuid.New()
-	if err := repo.InsertAccount(ctx, driven.AccountRow{
+	if err := repo.InsertAccount(ctx, domainaccounts.AccountRow{
 		UserID: userID, ID: accountID, Label: "Work", Provider: "m365",
 		MsAccountKind: "work", PrimaryEmail: "tl@example.com", ConnectionStatus: "connected",
 	}, []byte("tok")); err != nil {
 		t.Fatal(err)
 	}
 	projectID := uuid.New()
-	if err := repo.CreateProject(ctx, driven.ProjectRow{
+	if err := repo.CreateProject(ctx, domainprojects.ProjectRow{
 		ID: projectID, OrganisationID: orgID, Name: "Timeline", Code: "DC06", CreatedAt: now, UpdatedAt: now,
-	}, driven.ProjectMemberRow{
+	}, domainprojects.ProjectMemberRow{
 		ID: uuid.New(), ProjectID: projectID, UserID: userID, Role: "owner", CreatedAt: now, UpdatedAt: now,
 	}); err != nil {
 		t.Fatal(err)
@@ -87,14 +89,14 @@ func TestProjectTimelineOnSingleConnectionPool(t *testing.T) {
 	for i := 0; i < 25; i++ {
 		conv := "conv-" + uuid.NewString()
 		msgID := uuid.New()
-		if err := repo.UpsertMessage(ctx, driven.MessageRow{
+		if err := repo.UpsertMessage(ctx, domainmessages.MessageRow{
 			ID: msgID, AccountID: accountID, ProviderMessageID: msgID.String(), Subject: "mail",
 			FromJSON: `{"address":"a@b.com"}`, ConversationID: &conv, BodyText: &body,
 			ReceivedAt: now.Add(-time.Duration(i) * time.Minute), CreatedAt: now, UpdatedAt: now,
 		}); err != nil {
 			t.Fatal(err)
 		}
-		if err := repo.UpsertThreadAssignment(ctx, driven.AssignmentRow{
+		if err := repo.UpsertThreadAssignment(ctx, domainprojects.AssignmentRow{
 			ID: uuid.New(), OrganisationID: orgID, AccountID: accountID, ConversationID: conv,
 			ProjectID: &projectID, Status: "committed", Reason: "seed", Source: "user",
 			CreatedAt: now, UpdatedAt: now,
@@ -104,12 +106,12 @@ func TestProjectTimelineOnSingleConnectionPool(t *testing.T) {
 	}
 
 	type result struct {
-		items []driven.TimelineItem
+		items []domainprojects.TimelineItem
 		err   error
 	}
 	done := make(chan result, 1)
 	go func() {
-		items, err := repo.ListProjectTimeline(ctx, userID, orgID, projectID, driven.TimelineFilter{Limit: 100})
+		items, err := repo.ListProjectTimeline(ctx, userID, orgID, projectID, domainprojects.TimelineFilter{Limit: 100})
 		done <- result{items, err}
 	}()
 

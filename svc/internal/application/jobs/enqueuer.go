@@ -5,17 +5,17 @@ import (
 	"fmt"
 	"time"
 
-	"github.com/Kapital-B/automata/svc/internal/application/ports/driven"
+	domainjobs "github.com/Kapital-B/automata/svc/internal/domain/jobs"
 	"github.com/google/uuid"
 )
 
 // Enqueuer validates job types/chains and creates pending control-plane items.
 type Enqueuer struct {
-	Store    driven.JobStore
+	Store    domainjobs.JobStore
 	Registry *Registry
 }
 
-func (e *Enqueuer) Enqueue(ctx context.Context, in driven.CreateJobInput) (*driven.JobRecord, error) {
+func (e *Enqueuer) Enqueue(ctx context.Context, in domainjobs.CreateJobInput) (*domainjobs.JobRecord, error) {
 	if e == nil || e.Store == nil {
 		return nil, fmt.Errorf("job enqueuer not configured")
 	}
@@ -56,7 +56,7 @@ func (e *Enqueuer) Enqueue(ctx context.Context, in driven.CreateJobInput) (*driv
 		}
 	}
 	if in.TriggerKind == "" {
-		in.TriggerKind = driven.JobTriggerAPI
+		in.TriggerKind = domainjobs.JobTriggerAPI
 	}
 	def := reg.MustGet(name)
 	if def.RequiresLock {
@@ -88,7 +88,7 @@ func (e *Enqueuer) Enqueue(ctx context.Context, in driven.CreateJobInput) (*driv
 }
 
 // EnqueueChain creates the first pending step of a validated chain.
-func (e *Enqueuer) EnqueueChain(ctx context.Context, userID uuid.UUID, accountID *uuid.UUID, trigger string, chain []string, payload driven.JobPayload, scheduleID *uuid.UUID, scheduledFor *time.Time) (*driven.JobRecord, error) {
+func (e *Enqueuer) EnqueueChain(ctx context.Context, userID uuid.UUID, accountID *uuid.UUID, trigger string, chain []string, payload domainjobs.JobPayload, scheduleID *uuid.UUID, scheduledFor *time.Time) (*domainjobs.JobRecord, error) {
 	reg := e.Registry
 	if reg == nil {
 		reg = DefaultRegistry()
@@ -109,7 +109,7 @@ func (e *Enqueuer) EnqueueChain(ctx context.Context, userID uuid.UUID, accountID
 		jobID = DeterministicJobID(chainID, 0, steps[0])
 	}
 	remaining := append([]string(nil), steps[1:]...)
-	return e.Enqueue(ctx, driven.CreateJobInput{
+	return e.Enqueue(ctx, domainjobs.CreateJobInput{
 		ID:             jobID,
 		JobType:        steps[0],
 		UserID:         userID,
@@ -126,4 +126,4 @@ func (e *Enqueuer) EnqueueChain(ctx context.Context, userID uuid.UUID, accountID
 	})
 }
 
-var _ driven.JobEnqueuer = (*Enqueuer)(nil)
+var _ domainjobs.JobEnqueuer = (*Enqueuer)(nil)

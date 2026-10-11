@@ -7,7 +7,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/Kapital-B/automata/svc/internal/application/ports/driven"
+	domainai "github.com/Kapital-B/automata/svc/internal/domain/ai"
 	"github.com/aws/aws-sdk-go-v2/aws"
 	awsconfig "github.com/aws/aws-sdk-go-v2/config"
 	"github.com/aws/aws-sdk-go-v2/service/bedrockruntime"
@@ -45,11 +45,11 @@ func NewBedrockClient(ctx context.Context, cfg BedrockConfig) (*BedrockClient, e
 	return &BedrockClient{client: client, modelID: strings.TrimSpace(cfg.ModelID)}, nil
 }
 
-func (c *BedrockClient) ChatCompletion(ctx context.Context, messages []driven.LLMMessage) (*driven.LLMResponse, error) {
-	return c.ChatCompletionWithOptions(ctx, messages, driven.LLMRequestOptions{})
+func (c *BedrockClient) ChatCompletion(ctx context.Context, messages []domainai.LLMMessage) (*domainai.LLMResponse, error) {
+	return c.ChatCompletionWithOptions(ctx, messages, domainai.LLMRequestOptions{})
 }
 
-func (c *BedrockClient) ChatCompletionWithOptions(ctx context.Context, messages []driven.LLMMessage, opts driven.LLMRequestOptions) (*driven.LLMResponse, error) {
+func (c *BedrockClient) ChatCompletionWithOptions(ctx context.Context, messages []domainai.LLMMessage, opts domainai.LLMRequestOptions) (*domainai.LLMResponse, error) {
 	if c == nil || c.client == nil || c.modelID == "" {
 		return nil, fmt.Errorf("bedrock client not configured")
 	}
@@ -123,19 +123,19 @@ func (c *BedrockClient) ChatCompletionWithOptions(ctx context.Context, messages 
 	if strings.TrimSpace(b.String()) == "" {
 		return nil, fmt.Errorf("bedrock returned empty text")
 	}
-	return &driven.LLMResponse{Content: b.String(), Usage: usageFromBedrock(out.Usage)}, nil
+	return &domainai.LLMResponse{Content: b.String(), Usage: usageFromBedrock(out.Usage)}, nil
 }
 
-// usageFromBedrock maps Converse token counts onto driven.LLMUsage, whose
+// usageFromBedrock maps Converse token counts onto domainai.LLMUsage, whose
 // InputTokens excludes cached input.
 //
 // The SDK does not document whether InputTokens already excludes cache reads
 // and writes, so TotalTokens decides: when it equals input plus output alone,
 // the cached tokens are inside InputTokens and are subtracted here, so they
 // are never billed twice in our accounting.
-func usageFromBedrock(u *bedrocktypes.TokenUsage) driven.LLMUsage {
+func usageFromBedrock(u *bedrocktypes.TokenUsage) domainai.LLMUsage {
 	if u == nil {
-		return driven.LLMUsage{}
+		return domainai.LLMUsage{}
 	}
 	n := func(p *int32) int {
 		if p == nil {
@@ -148,7 +148,7 @@ func usageFromBedrock(u *bedrocktypes.TokenUsage) driven.LLMUsage {
 	if cached := read + write; cached > 0 && u.TotalTokens != nil && n(u.TotalTokens) == in+out && in >= cached {
 		in -= cached
 	}
-	return driven.LLMUsage{InputTokens: in, OutputTokens: out, CacheReadTokens: read, CacheWriteTokens: write}
+	return domainai.LLMUsage{InputTokens: in, OutputTokens: out, CacheReadTokens: read, CacheWriteTokens: write}
 }
 
-var _ driven.LLMClientWithOptions = (*BedrockClient)(nil)
+var _ domainai.LLMClientWithOptions = (*BedrockClient)(nil)

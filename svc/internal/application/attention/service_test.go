@@ -11,8 +11,11 @@ import (
 	"github.com/Kapital-B/automata/svc/internal/application/auth"
 	appdecisions "github.com/Kapital-B/automata/svc/internal/application/decisions"
 	appfacts "github.com/Kapital-B/automata/svc/internal/application/facts"
-	"github.com/Kapital-B/automata/svc/internal/application/ports/driven"
 	appprojects "github.com/Kapital-B/automata/svc/internal/application/projects"
+	domainaccounts "github.com/Kapital-B/automata/svc/internal/domain/accounts"
+	domainissues "github.com/Kapital-B/automata/svc/internal/domain/issues"
+	domainmessages "github.com/Kapital-B/automata/svc/internal/domain/messages"
+	domainprojects "github.com/Kapital-B/automata/svc/internal/domain/projects"
 	"github.com/google/uuid"
 	_ "modernc.org/sqlite"
 )
@@ -111,7 +114,7 @@ func TestAttentionMergesMailActionItems(t *testing.T) {
 	}
 
 	accountID := uuid.New()
-	if err := repo.InsertAccount(ctx, driven.AccountRow{
+	if err := repo.InsertAccount(ctx, domainaccounts.AccountRow{
 		UserID: userID, ID: accountID, Label: "Work", Provider: "m365",
 		MsAccountKind: "work", PrimaryEmail: "attn-mail@example.com", ConnectionStatus: "connected",
 	}, []byte("tok")); err != nil {
@@ -119,7 +122,7 @@ func TestAttentionMergesMailActionItems(t *testing.T) {
 	}
 	msgID := uuid.New()
 	body := "Please reply to the invoice"
-	if err := repo.UpsertMessage(ctx, driven.MessageRow{
+	if err := repo.UpsertMessage(ctx, domainmessages.MessageRow{
 		ID: msgID, AccountID: accountID, ProviderMessageID: msgID.String(),
 		ReceivedAt: time.Now().UTC(), Subject: "Invoice", BodyText: &body, FromJSON: `{}`,
 	}); err != nil {
@@ -131,7 +134,7 @@ func TestAttentionMergesMailActionItems(t *testing.T) {
 	if err := repo.InsertJobRun(ctx, runID, accountID, "summarize", "api", "success", now, now, nil, `{}`); err != nil {
 		t.Fatal(err)
 	}
-	if err := repo.InsertActionItems(ctx, []driven.ActionItemRow{{
+	if err := repo.InsertActionItems(ctx, []domainmessages.ActionItemRow{{
 		ID: actionID, UserID: userID, AccountID: accountID, MessageID: msgID,
 		RunID: runID, Text: "Reply to invoice", Status: "open",
 		CreatedAt: now, UpdatedAt: now,
@@ -208,7 +211,7 @@ func TestAttentionPlacesMailToDosOnProjectAndIssue(t *testing.T) {
 		t.Fatal(err)
 	}
 	accountID := uuid.New()
-	if err := repo.InsertAccount(ctx, driven.AccountRow{
+	if err := repo.InsertAccount(ctx, domainaccounts.AccountRow{
 		UserID: userID, ID: accountID, Label: "Work", Provider: "m365",
 		MsAccountKind: "work", PrimaryEmail: "attn-todo@example.com", ConnectionStatus: "connected",
 	}, []byte("tok")); err != nil {
@@ -221,7 +224,7 @@ func TestAttentionPlacesMailToDosOnProjectAndIssue(t *testing.T) {
 	}
 	newMsg := func(subject string) uuid.UUID {
 		id := uuid.New()
-		if err := repo.UpsertMessage(ctx, driven.MessageRow{
+		if err := repo.UpsertMessage(ctx, domainmessages.MessageRow{
 			ID: id, AccountID: accountID, ProviderMessageID: id.String(),
 			ReceivedAt: now, Subject: subject, FromJSON: `{}`,
 		}); err != nil {
@@ -233,14 +236,14 @@ func TestAttentionPlacesMailToDosOnProjectAndIssue(t *testing.T) {
 	unfiled := newMsg("Pump follow") // not filed, but on the issue
 	loose := newMsg("Invoice")       // neither
 
-	if err := repo.UpsertMessageOverride(ctx, driven.AssignmentRow{
+	if err := repo.UpsertMessageOverride(ctx, domainprojects.AssignmentRow{
 		ID: uuid.New(), OrganisationID: orgID, AccountID: accountID, MessageID: &filed,
 		ProjectID: &proj.ID, Status: "committed", Source: "user", CreatedAt: now, UpdatedAt: now,
 	}); err != nil {
 		t.Fatal(err)
 	}
 	issueID := uuid.New()
-	if err := repo.CreateIssue(ctx, driven.IssueRow{
+	if err := repo.CreateIssue(ctx, domainissues.IssueRow{
 		ID: issueID, OrganisationID: orgID, ProjectID: proj.ID, Title: "Pump P-03 duty",
 		Status: "open", CreatedAt: now, UpdatedAt: now,
 	}); err != nil {
@@ -248,7 +251,7 @@ func TestAttentionPlacesMailToDosOnProjectAndIssue(t *testing.T) {
 	}
 	for _, m := range []uuid.UUID{filed, unfiled} {
 		msg := m
-		if err := repo.AddIssueItem(ctx, driven.IssueItemRow{ID: uuid.New(), IssueID: issueID, MessageID: &msg, AddedAt: now}); err != nil {
+		if err := repo.AddIssueItem(ctx, domainissues.IssueItemRow{ID: uuid.New(), IssueID: issueID, MessageID: &msg, AddedAt: now}); err != nil {
 			t.Fatal(err)
 		}
 	}
@@ -256,7 +259,7 @@ func TestAttentionPlacesMailToDosOnProjectAndIssue(t *testing.T) {
 	for _, m := range []uuid.UUID{filed, unfiled, loose} {
 		id := uuid.New()
 		todoFor[m] = id
-		if err := repo.InsertActionItems(ctx, []driven.ActionItemRow{{
+		if err := repo.InsertActionItems(ctx, []domainmessages.ActionItemRow{{
 			ID: id, UserID: userID, AccountID: accountID, MessageID: m, RunID: runID,
 			Text: "Do something", Status: "open", CreatedAt: now, UpdatedAt: now,
 		}}); err != nil {
@@ -310,7 +313,7 @@ func TestAttentionPlacesMailToDosOnProjectAndIssue(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := repo.UpsertMessageOverride(ctx, driven.AssignmentRow{
+	if err := repo.UpsertMessageOverride(ctx, domainprojects.AssignmentRow{
 		ID: uuid.New(), OrganisationID: orgID, AccountID: accountID, MessageID: &filed,
 		ProjectID: &other.ID, Status: "committed", Source: "user", CreatedAt: now, UpdatedAt: now,
 	}); err != nil {

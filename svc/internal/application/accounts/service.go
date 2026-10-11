@@ -9,8 +9,8 @@ import (
 	"strings"
 	"time"
 
-	"github.com/Kapital-B/automata/svc/internal/application/ports/driven"
 	domainacc "github.com/Kapital-B/automata/svc/internal/domain/accounts"
+	domainaccounts "github.com/Kapital-B/automata/svc/internal/domain/accounts"
 	"github.com/google/uuid"
 )
 
@@ -51,14 +51,14 @@ const mailboxConnectFlow = "m365_mail"
 // the Microsoft provider consults it (RFC multi-provider mail §5.1, option A).
 const placeholderMsAccountKind = domainacc.KindWork
 
-func connectOptions(provider string, kind domainacc.MsAccountKind) (driven.ConnectOptions, error) {
+func connectOptions(provider string, kind domainacc.MsAccountKind) (domainaccounts.ConnectOptions, error) {
 	if provider != ProviderM365 {
-		return driven.ConnectOptions{}, nil
+		return domainaccounts.ConnectOptions{}, nil
 	}
 	if !kind.Valid() || kind == domainacc.KindCommon {
-		return driven.ConnectOptions{}, fmt.Errorf("invalid ms_account_kind")
+		return domainaccounts.ConnectOptions{}, fmt.Errorf("invalid ms_account_kind")
 	}
-	return driven.ConnectOptions{MsAccountKind: kind}, nil
+	return domainaccounts.ConnectOptions{MsAccountKind: kind}, nil
 }
 
 func (s *Service) StartConnect(ctx context.Context, userID uuid.UUID, in StartConnectInput) (*StartConnectOutput, error) {
@@ -119,7 +119,7 @@ func (s *Service) CompleteOAuth(ctx context.Context, code, state string) (*Compl
 	if !ok {
 		return nil, ErrInvalidOAuthState
 	}
-	connected, err := conn.Complete(ctx, code, driven.ConnectOptions{MsAccountKind: kind})
+	connected, err := conn.Complete(ctx, code, domainaccounts.ConnectOptions{MsAccountKind: kind})
 	if err != nil {
 		return nil, err
 	}
@@ -133,17 +133,17 @@ func (s *Service) CompleteOAuth(ctx context.Context, code, state string) (*Compl
 // ConnectWithPasswordInput is a typed-in mailbox connection.
 type ConnectWithPasswordInput struct {
 	Provider  string
-	Request   driven.PasswordConnectRequest
+	Request   domainaccounts.PasswordConnectRequest
 	LabelHint *string
 }
 
 // ConnectWithPassword verifies typed-in credentials against the provider and
 // stores the mailbox. A failure the user can fix wraps
-// driven.ErrConnectRejected and nothing is stored.
+// domainaccounts.ErrConnectRejected and nothing is stored.
 func (s *Service) ConnectWithPassword(ctx context.Context, userID uuid.UUID, in ConnectWithPasswordInput) (uuid.UUID, error) {
 	conn, ok := s.deps.PasswordConnectors[in.Provider]
 	if !ok {
-		return uuid.Nil, fmt.Errorf("%w: %s", driven.ErrUnsupportedProvider, in.Provider)
+		return uuid.Nil, fmt.Errorf("%w: %s", domainaccounts.ErrUnsupportedProvider, in.Provider)
 	}
 	connected, err := conn.Connect(ctx, in.Request)
 	if err != nil {
@@ -154,7 +154,7 @@ func (s *Service) ConnectWithPassword(ctx context.Context, userID uuid.UUID, in 
 
 // saveConnected stores a verified mailbox, or refreshes the credentials of
 // the matching account when this is a reconnect.
-func (s *Service) saveConnected(ctx context.Context, userID uuid.UUID, provider string, connected *driven.ConnectedMailbox, labelHint *string) (uuid.UUID, error) {
+func (s *Service) saveConnected(ctx context.Context, userID uuid.UUID, provider string, connected *domainaccounts.ConnectedMailbox, labelHint *string) (uuid.UUID, error) {
 	label := ""
 	if labelHint != nil {
 		label = strings.TrimSpace(*labelHint)
@@ -188,7 +188,7 @@ func (s *Service) saveConnected(ctx context.Context, userID uuid.UUID, provider 
 	}
 	id := uuid.New()
 	now := time.Now().UTC()
-	row := driven.AccountRow{
+	row := domainaccounts.AccountRow{
 		UserID:           userID,
 		ID:               id,
 		Label:            label,
@@ -207,7 +207,7 @@ func (s *Service) saveConnected(ctx context.Context, userID uuid.UUID, provider 
 }
 
 // findAccount returns the user's account for this provider and address.
-func (s *Service) findAccount(ctx context.Context, userID uuid.UUID, provider, email string) (*driven.AccountRow, error) {
+func (s *Service) findAccount(ctx context.Context, userID uuid.UUID, provider, email string) (*domainaccounts.AccountRow, error) {
 	if strings.TrimSpace(email) == "" {
 		return nil, nil
 	}
@@ -237,7 +237,7 @@ const (
 type ProviderInfo struct {
 	Provider     string
 	Connect      string
-	Capabilities driven.MailboxCapabilities
+	Capabilities domainaccounts.MailboxCapabilities
 }
 
 // Providers lists what can be connected, in a stable order, so the UI offers
@@ -260,6 +260,6 @@ func (s *Service) Providers() []ProviderInfo {
 
 // Capabilities reports what an account's provider can do; ok is false when
 // the provider is not configured here.
-func (s *Service) Capabilities(provider string) (driven.MailboxCapabilities, bool) {
+func (s *Service) Capabilities(provider string) (domainaccounts.MailboxCapabilities, bool) {
 	return s.deps.Mailboxes.Capabilities(provider)
 }

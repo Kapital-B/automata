@@ -9,8 +9,11 @@ import (
 	"strings"
 	"time"
 
-	"github.com/Kapital-B/automata/svc/internal/application/ports/driven"
+	domainauth "github.com/Kapital-B/automata/svc/internal/domain/auth"
 	domainfacts "github.com/Kapital-B/automata/svc/internal/domain/facts"
+	domainissues "github.com/Kapital-B/automata/svc/internal/domain/issues"
+	domainmessages "github.com/Kapital-B/automata/svc/internal/domain/messages"
+	domainprojects "github.com/Kapital-B/automata/svc/internal/domain/projects"
 	"github.com/google/uuid"
 )
 
@@ -27,13 +30,13 @@ var (
 
 // Service handles fact CRUD, version confirm/reject, and evidence links.
 type Service struct {
-	Users       driven.UserRepository
-	Projects    driven.ProjectRepository
-	Facts       driven.FactRepository
-	Issues      driven.IssueRepository
-	Assignments driven.AssignmentRepository
-	Manuals     driven.ManualItemRepository
-	Messages    driven.MessageRepository
+	Users       domainauth.UserRepository
+	Projects    domainprojects.ProjectRepository
+	Facts       domainfacts.FactRepository
+	Issues      domainissues.IssueRepository
+	Assignments domainprojects.AssignmentRepository
+	Manuals     domainprojects.ManualItemRepository
+	Messages    domainmessages.MessageRepository
 }
 
 func (s *Service) homeOrg(ctx context.Context, userID uuid.UUID) (uuid.UUID, error) {
@@ -52,12 +55,12 @@ type EvidenceRef struct {
 }
 
 type VersionView struct {
-	Version  driven.FactVersionRow
-	Evidence []driven.FactEvidenceRow
+	Version  domainfacts.FactVersionRow
+	Evidence []domainfacts.FactEvidenceRow
 }
 
 type FactView struct {
-	Fact     driven.FactRow
+	Fact     domainfacts.FactRow
 	Versions []VersionView
 }
 
@@ -248,9 +251,9 @@ func (s *Service) Create(ctx context.Context, userID, projectID uuid.UUID, in Cr
 		return nil, err
 	}
 
-	var fact driven.FactRow
+	var fact domainfacts.FactRow
 	if existing == nil {
-		fact = driven.FactRow{
+		fact = domainfacts.FactRow{
 			ID: uuid.New(), OrganisationID: orgID, ProjectID: projectID,
 			IssueID: in.IssueID, SubjectKey: subjectKey, Label: label,
 			CreatedAt: now, UpdatedAt: now,
@@ -299,7 +302,7 @@ func (s *Service) Create(ctx context.Context, userID, projectID uuid.UUID, in Cr
 	if !domainfacts.Source(source).Valid() {
 		return nil, fmt.Errorf("invalid source")
 	}
-	ver := driven.FactVersionRow{
+	ver := domainfacts.FactVersionRow{
 		ID: uuid.New(), FactID: fact.ID, Status: string(status),
 		ValueJSON: valueJSON, ValueText: valueText, Unit: unit,
 		Source: source, Confidence: in.Confidence, InterpretationID: in.InterpretationID,
@@ -323,7 +326,7 @@ func (s *Service) Create(ctx context.Context, userID, projectID uuid.UUID, in Cr
 	}
 
 	for _, ref := range in.Evidence {
-		ev := driven.FactEvidenceRow{
+		ev := domainfacts.FactEvidenceRow{
 			ID: uuid.New(), FactVersionID: ver.ID,
 			MessageID: ref.MessageID, ManualItemID: ref.ManualItemID, AddedAt: now,
 		}
@@ -458,7 +461,7 @@ func (s *Service) AddEvidence(ctx context.Context, userID, versionID uuid.UUID, 
 	if err := s.validateEvidenceOnProject(ctx, userID, orgID, fact.ProjectID, ref); err != nil {
 		return nil, err
 	}
-	ev := driven.FactEvidenceRow{
+	ev := domainfacts.FactEvidenceRow{
 		ID: uuid.New(), FactVersionID: versionID,
 		MessageID: ref.MessageID, ManualItemID: ref.ManualItemID,
 		AddedAt: time.Now().UTC(),
@@ -500,7 +503,7 @@ func (s *Service) RemoveEvidence(ctx context.Context, userID, versionID, evidenc
 	return s.Get(ctx, userID, fact.ID)
 }
 
-func (s *Service) buildFactView(ctx context.Context, fact driven.FactRow, include ListInclude, allVersions bool) (*FactView, error) {
+func (s *Service) buildFactView(ctx context.Context, fact domainfacts.FactRow, include ListInclude, allVersions bool) (*FactView, error) {
 	versions, err := s.Facts.ListFactVersions(ctx, fact.ID)
 	if err != nil {
 		return nil, err
@@ -509,7 +512,7 @@ func (s *Service) buildFactView(ctx context.Context, fact driven.FactRow, includ
 	if err != nil {
 		return nil, err
 	}
-	byVersion := map[uuid.UUID][]driven.FactEvidenceRow{}
+	byVersion := map[uuid.UUID][]domainfacts.FactEvidenceRow{}
 	for _, ev := range evidenceAll {
 		byVersion[ev.FactVersionID] = append(byVersion[ev.FactVersionID], ev)
 	}

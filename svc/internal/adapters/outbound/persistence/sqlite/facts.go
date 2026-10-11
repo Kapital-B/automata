@@ -5,11 +5,11 @@ import (
 	"database/sql"
 	"errors"
 
-	"github.com/Kapital-B/automata/svc/internal/application/ports/driven"
+	domainfacts "github.com/Kapital-B/automata/svc/internal/domain/facts"
 	"github.com/google/uuid"
 )
 
-func (r *Repository) CreateFact(ctx context.Context, row driven.FactRow) error {
+func (r *Repository) CreateFact(ctx context.Context, row domainfacts.FactRow) error {
 	var issueID any
 	if row.IssueID != nil {
 		issueID = row.IssueID.String()
@@ -23,7 +23,7 @@ func (r *Repository) CreateFact(ctx context.Context, row driven.FactRow) error {
 	return err
 }
 
-func (r *Repository) UpdateFact(ctx context.Context, row driven.FactRow) error {
+func (r *Repository) UpdateFact(ctx context.Context, row domainfacts.FactRow) error {
 	var issueID any
 	if row.IssueID != nil {
 		issueID = row.IssueID.String()
@@ -42,7 +42,7 @@ func (r *Repository) UpdateFact(ctx context.Context, row driven.FactRow) error {
 	return nil
 }
 
-func (r *Repository) GetFact(ctx context.Context, organisationID, factID uuid.UUID) (*driven.FactRow, error) {
+func (r *Repository) GetFact(ctx context.Context, organisationID, factID uuid.UUID) (*domainfacts.FactRow, error) {
 	row := r.db.QueryRowContext(ctx, `
 		SELECT id, organisation_id, project_id, issue_id, subject_key, label, created_at, updated_at
 		FROM facts WHERE id = ? AND organisation_id = ?
@@ -54,7 +54,7 @@ func (r *Repository) GetFact(ctx context.Context, organisationID, factID uuid.UU
 	return fact, err
 }
 
-func (r *Repository) GetFactBySubject(ctx context.Context, organisationID, projectID uuid.UUID, subjectKey string) (*driven.FactRow, error) {
+func (r *Repository) GetFactBySubject(ctx context.Context, organisationID, projectID uuid.UUID, subjectKey string) (*domainfacts.FactRow, error) {
 	row := r.db.QueryRowContext(ctx, `
 		SELECT id, organisation_id, project_id, issue_id, subject_key, label, created_at, updated_at
 		FROM facts WHERE organisation_id = ? AND project_id = ? AND subject_key = ?
@@ -66,7 +66,7 @@ func (r *Repository) GetFactBySubject(ctx context.Context, organisationID, proje
 	return fact, err
 }
 
-func (r *Repository) ListFactsByProject(ctx context.Context, organisationID, projectID uuid.UUID) ([]driven.FactRow, error) {
+func (r *Repository) ListFactsByProject(ctx context.Context, organisationID, projectID uuid.UUID) ([]domainfacts.FactRow, error) {
 	rows, err := r.db.QueryContext(ctx, `
 		SELECT id, organisation_id, project_id, issue_id, subject_key, label, created_at, updated_at
 		FROM facts WHERE organisation_id = ? AND project_id = ?
@@ -76,7 +76,7 @@ func (r *Repository) ListFactsByProject(ctx context.Context, organisationID, pro
 		return nil, err
 	}
 	defer rows.Close()
-	out := make([]driven.FactRow, 0)
+	out := make([]domainfacts.FactRow, 0)
 	for rows.Next() {
 		fact, err := scanFactRow(rows)
 		if err != nil {
@@ -87,7 +87,7 @@ func (r *Repository) ListFactsByProject(ctx context.Context, organisationID, pro
 	return out, rows.Err()
 }
 
-func (r *Repository) CreateFactVersion(ctx context.Context, row driven.FactVersionRow) error {
+func (r *Repository) CreateFactVersion(ctx context.Context, row domainfacts.FactVersionRow) error {
 	var unit, conf, interp, supersedes, supersededBy, supersededAt, createdBy any
 	if row.Unit != nil {
 		unit = *row.Unit
@@ -122,7 +122,7 @@ func (r *Repository) CreateFactVersion(ctx context.Context, row driven.FactVersi
 	return err
 }
 
-func (r *Repository) GetFactVersion(ctx context.Context, organisationID, versionID uuid.UUID) (*driven.FactVersionRow, error) {
+func (r *Repository) GetFactVersion(ctx context.Context, organisationID, versionID uuid.UUID) (*domainfacts.FactVersionRow, error) {
 	row := r.db.QueryRowContext(ctx, `
 		SELECT fv.id, fv.fact_id, fv.status, fv.value_json, fv.value_text, fv.unit, fv.source,
 			fv.confidence, fv.interpretation_id, fv.supersedes_version_id, fv.superseded_by_version_id,
@@ -138,7 +138,7 @@ func (r *Repository) GetFactVersion(ctx context.Context, organisationID, version
 	return ver, err
 }
 
-func (r *Repository) ListFactVersions(ctx context.Context, factID uuid.UUID) ([]driven.FactVersionRow, error) {
+func (r *Repository) ListFactVersions(ctx context.Context, factID uuid.UUID) ([]domainfacts.FactVersionRow, error) {
 	rows, err := r.db.QueryContext(ctx, `
 		SELECT id, fact_id, status, value_json, value_text, unit, source,
 			confidence, interpretation_id, supersedes_version_id, superseded_by_version_id,
@@ -150,7 +150,7 @@ func (r *Repository) ListFactVersions(ctx context.Context, factID uuid.UUID) ([]
 		return nil, err
 	}
 	defer rows.Close()
-	out := make([]driven.FactVersionRow, 0)
+	out := make([]domainfacts.FactVersionRow, 0)
 	for rows.Next() {
 		ver, err := scanFactVersionRow(rows)
 		if err != nil {
@@ -161,7 +161,7 @@ func (r *Repository) ListFactVersions(ctx context.Context, factID uuid.UUID) ([]
 	return out, rows.Err()
 }
 
-func (r *Repository) GetActiveFactVersion(ctx context.Context, factID uuid.UUID) (*driven.FactVersionRow, error) {
+func (r *Repository) GetActiveFactVersion(ctx context.Context, factID uuid.UUID) (*domainfacts.FactVersionRow, error) {
 	row := r.db.QueryRowContext(ctx, `
 		SELECT id, fact_id, status, value_json, value_text, unit, source,
 			confidence, interpretation_id, supersedes_version_id, superseded_by_version_id,
@@ -175,7 +175,7 @@ func (r *Repository) GetActiveFactVersion(ctx context.Context, factID uuid.UUID)
 	return ver, err
 }
 
-func (r *Repository) UpdateFactVersion(ctx context.Context, row driven.FactVersionRow) error {
+func (r *Repository) UpdateFactVersion(ctx context.Context, row domainfacts.FactVersionRow) error {
 	var unit, conf, interp, supersedes, supersededBy, supersededAt, createdBy any
 	if row.Unit != nil {
 		unit = *row.Unit
@@ -216,7 +216,7 @@ func (r *Repository) UpdateFactVersion(ctx context.Context, row driven.FactVersi
 	return nil
 }
 
-func (r *Repository) AddFactEvidence(ctx context.Context, row driven.FactEvidenceRow) error {
+func (r *Repository) AddFactEvidence(ctx context.Context, row domainfacts.FactEvidenceRow) error {
 	var msgID, manualID any
 	if row.MessageID != nil {
 		msgID = row.MessageID.String()
@@ -251,7 +251,7 @@ func (r *Repository) RemoveFactEvidence(ctx context.Context, organisationID, ver
 	return nil
 }
 
-func (r *Repository) ListFactEvidence(ctx context.Context, versionID uuid.UUID) ([]driven.FactEvidenceRow, error) {
+func (r *Repository) ListFactEvidence(ctx context.Context, versionID uuid.UUID) ([]domainfacts.FactEvidenceRow, error) {
 	rows, err := r.db.QueryContext(ctx, `
 		SELECT id, fact_version_id, message_id, manual_item_id, added_at
 		FROM fact_evidence WHERE fact_version_id = ?
@@ -264,7 +264,7 @@ func (r *Repository) ListFactEvidence(ctx context.Context, versionID uuid.UUID) 
 	return scanFactEvidenceRows(rows)
 }
 
-func (r *Repository) ListFactEvidenceForFact(ctx context.Context, factID uuid.UUID) ([]driven.FactEvidenceRow, error) {
+func (r *Repository) ListFactEvidenceForFact(ctx context.Context, factID uuid.UUID) ([]domainfacts.FactEvidenceRow, error) {
 	rows, err := r.db.QueryContext(ctx, `
 		SELECT fe.id, fe.fact_version_id, fe.message_id, fe.manual_item_id, fe.added_at
 		FROM fact_evidence fe
@@ -279,8 +279,8 @@ func (r *Repository) ListFactEvidenceForFact(ctx context.Context, factID uuid.UU
 	return scanFactEvidenceRows(rows)
 }
 
-func scanFactEvidenceRows(rows *sql.Rows) ([]driven.FactEvidenceRow, error) {
-	out := make([]driven.FactEvidenceRow, 0)
+func scanFactEvidenceRows(rows *sql.Rows) ([]domainfacts.FactEvidenceRow, error) {
+	out := make([]domainfacts.FactEvidenceRow, 0)
 	for rows.Next() {
 		ev, err := scanFactEvidenceRow(rows)
 		if err != nil {
@@ -291,7 +291,7 @@ func scanFactEvidenceRows(rows *sql.Rows) ([]driven.FactEvidenceRow, error) {
 	return out, rows.Err()
 }
 
-func scanFactRow(s rowScanner) (*driven.FactRow, error) {
+func scanFactRow(s rowScanner) (*domainfacts.FactRow, error) {
 	var idStr, orgStr, projStr, subjectKey, label, createdAt, updatedAt string
 	var issueID sql.NullString
 	if err := s.Scan(&idStr, &orgStr, &projStr, &issueID, &subjectKey, &label, &createdAt, &updatedAt); err != nil {
@@ -317,7 +317,7 @@ func scanFactRow(s rowScanner) (*driven.FactRow, error) {
 	if err != nil {
 		return nil, err
 	}
-	row := &driven.FactRow{
+	row := &domainfacts.FactRow{
 		ID: id, OrganisationID: orgID, ProjectID: projID,
 		SubjectKey: subjectKey, Label: label, CreatedAt: cat, UpdatedAt: uat,
 	}
@@ -331,7 +331,7 @@ func scanFactRow(s rowScanner) (*driven.FactRow, error) {
 	return row, nil
 }
 
-func scanFactVersionRow(s rowScanner) (*driven.FactVersionRow, error) {
+func scanFactVersionRow(s rowScanner) (*domainfacts.FactVersionRow, error) {
 	var idStr, factStr, status, valueJSON, valueText, source, createdAt string
 	var unit sql.NullString
 	var conf sql.NullFloat64
@@ -355,7 +355,7 @@ func scanFactVersionRow(s rowScanner) (*driven.FactVersionRow, error) {
 	if err != nil {
 		return nil, err
 	}
-	row := &driven.FactVersionRow{
+	row := &domainfacts.FactVersionRow{
 		ID: id, FactID: factID, Status: status, ValueJSON: valueJSON,
 		ValueText: valueText, Source: source, CreatedAt: cat,
 	}
@@ -412,7 +412,7 @@ func scanFactVersionRow(s rowScanner) (*driven.FactVersionRow, error) {
 	return row, nil
 }
 
-func scanFactEvidenceRow(s rowScanner) (*driven.FactEvidenceRow, error) {
+func scanFactEvidenceRow(s rowScanner) (*domainfacts.FactEvidenceRow, error) {
 	var idStr, versionStr, addedAt string
 	var msg, manual sql.NullString
 	if err := s.Scan(&idStr, &versionStr, &msg, &manual, &addedAt); err != nil {
@@ -430,7 +430,7 @@ func scanFactEvidenceRow(s rowScanner) (*driven.FactEvidenceRow, error) {
 	if err != nil {
 		return nil, err
 	}
-	row := &driven.FactEvidenceRow{ID: id, FactVersionID: versionID, AddedAt: at}
+	row := &domainfacts.FactEvidenceRow{ID: id, FactVersionID: versionID, AddedAt: at}
 	if msg.Valid && msg.String != "" {
 		mid, err := uuid.Parse(msg.String)
 		if err != nil {

@@ -6,15 +6,16 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/Kapital-B/automata/svc/internal/application/ports/driven"
+	domaincontacts "github.com/Kapital-B/automata/svc/internal/domain/contacts"
+	domainprojects "github.com/Kapital-B/automata/svc/internal/domain/projects"
 	"github.com/google/uuid"
 )
 
-func project(code, name string) driven.ProjectRow {
-	return driven.ProjectRow{ID: uuid.New(), Code: code, Name: name}
+func project(code, name string) domainprojects.ProjectRow {
+	return domainprojects.ProjectRow{ID: uuid.New(), Code: code, Name: name}
 }
 
-func codes(ps []driven.ProjectRow) string {
+func codes(ps []domainprojects.ProjectRow) string {
 	out := []string{}
 	for _, p := range ps {
 		out = append(out, p.Code)
@@ -23,7 +24,7 @@ func codes(ps []driven.ProjectRow) string {
 }
 
 func TestMatchProjects(t *testing.T) {
-	projects := []driven.ProjectRow{
+	projects := []domainprojects.ProjectRow{
 		project("DC07", "Data Centre Seven"),
 		project("DC09", "Cooling"),
 		project("P-100", "Pumps"),
@@ -46,7 +47,7 @@ func TestMatchProjects(t *testing.T) {
 func TestSearchTermsDropScopesAndStopwords(t *testing.T) {
 	toks := tokenize("What did Jan say about the P-03 seal on DC07, and the 2 kW figure?")
 	used := map[int]bool{}
-	matchProjects([]driven.ProjectRow{project("DC07", "x")}, toks, used)
+	matchProjects([]domainprojects.ProjectRow{project("DC07", "x")}, toks, used)
 	for i, tk := range toks {
 		if tk.lower == "jan" {
 			used[i] = true // as if resolved to a contact
@@ -81,25 +82,25 @@ func TestContactCandidatesPreferCapitalisedWords(t *testing.T) {
 }
 
 type fakeProjects struct {
-	driven.ProjectRepository
-	rows      []driven.ProjectRow
-	gotFilter driven.ProjectListFilter
+	domainprojects.ProjectRepository
+	rows      []domainprojects.ProjectRow
+	gotFilter domainprojects.ProjectListFilter
 }
 
-func (f *fakeProjects) ListProjects(_ context.Context, _ uuid.UUID, filter driven.ProjectListFilter) ([]driven.ProjectRow, error) {
+func (f *fakeProjects) ListProjects(_ context.Context, _ uuid.UUID, filter domainprojects.ProjectListFilter) ([]domainprojects.ProjectRow, error) {
 	f.gotFilter = filter
 	return f.rows, nil
 }
 
 type fakeContacts struct {
-	driven.ContactRepository
-	rows    []driven.ContactRow
+	domaincontacts.ContactRepository
+	rows    []domaincontacts.ContactRow
 	queries []string
 }
 
-func (f *fakeContacts) ListContacts(_ context.Context, _ uuid.UUID, filter driven.ContactListFilter) ([]driven.ContactRow, error) {
+func (f *fakeContacts) ListContacts(_ context.Context, _ uuid.UUID, filter domaincontacts.ContactListFilter) ([]domaincontacts.ContactRow, error) {
 	f.queries = append(f.queries, filter.Query)
-	var out []driven.ContactRow
+	var out []domaincontacts.ContactRow
 	for _, c := range f.rows {
 		if strings.Contains(strings.ToLower(c.DisplayName), filter.Query) {
 			out = append(out, c)
@@ -110,9 +111,9 @@ func (f *fakeContacts) ListContacts(_ context.Context, _ uuid.UUID, filter drive
 
 func TestResolve(t *testing.T) {
 	userID := uuid.New()
-	projects := &fakeProjects{rows: []driven.ProjectRow{project("DC07", "Seven"), project("DC08", "Eight")}}
-	jan := driven.ContactRow{ID: uuid.New(), DisplayName: "Jan de Vries"}
-	contacts := &fakeContacts{rows: []driven.ContactRow{
+	projects := &fakeProjects{rows: []domainprojects.ProjectRow{project("DC07", "Seven"), project("DC08", "Eight")}}
+	jan := domaincontacts.ContactRow{ID: uuid.New(), DisplayName: "Jan de Vries"}
+	contacts := &fakeContacts{rows: []domaincontacts.ContactRow{
 		jan,
 		{ID: uuid.New(), DisplayName: "Janet Smith"}, // contains "jan" but is not a Jan
 	}}

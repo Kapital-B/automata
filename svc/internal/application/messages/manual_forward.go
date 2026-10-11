@@ -7,13 +7,13 @@ import (
 	"time"
 	"unicode/utf8"
 
-	"github.com/Kapital-B/automata/svc/internal/application/ports/driven"
+	domainmessages "github.com/Kapital-B/automata/svc/internal/domain/messages"
 	"github.com/google/uuid"
 )
 
 const manualForwardCommentMaxRunes = 2000
 
-func destEmailInForwardAllowlist(dest string, rows []driven.ForwardAllowlistRow) bool {
+func destEmailInForwardAllowlist(dest string, rows []domainmessages.ForwardAllowlistRow) bool {
 	key := strings.ToLower(strings.TrimSpace(dest))
 	if key == "" {
 		return false
@@ -76,7 +76,7 @@ func (s *ForwardRulesService) ManualForwardMessage(ctx context.Context, userID, 
 
 	if err := box.Forward(ctx, msg.ProviderMessageID, normalizedTo, c); err != nil {
 		msgErr := err.Error()
-		_ = s.Forwards.InsertManualForwardAudit(ctx, driven.ManualForwardAuditRow{
+		_ = s.Forwards.InsertManualForwardAudit(ctx, domainmessages.ManualForwardAuditRow{
 			ID:        uuid.New(),
 			UserID:    userID,
 			AccountID: msg.AccountID,
@@ -95,7 +95,7 @@ func (s *ForwardRulesService) ManualForwardMessage(ctx context.Context, userID, 
 	if !box.Capabilities().ServerSideForward {
 		okReason = "manual forward (re-sent as attachment)"
 	}
-	_ = s.Forwards.InsertManualForwardAudit(ctx, driven.ManualForwardAuditRow{
+	_ = s.Forwards.InsertManualForwardAudit(ctx, domainmessages.ManualForwardAuditRow{
 		ID:        uuid.New(),
 		UserID:    userID,
 		AccountID: msg.AccountID,

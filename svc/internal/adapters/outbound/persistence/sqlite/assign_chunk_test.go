@@ -7,8 +7,10 @@ import (
 	"time"
 
 	"github.com/Kapital-B/automata/svc/internal/adapters/outbound/persistence/sqlite"
-	"github.com/Kapital-B/automata/svc/internal/application/ports/driven"
 	appprojects "github.com/Kapital-B/automata/svc/internal/application/projects"
+	domainjobs "github.com/Kapital-B/automata/svc/internal/domain/jobs"
+	domainmessages "github.com/Kapital-B/automata/svc/internal/domain/messages"
+
 	"github.com/google/uuid"
 )
 
@@ -44,7 +46,7 @@ func TestAssignChunkKeysetVisitsEveryMessage(t *testing.T) {
 	}
 
 	// thread_assignments.run_id is a FK, so the run must exist.
-	var cursor *driven.JobCursor
+	var cursor *domainjobs.JobCursor
 	runID := uuid.New()
 	if err := repo.InsertJobRun(ctx, runID, accountID, "assign_projects", "api", "running",
 		time.Now().UTC(), time.Time{}, nil, `{}`); err != nil {
@@ -53,7 +55,7 @@ func TestAssignChunkKeysetVisitsEveryMessage(t *testing.T) {
 
 	scanned := map[uuid.UUID]bool{}
 	for step := 0; step < 20; step++ {
-		res, err := assign.AssignAccountChunk(ctx, driven.RunContext{
+		res, err := assign.AssignAccountChunk(ctx, domainjobs.RunContext{
 			UserID: userID, AccountID: &accountID, RunID: runID, Cursor: cursor,
 		})
 		if err != nil {
@@ -75,7 +77,7 @@ func TestAssignChunkKeysetVisitsEveryMessage(t *testing.T) {
 	}
 
 	// Whatever survived must have been visited and committed.
-	msgs, err := repo.ListMessages(ctx, userID, driven.MessageListFilter{AccountID: &accountID, Limit: 500})
+	msgs, err := repo.ListMessages(ctx, userID, domainmessages.MessageListFilter{AccountID: &accountID, Limit: 500})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -116,7 +118,7 @@ func insertMsgAt(t *testing.T, repo *sqlite.Repository, accountID uuid.UUID, sub
 	id := uuid.New()
 	c := conv
 	b := body
-	if err := repo.UpsertMessage(context.Background(), driven.MessageRow{
+	if err := repo.UpsertMessage(context.Background(), domainmessages.MessageRow{
 		ID: id, AccountID: accountID, ProviderMessageID: id.String(), Subject: subject,
 		FromJSON: `{"address":"a@b.com"}`, ConversationID: &c, BodyText: &b,
 		ReceivedAt: at, CreatedAt: at, UpdatedAt: at,

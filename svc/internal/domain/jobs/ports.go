@@ -1,11 +1,10 @@
-package driven
+package jobs
 
 import (
 	"context"
 	"errors"
-	"time"
-
 	"github.com/google/uuid"
+	"time"
 )
 
 const (
@@ -204,4 +203,61 @@ type JobExecutor interface {
 type JobExecutionPort interface {
 	HandleStreamRecord(ctx context.Context, jobID uuid.UUID, now time.Time) error
 	RunSynchronous(ctx context.Context, in CreateJobInput, exec JobExecutor) (*JobRecord, error)
+}
+
+// JobRunRow is the persisted job run shape for API responses and auditing.
+type JobRunRow struct {
+	ID              uuid.UUID
+	AccountID       *uuid.UUID
+	AccountLabel    *string
+	JobType         string
+	TriggerKind     string
+	Status          string
+	TimeWindowStart *time.Time
+	TimeWindowEnd   *time.Time
+	StartedAt       time.Time
+	FinishedAt      *time.Time
+	ErrorMessage    *string
+	MetaJSON        string
+}
+
+// JobRunListFilter narrows a run listing for one user.
+type JobRunListFilter struct {
+	AccountID *uuid.UUID
+	JobType   string
+	Limit     int
+	Offset    int
+}
+
+type ScheduleChainRow struct {
+	ID              uuid.UUID
+	UserID          uuid.UUID
+	Name            string
+	AccountID       *uuid.UUID
+	Jobs            []string
+	IntervalMinutes int
+	Enabled         bool
+	LastRunAt       *time.Time
+	NextRunAt       time.Time
+	CreatedAt       time.Time
+	UpdatedAt       time.Time
+}
+
+// JobRunRepository records sync runs (Phase 1: synchronous insert).
+type JobRunRepository interface {
+	InsertJobRun(ctx context.Context, id uuid.UUID, accountID uuid.UUID, jobType string, trigger string, status string, startedAt, finishedAt time.Time, errMsg *string, metaJSON string) error
+	// PromoteJobRunToRunning transitions a queued run from pending to running (worker pickup).
+	// Idempotent if the run is already running. Fails if the row is missing or in a terminal state.
+	PromoteJobRunToRunning(ctx context.Context, id uuid.UUID, startedAt time.Time) error
+	UpdateJobRunMeta(ctx context.Context, id uuid.UUID, metaJSON string) error
+	UpdateJobRunStatus(ctx context.Context, id uuid.UUID, status string, finishedAt *time.Time, errMsg *string, metaJSON string) error
+	ListJobRuns(ctx context.Context, userID uuid.UUID, filter JobRunListFilter) ([]JobRunRow, error)
+	GetJobRun(ctx context.Context, userID uuid.UUID, id uuid.UUID) (*JobRunRow, error)
+}
+
+type ScheduleRepository interface {
+	ListSchedulesByUser(ctx context.Context, userID uuid.UUID) ([]ScheduleChainRow, error)
+	ReplaceSchedulesByUser(ctx context.Context, userID uuid.UUID, rows []ScheduleChainRow) error
+	ListDueSchedules(ctx context.Context, now time.Time, limit int) ([]ScheduleChainRow, error)
+	MarkScheduleExecuted(ctx context.Context, id uuid.UUID, lastRunAt, nextRunAt time.Time) error
 }

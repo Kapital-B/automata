@@ -5,7 +5,7 @@ import (
 	"log/slog"
 	"time"
 
-	"github.com/Kapital-B/automata/svc/internal/application/ports/driven"
+	domainai "github.com/Kapital-B/automata/svc/internal/domain/ai"
 	"github.com/google/uuid"
 )
 
@@ -15,8 +15,8 @@ import (
 // Each service gets its own MeteredClient naming its feature, so usage is
 // attributed without the services knowing they are metered.
 type MeteredClient struct {
-	Inner driven.LLMClient
-	Usage driven.LLMUsageRepository
+	Inner domainai.LLMClient
+	Usage domainai.LLMUsageRepository
 	// Feature names the caller, e.g. "categorize" or "ask".
 	Feature string
 	// Model is the configured model, recorded when the provider does not
@@ -26,25 +26,25 @@ type MeteredClient struct {
 	Now   func() time.Time
 }
 
-var _ driven.LLMClientWithOptions = (*MeteredClient)(nil)
+var _ domainai.LLMClientWithOptions = (*MeteredClient)(nil)
 
-func (c *MeteredClient) ChatCompletion(ctx context.Context, messages []driven.LLMMessage) (*driven.LLMResponse, error) {
+func (c *MeteredClient) ChatCompletion(ctx context.Context, messages []domainai.LLMMessage) (*domainai.LLMResponse, error) {
 	resp, err := c.Inner.ChatCompletion(ctx, messages)
 	c.record(ctx, resp, err)
 	return resp, err
 }
 
-func (c *MeteredClient) ChatCompletionWithOptions(ctx context.Context, messages []driven.LLMMessage, opts driven.LLMRequestOptions) (*driven.LLMResponse, error) {
-	resp, err := driven.ChatCompletion(ctx, c.Inner, messages, opts)
+func (c *MeteredClient) ChatCompletionWithOptions(ctx context.Context, messages []domainai.LLMMessage, opts domainai.LLMRequestOptions) (*domainai.LLMResponse, error) {
+	resp, err := domainai.ChatCompletion(ctx, c.Inner, messages, opts)
 	c.record(ctx, resp, err)
 	return resp, err
 }
 
-func (c *MeteredClient) record(ctx context.Context, resp *driven.LLMResponse, callErr error) {
+func (c *MeteredClient) record(ctx context.Context, resp *domainai.LLMResponse, callErr error) {
 	if c.Usage == nil || callErr != nil || resp == nil {
 		return
 	}
-	userID, accountID := driven.UsageScopeFrom(ctx)
+	userID, accountID := domainai.UsageScopeFrom(ctx)
 	model := resp.Usage.Model
 	if model == "" {
 		model = c.Model
@@ -53,7 +53,7 @@ func (c *MeteredClient) record(ctx context.Context, resp *driven.LLMResponse, ca
 	if c.Now != nil {
 		now = c.Now
 	}
-	row := driven.LLMUsageRow{
+	row := domainai.LLMUsageRow{
 		ID:               uuid.New(),
 		UserID:           userID,
 		AccountID:        accountID,

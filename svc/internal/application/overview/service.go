@@ -5,10 +5,12 @@ package overview
 
 import (
 	"context"
+	domainattention "github.com/Kapital-B/automata/svc/internal/domain/attention"
 	"strings"
 	"time"
 
-	"github.com/Kapital-B/automata/svc/internal/application/ports/driven"
+	domainauth "github.com/Kapital-B/automata/svc/internal/domain/auth"
+	domainprojects "github.com/Kapital-B/automata/svc/internal/domain/projects"
 	"github.com/google/uuid"
 )
 
@@ -40,17 +42,13 @@ func ValidKind(kind string) bool {
 }
 
 type Service struct {
-	Users     driven.UserRepository
-	Projects  driven.ProjectRepository
+	Users     domainauth.UserRepository
+	Projects  domainprojects.ProjectRepository
 	Attention AttentionCounts
-	Triage    driven.AssignmentRepository
+	Triage    domainprojects.AssignmentRepository
 }
 
-// AttentionCounts is the subset of the attention service Home needs. Kept as
-// an interface so overview does not depend on the whole attention package.
-type AttentionCounts interface {
-	CountsForUser(ctx context.Context, userID uuid.UUID) (total int, byProject map[uuid.UUID]int, err error)
-}
+type AttentionCounts = domainattention.AttentionCounts
 
 // Counts is the metric-card payload.
 type Counts struct {
@@ -147,7 +145,7 @@ type ActivityInput struct {
 }
 
 type ActivityPage struct {
-	Items      []driven.ActivityItem
+	Items      []domainprojects.ActivityItem
 	NextBefore *time.Time
 	NextID     *uuid.UUID
 }
@@ -166,7 +164,7 @@ func (s *Service) Activity(ctx context.Context, userID uuid.UUID, in ActivityInp
 		limit = MaxActivityLimit
 	}
 
-	items, err := s.Projects.ListActivity(ctx, userID, orgID, driven.ActivityFilter{
+	items, err := s.Projects.ListActivity(ctx, userID, orgID, domainprojects.ActivityFilter{
 		Limit:     limit,
 		Before:    in.Before,
 		BeforeID:  in.BeforeID,

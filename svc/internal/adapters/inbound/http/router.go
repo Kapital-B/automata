@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"github.com/go-chi/chi/v5"
 	"html"
 	"log/slog"
 	"net/http"
@@ -27,13 +28,19 @@ import (
 	appjobs "github.com/Kapital-B/automata/svc/internal/application/jobs"
 	appmessages "github.com/Kapital-B/automata/svc/internal/application/messages"
 	appoverview "github.com/Kapital-B/automata/svc/internal/application/overview"
-	"github.com/Kapital-B/automata/svc/internal/application/ports/driven"
 	appprojectai "github.com/Kapital-B/automata/svc/internal/application/projectai"
 	appprojects "github.com/Kapital-B/automata/svc/internal/application/projects"
 	appreconcile "github.com/Kapital-B/automata/svc/internal/application/reconcile"
 	apptodos "github.com/Kapital-B/automata/svc/internal/application/todos"
 	domainacc "github.com/Kapital-B/automata/svc/internal/domain/accounts"
-	"github.com/go-chi/chi/v5"
+	domainaccounts "github.com/Kapital-B/automata/svc/internal/domain/accounts"
+	domainauth "github.com/Kapital-B/automata/svc/internal/domain/auth"
+	domaincontacts "github.com/Kapital-B/automata/svc/internal/domain/contacts"
+	domainissues "github.com/Kapital-B/automata/svc/internal/domain/issues"
+	domainjobs "github.com/Kapital-B/automata/svc/internal/domain/jobs"
+	domainmessages "github.com/Kapital-B/automata/svc/internal/domain/messages"
+	domainprojects "github.com/Kapital-B/automata/svc/internal/domain/projects"
+
 	"github.com/go-chi/cors"
 	"github.com/google/uuid"
 )
@@ -61,22 +68,22 @@ type Handlers struct {
 	AttentionSvc         *appattention.Service
 	OverviewSvc          *appoverview.Service
 	ProjectAISvc         *appprojectai.Service
-	Accounts             driven.AccountRepository
-	Messages             driven.MessageRepository
-	JobRuns              driven.JobRunRepository
-	JobStore             driven.JobStore
-	JobEnqueuer          driven.JobEnqueuer
+	Accounts             domainaccounts.AccountRepository
+	Messages             domainmessages.MessageRepository
+	JobRuns              domainjobs.JobRunRepository
+	JobStore             domainjobs.JobStore
+	JobEnqueuer          domainjobs.JobEnqueuer
 	JobTerminalTTL       time.Duration
 	JobsInline           bool
-	Summaries            driven.SummaryRepository
-	Forwards             driven.ForwardRepository
-	Schedules            driven.ScheduleRepository
-	OAuthStates          driven.OAuthStateRepository
-	Users                driven.UserRepository
-	Contacts             driven.ContactRepository
-	Projects             driven.ProjectRepository
-	Assignments          driven.AssignmentRepository
-	Issues               driven.IssueRepository
+	Summaries            domainmessages.SummaryRepository
+	Forwards             domainmessages.ForwardRepository
+	Schedules            domainjobs.ScheduleRepository
+	OAuthStates          domainauth.OAuthStateRepository
+	Users                domainauth.UserRepository
+	Contacts             domaincontacts.ContactRepository
+	Projects             domainprojects.ProjectRepository
+	Assignments          domainprojects.AssignmentRepository
+	Issues               domainissues.IssueRepository
 	Dashboard            string
 	SuccessPath          string
 	ConnectorSuccessPath string
@@ -291,7 +298,7 @@ type capabilitiesBody struct {
 	ReportsRemovals   bool `json:"reports_removals"`
 }
 
-func capabilitiesJSON(c driven.MailboxCapabilities) capabilitiesBody {
+func capabilitiesJSON(c domainaccounts.MailboxCapabilities) capabilitiesBody {
 	return capabilitiesBody{
 		IncrementalSync:   c.IncrementalSync,
 		ServerSideForward: c.ServerSideForward,
@@ -378,12 +385,12 @@ func (h *Handlers) connectIMAP(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid json"})
 		return
 	}
-	server := func(b mailServerBody) driven.MailServer {
-		return driven.MailServer{Host: b.Host, Port: b.Port, Security: b.Security}
+	server := func(b mailServerBody) domainaccounts.MailServer {
+		return domainaccounts.MailServer{Host: b.Host, Port: b.Port, Security: b.Security}
 	}
 	id, err := h.AccountSvc.ConnectWithPassword(r.Context(), userIDOrEmpty(r), appaccounts.ConnectWithPasswordInput{
 		Provider: appaccounts.ProviderIMAP,
-		Request: driven.PasswordConnectRequest{
+		Request: domainaccounts.PasswordConnectRequest{
 			Email:    body.Email,
 			Username: body.Username,
 			Password: body.Password,
@@ -393,12 +400,12 @@ func (h *Handlers) connectIMAP(w http.ResponseWriter, r *http.Request) {
 		LabelHint: body.Label,
 	})
 	if err != nil {
-		var rejected *driven.ConnectRejectedError
+		var rejected *domainaccounts.ConnectRejectedError
 		if errors.As(err, &rejected) {
 			writeJSON(w, http.StatusUnprocessableEntity, map[string]string{"error": rejected.Reason})
 			return
 		}
-		if errors.Is(err, driven.ErrUnsupportedProvider) {
+		if errors.Is(err, domainaccounts.ErrUnsupportedProvider) {
 			writeJSON(w, http.StatusServiceUnavailable, map[string]string{"error": "IMAP accounts are not enabled"})
 			return
 		}
@@ -539,7 +546,7 @@ func (h *Handlers) syncAccount(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if h.JobEnqueuer != nil {
-		job, err := h.enqueueAccountJob(r.Context(), uid, id, "sync", driven.JobPayload{Force: force})
+		job, err := h.enqueueAccountJob(r.Context(), uid, id, "sync", domainjobs.JobPayload{Force: force})
 		if err != nil {
 			h.Log.Error("enqueue sync", "err", err)
 			writeJSON(w, http.StatusBadRequest, map[string]string{"error": err.Error()})
@@ -580,7 +587,7 @@ func (h *Handlers) syncAccount(w http.ResponseWriter, r *http.Request) {
 }
 
 func (h *Handlers) listMessages(w http.ResponseWriter, r *http.Request) {
-	filter := driven.MessageListFilter{Category: r.URL.Query().Get("category")}
+	filter := domainmessages.MessageListFilter{Category: r.URL.Query().Get("category")}
 	if aid := r.URL.Query().Get("account_id"); aid != "" {
 		id, err := uuid.Parse(aid)
 		if err != nil {
@@ -892,7 +899,7 @@ func (h *Handlers) runForwardRules(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if !h.JobsInline && h.JobEnqueuer != nil {
-		job, err := h.enqueueAccountJob(r.Context(), uid, accountID, "forward_rules", driven.JobPayload{})
+		job, err := h.enqueueAccountJob(r.Context(), uid, accountID, "forward_rules", domainjobs.JobPayload{})
 		if err != nil {
 			h.Log.Error("enqueue forward_rules", "err", err)
 			writeJSON(w, http.StatusBadRequest, map[string]string{"error": err.Error()})
@@ -1042,7 +1049,7 @@ type categoryItem struct {
 	SortOrder   int    `json:"sort_order"`
 }
 
-func toCategoryItem(row driven.CategoryDefinitionRow) categoryItem {
+func toCategoryItem(row domainmessages.CategoryDefinitionRow) categoryItem {
 	return categoryItem{
 		ID:          row.ID.String(),
 		Slug:        row.Slug,
@@ -1092,7 +1099,7 @@ func (h *Handlers) createCategory(w http.ResponseWriter, r *http.Request) {
 	}
 	uid := userIDOrEmpty(r)
 	now := time.Now().UTC()
-	row := driven.CategoryDefinitionRow{
+	row := domainmessages.CategoryDefinitionRow{
 		ID:          uuid.New(),
 		UserID:      uid,
 		Slug:        body.Slug,
@@ -1255,7 +1262,7 @@ func (h *Handlers) categorizeAccount(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if h.JobEnqueuer != nil {
-		job, err := h.enqueueAccountJob(r.Context(), uid, id, "categorize", driven.JobPayload{
+		job, err := h.enqueueAccountJob(r.Context(), uid, id, "categorize", domainjobs.JobPayload{
 			Recategorize: body.Recategorize,
 		})
 		if err != nil {
@@ -1330,7 +1337,7 @@ func (h *Handlers) refreshSummary(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if h.JobEnqueuer != nil {
-		job, err := h.enqueueAccountJob(r.Context(), uid, id, "summarize", driven.JobPayload{})
+		job, err := h.enqueueAccountJob(r.Context(), uid, id, "summarize", domainjobs.JobPayload{})
 		if err != nil {
 			h.Log.Error("enqueue summarize", "err", err)
 			writeJSON(w, http.StatusBadRequest, map[string]string{"error": err.Error()})
@@ -1423,7 +1430,7 @@ func (h *Handlers) generateDrafts(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if h.JobEnqueuer != nil {
-		job, err := h.enqueueAccountJob(r.Context(), uid, id, "draft_suggest", driven.JobPayload{
+		job, err := h.enqueueAccountJob(r.Context(), uid, id, "draft_suggest", domainjobs.JobPayload{
 			MessageID: messageID,
 			Force:     messageID != nil,
 		})
@@ -1631,7 +1638,7 @@ func (h *Handlers) updateSummarySettings(w http.ResponseWriter, r *http.Request)
 		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid json"})
 		return
 	}
-	row := driven.SummarySettingsRow{
+	row := domainmessages.SummarySettingsRow{
 		UserID:               userIDOrEmpty(r),
 		IncludeCategorySlugs: body.Include,
 		ExcludeCategorySlugs: body.Exclude,
@@ -1704,7 +1711,7 @@ func (h *Handlers) updateSchedules(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	now := time.Now().UTC()
-	rows := make([]driven.ScheduleChainRow, 0, len(body.Chains))
+	rows := make([]domainjobs.ScheduleChainRow, 0, len(body.Chains))
 	for _, in := range body.Chains {
 		id := uuid.New()
 		if strings.TrimSpace(in.ID) != "" {
@@ -1741,7 +1748,7 @@ func (h *Handlers) updateSchedules(w http.ResponseWriter, r *http.Request) {
 			writeJSON(w, http.StatusUnprocessableEntity, map[string]string{"error": fmt.Sprintf("%q cannot run: %v", name, err)})
 			return
 		}
-		rows = append(rows, driven.ScheduleChainRow{
+		rows = append(rows, domainjobs.ScheduleChainRow{
 			ID:              id,
 			UserID:          userIDOrEmpty(r),
 			Name:            name,
@@ -1786,7 +1793,7 @@ func (h *Handlers) listRuns(w http.ResponseWriter, r *http.Request) {
 		if err != nil {
 			h.Log.Error("list runs", "err", err)
 			switch {
-			case errors.Is(err, driven.ErrOffsetNotSupported):
+			case errors.Is(err, domainjobs.ErrOffsetNotSupported):
 				writeJSON(w, http.StatusBadRequest, map[string]string{"error": "cursor_required"})
 			default:
 				writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "internal"})
@@ -1809,7 +1816,7 @@ func (h *Handlers) listRuns(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusServiceUnavailable, map[string]string{"error": "job runs not configured"})
 		return
 	}
-	filter := driven.JobRunListFilter{
+	filter := domainjobs.JobRunListFilter{
 		JobType: r.URL.Query().Get("job_type"),
 	}
 	if aid := r.URL.Query().Get("account_id"); aid != "" {
@@ -1859,7 +1866,7 @@ func (h *Handlers) getRun(w http.ResponseWriter, r *http.Request) {
 	if h.JobStore != nil {
 		row, err := h.JobStore.Get(r.Context(), uid, id)
 		if err != nil {
-			if errors.Is(err, driven.ErrJobNotFound) {
+			if errors.Is(err, domainjobs.ErrJobNotFound) {
 				writeJSON(w, http.StatusNotFound, map[string]string{"error": "not found"})
 				return
 			}
@@ -1905,7 +1912,7 @@ func (h *Handlers) cancelRun(w http.ResponseWriter, r *http.Request) {
 	}
 	row, err := h.JobStore.RequestCancel(r.Context(), userIDOrEmpty(r), id, time.Now().UTC(), h.jobTerminalTTL())
 	if err != nil {
-		if errors.Is(err, driven.ErrJobNotFound) {
+		if errors.Is(err, domainjobs.ErrJobNotFound) {
 			writeJSON(w, http.StatusNotFound, map[string]string{"error": "not found"})
 			return
 		}
@@ -1937,7 +1944,7 @@ type jobRunItem struct {
 	Meta            json.RawMessage `json:"meta_json"`
 }
 
-func legacyJobRunItem(row driven.JobRunRow) jobRunItem {
+func legacyJobRunItem(row domainjobs.JobRunRow) jobRunItem {
 	var accountID *string
 	if row.AccountID != nil {
 		s := row.AccountID.String()
@@ -1963,8 +1970,8 @@ func legacyJobRunItem(row driven.JobRunRow) jobRunItem {
 	}
 }
 
-func parseJobStoreListFilter(r *http.Request) (driven.JobListFilter, error) {
-	filter := driven.JobListFilter{
+func parseJobStoreListFilter(r *http.Request) (domainjobs.JobListFilter, error) {
+	filter := domainjobs.JobListFilter{
 		JobType: strings.TrimSpace(r.URL.Query().Get("job_type")),
 		Limit:   50,
 		Cursor:  strings.TrimSpace(r.URL.Query().Get("cursor")),
@@ -2013,21 +2020,21 @@ func (h *Handlers) authorizeAccount(ctx context.Context, userID, accountID uuid.
 	return row != nil, nil
 }
 
-func (h *Handlers) enqueueAccountJob(ctx context.Context, userID, accountID uuid.UUID, jobType string, payload driven.JobPayload) (*driven.JobRecord, error) {
+func (h *Handlers) enqueueAccountJob(ctx context.Context, userID, accountID uuid.UUID, jobType string, payload domainjobs.JobPayload) (*domainjobs.JobRecord, error) {
 	if h.JobEnqueuer == nil {
 		return nil, fmt.Errorf("job queue not configured")
 	}
-	return h.JobEnqueuer.Enqueue(ctx, driven.CreateJobInput{
+	return h.JobEnqueuer.Enqueue(ctx, domainjobs.CreateJobInput{
 		JobType:     jobType,
 		UserID:      userID,
 		AccountID:   &accountID,
-		TriggerKind: driven.JobTriggerAPI,
+		TriggerKind: domainjobs.JobTriggerAPI,
 		Payload:     payload,
 		Now:         time.Now().UTC(),
 	})
 }
 
-func (h *Handlers) jobStoreListItems(ctx context.Context, userID uuid.UUID, rows []driven.JobRecord) ([]jobRunItem, error) {
+func (h *Handlers) jobStoreListItems(ctx context.Context, userID uuid.UUID, rows []domainjobs.JobRecord) ([]jobRunItem, error) {
 	out := make([]jobRunItem, 0, len(rows))
 	for _, row := range rows {
 		item, err := h.jobStoreItem(ctx, userID, row)
@@ -2039,7 +2046,7 @@ func (h *Handlers) jobStoreListItems(ctx context.Context, userID uuid.UUID, rows
 	return out, nil
 }
 
-func (h *Handlers) jobStoreItem(ctx context.Context, userID uuid.UUID, row driven.JobRecord) (jobRunItem, error) {
+func (h *Handlers) jobStoreItem(ctx context.Context, userID uuid.UUID, row domainjobs.JobRecord) (jobRunItem, error) {
 	var accountID *string
 	var accountLabel *string
 	if row.AccountID != nil {

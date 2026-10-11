@@ -4,17 +4,17 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"github.com/emersion/go-imap"
 	"io"
 	"sort"
 	"strconv"
 	"strings"
 	"time"
 
-	"github.com/emersion/go-imap"
 	"github.com/emersion/go-imap/client"
 
 	"github.com/Kapital-B/automata/svc/internal/adapters/outbound/mailmime"
-	"github.com/Kapital-B/automata/svc/internal/application/ports/driven"
+	domainaccounts "github.com/Kapital-B/automata/svc/internal/domain/accounts"
 )
 
 const (
@@ -39,7 +39,7 @@ type mailbox struct {
 // sync sees new mail but not removals or edits. Ids are the Message-ID header
 // where there is one, which survives a UIDVALIDITY reset that would renumber
 // every UID; mail without one falls back to the UID.
-var capabilities = driven.MailboxCapabilities{
+var capabilities = domainaccounts.MailboxCapabilities{
 	IncrementalSync:   true,
 	ServerSideForward: false,
 	ServerSideReply:   false,
@@ -47,14 +47,14 @@ var capabilities = driven.MailboxCapabilities{
 	StableMessageIDs:  false,
 }
 
-func (p *Provider) Capabilities() driven.MailboxCapabilities { return capabilities }
+func (p *Provider) Capabilities() domainaccounts.MailboxCapabilities { return capabilities }
 
-func (m *mailbox) Capabilities() driven.MailboxCapabilities { return capabilities }
+func (m *mailbox) Capabilities() domainaccounts.MailboxCapabilities { return capabilities }
 
 func (m *mailbox) session(ctx context.Context) (*client.Client, *imap.MailboxStatus, error) {
 	cl, status, err := m.p.imapSession(ctx, m.cred)
 	if errors.Is(err, errLoginRefused) {
-		err = fmt.Errorf("%w: %v", driven.ErrCredentialsRejected, err)
+		err = fmt.Errorf("%w: %v", domainaccounts.ErrCredentialsRejected, err)
 	}
 	return cl, status, err
 }
@@ -79,14 +79,14 @@ func parseCursor(c string) (validity, uid uint32, err error) {
 	return uint32(v), uint32(u), nil
 }
 
-func (m *mailbox) ListChanges(ctx context.Context, cursor string, pageSize int) (*driven.MailChangePage, error) {
+func (m *mailbox) ListChanges(ctx context.Context, cursor string, pageSize int) (*domainaccounts.MailChangePage, error) {
 	var after uint32
 	var wantValidity uint32
 	if cursor != "" {
 		var err error
 		if wantValidity, after, err = parseCursor(cursor); err != nil {
 			// A cursor we cannot read is one we cannot resume from.
-			return nil, fmt.Errorf("%w: %v", driven.ErrCursorExpired, err)
+			return nil, fmt.Errorf("%w: %v", domainaccounts.ErrCursorExpired, err)
 		}
 	}
 	cl, status, err := m.session(ctx)
@@ -96,7 +96,7 @@ func (m *mailbox) ListChanges(ctx context.Context, cursor string, pageSize int) 
 	defer func() { _ = cl.Logout() }()
 	if cursor != "" && status.UidValidity != wantValidity {
 		// The server renumbered the mailbox; our UIDs mean nothing now.
-		return nil, fmt.Errorf("%w: uidvalidity changed from %d to %d", driven.ErrCursorExpired, wantValidity, status.UidValidity)
+		return nil, fmt.Errorf("%w: uidvalidity changed from %d to %d", domainaccounts.ErrCursorExpired, wantValidity, status.UidValidity)
 	}
 	if pageSize <= 0 || pageSize > maxPageSize {
 		pageSize = maxPageSize
@@ -126,7 +126,7 @@ func (m *mailbox) ListChanges(ctx context.Context, cursor string, pageSize int) 
 	if err != nil {
 		return nil, err
 	}
-	page := &driven.MailChangePage{Messages: msgs}
+	page := &domainaccounts.MailChangePage{Messages: msgs}
 	last := after
 	if len(uids) > 0 {
 		last = uids[len(uids)-1]
@@ -139,7 +139,7 @@ func (m *mailbox) ListChanges(ctx context.Context, cursor string, pageSize int) 
 	return page, nil
 }
 
-func (m *mailbox) fetchForSync(cl *client.Client, validity uint32, uids []uint32) ([]driven.MailMessage, error) {
+func (m *mailbox) fetchForSync(cl *client.Client, validity uint32, uids []uint32) ([]domainaccounts.MailMessage, error) {
 	if len(uids) == 0 {
 		return nil, nil
 	}
@@ -150,14 +150,14 @@ func (m *mailbox) fetchForSync(cl *client.Client, validity uint32, uids []uint32
 	ch := make(chan *imap.Message, len(uids))
 	done := make(chan error, 1)
 	go func() { done <- cl.UidFetch(set, items, ch) }()
-	byUID := map[uint32]driven.MailMessage{}
+	byUID := map[uint32]domainaccounts.MailMessage{}
 	for msg := range ch {
 		byUID[msg.Uid] = toMailMessage(validity, msg, section)
 	}
 	if err := <-done; err != nil {
 		return nil, fmt.Errorf("imap fetch: %w", err)
 	}
-	out := make([]driven.MailMessage, 0, len(uids))
+	out := make([]domainaccounts.MailMessage, 0, len(uids))
 	for _, u := range uids {
 		if mm, ok := byUID[u]; ok {
 			out = append(out, mm)
@@ -173,7 +173,7 @@ func messageID(validity, uid uint32, headerID string) string {
 	return fmt.Sprintf("uid:%d:%d", validity, uid)
 }
 
-func toMailMessage(validity uint32, msg *imap.Message, section *imap.BodySectionName) driven.MailMessage {
+func toMailMessage(validity uint32, msg *imap.Message, section *imap.BodySectionName) domainaccounts.MailMessage {
 	var raw []byte
 	if body := msg.GetBody(section); body != nil {
 		raw, _ = io.ReadAll(body)
@@ -183,7 +183,7 @@ func toMailMessage(validity uint32, msg *imap.Message, section *imap.BodySection
 		// Unreadable headers still have to become a row, or one bad message
 		// would stall sync behind it forever. Mark it rather than blank it.
 		id := messageID(validity, msg.Uid, "")
-		return driven.MailMessage{
+		return domainaccounts.MailMessage{
 			ID:               id,
 			ConversationID:   id,
 			ReceivedDateTime: msg.InternalDate.UTC().Format(time.RFC3339),
@@ -280,7 +280,7 @@ func (m *mailbox) GetRawMessage(ctx context.Context, id string) ([]byte, error) 
 		return nil, fmt.Errorf("%s: %w", id, errNotInInbox)
 	}
 	if int64(size) > m.p.maxRaw() {
-		return nil, driven.TooLarge(m.p.maxRaw())
+		return nil, domainaccounts.TooLarge(m.p.maxRaw())
 	}
 
 	section := &imap.BodySectionName{Peek: true}
@@ -300,7 +300,7 @@ func (m *mailbox) GetRawMessage(ctx context.Context, id string) ([]byte, error) 
 		return nil, fmt.Errorf("%s: %w", id, errNotInInbox)
 	}
 	if int64(len(raw)) > m.p.maxRaw() {
-		return nil, driven.TooLarge(m.p.maxRaw())
+		return nil, domainaccounts.TooLarge(m.p.maxRaw())
 	}
 	return raw, nil
 }
@@ -311,7 +311,7 @@ func recipients(raw []byte) ([]string, error) {
 		return nil, err
 	}
 	var out []string
-	for _, r := range append(append([]driven.MailRecipient{}, p.To...), p.Cc...) {
+	for _, r := range append(append([]domainaccounts.MailRecipient{}, p.To...), p.Cc...) {
 		out = append(out, r.Address)
 	}
 	return out, nil

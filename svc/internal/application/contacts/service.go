@@ -7,16 +7,19 @@ import (
 	"strings"
 	"time"
 
-	"github.com/Kapital-B/automata/svc/internal/application/ports/driven"
+	domainauth "github.com/Kapital-B/automata/svc/internal/domain/auth"
 	domaincontacts "github.com/Kapital-B/automata/svc/internal/domain/contacts"
+	domainjobs "github.com/Kapital-B/automata/svc/internal/domain/jobs"
+	domainmessages "github.com/Kapital-B/automata/svc/internal/domain/messages"
+
 	"github.com/google/uuid"
 )
 
 // ResolveService upserts contacts and participants from mail headers.
 type ResolveService struct {
-	Users    driven.UserRepository
-	Messages driven.MessageRepository
-	Contacts driven.ContactRepository
+	Users    domainauth.UserRepository
+	Messages domainmessages.MessageRepository
+	Contacts domaincontacts.ContactRepository
 }
 
 type recipientPayload struct {
@@ -26,7 +29,7 @@ type recipientPayload struct {
 
 type ResolveChunkResult struct {
 	MessagesProcessed int
-	NextCursor        *driven.JobCursor
+	NextCursor        *domainjobs.JobCursor
 	Done              bool
 }
 
@@ -68,7 +71,7 @@ func (s *ResolveService) BackfillAccount(ctx context.Context, userID, accountID 
 // resolveChunkSize bounds one chunk of contact resolution.
 const resolveChunkSize = 100
 
-func (s *ResolveService) ResolveAccountChunk(ctx context.Context, run driven.RunContext) (*ResolveChunkResult, error) {
+func (s *ResolveService) ResolveAccountChunk(ctx context.Context, run domainjobs.RunContext) (*ResolveChunkResult, error) {
 	if s == nil || s.Users == nil || s.Messages == nil || s.Contacts == nil {
 		return nil, fmt.Errorf("resolve service not configured")
 	}
@@ -114,7 +117,7 @@ func (s *ResolveService) resolveNextBatch(ctx context.Context, orgID, userID, ac
 	return len(rows), done, nil
 }
 
-func (s *ResolveService) resolveStoredMessage(ctx context.Context, orgID uuid.UUID, msg *driven.MessageRow) error {
+func (s *ResolveService) resolveStoredMessage(ctx context.Context, orgID uuid.UUID, msg *domainmessages.MessageRow) error {
 	now := time.Now().UTC()
 	type part struct {
 		role domaincontacts.ParticipantRole
@@ -144,7 +147,7 @@ func (s *ResolveService) resolveStoredMessage(ctx context.Context, orgID uuid.UU
 		if err != nil {
 			continue
 		}
-		_ = s.Contacts.UpsertParticipant(ctx, driven.CorrespondenceParticipantRow{
+		_ = s.Contacts.UpsertParticipant(ctx, domaincontacts.CorrespondenceParticipantRow{
 			ID:             uuid.New(),
 			OrganisationID: orgID,
 			ContactID:      contactID,
@@ -192,16 +195,16 @@ func parseRecipientList(raw string) []recipientPayload {
 
 // Service exposes contact CRUD and merge for HTTP.
 type Service struct {
-	Users    driven.UserRepository
-	Contacts driven.ContactRepository
-	Messages driven.MessageRepository
+	Users    domainauth.UserRepository
+	Contacts domaincontacts.ContactRepository
+	Messages domainmessages.MessageRepository
 }
 
 func (s *Service) homeOrg(ctx context.Context, userID uuid.UUID) (uuid.UUID, error) {
 	return s.Users.GetHomeOrganisationID(ctx, userID)
 }
 
-func (s *Service) List(ctx context.Context, userID uuid.UUID, filter driven.ContactListFilter) ([]driven.ContactRow, error) {
+func (s *Service) List(ctx context.Context, userID uuid.UUID, filter domaincontacts.ContactListFilter) ([]domaincontacts.ContactRow, error) {
 	orgID, err := s.homeOrg(ctx, userID)
 	if err != nil {
 		return nil, err
@@ -210,10 +213,10 @@ func (s *Service) List(ctx context.Context, userID uuid.UUID, filter driven.Cont
 }
 
 type ContactDetail struct {
-	Contact         driven.ContactRow
-	Identities      []driven.ContactIdentityRow
+	Contact         domaincontacts.ContactRow
+	Identities      []domaincontacts.ContactIdentityRow
 	RecentMessages  []RecentMessageRef
-	SuggestedMerges []driven.ContactRow
+	SuggestedMerges []domaincontacts.ContactRow
 }
 
 // RecentMessageRef is enough of a message to recognise it in a list.
@@ -283,14 +286,14 @@ type CreateContactInput struct {
 	}
 }
 
-func (s *Service) Create(ctx context.Context, userID uuid.UUID, in CreateContactInput) (*driven.ContactRow, error) {
+func (s *Service) Create(ctx context.Context, userID uuid.UUID, in CreateContactInput) (*domaincontacts.ContactRow, error) {
 	orgID, err := s.homeOrg(ctx, userID)
 	if err != nil {
 		return nil, err
 	}
 	now := time.Now().UTC()
 	id := uuid.New()
-	row := driven.ContactRow{
+	row := domaincontacts.ContactRow{
 		ID:             id,
 		OrganisationID: orgID,
 		DisplayName:    strings.TrimSpace(in.DisplayName),
@@ -321,7 +324,7 @@ func (s *Service) Create(ctx context.Context, userID uuid.UUID, in CreateContact
 		if norm == "" {
 			continue
 		}
-		if err := s.Contacts.CreateIdentity(ctx, driven.ContactIdentityRow{
+		if err := s.Contacts.CreateIdentity(ctx, domaincontacts.ContactIdentityRow{
 			ID:              uuid.New(),
 			OrganisationID:  orgID,
 			ContactID:       id,
@@ -336,7 +339,7 @@ func (s *Service) Create(ctx context.Context, userID uuid.UUID, in CreateContact
 	return &row, nil
 }
 
-func (s *Service) AddIdentity(ctx context.Context, userID, contactID uuid.UUID, kind, value string) (*driven.ContactIdentityRow, error) {
+func (s *Service) AddIdentity(ctx context.Context, userID, contactID uuid.UUID, kind, value string) (*domaincontacts.ContactIdentityRow, error) {
 	orgID, err := s.homeOrg(ctx, userID)
 	if err != nil {
 		return nil, err
@@ -366,7 +369,7 @@ func (s *Service) AddIdentity(ctx context.Context, userID, contactID uuid.UUID, 
 		return nil, fmt.Errorf("invalid identity value")
 	}
 	now := time.Now().UTC()
-	row := driven.ContactIdentityRow{
+	row := domaincontacts.ContactIdentityRow{
 		ID:              uuid.New(),
 		OrganisationID:  orgID,
 		ContactID:       contactID,

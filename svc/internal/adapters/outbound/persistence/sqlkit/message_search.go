@@ -4,7 +4,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/Kapital-B/automata/svc/internal/application/ports/driven"
+	domainmessages "github.com/Kapital-B/automata/svc/internal/domain/messages"
 	"github.com/google/uuid"
 )
 
@@ -29,7 +29,7 @@ func LikeContains(s string) string {
 // Selected columns: id, account_id, conversation_id, received_at, subject,
 // from_json, body_text, score. formatTime renders time arguments in the
 // adapter's storage format.
-func MessageSearchQuery(userID uuid.UUID, f driven.MessageSearchFilter, formatTime func(time.Time) any) (string, []any) {
+func MessageSearchQuery(userID uuid.UUID, f domainmessages.MessageSearchFilter, formatTime func(time.Time) any) (string, []any) {
 	terms := make([]string, 0, len(f.Terms))
 	seen := map[string]bool{}
 	for _, t := range f.Terms {
