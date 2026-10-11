@@ -23,6 +23,8 @@ import (
 	domainaccounts "github.com/Kapital-B/automata/svc/internal/domain/accounts"
 	domainai "github.com/Kapital-B/automata/svc/internal/domain/ai"
 
+	queries "github.com/Kapital-B/automata/svc/internal/application/queries"
+	submissions "github.com/Kapital-B/automata/svc/internal/application/submissions"
 	"github.com/google/uuid"
 	_ "modernc.org/sqlite"
 )
@@ -90,8 +92,8 @@ func newCategorizeTestServer(t *testing.T) (*httptest.Server, *sqlite.Repository
 	h := &Handlers{
 		Log:        slog.New(slog.NewTextHandler(io.Discard, nil)),
 		AccountSvc: accountSvc, SyncSvc: syncSvc, CategorizeSvc: categorizeSvc, AuthSvc: authSvc,
-		Accounts: repo, Messages: repo, JobRuns: repo, OAuthStates: repo, Users: repo,
-		Dashboard: "http://localhost:5173", SuccessPath: "/ok", ErrorPath: "/err", TokenVerifier: security.JWT{Secret: jwtSecret}, JobsInline: true,
+		AccountsQueries: &queries.Service{Accounts: repo}, MessagesQueries: &queries.Service{Messages: repo}, JobRunsQueries: &queries.Service{JobRuns: repo}, UsersQueries: &queries.Service{Users: repo},
+		Dashboard: "http://localhost:5173", SuccessPath: "/ok", ErrorPath: "/err", TokenVerifier: security.JWT{Secret: jwtSecret}, AccountJobs: &submissions.Service{Inline: true, Accounts: repo, Runs: repo, Sync: syncSvc, Categorize: categorizeSvc}, ConnectorJobs: &submissions.Service{Inline: true, Accounts: repo, Runs: repo, Sync: syncSvc, Categorize: categorizeSvc}, Extraction: &submissions.Service{Inline: true, Accounts: repo, Runs: repo, Sync: syncSvc, Categorize: categorizeSvc}, JobRequests: &submissions.Service{Inline: true, Accounts: repo, Runs: repo, Sync: syncSvc, Categorize: categorizeSvc},
 	}
 	srv := httptest.NewServer(h.Routes())
 	t.Cleanup(srv.Close)

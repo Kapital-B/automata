@@ -5,7 +5,7 @@ import (
 	"crypto/rand"
 	"encoding/base64"
 	"encoding/json"
-	"errors"
+
 	"fmt"
 	"strings"
 	"time"
@@ -20,10 +20,8 @@ import (
 
 const oauthFlowSlackConnector = "slack_connector"
 
-var (
-	ErrInvalidOAuthState = errors.New("invalid oauth state")
-	ErrNotFound          = errors.New("connector not found")
-)
+var ErrInvalidOAuthState = domainconnectors.ConnectorErrInvalidOAuthState
+var ErrNotFound = domainconnectors.ConnectorErrNotFound
 
 // Service orchestrates Slack connector OAuth, bindings, and synchronization.
 type Service struct {
@@ -36,15 +34,9 @@ type Service struct {
 	JobRuns    domainjobs.JobRunRepository
 }
 
-type StartConnectInput struct {
-	Provider  string
-	LabelHint *string
-}
+type StartConnectInput = domainconnectors.ConnectorStartConnectInput
 
-type StartConnectOutput struct {
-	AuthorizationURL string
-	State            string
-}
+type StartConnectOutput = domainconnectors.ConnectorStartConnectOutput
 
 func (s *Service) StartConnect(ctx context.Context, userID uuid.UUID, in StartConnectInput) (*StartConnectOutput, error) {
 	if s == nil || s.Slack == nil || s.OAuthState == nil {
@@ -72,9 +64,7 @@ func (s *Service) StartConnect(ctx context.Context, userID uuid.UUID, in StartCo
 	return &StartConnectOutput{AuthorizationURL: authorizationURL, State: state}, nil
 }
 
-type CompleteOAuthResult struct {
-	ConnectorAccountID uuid.UUID
-}
+type CompleteOAuthResult = domainconnectors.ConnectorCompleteOAuthResult
 
 func (s *Service) CompleteOAuth(ctx context.Context, code, state string) (*CompleteOAuthResult, error) {
 	flow, userID, payloadJSON, ok, err := s.OAuthState.TakeOAuthState(ctx, state)
@@ -154,12 +144,7 @@ func (s *Service) ListBindings(ctx context.Context, userID, connectorAccountID u
 	return s.Connectors.ListConnectorBindings(ctx, userID, connectorAccountID)
 }
 
-type CreateBindingInput struct {
-	ExternalChannelID string
-	OrganisationID    *uuid.UUID
-	ProjectID         *uuid.UUID
-	Label             string
-}
+type CreateBindingInput = domainconnectors.ConnectorCreateBindingInput
 
 func (s *Service) CreateBinding(ctx context.Context, userID, connectorAccountID uuid.UUID, in CreateBindingInput) (*domainconnectors.ConnectorBindingRow, error) {
 	account, err := s.Connectors.GetConnectorAccount(ctx, userID, connectorAccountID)

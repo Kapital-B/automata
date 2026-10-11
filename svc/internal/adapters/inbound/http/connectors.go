@@ -9,9 +9,8 @@ import (
 	"strings"
 	"time"
 
-	asynqadapter "github.com/Kapital-B/automata/svc/internal/adapters/inbound/asynq"
-	appconnectors "github.com/Kapital-B/automata/svc/internal/application/connectors"
 	domainconnectors "github.com/Kapital-B/automata/svc/internal/domain/connectors"
+
 	domainjobs "github.com/Kapital-B/automata/svc/internal/domain/jobs"
 
 	"github.com/google/uuid"
@@ -47,7 +46,7 @@ func (h *Handlers) startConnectorConnect(w http.ResponseWriter, r *http.Request)
 		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid json"})
 		return
 	}
-	result, err := h.ConnectorSvc.StartConnect(r.Context(), userIDOrEmpty(r), appconnectors.StartConnectInput{
+	result, err := h.ConnectorSvc.StartConnect(r.Context(), userIDOrEmpty(r), domainconnectors.ConnectorStartConnectInput{
 		Provider: body.Provider, LabelHint: body.Label,
 	})
 	if err != nil {
@@ -77,7 +76,7 @@ func (h *Handlers) connectorOAuthCallback(w http.ResponseWriter, r *http.Request
 	}
 	result, err := h.ConnectorSvc.CompleteOAuth(r.Context(), code, state)
 	if err != nil {
-		if errors.Is(err, appconnectors.ErrInvalidOAuthState) {
+		if errors.Is(err, domainconnectors.ConnectorErrInvalidOAuthState) {
 			h.redirectError(w, r, "invalid_state")
 			return
 		}
@@ -102,7 +101,7 @@ func (h *Handlers) deleteConnector(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if err := h.ConnectorSvc.Disconnect(r.Context(), userIDOrEmpty(r), id); err != nil {
-		if errors.Is(err, appconnectors.ErrNotFound) {
+		if errors.Is(err, domainconnectors.ConnectorErrNotFound) {
 			writeJSON(w, http.StatusNotFound, map[string]string{"error": "not found"})
 			return
 		}
@@ -120,7 +119,7 @@ func (h *Handlers) listConnectorBindings(w http.ResponseWriter, r *http.Request)
 	}
 	rows, err := h.ConnectorSvc.ListBindings(r.Context(), userIDOrEmpty(r), id)
 	if err != nil {
-		if errors.Is(err, appconnectors.ErrNotFound) {
+		if errors.Is(err, domainconnectors.ConnectorErrNotFound) {
 			writeJSON(w, http.StatusNotFound, map[string]string{"error": "not found"})
 			return
 		}
@@ -150,7 +149,7 @@ func (h *Handlers) createConnectorBinding(w http.ResponseWriter, r *http.Request
 		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid json"})
 		return
 	}
-	input := appconnectors.CreateBindingInput{
+	input := domainconnectors.ConnectorCreateBindingInput{
 		ExternalChannelID: body.ExternalChannelID,
 		Label:             body.Label,
 	}
@@ -172,7 +171,7 @@ func (h *Handlers) createConnectorBinding(w http.ResponseWriter, r *http.Request
 	}
 	row, err := h.ConnectorSvc.CreateBinding(r.Context(), userIDOrEmpty(r), connectorAccountID, input)
 	if err != nil {
-		if errors.Is(err, appconnectors.ErrNotFound) {
+		if errors.Is(err, domainconnectors.ConnectorErrNotFound) {
 			writeJSON(w, http.StatusNotFound, map[string]string{"error": "not found"})
 			return
 		}
@@ -187,89 +186,17 @@ func (h *Handlers) syncConnector(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusServiceUnavailable, map[string]string{"error": "connector sync not configured"})
 		return
 	}
-	connectorAccountID, err := uuid.Parse(chi.URLParam(r, "id"))
+	id, err := uuid.Parse(chi.URLParam(r, "id"))
 	if err != nil {
 		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "bad id"})
 		return
 	}
-	userID := userIDOrEmpty(r)
-	if h.JobsInline {
-		result, err := h.ConnectorSvc.Sync(r.Context(), userID, connectorAccountID)
-		if err != nil {
-			if errors.Is(err, appconnectors.ErrNotFound) {
-				writeJSON(w, http.StatusNotFound, map[string]string{"error": "not found"})
-				return
-			}
-			writeJSON(w, http.StatusBadRequest, map[string]string{"error": err.Error()})
-			return
-		}
-		writeJSON(w, http.StatusOK, map[string]any{
-			"job_run_id": result.JobRunID.String(), "messages_upserted": result.MessagesUpserted,
-			"status": "success",
-		})
-		return
-	}
-	account, err := h.ConnectorSvc.List(r.Context(), userID)
+	result, err := h.ConnectorJobs.SubmitConnector(r.Context(), userIDOrEmpty(r), id)
 	if err != nil {
-		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "internal"})
+		writeOperationError(w, err)
 		return
 	}
-	found := false
-	for _, row := range account {
-		if row.ID == connectorAccountID {
-			found = true
-			break
-		}
-	}
-	if !found {
-		writeJSON(w, http.StatusNotFound, map[string]string{"error": "not found"})
-		return
-	}
-	if h.JobEnqueuer != nil {
-		job, err := h.JobEnqueuer.Enqueue(r.Context(), domainjobs.CreateJobInput{
-			JobType:     "sync_slack",
-			UserID:      userID,
-			TriggerKind: domainjobs.JobTriggerAPI,
-			Payload: domainjobs.JobPayload{
-				ConnectorAccountID: &connectorAccountID,
-			},
-			Now: time.Now().UTC(),
-		})
-		if err != nil {
-			writeJSON(w, http.StatusBadRequest, map[string]string{"error": err.Error()})
-			return
-		}
-		writeAcceptedJob(w, job.ID)
-		return
-	}
-	if h.JobQueue == nil || h.JobRuns == nil {
-		writeJSON(w, http.StatusServiceUnavailable, map[string]string{"error": "connector sync not configured"})
-		return
-	}
-	runID := uuid.New()
-	startedAt := time.Now().UTC()
-	meta, _ := json.Marshal(map[string]any{
-		"queued": true, "connector_account_id": connectorAccountID.String(),
-	})
-	if err := h.JobRuns.InsertJobRun(
-		r.Context(), runID, uuid.Nil, "sync_slack", "api", "pending",
-		startedAt, time.Time{}, nil, string(meta),
-	); err != nil {
-		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "internal"})
-		return
-	}
-	err = h.JobQueue.EnqueueSyncSlack(r.Context(), asynqadapter.TaskPayload{
-		SchemaVersion: 1, RunID: runID, UserID: userID,
-		ConnectorAccountID: connectorAccountID, TriggerKind: "api",
-	})
-	if err != nil {
-		message := err.Error()
-		finishedAt := time.Now().UTC()
-		_ = h.JobRuns.UpdateJobRunStatus(r.Context(), runID, "failed", &finishedAt, &message, string(meta))
-		writeJSON(w, http.StatusBadRequest, map[string]string{"error": message})
-		return
-	}
-	writeJSON(w, http.StatusAccepted, map[string]any{"job_run_id": runID.String(), "status": "queued"})
+	writeSubmission(w, result, "sync_slack", domainjobs.JobPayload{})
 }
 
 func connectorAccountJSON(row domainconnectors.ConnectorAccountRow) map[string]any {

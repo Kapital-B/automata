@@ -21,6 +21,8 @@ import (
 	domainmessages "github.com/Kapital-B/automata/svc/internal/domain/messages"
 
 	security "github.com/Kapital-B/automata/svc/internal/adapters/outbound/security"
+	queries "github.com/Kapital-B/automata/svc/internal/application/queries"
+	submissions "github.com/Kapital-B/automata/svc/internal/application/submissions"
 	"github.com/google/uuid"
 )
 
@@ -55,8 +57,8 @@ func newForwardAPI(t *testing.T) *forwardAPI {
 		t.Fatal(err)
 	}
 	h := &Handlers{
-		Log: slog.New(slog.NewTextHandler(io.Discard, nil)), Accounts: repo, Forwards: repo, Messages: repo, Schedules: repo,
-		ForwardRulesSvc: &appmessages.ForwardRulesService{Messages: repo, Forwards: repo, JobRuns: repo, Effects: memoryjobs.NewStore()}, TokenVerifier: security.JWT{Secret: []byte("abcdefghijklmnopqrstuvwxyz123456")},
+		Log: slog.New(slog.NewTextHandler(io.Discard, nil)), AccountsQueries: &queries.Service{Accounts: repo}, ForwardsQueries: &queries.Service{Forwards: repo, Accounts: repo}, MessagesQueries: &queries.Service{Messages: repo}, SchedulesQueries: &queries.Service{Schedules: repo},
+		ForwardRulesSvc: &appmessages.ForwardRulesService{Messages: repo, Forwards: repo, JobRuns: repo, Effects: memoryjobs.NewStore()}, TokenVerifier: security.JWT{Secret: []byte("abcdefghijklmnopqrstuvwxyz123456")}, AccountJobs: &submissions.Service{Accounts: repo, Forward: &appmessages.ForwardRulesService{Messages: repo, Forwards: repo, JobRuns: repo, Effects: memoryjobs.NewStore()}}, ConnectorJobs: &submissions.Service{Accounts: repo, Forward: &appmessages.ForwardRulesService{Messages: repo, Forwards: repo, JobRuns: repo, Effects: memoryjobs.NewStore()}}, Extraction: &submissions.Service{Accounts: repo, Forward: &appmessages.ForwardRulesService{Messages: repo, Forwards: repo, JobRuns: repo, Effects: memoryjobs.NewStore()}}, JobRequests: &submissions.Service{Accounts: repo, Forward: &appmessages.ForwardRulesService{Messages: repo, Forwards: repo, JobRuns: repo, Effects: memoryjobs.NewStore()}},
 	}
 	a.srv = httptest.NewServer(h.Routes())
 	t.Cleanup(a.srv.Close)

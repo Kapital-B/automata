@@ -3,11 +3,10 @@ package http
 import (
 	"encoding/json"
 	"errors"
+	domainprojects "github.com/Kapital-B/automata/svc/internal/domain/projects"
 	"github.com/go-chi/chi/v5"
 	"net/http"
 	"strings"
-
-	appprojectai "github.com/Kapital-B/automata/svc/internal/application/projectai"
 
 	"github.com/google/uuid"
 )
@@ -69,11 +68,11 @@ func (h *Handlers) askAcross(w http.ResponseWriter, r *http.Request) {
 
 func writeAskError(w http.ResponseWriter, err error) {
 	switch {
-	case errors.Is(err, appprojectai.ErrNotFound):
+	case errors.Is(err, domainprojects.ProjectAIErrNotFound):
 		writeJSON(w, http.StatusNotFound, map[string]string{"error": "not found"})
-	case errors.Is(err, appprojectai.ErrLLMUnavailable):
+	case errors.Is(err, domainprojects.ProjectAIErrLLMUnavailable):
 		writeJSON(w, http.StatusServiceUnavailable, map[string]string{"error": err.Error()})
-	case errors.Is(err, appprojectai.ErrEmptyQuestion):
+	case errors.Is(err, domainprojects.ProjectAIErrEmptyQuestion):
 		writeJSON(w, http.StatusBadRequest, map[string]string{"error": err.Error()})
 	default:
 		writeJSON(w, http.StatusBadRequest, map[string]string{"error": err.Error()})

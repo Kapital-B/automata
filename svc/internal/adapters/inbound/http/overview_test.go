@@ -16,6 +16,8 @@ import (
 	"github.com/Kapital-B/automata/svc/internal/application/auth"
 	appoverview "github.com/Kapital-B/automata/svc/internal/application/overview"
 	appprojects "github.com/Kapital-B/automata/svc/internal/application/projects"
+	queries "github.com/Kapital-B/automata/svc/internal/application/queries"
+	submissions "github.com/Kapital-B/automata/svc/internal/application/submissions"
 	domaincontradictions "github.com/Kapital-B/automata/svc/internal/domain/contradictions"
 	domaindecisions "github.com/Kapital-B/automata/svc/internal/domain/decisions"
 	"github.com/google/uuid"
@@ -56,7 +58,7 @@ func newOverviewFixture(t *testing.T, dbName string) overviewFixture {
 		OverviewSvc: &appoverview.Service{
 			Users: repo, Projects: repo, Attention: attentionSvc, Triage: repo,
 		},
-		Users: repo, Messages: repo, Projects: repo, Assignments: repo, Contacts: repo, TokenVerifier: security.JWT{Secret: jwtSecret},
+		UsersQueries: &queries.Service{Users: repo}, MessagesQueries: &queries.Service{Messages: repo, Assignments: repo}, TokenVerifier: security.JWT{Secret: jwtSecret}, AccountJobs: &submissions.Service{Projects: projectSvc}, ConnectorJobs: &submissions.Service{Projects: projectSvc}, Extraction: &submissions.Service{Projects: projectSvc}, JobRequests: &submissions.Service{Projects: projectSvc},
 	}
 	srv := httptest.NewServer(h.Routes())
 	t.Cleanup(srv.Close)

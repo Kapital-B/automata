@@ -4,31 +4,20 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"strings"
 
 	domainaccounts "github.com/Kapital-B/automata/svc/internal/domain/accounts"
 	domainshared "github.com/Kapital-B/automata/svc/internal/domain/shared"
 	"github.com/google/uuid"
 )
 
-// ProviderM365 is the provider value for Microsoft 365 mailboxes, and what
-// every row written before provider support means.
-const ProviderM365 = "m365"
+const ProviderM365 = domainaccounts.AccountProviderM365
 
 // ProviderGoogle covers Gmail and Google Workspace, which are one mailbox.
 const ProviderGoogle = "google"
 
-// ProviderIMAP is any mailbox reached over IMAP and SMTP with a password.
-const ProviderIMAP = "imap"
+const ProviderIMAP = domainaccounts.AccountProviderIMAP
 
-// ProviderKey normalises a stored provider value.
-func ProviderKey(provider string) string {
-	p := strings.ToLower(strings.TrimSpace(provider))
-	if p == "" {
-		return ProviderM365
-	}
-	return p
-}
+var ProviderKey = domainaccounts.AccountProviderKey
 
 // MailboxOpener turns an account into an open mailbox. It is the one place
 // that knows credentials are encrypted at rest, which provider decodes them,

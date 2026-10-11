@@ -17,6 +17,8 @@ import (
 	security "github.com/Kapital-B/automata/svc/internal/adapters/outbound/security"
 	"github.com/Kapital-B/automata/svc/internal/application/auth"
 	appprojects "github.com/Kapital-B/automata/svc/internal/application/projects"
+	queries "github.com/Kapital-B/automata/svc/internal/application/queries"
+	submissions "github.com/Kapital-B/automata/svc/internal/application/submissions"
 	domainaccounts "github.com/Kapital-B/automata/svc/internal/domain/accounts"
 	domainprojects "github.com/Kapital-B/automata/svc/internal/domain/projects"
 	"github.com/google/uuid"
@@ -60,7 +62,7 @@ func newBatchFixture(t *testing.T, dbName string) batchFixture {
 	}
 	h := &Handlers{
 		Log: slog.Default(), AuthSvc: authSvc, ProjectSvc: projectSvc,
-		Users: repo, Messages: repo, Projects: repo, Assignments: repo, Contacts: repo, TokenVerifier: security.JWT{Secret: jwtSecret},
+		UsersQueries: &queries.Service{Users: repo}, MessagesQueries: &queries.Service{Messages: repo, Assignments: repo}, TokenVerifier: security.JWT{Secret: jwtSecret}, AccountJobs: &submissions.Service{Projects: projectSvc}, ConnectorJobs: &submissions.Service{Projects: projectSvc}, Extraction: &submissions.Service{Projects: projectSvc}, JobRequests: &submissions.Service{Projects: projectSvc},
 	}
 	srv := httptest.NewServer(h.Routes())
 	t.Cleanup(srv.Close)

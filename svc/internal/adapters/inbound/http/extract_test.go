@@ -16,13 +16,15 @@ import (
 	"github.com/Kapital-B/automata/svc/internal/application/auth"
 	appjobs "github.com/Kapital-B/automata/svc/internal/application/jobs"
 	appprojects "github.com/Kapital-B/automata/svc/internal/application/projects"
+	queries "github.com/Kapital-B/automata/svc/internal/application/queries"
+	submissions "github.com/Kapital-B/automata/svc/internal/application/submissions"
 	domainjobs "github.com/Kapital-B/automata/svc/internal/domain/jobs"
 	_ "modernc.org/sqlite"
+	// The "Check now" verb has to queue the same chain the debounce queues, and it
+	// has to stay quiet when one is already in flight — otherwise a second click
+	// reads as an error to the operator.
 )
 
-// The "Check now" verb has to queue the same chain the debounce queues, and it
-// has to stay quiet when one is already in flight — otherwise a second click
-// reads as an error to the operator.
 func TestExtractProjectQueuesChain(t *testing.T) {
 	db, err := sql.Open("sqlite", "file:extracthttp?mode=memory&cache=shared")
 	if err != nil {
@@ -42,9 +44,9 @@ func TestExtractProjectQueuesChain(t *testing.T) {
 	}
 	h := &Handlers{
 		Log: slog.Default(), AuthSvc: authSvc, ProjectSvc: projectSvc,
-		Users: repo, Projects: repo, Assignments: repo, Messages: repo,
-		JobEnqueuer: &appjobs.Enqueuer{Store: store, Registry: appjobs.DefaultRegistry()},
-		JobStore:    store, TokenVerifier: security.JWT{Secret: jwtSecret},
+		UsersQueries: &queries.Service{Users: repo}, MessagesQueries: &queries.Service{Messages: repo, Assignments: repo},
+
+		JobStoreQueries: &queries.Service{JobStore: store}, TokenVerifier: security.JWT{Secret: jwtSecret}, AccountJobs: &submissions.Service{Durable: &appjobs.Enqueuer{Store: store, Registry: appjobs.DefaultRegistry()}, Projects: projectSvc}, ConnectorJobs: &submissions.Service{Durable: &appjobs.Enqueuer{Store: store, Registry: appjobs.DefaultRegistry()}, Projects: projectSvc}, Extraction: &submissions.Service{Durable: &appjobs.Enqueuer{Store: store, Registry: appjobs.DefaultRegistry()}, Projects: projectSvc}, JobRequests: &submissions.Service{Durable: &appjobs.Enqueuer{Store: store, Registry: appjobs.DefaultRegistry()}, Projects: projectSvc},
 	}
 	srv := httptest.NewServer(h.Routes())
 	defer srv.Close()

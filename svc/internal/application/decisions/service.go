@@ -2,7 +2,7 @@ package decisions
 
 import (
 	"context"
-	"errors"
+
 	"fmt"
 	"strings"
 	"time"
@@ -16,14 +16,12 @@ import (
 	"github.com/google/uuid"
 )
 
-var (
-	ErrNotFound      = errors.New("not found")
-	ErrNotProposed   = errors.New("decision is not proposed")
-	ErrInvalidStatus = errors.New("invalid status")
-	ErrWrongProject  = errors.New("wrong project")
-	ErrBadAssignee   = errors.New("assignee xor violated")
-	ErrBadEvidence   = errors.New("evidence must be exactly one of message or manual")
-)
+var ErrNotFound = domaindecisions.DecisionErrNotFound
+var ErrNotProposed = domaindecisions.DecisionErrNotProposed
+var ErrInvalidStatus = domaindecisions.DecisionErrInvalidStatus
+var ErrWrongProject = domaindecisions.DecisionErrWrongProject
+var ErrBadAssignee = domaindecisions.DecisionErrBadAssignee
+var ErrBadEvidence = domaindecisions.DecisionErrBadEvidence
 
 type Service struct {
 	Users       domainauth.UserRepository
@@ -35,34 +33,13 @@ type Service struct {
 	Messages    domainmessages.MessageRepository
 }
 
-type EvidenceRef struct {
-	MessageID    *uuid.UUID
-	ManualItemID *uuid.UUID
-}
+type EvidenceRef = domaindecisions.DecisionEvidenceRef
 
-type DecisionView struct {
-	Decision domaindecisions.DecisionRow
-	Evidence []domaindecisions.DecisionEvidenceRow
-}
+type DecisionView = domaindecisions.DecisionDecisionView
 
-type CreateInput struct {
-	Statement         string
-	IssueID           *uuid.UUID
-	Confirm           bool
-	AssigneeUserID    *uuid.UUID
-	AssigneeContactID *uuid.UUID
-	Evidence          []EvidenceRef
-	Source            string
-	Confidence        *float64
-	SupersedesID      *uuid.UUID
-}
+type CreateInput = domaindecisions.DecisionCreateInput
 
-type PatchInput struct {
-	Statement         *string
-	AssigneeUserID    *uuid.UUID
-	AssigneeContactID *uuid.UUID
-	ClearAssignee     bool
-}
+type PatchInput = domaindecisions.DecisionPatchInput
 
 func (s *Service) homeOrg(ctx context.Context, userID uuid.UUID) (uuid.UUID, error) {
 	return s.Users.GetHomeOrganisationID(ctx, userID)

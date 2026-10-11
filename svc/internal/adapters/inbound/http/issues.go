@@ -3,13 +3,11 @@ package http
 import (
 	"encoding/json"
 	"errors"
+	domainissues "github.com/Kapital-B/automata/svc/internal/domain/issues"
 	"github.com/go-chi/chi/v5"
 	"net/http"
 	"strings"
 	"time"
-
-	appissues "github.com/Kapital-B/automata/svc/internal/application/issues"
-	domainissues "github.com/Kapital-B/automata/svc/internal/domain/issues"
 
 	"github.com/google/uuid"
 )
@@ -31,7 +29,7 @@ func (h *Handlers) listProjectIssues(w http.ResponseWriter, r *http.Request) {
 	}
 	rows, err := h.IssueSvc.List(r.Context(), uid, projectID)
 	if err != nil {
-		if errors.Is(err, appissues.ErrNotFound) {
+		if errors.Is(err, domainissues.IssueErrNotFound) {
 			writeJSON(w, http.StatusNotFound, map[string]string{"error": "not found"})
 			return
 		}
@@ -61,7 +59,7 @@ func (h *Handlers) suggestProjectIssue(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "bad id"})
 		return
 	}
-	in := appissues.SuggestInput{}
+	in := domainissues.IssueSuggestInput{}
 	if v := strings.TrimSpace(r.URL.Query().Get("account_id")); v != "" {
 		aid, err := uuid.Parse(v)
 		if err != nil {
@@ -123,7 +121,7 @@ func (h *Handlers) createProjectIssue(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid json"})
 		return
 	}
-	in := appissues.CreateInput{Title: body.Title, CurrentPositionNote: body.CurrentPositionNote}
+	in := domainissues.IssueCreateInput{Title: body.Title, CurrentPositionNote: body.CurrentPositionNote}
 	if body.AssigneeUserID != nil && strings.TrimSpace(*body.AssigneeUserID) != "" {
 		id, err := uuid.Parse(strings.TrimSpace(*body.AssigneeUserID))
 		if err != nil {
@@ -141,7 +139,7 @@ func (h *Handlers) createProjectIssue(w http.ResponseWriter, r *http.Request) {
 		in.AssigneeContactID = &id
 	}
 	for _, ref := range body.ItemRefs {
-		ir := appissues.ItemRef{}
+		ir := domainissues.IssueItemRef{}
 		if ref.MessageID != nil && strings.TrimSpace(*ref.MessageID) != "" {
 			id, err := uuid.Parse(strings.TrimSpace(*ref.MessageID))
 			if err != nil {
@@ -211,7 +209,7 @@ func (h *Handlers) updateIssue(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid json"})
 		return
 	}
-	in := appissues.UpdateInput{}
+	in := domainissues.IssueUpdateInput{}
 	if raw, ok := body["title"]; ok {
 		var title string
 		_ = json.Unmarshal(raw, &title)
@@ -299,7 +297,7 @@ func (h *Handlers) addIssueItem(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid json"})
 		return
 	}
-	ref := appissues.ItemRef{}
+	ref := domainissues.IssueItemRef{}
 	if body.MessageID != nil && strings.TrimSpace(*body.MessageID) != "" {
 		mid, err := uuid.Parse(strings.TrimSpace(*body.MessageID))
 		if err != nil {
@@ -354,21 +352,21 @@ func (h *Handlers) removeIssueItem(w http.ResponseWriter, r *http.Request) {
 
 func writeIssueError(w http.ResponseWriter, err error) {
 	switch {
-	case errors.Is(err, appissues.ErrNotFound):
+	case errors.Is(err, domainissues.IssueErrNotFound):
 		writeJSON(w, http.StatusNotFound, map[string]string{"error": "not found"})
-	case errors.Is(err, appissues.ErrDualAssignee):
+	case errors.Is(err, domainissues.IssueErrDualAssignee):
 		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "cannot set both assignees"})
-	case errors.Is(err, appissues.ErrItemConflict):
+	case errors.Is(err, domainissues.IssueErrItemConflict):
 		writeJSON(w, http.StatusConflict, map[string]string{"error": "item already linked to an issue"})
-	case errors.Is(err, appissues.ErrWrongProject):
+	case errors.Is(err, domainissues.IssueErrWrongProject):
 		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "item not on this project"})
-	case errors.Is(err, appissues.ErrInvalidItemRef):
+	case errors.Is(err, domainissues.IssueErrInvalidItemRef):
 		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid item ref"})
-	case errors.Is(err, appissues.ErrInvalidStatus):
+	case errors.Is(err, domainissues.IssueErrInvalidStatus):
 		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid status"})
-	case errors.Is(err, appissues.ErrLLMUnavailable):
+	case errors.Is(err, domainissues.IssueErrLLMUnavailable):
 		writeJSON(w, http.StatusServiceUnavailable, map[string]string{"error": "llm not configured"})
-	case errors.Is(err, appissues.ErrNothingToSuggest):
+	case errors.Is(err, domainissues.IssueErrNothingToSuggest):
 		writeJSON(w, http.StatusUnprocessableEntity, map[string]string{"error": "no unassigned correspondence to suggest from"})
 	default:
 		writeJSON(w, http.StatusBadRequest, map[string]string{"error": err.Error()})
@@ -384,7 +382,7 @@ func sourceOrHuman(src string) string {
 	return src
 }
 
-func issueJSON(v appissues.IssueView, withItems bool) map[string]any {
+func issueJSON(v domainissues.IssueIssueView, withItems bool) map[string]any {
 	iss := v.Issue
 	out := map[string]any{
 		"id":                    iss.ID.String(),
@@ -468,7 +466,7 @@ func (h *Handlers) discardIssue(w http.ResponseWriter, r *http.Request) {
 	}
 	view, err := h.IssueSvc.Discard(r.Context(), uid, id)
 	if err != nil {
-		if errors.Is(err, appissues.ErrNotFound) {
+		if errors.Is(err, domainissues.IssueErrNotFound) {
 			writeJSON(w, http.StatusNotFound, map[string]string{"error": "not found"})
 			return
 		}

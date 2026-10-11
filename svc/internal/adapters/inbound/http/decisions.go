@@ -3,12 +3,11 @@ package http
 import (
 	"encoding/json"
 	"errors"
+	domaindecisions "github.com/Kapital-B/automata/svc/internal/domain/decisions"
 	"github.com/go-chi/chi/v5"
 	"net/http"
 	"strings"
 	"time"
-
-	appdecisions "github.com/Kapital-B/automata/svc/internal/application/decisions"
 
 	"github.com/google/uuid"
 )
@@ -72,7 +71,7 @@ func (h *Handlers) createProjectDecision(w http.ResponseWriter, r *http.Request)
 		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "bad json"})
 		return
 	}
-	in := appdecisions.CreateInput{Statement: body.Statement, Confirm: body.Confirm}
+	in := domaindecisions.DecisionCreateInput{Statement: body.Statement, Confirm: body.Confirm}
 	if body.IssueID != nil && strings.TrimSpace(*body.IssueID) != "" {
 		id, err := uuid.Parse(*body.IssueID)
 		if err != nil {
@@ -106,7 +105,7 @@ func (h *Handlers) createProjectDecision(w http.ResponseWriter, r *http.Request)
 		in.SupersedesID = &id
 	}
 	for _, e := range body.Evidence {
-		ref := appdecisions.EvidenceRef{}
+		ref := domaindecisions.DecisionEvidenceRef{}
 		if e.MessageID != nil && strings.TrimSpace(*e.MessageID) != "" {
 			id, err := uuid.Parse(*e.MessageID)
 			if err != nil {
@@ -204,7 +203,7 @@ func (h *Handlers) patchDecision(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "bad json"})
 		return
 	}
-	in := appdecisions.PatchInput{Statement: body.Statement, ClearAssignee: body.ClearAssignee}
+	in := domaindecisions.DecisionPatchInput{Statement: body.Statement, ClearAssignee: body.ClearAssignee}
 	if body.AssigneeUserID != nil && strings.TrimSpace(*body.AssigneeUserID) != "" {
 		uid2, err := uuid.Parse(*body.AssigneeUserID)
 		if err != nil {
@@ -231,18 +230,18 @@ func (h *Handlers) patchDecision(w http.ResponseWriter, r *http.Request) {
 
 func writeDecisionError(w http.ResponseWriter, err error) {
 	switch {
-	case errors.Is(err, appdecisions.ErrNotFound):
+	case errors.Is(err, domaindecisions.DecisionErrNotFound):
 		writeJSON(w, http.StatusNotFound, map[string]string{"error": "not found"})
-	case errors.Is(err, appdecisions.ErrNotProposed), errors.Is(err, appdecisions.ErrInvalidStatus),
-		errors.Is(err, appdecisions.ErrBadAssignee), errors.Is(err, appdecisions.ErrBadEvidence),
-		errors.Is(err, appdecisions.ErrWrongProject):
+	case errors.Is(err, domaindecisions.DecisionErrNotProposed), errors.Is(err, domaindecisions.DecisionErrInvalidStatus),
+		errors.Is(err, domaindecisions.DecisionErrBadAssignee), errors.Is(err, domaindecisions.DecisionErrBadEvidence),
+		errors.Is(err, domaindecisions.DecisionErrWrongProject):
 		writeJSON(w, http.StatusBadRequest, map[string]string{"error": err.Error()})
 	default:
 		writeJSON(w, http.StatusBadRequest, map[string]string{"error": err.Error()})
 	}
 }
 
-func decisionJSON(v appdecisions.DecisionView) map[string]any {
+func decisionJSON(v domaindecisions.DecisionDecisionView) map[string]any {
 	d := v.Decision
 	out := map[string]any{
 		"id":              d.ID.String(),

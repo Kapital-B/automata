@@ -4,164 +4,44 @@ import (
 	"encoding/json"
 	"fmt"
 	domainmessages "github.com/Kapital-B/automata/svc/internal/domain/messages"
-	"net/mail"
+
 	"strings"
 	"time"
 	"unicode/utf8"
 )
 
-// Forward rule modes.
-const (
-	ForwardModeLogic = "logic"
-	ForwardModeLLM   = "llm"
-)
+const ForwardModeLogic = domainmessages.MessageForwardModeLogic
+const ForwardModeLLM = domainmessages.MessageForwardModeLLM
 
-// Condition fields and operators a logic rule may use. Anything else is
-// refused when the rule is saved: an unknown field used to be accepted and
-// then silently never match.
-const (
-	ForwardFieldHasAttachments = "has_attachments"
-	ForwardFieldCategory       = "category_slug"
-	ForwardFieldFrom           = "from"
-	ForwardFieldSubject        = "subject"
+const ForwardFieldHasAttachments = domainmessages.MessageForwardFieldHasAttachments
+const ForwardFieldCategory = domainmessages.MessageForwardFieldCategory
+const ForwardFieldFrom = domainmessages.MessageForwardFieldFrom
+const ForwardFieldSubject = domainmessages.MessageForwardFieldSubject
+const ForwardOpEquals = domainmessages.MessageForwardOpEquals
+const ForwardOpContains = domainmessages.MessageForwardOpContains
+const ForwardOpDomain = domainmessages.MessageForwardOpDomain
 
-	ForwardOpEquals   = "equals"
-	ForwardOpContains = "contains"
-	ForwardOpDomain   = "domain"
-)
+var forwardFieldOps = domainmessages.MessageForwardFieldOps
 
-// forwardFieldOps lists the operators each field supports.
-var forwardFieldOps = map[string][]string{
-	ForwardFieldHasAttachments: {ForwardOpEquals},
-	ForwardFieldCategory:       {ForwardOpEquals},
-	ForwardFieldFrom:           {ForwardOpEquals, ForwardOpContains, ForwardOpDomain},
-	ForwardFieldSubject:        {ForwardOpEquals, ForwardOpContains},
-}
+const maxForwardPredicates = domainmessages.MessageMaxForwardPredicates
+const maxForwardPromptLen = domainmessages.MessageMaxForwardPromptLen
+const categoryWait = domainmessages.MessageCategoryWait
 
-const (
-	maxForwardPredicates = 10
-	maxForwardPromptLen  = 1000
-	// categoryWait is how long a category rule waits for a message to be
-	// categorised before judging it uncategorised. Forwarding can run before
-	// categorisation reaches new mail; judging then used to skip the message
-	// for good.
-	categoryWait = 72 * time.Hour
-)
+type ForwardRuleError = domainmessages.MessageForwardRuleError
 
-// ForwardRuleError is a rule the user must fix. Its message says what.
-type ForwardRuleError struct{ Reason string }
+var ruleError = domainmessages.MessageRuleError
 
-func (e *ForwardRuleError) Error() string { return e.Reason }
+type forwardLogicCondition = domainmessages.MessageForwardLogicCondition
 
-func ruleError(format string, args ...any) error {
-	return &ForwardRuleError{Reason: fmt.Sprintf(format, args...)}
-}
+type forwardPredicate = domainmessages.MessageForwardPredicate
 
-type forwardLogicCondition struct {
-	All []forwardPredicate `json:"all"`
-}
+type forwardLLMCondition = domainmessages.MessageForwardLLMCondition
 
-type forwardPredicate struct {
-	Field string      `json:"field"`
-	Op    string      `json:"op"`
-	Value interface{} `json:"value"`
-}
+var NormalizeForwardRule = domainmessages.MessageNormalizeForwardRule
 
-type forwardLLMCondition struct {
-	Prompt string `json:"prompt"`
-}
+var strictUnmarshal = domainmessages.MessageStrictUnmarshal
 
-// NormalizeForwardRule validates a rule's mode and condition and returns them
-// in canonical form. An empty condition is an error, not "match everything":
-// one bad paste must never forward a whole mailbox.
-func NormalizeForwardRule(mode string, condition json.RawMessage) (string, string, error) {
-	mode = strings.ToLower(strings.TrimSpace(mode))
-	switch mode {
-	case ForwardModeLogic:
-		var c forwardLogicCondition
-		if err := strictUnmarshal(condition, &c); err != nil {
-			return "", "", ruleError("the condition is not valid: %v", err)
-		}
-		if len(c.All) == 0 {
-			return "", "", ruleError("add at least one condition; a rule with none would forward every message")
-		}
-		if len(c.All) > maxForwardPredicates {
-			return "", "", ruleError("a rule can have at most %d conditions", maxForwardPredicates)
-		}
-		for i := range c.All {
-			p, err := normalizePredicate(c.All[i])
-			if err != nil {
-				return "", "", err
-			}
-			c.All[i] = p
-		}
-		out, _ := json.Marshal(c)
-		return mode, string(out), nil
-	case ForwardModeLLM:
-		var c forwardLLMCondition
-		if err := strictUnmarshal(condition, &c); err != nil {
-			return "", "", ruleError("the condition is not valid: %v", err)
-		}
-		c.Prompt = strings.TrimSpace(c.Prompt)
-		if c.Prompt == "" {
-			return "", "", ruleError("describe which messages to forward")
-		}
-		if utf8.RuneCountInString(c.Prompt) > maxForwardPromptLen {
-			return "", "", ruleError("the description can be at most %d characters", maxForwardPromptLen)
-		}
-		out, _ := json.Marshal(c)
-		return mode, string(out), nil
-	default:
-		return "", "", ruleError("mode must be %q or %q", ForwardModeLogic, ForwardModeLLM)
-	}
-}
-
-func strictUnmarshal(raw json.RawMessage, v any) error {
-	if len(strings.TrimSpace(string(raw))) == 0 {
-		return fmt.Errorf("it is empty")
-	}
-	dec := json.NewDecoder(strings.NewReader(string(raw)))
-	dec.DisallowUnknownFields()
-	return dec.Decode(v)
-}
-
-func normalizePredicate(p forwardPredicate) (forwardPredicate, error) {
-	field := strings.ToLower(strings.TrimSpace(p.Field))
-	op := strings.ToLower(strings.TrimSpace(p.Op))
-	if op == "eq" {
-		op = ForwardOpEquals
-	}
-	ops, ok := forwardFieldOps[field]
-	if !ok {
-		return p, ruleError("unknown condition field %q", p.Field)
-	}
-	allowed := false
-	for _, o := range ops {
-		allowed = allowed || o == op
-	}
-	if !allowed {
-		return p, ruleError("%q cannot use %q; use one of %s", field, p.Op, strings.Join(ops, ", "))
-	}
-	out := forwardPredicate{Field: field, Op: op}
-	if field == ForwardFieldHasAttachments {
-		b, ok := p.Value.(bool)
-		if !ok {
-			return p, ruleError("%q needs true or false", field)
-		}
-		out.Value = b
-		return out, nil
-	}
-	str, ok := p.Value.(string)
-	str = strings.ToLower(strings.TrimSpace(str))
-	if !ok || str == "" {
-		return p, ruleError("%q needs a value", field)
-	}
-	if field == ForwardFieldFrom && op == ForwardOpDomain {
-		str = strings.TrimPrefix(str, "@")
-	}
-	out.Value = str
-	return out, nil
-}
+var normalizePredicate = domainmessages.MessageNormalizePredicate
 
 // ruleVerdict is what a rule concluded about one message.
 type ruleVerdict struct {
@@ -237,12 +117,7 @@ func predicateMatches(msg domainmessages.MessageRow, p forwardPredicate) bool {
 	return false
 }
 
-// ValidForwardAddress reports whether s is a bare email address.
-func ValidForwardAddress(s string) bool {
-	s = strings.TrimSpace(s)
-	a, err := mail.ParseAddress(s)
-	return err == nil && strings.EqualFold(a.Address, s)
-}
+var ValidForwardAddress = domainmessages.MessageValidForwardAddress
 
 // truncateRunes cuts s to at most n characters without splitting one.
 func truncateRunes(s string, n int) string {

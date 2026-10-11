@@ -3,15 +3,12 @@ package http
 import (
 	"encoding/json"
 	"errors"
+	domainmessages "github.com/Kapital-B/automata/svc/internal/domain/messages"
 	"github.com/go-chi/chi/v5"
 	"net/http"
 	"sort"
-	"strconv"
-	"strings"
-	"time"
 
-	appmessages "github.com/Kapital-B/automata/svc/internal/application/messages"
-	domainmessages "github.com/Kapital-B/automata/svc/internal/domain/messages"
+	"time"
 
 	"github.com/google/uuid"
 )
@@ -36,19 +33,11 @@ const (
 
 // forwardStart turns a start choice into the rule's ApplyFrom.
 func forwardStart(start string, now time.Time) (*time.Time, bool) {
-	switch strings.ToLower(strings.TrimSpace(start)) {
-	case forwardStartNew:
-		return &now, true
-	case forwardStartExisting, "all":
-		epoch := time.Unix(0, 0).UTC()
-		return &epoch, true
-	default:
-		return nil, false
-	}
+	return domainmessages.ForwardStart(start, now)
 }
 
 func writeRuleError(w http.ResponseWriter, err error) bool {
-	var re *appmessages.ForwardRuleError
+	var re *domainmessages.MessageForwardRuleError
 	if errors.As(err, &re) {
 		writeJSON(w, http.StatusUnprocessableEntity, map[string]string{"error": re.Reason})
 		return true
@@ -56,39 +45,12 @@ func writeRuleError(w http.ResponseWriter, err error) bool {
 	return false
 }
 
-// validRule checks everything a rule needs, returning its canonical mode and
-// condition, or writing the reason it cannot be saved.
-func (h *Handlers) validRule(w http.ResponseWriter, r *http.Request, uid uuid.UUID, body forwardRuleBody) (mode, cond, forwardTo string, ok bool) {
-	if strings.TrimSpace(body.Name) == "" {
-		writeJSON(w, http.StatusUnprocessableEntity, map[string]string{"error": "give the rule a name"})
-		return "", "", "", false
-	}
-	mode, cond, err := appmessages.NormalizeForwardRule(body.Mode, body.ConditionJSON)
-	if err != nil {
-		if !writeRuleError(w, err) {
-			writeJSON(w, http.StatusBadRequest, map[string]string{"error": err.Error()})
-		}
-		return "", "", "", false
-	}
-	forwardTo = strings.ToLower(strings.TrimSpace(body.ForwardTo))
-	allowRows, err := h.Forwards.ListForwardAllowlist(r.Context(), uid)
-	if err != nil {
-		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "internal"})
-		return "", "", "", false
-	}
-	if _, ok := appmessages.AllowlistSet(allowRows)[forwardTo]; !ok {
-		writeJSON(w, http.StatusUnprocessableEntity, map[string]string{"error": "the destination must be on your forwarding allowlist"})
-		return "", "", "", false
-	}
-	return mode, cond, forwardTo, true
-}
-
 func (h *Handlers) getForwardAllowlist(w http.ResponseWriter, r *http.Request) {
-	if h.Forwards == nil {
+	if h.ForwardsQueries == nil {
 		writeJSON(w, http.StatusServiceUnavailable, map[string]string{"error": "persistence not configured"})
 		return
 	}
-	rows, err := h.Forwards.ListForwardAllowlist(r.Context(), userIDOrEmpty(r))
+	rows, err := h.ForwardsQueries.ListForwardAllowlist(r.Context(), userIDOrEmpty(r))
 	if err != nil {
 		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "internal"})
 		return
@@ -108,23 +70,8 @@ func (h *Handlers) putForwardAllowlist(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid json"})
 		return
 	}
-	seen := map[string]bool{}
-	emails := make([]string, 0, len(body.Emails))
-	for _, e := range body.Emails {
-		e = strings.ToLower(strings.TrimSpace(e))
-		if e == "" || seen[e] {
-			continue
-		}
-		if !appmessages.ValidForwardAddress(e) {
-			writeJSON(w, http.StatusUnprocessableEntity, map[string]string{"error": strconv.Quote(e) + " is not an email address"})
-			return
-		}
-		seen[e] = true
-		emails = append(emails, e)
-	}
-	if err := h.Forwards.ReplaceForwardAllowlist(r.Context(), userIDOrEmpty(r), emails); err != nil {
-		h.Log.Error("replace forward allowlist", "err", err)
-		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "internal"})
+	if err := h.ForwardsQueries.SaveForwardAllowlist(r.Context(), userIDOrEmpty(r), body.Emails); err != nil {
+		writeOperationError(w, err)
 		return
 	}
 	writeJSON(w, http.StatusOK, map[string]any{"status": "ok"})
@@ -144,25 +91,12 @@ func (h *Handlers) listForwardRules(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	uid := userIDOrEmpty(r)
-	rows, err := h.Forwards.ListForwardRules(r.Context(), uid, accountID)
+	listing, err := h.ForwardsQueries.GetForwardRuleListing(r.Context(), uid, accountID)
 	if err != nil {
 		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "internal"})
 		return
 	}
-	allowRows, err := h.Forwards.ListForwardAllowlist(r.Context(), uid)
-	if err != nil {
-		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "internal"})
-		return
-	}
-	allowed := appmessages.AllowlistSet(allowRows)
-	stats := map[uuid.UUID]domainmessages.ForwardRuleStats{}
-	if st, err := h.Forwards.ForwardRuleStats(r.Context(), uid, accountID); err == nil {
-		for _, s := range st {
-			stats[s.RuleID] = s
-		}
-	} else {
-		h.Log.Warn("forward rule stats", "err", err)
-	}
+	rows, allowed, stats := listing.Rules, listing.Allowlist, listing.Stats
 	out := make([]map[string]any, 0, len(rows))
 	for _, row := range rows {
 		st := stats[row.ID]
@@ -174,7 +108,7 @@ func (h *Handlers) listForwardRules(w http.ResponseWriter, r *http.Request) {
 			"condition_json": json.RawMessage(row.ConditionJSON),
 			"forward_to":     row.ForwardTo,
 			"enabled":        row.Enabled,
-			"applies_from":   appmessages.RuleScopeStart(row).Format(time.RFC3339),
+			"applies_from":   domainmessages.MessageRuleScopeStart(row).Format(time.RFC3339),
 			"created_at":     row.CreatedAt.UTC().Format(time.RFC3339),
 			"stats": map[string]any{
 				"forwarded":         st.Forwarded,
@@ -184,7 +118,7 @@ func (h *Handlers) listForwardRules(w http.ResponseWriter, r *http.Request) {
 				"last_activity_at":  timeOrNil(st.LastActivityAt),
 			},
 		}
-		if block := appmessages.ForwardRuleBlock(row, allowed); block != "" {
+		if block := domainmessages.MessageForwardRuleBlock(row, allowed); block != "" {
 			item["blocked_reason"] = block
 		}
 		out = append(out, item)
@@ -193,84 +127,41 @@ func (h *Handlers) listForwardRules(w http.ResponseWriter, r *http.Request) {
 }
 
 func (h *Handlers) createForwardRule(w http.ResponseWriter, r *http.Request) {
-	accountID, err := uuid.Parse(chi.URLParam(r, "id"))
+	id, err := uuid.Parse(chi.URLParam(r, "id"))
 	if err != nil {
 		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "bad id"})
 		return
 	}
-	uid := userIDOrEmpty(r)
-	if ok, err := h.authorizeAccount(r.Context(), uid, accountID); err != nil {
-		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "internal"})
-		return
-	} else if !ok {
-		writeJSON(w, http.StatusNotFound, map[string]string{"error": "not found"})
-		return
-	}
 	var body forwardRuleBody
-	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+	if err = json.NewDecoder(r.Body).Decode(&body); err != nil {
 		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid json"})
 		return
 	}
-	mode, cond, forwardTo, ok := h.validRule(w, r, uid, body)
-	if !ok {
+	savedID, err := h.ForwardsQueries.SaveForwardRule(r.Context(), userIDOrEmpty(r), id, true, domainmessages.ForwardRuleInput{Name: body.Name, Mode: body.Mode, ConditionJSON: body.ConditionJSON, ForwardTo: body.ForwardTo, Enabled: body.Enabled, Start: body.Start})
+	if err != nil {
+		writeOperationError(w, err)
 		return
 	}
-	now := time.Now().UTC()
-	enabled := body.Enabled != nil && *body.Enabled
-	var applyFrom *time.Time
-	if enabled {
-		if applyFrom, ok = forwardStart(body.Start, now); !ok {
-			writeJSON(w, http.StatusUnprocessableEntity, map[string]string{"error": `say whether the rule covers existing mail: start must be "new" or "existing"`})
-			return
-		}
-	}
-	row := domainmessages.ForwardRuleRow{
-		ID: uuid.New(), UserID: uid, AccountID: accountID, Name: strings.TrimSpace(body.Name),
-		Mode: mode, ConditionJSON: cond, ForwardTo: forwardTo, Enabled: enabled, ApplyFrom: applyFrom,
-		CreatedAt: now, UpdatedAt: now,
-	}
-	if err := h.Forwards.CreateForwardRule(r.Context(), row); err != nil {
-		h.Log.Error("create forward rule", "err", err)
-		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "internal"})
-		return
-	}
-	writeJSON(w, http.StatusCreated, map[string]any{"id": row.ID.String()})
+	writeJSON(w, http.StatusCreated, map[string]any{"id": savedID.String()})
 }
 
 func (h *Handlers) updateForwardRule(w http.ResponseWriter, r *http.Request) {
-	ruleID, err := uuid.Parse(chi.URLParam(r, "id"))
+	id, err := uuid.Parse(chi.URLParam(r, "id"))
 	if err != nil {
 		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "bad id"})
 		return
 	}
 	var body forwardRuleBody
-	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+	if err = json.NewDecoder(r.Body).Decode(&body); err != nil {
 		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid json"})
 		return
 	}
-	uid := userIDOrEmpty(r)
-	mode, cond, forwardTo, ok := h.validRule(w, r, uid, body)
-	if !ok {
+	savedID, err := h.ForwardsQueries.SaveForwardRule(r.Context(), userIDOrEmpty(r), id, false, domainmessages.ForwardRuleInput{Name: body.Name, Mode: body.Mode, ConditionJSON: body.ConditionJSON, ForwardTo: body.ForwardTo, Enabled: body.Enabled, Start: body.Start})
+	if err != nil {
+		writeOperationError(w, err)
 		return
 	}
-	enabled := body.Enabled != nil && *body.Enabled
-	// A start re-scopes the rule; without one it keeps its current scope.
-	var applyFrom *time.Time
-	if strings.TrimSpace(body.Start) != "" {
-		if applyFrom, ok = forwardStart(body.Start, time.Now().UTC()); !ok {
-			writeJSON(w, http.StatusUnprocessableEntity, map[string]string{"error": `start must be "new" or "existing"`})
-			return
-		}
-	}
-	row := domainmessages.ForwardRuleRow{
-		ID: ruleID, UserID: uid, Name: strings.TrimSpace(body.Name), Mode: mode, ConditionJSON: cond,
-		ForwardTo: forwardTo, Enabled: enabled, ApplyFrom: applyFrom, UpdatedAt: time.Now().UTC(),
-	}
-	if err := h.Forwards.UpdateForwardRule(r.Context(), row); err != nil {
-		h.Log.Error("update forward rule", "err", err)
-		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "internal"})
-		return
-	}
+	_ = savedID
 	writeJSON(w, http.StatusOK, map[string]any{"status": "ok"})
 }
 
@@ -280,7 +171,7 @@ func (h *Handlers) deleteForwardRule(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "bad id"})
 		return
 	}
-	if err := h.Forwards.DeleteForwardRule(r.Context(), userIDOrEmpty(r), ruleID); err != nil {
+	if err := h.ForwardsQueries.DeleteForwardRule(r.Context(), userIDOrEmpty(r), ruleID); err != nil {
 		h.Log.Error("delete forward rule", "err", err)
 		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "internal"})
 		return
@@ -304,7 +195,7 @@ func (h *Handlers) forwardRuleActivity(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "bad id"})
 		return
 	}
-	rows, err := h.Forwards.ListForwardActivity(r.Context(), userIDOrEmpty(r), ruleID, 50)
+	rows, err := h.ForwardsQueries.ListForwardActivity(r.Context(), userIDOrEmpty(r), ruleID, 50)
 	if err != nil {
 		h.Log.Error("forward rule activity", "err", err)
 		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "internal"})

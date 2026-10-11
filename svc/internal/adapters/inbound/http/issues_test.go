@@ -16,6 +16,8 @@ import (
 	"github.com/Kapital-B/automata/svc/internal/application/auth"
 	appissues "github.com/Kapital-B/automata/svc/internal/application/issues"
 	appprojects "github.com/Kapital-B/automata/svc/internal/application/projects"
+	queries "github.com/Kapital-B/automata/svc/internal/application/queries"
+	submissions "github.com/Kapital-B/automata/svc/internal/application/submissions"
 	_ "modernc.org/sqlite"
 )
 
@@ -40,7 +42,7 @@ func TestIssuesHTTPOrgIsolation(t *testing.T) {
 	}
 	h := &Handlers{
 		Log: slog.Default(), AuthSvc: authSvc, ProjectSvc: projectSvc, IssueSvc: issueSvc,
-		Users: repo, Projects: repo, Assignments: repo, Issues: repo, Messages: repo, TokenVerifier: security.JWT{Secret: jwtSecret},
+		UsersQueries: &queries.Service{Users: repo}, MessagesQueries: &queries.Service{Messages: repo, Assignments: repo}, TokenVerifier: security.JWT{Secret: jwtSecret}, AccountJobs: &submissions.Service{Projects: projectSvc}, ConnectorJobs: &submissions.Service{Projects: projectSvc}, Extraction: &submissions.Service{Projects: projectSvc}, JobRequests: &submissions.Service{Projects: projectSvc},
 	}
 	srv := httptest.NewServer(h.Routes())
 	defer srv.Close()

@@ -2,7 +2,7 @@ package issues
 
 import (
 	"context"
-	"errors"
+
 	"fmt"
 	"sort"
 	"strings"
@@ -18,14 +18,12 @@ import (
 	"github.com/google/uuid"
 )
 
-var (
-	ErrNotFound       = errors.New("not found")
-	ErrInvalidStatus  = errors.New("invalid status")
-	ErrDualAssignee   = errors.New("cannot set both assignee_user_id and assignee_contact_id")
-	ErrItemConflict   = errors.New("item already linked to an issue")
-	ErrWrongProject   = errors.New("item not on this project")
-	ErrInvalidItemRef = errors.New("invalid item ref")
-)
+var ErrNotFound = domainissues.IssueErrNotFound
+var ErrInvalidStatus = domainissues.IssueErrInvalidStatus
+var ErrDualAssignee = domainissues.IssueErrDualAssignee
+var ErrItemConflict = domainissues.IssueErrItemConflict
+var ErrWrongProject = domainissues.IssueErrWrongProject
+var ErrInvalidItemRef = domainissues.IssueErrInvalidItemRef
 
 // Service handles issue CRUD and trail links.
 type Service struct {
@@ -52,59 +50,15 @@ func (s *Service) HasLLM() bool {
 	return s != nil && s.LLM != nil
 }
 
-type IssueView struct {
-	Issue         domainissues.IssueRow
-	AwaitingMe    bool
-	AssigneeLabel string
-	Items         []TrailItem
-	// ItemCount is the evidence count. On a listing it is resolved in one
-	// query for the whole project rather than per issue; on a single issue
-	// it is len(Items).
-	ItemCount int
-	// Todos are the project's open to-dos from mail on this issue's trail,
-	// whoever's mailbox they came from. Only a single-issue view carries them.
-	Todos []apptodos.Todo
-}
+type IssueView = domainissues.IssueIssueView
 
-type TrailItem struct {
-	Item        domainissues.IssueItemRow
-	Source      string // mail | manual
-	Title       string
-	OccurredAt  *time.Time
-	AccountID   *uuid.UUID
-	Channel     string
-	BodySnippet string
-}
+type TrailItem = domainissues.IssueTrailItem
 
-type CreateInput struct {
-	Title               string
-	CurrentPositionNote string
-	AssigneeUserID      *uuid.UUID
-	AssigneeContactID   *uuid.UUID
-	ItemRefs            []ItemRef
-	// Source is "llm" when extraction raised the issue. Empty means a person
-	// did, which is the default for every operator-facing path.
-	Source string
-}
+type CreateInput = domainissues.IssueCreateInput
 
-type ItemRef struct {
-	MessageID    *uuid.UUID
-	ManualItemID *uuid.UUID
-}
+type ItemRef = domainissues.IssueItemRef
 
-type UpdateInput struct {
-	Title               *string
-	CurrentPositionNote *string
-	Status              *string
-	// ClearAssignee clears both assignee fields when true.
-	ClearAssignee     bool
-	AssigneeUserID    *uuid.UUID
-	AssigneeContactID *uuid.UUID
-	SetAssignee       bool // true when client sent assignee fields
-	// CompleteTodos marks the to-dos on the trail done, the team's as well as
-	// the caller's, when this update resolves the issue.
-	CompleteTodos bool
-}
+type UpdateInput = domainissues.IssueUpdateInput
 
 func (s *Service) List(ctx context.Context, userID, projectID uuid.UUID) ([]IssueView, error) {
 	orgID, err := s.homeOrg(ctx, userID)

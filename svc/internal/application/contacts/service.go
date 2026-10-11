@@ -27,11 +27,7 @@ type recipientPayload struct {
 	Address string `json:"address"`
 }
 
-type ResolveChunkResult struct {
-	MessagesProcessed int
-	NextCursor        *domainjobs.JobCursor
-	Done              bool
-}
+type ResolveChunkResult = domaincontacts.ContactResolveChunkResult
 
 // ResolveMessage resolves From/To/Cc on one stored message into the user's home organisation.
 func (s *ResolveService) ResolveMessage(ctx context.Context, userID, messageID uuid.UUID) error {
@@ -212,22 +208,9 @@ func (s *Service) List(ctx context.Context, userID uuid.UUID, filter domainconta
 	return s.Contacts.ListContacts(ctx, orgID, filter)
 }
 
-type ContactDetail struct {
-	Contact         domaincontacts.ContactRow
-	Identities      []domaincontacts.ContactIdentityRow
-	RecentMessages  []RecentMessageRef
-	SuggestedMerges []domaincontacts.ContactRow
-}
+type ContactDetail = domaincontacts.ContactContactDetail
 
-// RecentMessageRef is enough of a message to recognise it in a list.
-type RecentMessageRef struct {
-	MessageID   uuid.UUID
-	AccountID   uuid.UUID
-	Subject     string
-	FromName    string
-	FromAddress string
-	ReceivedAt  time.Time
-}
+type RecentMessageRef = domaincontacts.ContactRecentMessageRef
 
 func (s *Service) Get(ctx context.Context, userID, contactID uuid.UUID) (*ContactDetail, error) {
 	orgID, err := s.homeOrg(ctx, userID)
@@ -277,14 +260,7 @@ func (s *Service) Get(ctx context.Context, userID, contactID uuid.UUID) (*Contac
 	}, nil
 }
 
-type CreateContactInput struct {
-	DisplayName string
-	Company     *string
-	Identities  []struct {
-		Kind  string
-		Value string
-	}
-}
+type CreateContactInput = domaincontacts.ContactCreateContactInput
 
 func (s *Service) Create(ctx context.Context, userID uuid.UUID, in CreateContactInput) (*domaincontacts.ContactRow, error) {
 	orgID, err := s.homeOrg(ctx, userID)

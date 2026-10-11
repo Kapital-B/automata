@@ -11,33 +11,13 @@ import (
 	"github.com/google/uuid"
 )
 
-// MaxBatchAssignItems caps one batch request. Triage selections are operator
-// sized; a larger request is a client bug, not a workload.
-const MaxBatchAssignItems = 200
+const MaxBatchAssignItems = domainprojects.ProjectMaxBatchAssignItems
 
-// ErrTooManyItems is returned when a batch exceeds MaxBatchAssignItems.
-var ErrTooManyItems = fmt.Errorf("too_many_items")
+var ErrTooManyItems = domainprojects.ProjectErrTooManyItems
 
-// BatchAssignItem is one assignment in a batch. A nil ProjectID clears the
-// assignment, matching the single-item endpoints.
-type BatchAssignItem struct {
-	Kind      string // "message" | "manual"
-	ID        uuid.UUID
-	ProjectID *uuid.UUID
-	Scope     domainprojects.AssignScope // messages only; defaults to thread
-	// NotRelevant marks (true) or restores (false) correspondence that is not
-	// project work. Nil leaves the flag untouched, so existing callers are
-	// unaffected.
-	NotRelevant *bool
-}
+type BatchAssignItem = domainprojects.ProjectBatchAssignItem
 
-// BatchAssignResult reports the outcome of one item. Errors are machine
-// readable so the UI can explain a partial failure without parsing prose.
-type BatchAssignResult struct {
-	ID    uuid.UUID
-	OK    bool
-	Error string
-}
+type BatchAssignResult = domainprojects.ProjectBatchAssignResult
 
 // AssignBatch assigns or clears many items in one call.
 //

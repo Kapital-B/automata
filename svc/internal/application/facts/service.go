@@ -18,16 +18,14 @@ import (
 	"github.com/google/uuid"
 )
 
-var (
-	ErrNotFound          = errors.New("not found")
-	ErrInvalidSubjectKey = errors.New("invalid subject_key")
-	ErrInvalidStatus     = errors.New("invalid status")
-	ErrInvalidEvidence   = errors.New("invalid evidence ref")
-	ErrWrongProject      = errors.New("item not on this project")
-	ErrSupersedeRequired = errors.New("supersedes_version_id required when an active version exists")
-	ErrInvalidSupersedes = errors.New("supersedes_version_id must be the current active version")
-	ErrNotProposed       = errors.New("version is not proposed")
-)
+var ErrNotFound = domainfacts.FactErrNotFound
+var ErrInvalidSubjectKey = domainfacts.FactErrInvalidSubjectKey
+var ErrInvalidStatus = domainfacts.FactErrInvalidStatus
+var ErrInvalidEvidence = domainfacts.FactErrInvalidEvidence
+var ErrWrongProject = domainfacts.FactErrWrongProject
+var ErrSupersedeRequired = domainfacts.FactErrSupersedeRequired
+var ErrInvalidSupersedes = domainfacts.FactErrInvalidSupersedes
+var ErrNotProposed = domainfacts.FactErrNotProposed
 
 // Service handles fact CRUD, version confirm/reject, and evidence links.
 type Service struct {
@@ -44,59 +42,21 @@ func (s *Service) homeOrg(ctx context.Context, userID uuid.UUID) (uuid.UUID, err
 	return s.Users.GetHomeOrganisationID(ctx, userID)
 }
 
-// ListInclude controls which versions appear in list responses.
-type ListInclude struct {
-	Proposed bool
-	History  bool
-}
+type ListInclude = domainfacts.FactListInclude
 
-type EvidenceRef struct {
-	MessageID    *uuid.UUID
-	ManualItemID *uuid.UUID
-}
+type EvidenceRef = domainfacts.FactEvidenceRef
 
-type VersionView struct {
-	Version  domainfacts.FactVersionRow
-	Evidence []domainfacts.FactEvidenceRow
-}
+type VersionView = domainfacts.FactVersionView
 
-type FactView struct {
-	Fact     domainfacts.FactRow
-	Versions []VersionView
-}
+type FactView = domainfacts.FactFactView
 
-type CurrentPositionFact struct {
-	FactID        uuid.UUID
-	SubjectKey    string
-	Label         string
-	VersionID     uuid.UUID
-	ValueJSON     string
-	ValueText     string
-	Unit          *string
-	EvidenceCount int
-}
+type CurrentPositionFact = domainfacts.FactCurrentPositionFact
 
-type CurrentPosition struct {
-	Facts []CurrentPositionFact
-}
+type CurrentPosition = domainfacts.FactCurrentPosition
 
-type CreateInput struct {
-	SubjectKey          string
-	Label               string
-	Value               any
-	Unit                *string
-	IssueID             *uuid.UUID
-	Confirm             bool
-	SupersedesVersionID *uuid.UUID
-	Evidence            []EvidenceRef
-	Source              string // user|rule|llm; default user
-	InterpretationID    *uuid.UUID
-	Confidence          *float64
-}
+type CreateInput = domainfacts.FactCreateInput
 
-type ConfirmInput struct {
-	SupersedesVersionID *uuid.UUID
-}
+type ConfirmInput = domainfacts.FactConfirmInput
 
 func (s *Service) requireProjectMember(ctx context.Context, userID, projectID uuid.UUID) (orgID uuid.UUID, err error) {
 	orgID, err = s.homeOrg(ctx, userID)

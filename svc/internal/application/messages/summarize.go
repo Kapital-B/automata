@@ -21,18 +21,9 @@ type SummarizeService struct {
 	JobRuns   domainjobs.JobRunRepository
 }
 
-type SummarizeOptions struct {
-	RunID     *uuid.UUID
-	Trigger   string
-	Since     *time.Time
-	AccountID *uuid.UUID
-}
+type SummarizeOptions = domainmessages.MessageSummarizeOptions
 
-type SummarizeResult struct {
-	JobRunID    uuid.UUID
-	ActionItems int
-	FYIItems    int
-}
+type SummarizeResult = domainmessages.MessageSummarizeResult
 
 type summarizePayload struct {
 	GeneralSummary string `json:"general_summary"`

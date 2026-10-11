@@ -3,16 +3,13 @@ package http
 import (
 	"encoding/json"
 	"errors"
+
+	domainprojects "github.com/Kapital-B/automata/svc/internal/domain/projects"
 	"github.com/go-chi/chi/v5"
 	"net/http"
 	"strconv"
 	"strings"
 	"time"
-
-	appjobs "github.com/Kapital-B/automata/svc/internal/application/jobs"
-	appprojects "github.com/Kapital-B/automata/svc/internal/application/projects"
-	domainjobs "github.com/Kapital-B/automata/svc/internal/domain/jobs"
-	domainprojects "github.com/Kapital-B/automata/svc/internal/domain/projects"
 
 	"github.com/google/uuid"
 )
@@ -110,7 +107,7 @@ func (h *Handlers) createProject(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid json"})
 		return
 	}
-	in := appprojects.CreateProjectInput{
+	in := domainprojects.ProjectCreateProjectInput{
 		Name: body.Name, Code: body.Code, Description: body.Description,
 		Client: body.Client, Keywords: body.Keywords,
 	}
@@ -125,9 +122,9 @@ func (h *Handlers) createProject(w http.ResponseWriter, r *http.Request) {
 	row, err := h.ProjectSvc.Create(r.Context(), uid, in)
 	if err != nil {
 		switch {
-		case errors.Is(err, appprojects.ErrInvalidCode):
+		case errors.Is(err, domainprojects.ProjectErrInvalidCode):
 			writeJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid project code"})
-		case errors.Is(err, appprojects.ErrCodeTaken):
+		case errors.Is(err, domainprojects.ProjectErrCodeTaken):
 			writeJSON(w, http.StatusConflict, map[string]string{"error": "project code already exists"})
 		default:
 			writeJSON(w, http.StatusBadRequest, map[string]string{"error": err.Error()})
@@ -161,7 +158,7 @@ func (h *Handlers) updateProject(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "project code is immutable"})
 		return
 	}
-	in := appprojects.UpdateProjectInput{}
+	in := domainprojects.ProjectUpdateProjectInput{}
 	if raw, ok := body["name"]; ok {
 		var name string
 		_ = json.Unmarshal(raw, &name)
@@ -189,7 +186,7 @@ func (h *Handlers) updateProject(w http.ResponseWriter, r *http.Request) {
 	}
 	row, err := h.ProjectSvc.Update(r.Context(), uid, id, in)
 	if err != nil {
-		if errors.Is(err, appprojects.ErrNotFound) {
+		if errors.Is(err, domainprojects.ProjectErrNotFound) {
 			writeJSON(w, http.StatusNotFound, map[string]string{"error": "not found"})
 			return
 		}
@@ -226,12 +223,12 @@ func (h *Handlers) updateProjectMember(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid json"})
 		return
 	}
-	m, err := h.ProjectSvc.UpdateMember(r.Context(), uid, id, appprojects.UpdateMemberInput{
+	m, err := h.ProjectSvc.UpdateMember(r.Context(), uid, id, domainprojects.ProjectUpdateMemberInput{
 		Role: body.Role, Discipline: body.Discipline, Responsibilities: body.Responsibilities,
 		CurrentScope: body.CurrentScope, ApprovalAuthority: body.ApprovalAuthority, OutOfScope: body.OutOfScope,
 	})
 	if err != nil {
-		if errors.Is(err, appprojects.ErrNotFound) {
+		if errors.Is(err, domainprojects.ProjectErrNotFound) {
 			writeJSON(w, http.StatusNotFound, map[string]string{"error": "not found"})
 			return
 		}
@@ -370,7 +367,7 @@ func (h *Handlers) assignMessageProject(w http.ResponseWriter, r *http.Request) 
 		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid json"})
 		return
 	}
-	in := appprojects.AssignInput{
+	in := domainprojects.ProjectAssignInput{
 		Scope:  domainprojects.AssignScope(strings.TrimSpace(body.Scope)),
 		Status: domainprojects.AssignmentStatus(strings.TrimSpace(body.Status)),
 	}
@@ -385,7 +382,7 @@ func (h *Handlers) assignMessageProject(w http.ResponseWriter, r *http.Request) 
 	eff, err := h.ProjectSvc.AssignMessage(r.Context(), uid, id, in)
 	if err != nil {
 		switch {
-		case errors.Is(err, appprojects.ErrNotFound):
+		case errors.Is(err, domainprojects.ProjectErrNotFound):
 			writeJSON(w, http.StatusNotFound, map[string]string{"error": "not found"})
 		default:
 			writeJSON(w, http.StatusBadRequest, map[string]string{"error": err.Error()})
@@ -412,7 +409,7 @@ func (h *Handlers) clearMessageOverride(w http.ResponseWriter, r *http.Request) 
 	}
 	eff, err := h.ProjectSvc.ClearOverride(r.Context(), uid, id)
 	if err != nil {
-		if errors.Is(err, appprojects.ErrNotFound) {
+		if errors.Is(err, domainprojects.ProjectErrNotFound) {
 			writeJSON(w, http.StatusNotFound, map[string]string{"error": "not found"})
 			return
 		}
@@ -542,7 +539,7 @@ func (h *Handlers) getProjectTimeline(w http.ResponseWriter, r *http.Request) {
 	}
 	items, err := h.ProjectSvc.GetTimeline(r.Context(), uid, id, filter)
 	if err != nil {
-		if errors.Is(err, appprojects.ErrNotFound) {
+		if errors.Is(err, domainprojects.ProjectErrNotFound) {
 			writeJSON(w, http.StatusNotFound, map[string]string{"error": "not found"})
 			return
 		}
@@ -624,7 +621,7 @@ func (h *Handlers) createManualItem(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "bad occurred_at"})
 		return
 	}
-	in := appprojects.CreateManualInput{
+	in := domainprojects.ProjectCreateManualInput{
 		Channel: body.Channel, OccurredAt: occurredAt, Title: body.Title, BodyText: body.BodyText,
 	}
 	if body.ProjectID != nil && strings.TrimSpace(*body.ProjectID) != "" {
@@ -645,11 +642,11 @@ func (h *Handlers) createManualItem(w http.ResponseWriter, r *http.Request) {
 	row, err := h.ProjectSvc.CreateManualItem(r.Context(), uid, in)
 	if err != nil {
 		switch {
-		case errors.Is(err, appprojects.ErrInvalidChannel):
+		case errors.Is(err, domainprojects.ProjectErrInvalidChannel):
 			writeJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid channel"})
-		case errors.Is(err, appprojects.ErrInvalidBody):
+		case errors.Is(err, domainprojects.ProjectErrInvalidBody):
 			writeJSON(w, http.StatusBadRequest, map[string]string{"error": "body_text required"})
-		case errors.Is(err, appprojects.ErrNotFound):
+		case errors.Is(err, domainprojects.ProjectErrNotFound):
 			writeJSON(w, http.StatusNotFound, map[string]string{"error": "not found"})
 		default:
 			writeJSON(w, http.StatusBadRequest, map[string]string{"error": err.Error()})
@@ -692,7 +689,7 @@ func (h *Handlers) assignManualItemProject(w http.ResponseWriter, r *http.Reques
 	}
 	row, err := h.ProjectSvc.AssignManualItem(r.Context(), uid, id, projectID)
 	if err != nil {
-		if errors.Is(err, appprojects.ErrNotFound) {
+		if errors.Is(err, domainprojects.ProjectErrNotFound) {
 			writeJSON(w, http.StatusNotFound, map[string]string{"error": "not found"})
 			return
 		}
@@ -753,19 +750,19 @@ func (h *Handlers) assignProjectsBatch(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid json"})
 		return
 	}
-	if len(body.Items) > appprojects.MaxBatchAssignItems {
+	if len(body.Items) > domainprojects.ProjectMaxBatchAssignItems {
 		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "too_many_items"})
 		return
 	}
 
-	items := make([]appprojects.BatchAssignItem, 0, len(body.Items))
+	items := make([]domainprojects.ProjectBatchAssignItem, 0, len(body.Items))
 	for _, in := range body.Items {
 		id, err := uuid.Parse(strings.TrimSpace(in.ID))
 		if err != nil {
 			writeJSON(w, http.StatusBadRequest, map[string]string{"error": "bad id"})
 			return
 		}
-		item := appprojects.BatchAssignItem{
+		item := domainprojects.ProjectBatchAssignItem{
 			Kind:        strings.TrimSpace(in.Kind),
 			ID:          id,
 			Scope:       domainprojects.AssignScope(strings.TrimSpace(in.Scope)),
@@ -784,7 +781,7 @@ func (h *Handlers) assignProjectsBatch(w http.ResponseWriter, r *http.Request) {
 
 	results, err := h.ProjectSvc.AssignBatch(r.Context(), uid, items)
 	if err != nil {
-		if errors.Is(err, appprojects.ErrTooManyItems) {
+		if errors.Is(err, domainprojects.ProjectErrTooManyItems) {
 			writeJSON(w, http.StatusBadRequest, map[string]string{"error": "too_many_items"})
 			return
 		}
@@ -823,7 +820,7 @@ func (h *Handlers) rescanUnassigned(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusUnauthorized, map[string]string{"error": "unauthorized"})
 		return
 	}
-	if h.JobEnqueuer == nil {
+	if h.AccountJobs == nil {
 		writeJSON(w, http.StatusServiceUnavailable, map[string]string{"error": "assignment not configured"})
 		return
 	}
@@ -833,54 +830,23 @@ func (h *Handlers) rescanUnassigned(w http.ResponseWriter, r *http.Request) {
 	if r.Body != nil {
 		_ = json.NewDecoder(r.Body).Decode(&body)
 	}
-
-	accountIDs := make([]uuid.UUID, 0, 1)
+	var account *uuid.UUID
 	if body.AccountID != nil && strings.TrimSpace(*body.AccountID) != "" {
 		id, err := uuid.Parse(strings.TrimSpace(*body.AccountID))
 		if err != nil {
 			writeJSON(w, http.StatusBadRequest, map[string]string{"error": "bad account_id"})
 			return
 		}
-		authorized, err := h.authorizeAccount(r.Context(), uid, id)
-		if err != nil {
-			h.Log.Error("authorize rescan account", "err", err)
-			writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "internal"})
-			return
-		}
-		if !authorized {
-			writeJSON(w, http.StatusNotFound, map[string]string{"error": "not found"})
-			return
-		}
-		accountIDs = append(accountIDs, id)
-	} else {
-		if h.Accounts == nil {
-			writeJSON(w, http.StatusServiceUnavailable, map[string]string{"error": "accounts not configured"})
-			return
-		}
-		rows, err := h.Accounts.ListAccounts(r.Context(), uid)
-		if err != nil {
-			h.Log.Error("list accounts for rescan", "err", err)
-			writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "internal"})
-			return
-		}
-		for _, row := range rows {
-			accountIDs = append(accountIDs, row.ID)
-		}
+		account = &id
 	}
-	if len(accountIDs) == 0 {
-		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "no accounts to rescan"})
+	ids, err := h.AccountJobs.RescanAssignments(r.Context(), uid, account)
+	if err != nil {
+		writeOperationError(w, err)
 		return
 	}
-
-	runIDs := make([]string, 0, len(accountIDs))
-	for _, accountID := range accountIDs {
-		job, err := h.enqueueAccountJob(r.Context(), uid, accountID, appjobs.TypeAssignProjects, domainjobs.JobPayload{})
-		if err != nil {
-			h.Log.Error("enqueue assign_projects", "err", err)
-			writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "internal"})
-			return
-		}
-		runIDs = append(runIDs, job.ID.String())
+	out := make([]string, 0, len(ids))
+	for _, id := range ids {
+		out = append(out, id.String())
 	}
-	writeJSON(w, http.StatusAccepted, map[string]any{"run_ids": runIDs})
+	writeJSON(w, http.StatusAccepted, map[string]any{"run_ids": out})
 }

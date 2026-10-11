@@ -10,36 +10,27 @@ import (
 	"log/slog"
 	"net/http"
 	"net/url"
-	"regexp"
+
 	"strconv"
 	"strings"
 	"time"
 
-	asynqadapter "github.com/Kapital-B/automata/svc/internal/adapters/inbound/asynq"
-	appaccounts "github.com/Kapital-B/automata/svc/internal/application/accounts"
-	appattention "github.com/Kapital-B/automata/svc/internal/application/attention"
-	"github.com/Kapital-B/automata/svc/internal/application/auth"
-	appconnectors "github.com/Kapital-B/automata/svc/internal/application/connectors"
-	appcontacts "github.com/Kapital-B/automata/svc/internal/application/contacts"
-	appdecisions "github.com/Kapital-B/automata/svc/internal/application/decisions"
-	appfacts "github.com/Kapital-B/automata/svc/internal/application/facts"
-	appinterpret "github.com/Kapital-B/automata/svc/internal/application/interpret"
-	appissues "github.com/Kapital-B/automata/svc/internal/application/issues"
-	appjobs "github.com/Kapital-B/automata/svc/internal/application/jobs"
-	appmessages "github.com/Kapital-B/automata/svc/internal/application/messages"
-	appoverview "github.com/Kapital-B/automata/svc/internal/application/overview"
-	appprojectai "github.com/Kapital-B/automata/svc/internal/application/projectai"
-	appprojects "github.com/Kapital-B/automata/svc/internal/application/projects"
-	appreconcile "github.com/Kapital-B/automata/svc/internal/application/reconcile"
-	apptodos "github.com/Kapital-B/automata/svc/internal/application/todos"
-	domainacc "github.com/Kapital-B/automata/svc/internal/domain/accounts"
 	domainaccounts "github.com/Kapital-B/automata/svc/internal/domain/accounts"
+	domainattention "github.com/Kapital-B/automata/svc/internal/domain/attention"
 	domainauth "github.com/Kapital-B/automata/svc/internal/domain/auth"
+	domainconnectors "github.com/Kapital-B/automata/svc/internal/domain/connectors"
 	domaincontacts "github.com/Kapital-B/automata/svc/internal/domain/contacts"
+	domaindecisions "github.com/Kapital-B/automata/svc/internal/domain/decisions"
+	domainfacts "github.com/Kapital-B/automata/svc/internal/domain/facts"
+	domaininterpretations "github.com/Kapital-B/automata/svc/internal/domain/interpretations"
 	domainissues "github.com/Kapital-B/automata/svc/internal/domain/issues"
 	domainjobs "github.com/Kapital-B/automata/svc/internal/domain/jobs"
 	domainmessages "github.com/Kapital-B/automata/svc/internal/domain/messages"
 	domainprojects "github.com/Kapital-B/automata/svc/internal/domain/projects"
+
+	domaincontradictions "github.com/Kapital-B/automata/svc/internal/domain/contradictions"
+
+	domainacc "github.com/Kapital-B/automata/svc/internal/domain/accounts"
 
 	"github.com/go-chi/cors"
 	"github.com/google/uuid"
@@ -47,43 +38,43 @@ import (
 
 // Handlers holds wired application services for HTTP.
 type Handlers struct {
-	Log                  *slog.Logger
-	AccountSvc           *appaccounts.Service
-	ConnectorSvc         *appconnectors.Service
-	SyncSvc              *appmessages.SyncService
-	CategorizeSvc        *appmessages.CategorizeService
-	SummarizeSvc         *appmessages.SummarizeService
-	AutoDraftSvc         *appmessages.AutoDraftService
-	DraftsSvc            *appmessages.DraftLifecycleService
-	ForwardRulesSvc      *appmessages.ForwardRulesService
-	AuthSvc              *auth.Service
-	ContactSvc           *appcontacts.Service
-	ProjectSvc           *appprojects.Service
-	IssueSvc             *appissues.Service
-	TodoSvc              *apptodos.Service
-	FactSvc              *appfacts.Service
-	InterpretSvc         *appinterpret.Service
-	ReconcileSvc         *appreconcile.Service
-	DecisionSvc          *appdecisions.Service
-	AttentionSvc         *appattention.Service
-	OverviewSvc          *appoverview.Service
-	ProjectAISvc         *appprojectai.Service
-	Accounts             domainaccounts.AccountRepository
-	Messages             domainmessages.MessageRepository
-	JobRuns              domainjobs.JobRunRepository
-	JobStore             domainjobs.JobStore
-	JobEnqueuer          domainjobs.JobEnqueuer
-	JobTerminalTTL       time.Duration
-	JobsInline           bool
-	Summaries            domainmessages.SummaryRepository
-	Forwards             domainmessages.ForwardRepository
-	Schedules            domainjobs.ScheduleRepository
-	OAuthStates          domainauth.OAuthStateRepository
-	Users                domainauth.UserRepository
-	Contacts             domaincontacts.ContactRepository
-	Projects             domainprojects.ProjectRepository
-	Assignments          domainprojects.AssignmentRepository
-	Issues               domainissues.IssueRepository
+	Log             *slog.Logger
+	AccountSvc      domainaccounts.AccountUseCases
+	ConnectorSvc    domainconnectors.ConnectorUseCases
+	SyncSvc         domainmessages.MessageSyncUseCases
+	CategorizeSvc   domainmessages.MessageCategorizeUseCases
+	SummarizeSvc    domainmessages.MessageSummarizeUseCases
+	AutoDraftSvc    domainmessages.MessageAutoDraftUseCases
+	DraftsSvc       domainmessages.MessageDraftLifecycleUseCases
+	ForwardRulesSvc domainmessages.MessageForwardRulesUseCases
+	AuthSvc         domainauth.AuthUseCases
+	ContactSvc      domaincontacts.ContactUseCases
+	ProjectSvc      domainprojects.ProjectUseCases
+	IssueSvc        domainissues.IssueUseCases
+	TodoSvc         domainissues.TodoUseCases
+	FactSvc         domainfacts.FactUseCases
+	InterpretSvc    domaininterpretations.InterpretationUseCases
+	ReconcileSvc    domaincontradictions.ReconciliationUseCases
+	DecisionSvc     domaindecisions.DecisionUseCases
+	AttentionSvc    domainattention.AttentionUseCases
+	OverviewSvc     domainprojects.OverviewUseCases
+	ProjectAISvc    domainprojects.ProjectAIUseCases
+	AccountsQueries domainaccounts.AccountsQueries
+	MessagesQueries domainmessages.MessagesQueries
+	JobRunsQueries  domainjobs.JobRunsQueries
+	JobStoreQueries domainjobs.JobStoreQueries
+
+	JobRequests      domainjobs.RequestSubmission
+	AccountJobs      domainmessages.AccountJobSubmission
+	ConnectorJobs    domainconnectors.SyncSubmission
+	Extraction       domainprojects.ExtractionSubmission
+	JobTerminalTTL   time.Duration
+	SummariesQueries domainmessages.SummariesQueries
+	ForwardsQueries  domainmessages.ForwardsQueries
+	SchedulesQueries domainjobs.SchedulesQueries
+
+	UsersQueries domainauth.UsersQueries
+
 	Dashboard            string
 	SuccessPath          string
 	ConnectorSuccessPath string
@@ -92,7 +83,6 @@ type Handlers struct {
 	AuthErrorPath        string
 	StateTTL             time.Duration
 	TokenVerifier        domainauth.AccessTokenVerifier
-	JobQueue             *asynqadapter.QueueClient
 	CORSOrigins          []string
 }
 
@@ -246,7 +236,7 @@ func (h *Handlers) health(w http.ResponseWriter, r *http.Request) {
 
 func (h *Handlers) listAccounts(w http.ResponseWriter, r *http.Request) {
 	uid := userIDOrEmpty(r)
-	rows, err := h.Accounts.ListAccounts(r.Context(), uid)
+	rows, err := h.AccountsQueries.ListAccounts(r.Context(), uid)
 	if err != nil {
 		h.Log.Error("list accounts", "err", err)
 		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "internal"})
@@ -269,7 +259,7 @@ func (h *Handlers) listAccounts(w http.ResponseWriter, r *http.Request) {
 		it := item{
 			ID:               a.ID.String(),
 			Label:            a.Label,
-			Provider:         appaccounts.ProviderKey(a.Provider),
+			Provider:         domainaccounts.AccountProviderKey(a.Provider),
 			MsAccountKind:    string(a.MsAccountKind),
 			PrimaryEmail:     a.PrimaryEmail,
 			ConnectionStatus: a.ConnectionStatus,
@@ -340,7 +330,7 @@ func (h *Handlers) startConnect(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	kind := domainacc.MsAccountKind(body.MsAccountKind)
-	res, err := h.AccountSvc.StartConnect(r.Context(), userIDOrEmpty(r), appaccounts.StartConnectInput{
+	res, err := h.AccountSvc.StartConnect(r.Context(), userIDOrEmpty(r), domainaccounts.AccountStartConnectInput{
 		Provider:      body.Provider,
 		MsAccountKind: kind,
 		LabelHint:     body.Label,
@@ -387,8 +377,8 @@ func (h *Handlers) connectIMAP(w http.ResponseWriter, r *http.Request) {
 	server := func(b mailServerBody) domainaccounts.MailServer {
 		return domainaccounts.MailServer{Host: b.Host, Port: b.Port, Security: b.Security}
 	}
-	id, err := h.AccountSvc.ConnectWithPassword(r.Context(), userIDOrEmpty(r), appaccounts.ConnectWithPasswordInput{
-		Provider: appaccounts.ProviderIMAP,
+	id, err := h.AccountSvc.ConnectWithPassword(r.Context(), userIDOrEmpty(r), domainaccounts.AccountConnectWithPasswordInput{
+		Provider: domainaccounts.AccountProviderIMAP,
 		Request: domainaccounts.PasswordConnectRequest{
 			Email:    body.Email,
 			Username: body.Username,
@@ -430,7 +420,7 @@ func (h *Handlers) oauthCallback(w http.ResponseWriter, r *http.Request) {
 	}
 	res, err := h.AccountSvc.CompleteOAuth(r.Context(), code, state)
 	if err != nil {
-		if errors.Is(err, appaccounts.ErrInvalidOAuthState) {
+		if errors.Is(err, domainaccounts.AccountErrInvalidOAuthState) {
 			h.redirectError(w, r, "invalid_state")
 			return
 		}
@@ -465,7 +455,7 @@ func (h *Handlers) getAccount(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "bad id"})
 		return
 	}
-	row, _, err := h.Accounts.GetAccount(r.Context(), userIDOrEmpty(r), id)
+	row, err := h.AccountsQueries.GetScopedAccount(r.Context(), userIDOrEmpty(r), id)
 	if err != nil {
 		h.Log.Error("get account", "err", err)
 		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "internal"})
@@ -518,71 +508,13 @@ func (h *Handlers) syncAccount(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	uid := userIDOrEmpty(r)
-	if ok, err := h.authorizeAccount(r.Context(), uid, id); err != nil {
-		h.Log.Error("authorize sync account", "err", err)
-		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "internal"})
-		return
-	} else if !ok {
-		writeJSON(w, http.StatusNotFound, map[string]string{"error": "not found"})
-		return
-	}
-	// A forced sync starts from an empty delta link. Graph only resends what
-	// changed, so this is the only way to repair a message whose stored
-	// content was lost locally.
 	force := r.URL.Query().Get("force") == "true"
-	if h.JobsInline {
-		res, err := h.SyncSvc.SyncInboxWithOptions(r.Context(), uid, id, appmessages.SyncOptions{Force: force})
-		if err != nil {
-			h.Log.Error("sync", "err", err)
-			writeJSON(w, http.StatusBadRequest, map[string]string{"error": err.Error()})
-			return
-		}
-		writeJSON(w, http.StatusOK, map[string]any{
-			"job_run_id":        res.JobRunID.String(),
-			"messages_upserted": res.MessagesUpserted,
-			"status":            "success",
-		})
-		return
-	}
-	if h.JobEnqueuer != nil {
-		job, err := h.enqueueAccountJob(r.Context(), uid, id, "sync", domainjobs.JobPayload{Force: force})
-		if err != nil {
-			h.Log.Error("enqueue sync", "err", err)
-			writeJSON(w, http.StatusBadRequest, map[string]string{"error": err.Error()})
-			return
-		}
-		writeAcceptedJob(w, job.ID)
-		return
-	}
-	if h.JobQueue == nil || h.JobRuns == nil {
-		writeJSON(w, http.StatusServiceUnavailable, map[string]string{"error": "sync queue not configured"})
-		return
-	}
-	jobID := uuid.New()
-	started := time.Now().UTC()
-	if err := h.JobRuns.InsertJobRun(r.Context(), jobID, id, "sync", "api", "pending", started, time.Time{}, nil, `{"queued":true}`); err != nil {
-		h.Log.Error("create sync run", "err", err)
-		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "internal"})
-		return
-	}
-	err = h.JobQueue.EnqueueSync(r.Context(), asynqadapter.TaskPayload{
-		SchemaVersion: 1,
-		RunID:         jobID,
-		UserID:        uid,
-		AccountID:     id,
-		TriggerKind:   "api",
-	})
+	result, err := h.AccountJobs.SubmitAccount(r.Context(), uid, id, "sync", domainjobs.JobPayload{Force: force})
 	if err != nil {
-		msg := err.Error()
-		_ = h.JobRuns.UpdateJobRunStatus(r.Context(), jobID, "failed", timePtrHTTP(time.Now().UTC()), &msg, `{"queued":false}`)
-		h.Log.Error("enqueue sync", "err", err)
-		writeJSON(w, http.StatusBadRequest, map[string]string{"error": err.Error()})
+		writeOperationError(w, err)
 		return
 	}
-	writeJSON(w, http.StatusAccepted, map[string]any{
-		"job_run_id": jobID.String(),
-		"status":     "queued",
-	})
+	writeSubmission(w, result, "sync", domainjobs.JobPayload{Force: force})
 }
 
 func (h *Handlers) listMessages(w http.ResponseWriter, r *http.Request) {
@@ -656,21 +588,13 @@ func (h *Handlers) listMessages(w http.ResponseWriter, r *http.Request) {
 	}
 	filter.OmitBody = true
 	uid := userIDOrEmpty(r)
-	rows, err := h.Messages.ListMessages(r.Context(), uid, filter)
+	page, err := h.MessagesQueries.ListMessagePage(r.Context(), uid, filter)
 	if err != nil {
 		h.Log.Error("list messages", "err", err)
 		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "internal"})
 		return
 	}
-	var projectIDs map[uuid.UUID]*uuid.UUID
-	if h.Assignments != nil {
-		projectIDs, err = h.Assignments.EffectiveProjectIDsForMessages(r.Context(), uid, rows)
-		if err != nil {
-			h.Log.Error("list message projects", "err", err)
-			writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "internal"})
-			return
-		}
-	}
+	rows, projectIDs := page.Messages, page.ProjectIDs
 	type item struct {
 		ID                 string          `json:"id"`
 		AccountID          string          `json:"account_id"`
@@ -772,7 +696,7 @@ func (h *Handlers) getMessage(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "bad id"})
 		return
 	}
-	m, err := h.Messages.GetMessage(r.Context(), userIDOrEmpty(r), id)
+	m, err := h.MessagesQueries.GetMessage(r.Context(), userIDOrEmpty(r), id)
 	if err != nil {
 		h.Log.Error("get message", "err", err)
 		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "internal"})
@@ -838,7 +762,7 @@ func (h *Handlers) forwardMessage(w http.ResponseWriter, r *http.Request) {
 }
 
 func (h *Handlers) listDrafts(w http.ResponseWriter, r *http.Request) {
-	if h.Summaries == nil {
+	if h.SummariesQueries == nil {
 		writeJSON(w, http.StatusServiceUnavailable, map[string]string{"error": "summaries not configured"})
 		return
 	}
@@ -852,7 +776,7 @@ func (h *Handlers) listDrafts(w http.ResponseWriter, r *http.Request) {
 		}
 		accountID = &id
 	}
-	rows, err := h.Summaries.ListDraftSuggestions(r.Context(), uid, accountID, 200)
+	rows, err := h.SummariesQueries.ListDraftSuggestions(r.Context(), uid, accountID, 200)
 	if err != nil {
 		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "internal"})
 		return
@@ -889,53 +813,16 @@ func (h *Handlers) runForwardRules(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	uid := userIDOrEmpty(r)
-	if ok, err := h.authorizeAccount(r.Context(), uid, accountID); err != nil {
-		h.Log.Error("authorize forward rules account", "err", err)
-		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "internal"})
-		return
-	} else if !ok {
-		writeJSON(w, http.StatusNotFound, map[string]string{"error": "not found"})
-		return
-	}
-	if !h.JobsInline && h.JobEnqueuer != nil {
-		job, err := h.enqueueAccountJob(r.Context(), uid, accountID, "forward_rules", domainjobs.JobPayload{})
-		if err != nil {
-			h.Log.Error("enqueue forward_rules", "err", err)
-			writeJSON(w, http.StatusBadRequest, map[string]string{"error": err.Error()})
-			return
-		}
-		writeAcceptedJob(w, job.ID)
-		return
-	}
-	if !h.JobsInline && h.JobQueue != nil && h.JobRuns != nil {
-		runID := uuid.New()
-		_ = h.JobRuns.InsertJobRun(r.Context(), runID, accountID, "forward_rules", "api", "pending", time.Now().UTC(), time.Time{}, nil, `{"queued":true}`)
-		err := h.JobQueue.EnqueueForwardRules(r.Context(), asynqadapter.TaskPayload{
-			SchemaVersion: 1, RunID: runID, UserID: uid, AccountID: accountID, TriggerKind: "api",
-		})
-		if err != nil {
-			msg := err.Error()
-			_ = h.JobRuns.UpdateJobRunStatus(r.Context(), runID, "failed", timePtrHTTP(time.Now().UTC()), &msg, `{"queued":false}`)
-			writeJSON(w, http.StatusBadRequest, map[string]string{"error": err.Error()})
-			return
-		}
-		writeJSON(w, http.StatusAccepted, map[string]any{"job_run_id": runID.String(), "status": "queued"})
-		return
-	}
-	if h.ForwardRulesSvc == nil {
-		writeJSON(w, http.StatusServiceUnavailable, map[string]string{"error": "forward-rules service not configured"})
-		return
-	}
-	runID, err := h.ForwardRulesSvc.RunAccount(r.Context(), uid, accountID, appmessages.ForwardRulesOptions{Trigger: "api"})
+	result, err := h.AccountJobs.SubmitAccount(r.Context(), uid, accountID, "forward_rules", domainjobs.JobPayload{})
 	if err != nil {
-		writeJSON(w, http.StatusBadRequest, map[string]string{"error": err.Error()})
+		writeOperationError(w, err)
 		return
 	}
-	writeJSON(w, http.StatusOK, map[string]any{"job_run_id": runID.String(), "status": "success"})
+	writeSubmission(w, result, "forward_rules", domainjobs.JobPayload{})
 }
 
 func (h *Handlers) listDraftAttempts(w http.ResponseWriter, r *http.Request) {
-	if h.Summaries == nil {
+	if h.SummariesQueries == nil {
 		writeJSON(w, http.StatusServiceUnavailable, map[string]string{"error": "summaries not configured"})
 		return
 	}
@@ -944,7 +831,7 @@ func (h *Handlers) listDraftAttempts(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "bad id"})
 		return
 	}
-	rows, err := h.Summaries.ListSendAttemptsByDraft(r.Context(), userIDOrEmpty(r), draftID, 50)
+	rows, err := h.SummariesQueries.ListSendAttemptsByDraft(r.Context(), userIDOrEmpty(r), draftID, 50)
 	if err != nil {
 		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "internal"})
 		return
@@ -1027,7 +914,7 @@ func (h *Handlers) sendDraft(w http.ResponseWriter, r *http.Request) {
 }
 
 func (h *Handlers) listCategories(w http.ResponseWriter, r *http.Request) {
-	rows, err := h.Messages.ListCategoryDefinitions(r.Context(), userIDOrEmpty(r))
+	rows, err := h.MessagesQueries.ListCategoryDefinitions(r.Context(), userIDOrEmpty(r))
 	if err != nil {
 		h.Log.Error("list categories", "err", err)
 		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "internal"})
@@ -1067,22 +954,10 @@ type categoryUpsertBody struct {
 
 // slugPattern allows 1 to 64 characters. It used to demand either exactly one
 // or at least three, so a category called "HR" or "IT" could not be created.
-var slugPattern = regexp.MustCompile(`^[a-z0-9](?:[a-z0-9_-]{0,62}[a-z0-9])?$`)
 
 func normalizeCategoryInput(body categoryUpsertBody) (categoryUpsertBody, error) {
-	body.Slug = strings.ToLower(strings.TrimSpace(body.Slug))
-	body.DisplayName = strings.TrimSpace(body.DisplayName)
-	body.Definition = strings.TrimSpace(body.Definition)
-	if !slugPattern.MatchString(body.Slug) {
-		return body, errors.New("slug must be 1-64 chars: lowercase letters, digits, '_' or '-'")
-	}
-	if body.DisplayName == "" {
-		return body, errors.New("display_name is required")
-	}
-	if len(body.Definition) > 280 {
-		return body, errors.New("definition is too long (max 280 chars)")
-	}
-	return body, nil
+	in, err := domainmessages.NormalizeCategoryInput(domainmessages.CategoryInput{Slug: body.Slug, DisplayName: body.DisplayName, Definition: body.Definition, SortOrder: body.SortOrder})
+	return categoryUpsertBody{Slug: in.Slug, DisplayName: in.DisplayName, Definition: in.Definition, SortOrder: in.SortOrder}, err
 }
 
 func (h *Handlers) createCategory(w http.ResponseWriter, r *http.Request) {
@@ -1091,29 +966,13 @@ func (h *Handlers) createCategory(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid json"})
 		return
 	}
-	body, err := normalizeCategoryInput(body)
+	in := domainmessages.CategoryInput{Slug: body.Slug, DisplayName: body.DisplayName, Definition: body.Definition, SortOrder: body.SortOrder}
+	row, err := h.MessagesQueries.CreateCategory(r.Context(), userIDOrEmpty(r), in)
 	if err != nil {
-		writeJSON(w, http.StatusBadRequest, map[string]string{"error": err.Error()})
+		writeOperationError(w, err)
 		return
 	}
-	uid := userIDOrEmpty(r)
-	now := time.Now().UTC()
-	row := domainmessages.CategoryDefinitionRow{
-		ID:          uuid.New(),
-		UserID:      uid,
-		Slug:        body.Slug,
-		DisplayName: body.DisplayName,
-		Definition:  body.Definition,
-		SortOrder:   body.SortOrder,
-		CreatedAt:   now,
-		UpdatedAt:   now,
-	}
-	if err := h.Messages.CreateCategoryDefinition(r.Context(), row); err != nil {
-		h.Log.Error("create category", "err", err)
-		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "create failed"})
-		return
-	}
-	writeJSON(w, http.StatusCreated, toCategoryItem(row))
+	writeJSON(w, http.StatusCreated, toCategoryItem(*row))
 }
 
 func (h *Handlers) updateCategory(w http.ResponseWriter, r *http.Request) {
@@ -1127,33 +986,13 @@ func (h *Handlers) updateCategory(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid json"})
 		return
 	}
-	body, err = normalizeCategoryInput(body)
+	in := domainmessages.CategoryInput{Slug: body.Slug, DisplayName: body.DisplayName, Definition: body.Definition, SortOrder: body.SortOrder}
+	row, err := h.MessagesQueries.UpdateCategory(r.Context(), userIDOrEmpty(r), id, in)
 	if err != nil {
-		writeJSON(w, http.StatusBadRequest, map[string]string{"error": err.Error()})
+		writeOperationError(w, err)
 		return
 	}
-	uid := userIDOrEmpty(r)
-	cur, err := h.Messages.GetCategoryDefinitionByID(r.Context(), uid, id)
-	if err != nil {
-		h.Log.Error("get category for update", "err", err)
-		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "internal"})
-		return
-	}
-	if cur == nil {
-		writeJSON(w, http.StatusNotFound, map[string]string{"error": "not found"})
-		return
-	}
-	cur.Slug = body.Slug
-	cur.DisplayName = body.DisplayName
-	cur.Definition = body.Definition
-	cur.SortOrder = body.SortOrder
-	cur.UpdatedAt = time.Now().UTC()
-	if err := h.Messages.UpdateCategoryDefinition(r.Context(), *cur); err != nil {
-		h.Log.Error("update category", "err", err)
-		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "update failed"})
-		return
-	}
-	writeJSON(w, http.StatusOK, toCategoryItem(*cur))
+	writeJSON(w, http.StatusOK, toCategoryItem(*row))
 }
 
 func (h *Handlers) deleteCategory(w http.ResponseWriter, r *http.Request) {
@@ -1162,54 +1001,9 @@ func (h *Handlers) deleteCategory(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "bad id"})
 		return
 	}
-	uid := userIDOrEmpty(r)
-	cur, err := h.Messages.GetCategoryDefinitionByID(r.Context(), uid, id)
+	err = h.MessagesQueries.DeleteCategory(r.Context(), userIDOrEmpty(r), id, r.URL.Query().Get("replacement_id"))
 	if err != nil {
-		h.Log.Error("get category for delete", "err", err)
-		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "internal"})
-		return
-	}
-	if cur == nil {
-		writeJSON(w, http.StatusNotFound, map[string]string{"error": "not found"})
-		return
-	}
-	replRaw := strings.TrimSpace(r.URL.Query().Get("replacement_id"))
-	if replRaw == "" {
-		n, err := h.Messages.CountMessageCategoriesByCategory(r.Context(), uid, id)
-		if err != nil {
-			h.Log.Error("count category usage", "err", err)
-			writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "internal"})
-			return
-		}
-		if n > 0 {
-			writeJSON(w, http.StatusBadRequest, map[string]string{"error": "category is in use; pass replacement_id"})
-			return
-		}
-	} else {
-		replID, err := uuid.Parse(replRaw)
-		if err != nil || replID == id {
-			writeJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid replacement_id"})
-			return
-		}
-		repl, err := h.Messages.GetCategoryDefinitionByID(r.Context(), uid, replID)
-		if err != nil {
-			h.Log.Error("get replacement category", "err", err)
-			writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "internal"})
-			return
-		}
-		if repl == nil {
-			writeJSON(w, http.StatusBadRequest, map[string]string{"error": "replacement category not found"})
-			return
-		}
-		if _, err := h.Messages.ReassignMessageCategories(r.Context(), uid, id, replID); err != nil {
-			h.Log.Error("reassign categories", "err", err)
-			writeJSON(w, http.StatusBadRequest, map[string]string{"error": "reassign failed"})
-			return
-		}
-	}
-	if err := h.Messages.DeleteCategoryDefinition(r.Context(), uid, id); err != nil {
-		h.Log.Error("delete category", "err", err)
-		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "delete failed"})
+		writeOperationError(w, err)
 		return
 	}
 	writeJSON(w, http.StatusOK, map[string]any{"status": "success"})
@@ -1235,75 +1029,12 @@ func (h *Handlers) categorizeAccount(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 	uid := userIDOrEmpty(r)
-	if ok, err := h.authorizeAccount(r.Context(), uid, id); err != nil {
-		h.Log.Error("authorize categorize account", "err", err)
-		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "internal"})
-		return
-	} else if !ok {
-		writeJSON(w, http.StatusNotFound, map[string]string{"error": "not found"})
-		return
-	}
-	if h.JobsInline {
-		res, err := h.CategorizeSvc.CategorizeAccount(r.Context(), uid, id, appmessages.CategorizeOptions{
-			Recategorize: body.Recategorize,
-		})
-		if err != nil {
-			h.Log.Error("categorize", "err", err)
-			writeJSON(w, http.StatusBadRequest, map[string]string{"error": err.Error()})
-			return
-		}
-		writeJSON(w, http.StatusOK, map[string]any{
-			"job_run_id":           res.JobRunID.String(),
-			"messages_categorized": res.MessagesCategorized,
-			"recategorize":         body.Recategorize,
-			"status":               "success",
-		})
-		return
-	}
-	if h.JobEnqueuer != nil {
-		job, err := h.enqueueAccountJob(r.Context(), uid, id, "categorize", domainjobs.JobPayload{
-			Recategorize: body.Recategorize,
-		})
-		if err != nil {
-			h.Log.Error("enqueue categorize", "err", err)
-			writeJSON(w, http.StatusBadRequest, map[string]string{"error": err.Error()})
-			return
-		}
-		writeAcceptedJob(w, job.ID)
-		return
-	}
-	if h.JobQueue == nil || h.JobRuns == nil {
-		writeJSON(w, http.StatusServiceUnavailable, map[string]string{"error": "categorize service not configured"})
-		return
-	}
-	jobID := uuid.New()
-	started := time.Now().UTC()
-	meta := fmt.Sprintf(`{"queued":true,"recategorize":%t}`, body.Recategorize)
-	if err := h.JobRuns.InsertJobRun(r.Context(), jobID, id, "categorize", "api", "pending", started, time.Time{}, nil, meta); err != nil {
-		h.Log.Error("create categorize run", "err", err)
-		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "internal"})
-		return
-	}
-	err = h.JobQueue.EnqueueCategorize(r.Context(), asynqadapter.TaskPayload{
-		SchemaVersion: 1,
-		RunID:         jobID,
-		UserID:        uid,
-		AccountID:     id,
-		TriggerKind:   "api",
-		Recategorize:  body.Recategorize,
-	})
+	result, err := h.AccountJobs.SubmitAccount(r.Context(), uid, id, "categorize", domainjobs.JobPayload{Recategorize: body.Recategorize})
 	if err != nil {
-		msg := err.Error()
-		_ = h.JobRuns.UpdateJobRunStatus(r.Context(), jobID, "failed", timePtrHTTP(time.Now().UTC()), &msg, fmt.Sprintf(`{"queued":false,"recategorize":%t}`, body.Recategorize))
-		h.Log.Error("enqueue categorize", "err", err)
-		writeJSON(w, http.StatusBadRequest, map[string]string{"error": err.Error()})
+		writeOperationError(w, err)
 		return
 	}
-	writeJSON(w, http.StatusAccepted, map[string]any{
-		"job_run_id":   jobID.String(),
-		"recategorize": body.Recategorize,
-		"status":       "queued",
-	})
+	writeSubmission(w, result, "categorize", domainjobs.JobPayload{Recategorize: body.Recategorize})
 }
 
 func (h *Handlers) refreshSummary(w http.ResponseWriter, r *http.Request) {
@@ -1317,59 +1048,12 @@ func (h *Handlers) refreshSummary(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	uid := userIDOrEmpty(r)
-	if ok, err := h.authorizeAccount(r.Context(), uid, id); err != nil {
-		h.Log.Error("authorize summarize account", "err", err)
-		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "internal"})
-		return
-	} else if !ok {
-		writeJSON(w, http.StatusNotFound, map[string]string{"error": "not found"})
-		return
-	}
-	if h.JobsInline {
-		res, err := h.SummarizeSvc.SummarizeAccount(r.Context(), uid, id, appmessages.SummarizeOptions{})
-		if err != nil {
-			h.Log.Error("summarize", "err", err)
-			writeJSON(w, http.StatusBadRequest, map[string]string{"error": err.Error()})
-			return
-		}
-		writeJSON(w, http.StatusOK, map[string]any{"job_run_id": res.JobRunID.String(), "status": "success"})
-		return
-	}
-	if h.JobEnqueuer != nil {
-		job, err := h.enqueueAccountJob(r.Context(), uid, id, "summarize", domainjobs.JobPayload{})
-		if err != nil {
-			h.Log.Error("enqueue summarize", "err", err)
-			writeJSON(w, http.StatusBadRequest, map[string]string{"error": err.Error()})
-			return
-		}
-		writeAcceptedJob(w, job.ID)
-		return
-	}
-	if h.JobQueue == nil || h.JobRuns == nil {
-		writeJSON(w, http.StatusServiceUnavailable, map[string]string{"error": "summarize service not configured"})
-		return
-	}
-	jobID := uuid.New()
-	started := time.Now().UTC()
-	if err := h.JobRuns.InsertJobRun(r.Context(), jobID, id, "summarize", "api", "pending", started, time.Time{}, nil, `{"queued":true}`); err != nil {
-		h.Log.Error("create summarize run", "err", err)
-		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "internal"})
-		return
-	}
-	err = h.JobQueue.EnqueueSummarize(r.Context(), asynqadapter.TaskPayload{
-		SchemaVersion: 1,
-		RunID:         jobID,
-		UserID:        uid,
-		AccountID:     id,
-		TriggerKind:   "api",
-	})
+	result, err := h.AccountJobs.SubmitAccount(r.Context(), uid, id, "summarize", domainjobs.JobPayload{})
 	if err != nil {
-		msg := err.Error()
-		_ = h.JobRuns.UpdateJobRunStatus(r.Context(), jobID, "failed", timePtrHTTP(time.Now().UTC()), &msg, `{"queued":false}`)
-		writeJSON(w, http.StatusBadRequest, map[string]string{"error": err.Error()})
+		writeOperationError(w, err)
 		return
 	}
-	writeJSON(w, http.StatusAccepted, map[string]any{"job_run_id": jobID.String(), "status": "queued"})
+	writeSubmission(w, result, "summarize", domainjobs.JobPayload{})
 }
 
 func (h *Handlers) generateDrafts(w http.ResponseWriter, r *http.Request) {
@@ -1401,77 +1085,16 @@ func (h *Handlers) generateDrafts(w http.ResponseWriter, r *http.Request) {
 		}
 		messageID = &parsed
 	}
-	if ok, err := h.authorizeAccount(r.Context(), uid, id); err != nil {
-		h.Log.Error("authorize draft account", "err", err)
-		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "internal"})
-		return
-	} else if !ok {
-		writeJSON(w, http.StatusNotFound, map[string]string{"error": "not found"})
-		return
-	}
-	if h.JobsInline {
-		res, err := h.AutoDraftSvc.GenerateForAccount(r.Context(), uid, id, appmessages.AutoDraftOptions{
-			OnlyUnseen: false,
-			MessageID:  messageID,
-			Force:      messageID != nil,
-		})
-		if err != nil {
-			h.Log.Error("auto-draft", "err", err)
-			writeJSON(w, http.StatusBadRequest, map[string]string{"error": err.Error()})
-			return
-		}
-		writeJSON(w, http.StatusOK, map[string]any{
-			"job_run_id":        res.JobRunID.String(),
-			"drafts_generated":  res.DraftsGenerated,
-			"action_items_seen": res.ActionItemsSeen,
-			"status":            "success",
-		})
-		return
-	}
-	if h.JobEnqueuer != nil {
-		job, err := h.enqueueAccountJob(r.Context(), uid, id, "draft_suggest", domainjobs.JobPayload{
-			MessageID: messageID,
-			Force:     messageID != nil,
-		})
-		if err != nil {
-			h.Log.Error("enqueue draft_suggest", "err", err)
-			writeJSON(w, http.StatusBadRequest, map[string]string{"error": err.Error()})
-			return
-		}
-		writeAcceptedJob(w, job.ID)
-		return
-	}
-	if h.JobQueue == nil || h.JobRuns == nil {
-		writeJSON(w, http.StatusServiceUnavailable, map[string]string{"error": "auto-draft service not configured"})
-		return
-	}
-	jobID := uuid.New()
-	started := time.Now().UTC()
-	if err := h.JobRuns.InsertJobRun(r.Context(), jobID, id, "draft_suggest", "api", "pending", started, time.Time{}, nil, `{"queued":true,"only_unseen":false}`); err != nil {
-		h.Log.Error("create draft_suggest run", "err", err)
-		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "internal"})
-		return
-	}
-	err = h.JobQueue.EnqueueDraftSuggest(r.Context(), asynqadapter.TaskPayload{
-		SchemaVersion: 1,
-		RunID:         jobID,
-		UserID:        uid,
-		AccountID:     id,
-		TriggerKind:   "api",
-		MessageID:     messageID,
-		Force:         messageID != nil,
-	})
+	result, err := h.AccountJobs.SubmitAccount(r.Context(), uid, id, "draft_suggest", domainjobs.JobPayload{MessageID: messageID, Force: messageID != nil})
 	if err != nil {
-		msg := err.Error()
-		_ = h.JobRuns.UpdateJobRunStatus(r.Context(), jobID, "failed", timePtrHTTP(time.Now().UTC()), &msg, `{"queued":false,"only_unseen":false}`)
-		writeJSON(w, http.StatusBadRequest, map[string]string{"error": err.Error()})
+		writeOperationError(w, err)
 		return
 	}
-	writeJSON(w, http.StatusAccepted, map[string]any{"job_run_id": jobID.String(), "status": "queued"})
+	writeSubmission(w, result, "draft_suggest", domainjobs.JobPayload{MessageID: messageID, Force: messageID != nil})
 }
 
 func (h *Handlers) listSummaries(w http.ResponseWriter, r *http.Request) {
-	if h.Summaries == nil {
+	if h.SummariesQueries == nil {
 		writeJSON(w, http.StatusServiceUnavailable, map[string]string{"error": "summaries not configured"})
 		return
 	}
@@ -1485,12 +1108,12 @@ func (h *Handlers) listSummaries(w http.ResponseWriter, r *http.Request) {
 		}
 		accountID = &id
 	}
-	snaps, err := h.Summaries.ListSummarySnapshots(r.Context(), uid, accountID, 1)
+	overview, err := h.SummariesQueries.GetSummaryOverview(r.Context(), uid, accountID)
 	if err != nil {
 		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "internal"})
 		return
 	}
-	if len(snaps) == 0 {
+	if overview.Snapshot == nil {
 		writeJSON(w, http.StatusOK, map[string]any{
 			"snapshot":     nil,
 			"action_items": []any{},
@@ -1498,17 +1121,7 @@ func (h *Handlers) listSummaries(w http.ResponseWriter, r *http.Request) {
 		})
 		return
 	}
-	snap := snaps[0]
-	items, err := h.Summaries.ListOpenActionItems(r.Context(), uid, accountID)
-	if err != nil {
-		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "internal"})
-		return
-	}
-	fyiRows, err := h.Summaries.ListOpenFYI(r.Context(), uid, accountID, 200)
-	if err != nil {
-		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "internal"})
-		return
-	}
+	snap, items, fyiRows := *overview.Snapshot, overview.ActionItems, overview.FYI
 	type actionItem struct {
 		ID        string  `json:"id"`
 		AccountID string  `json:"account_id"`
@@ -1564,7 +1177,7 @@ func (h *Handlers) listSummaries(w http.ResponseWriter, r *http.Request) {
 }
 
 func (h *Handlers) markActionItemDone(w http.ResponseWriter, r *http.Request) {
-	if h.Summaries == nil {
+	if h.SummariesQueries == nil {
 		writeJSON(w, http.StatusServiceUnavailable, map[string]string{"error": "summaries not configured"})
 		return
 	}
@@ -1573,7 +1186,7 @@ func (h *Handlers) markActionItemDone(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "bad id"})
 		return
 	}
-	if err := h.Summaries.MarkActionItemDone(r.Context(), userIDOrEmpty(r), id, time.Now().UTC()); err != nil {
+	if err := h.SummariesQueries.MarkActionItemDone(r.Context(), userIDOrEmpty(r), id, time.Now().UTC()); err != nil {
 		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "internal"})
 		return
 	}
@@ -1581,7 +1194,7 @@ func (h *Handlers) markActionItemDone(w http.ResponseWriter, r *http.Request) {
 }
 
 func (h *Handlers) dismissFYI(w http.ResponseWriter, r *http.Request) {
-	if h.Summaries == nil {
+	if h.SummariesQueries == nil {
 		writeJSON(w, http.StatusServiceUnavailable, map[string]string{"error": "summaries not configured"})
 		return
 	}
@@ -1590,7 +1203,7 @@ func (h *Handlers) dismissFYI(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "bad id"})
 		return
 	}
-	if err := h.Summaries.DeleteFYI(r.Context(), userIDOrEmpty(r), id); err != nil {
+	if err := h.SummariesQueries.DeleteFYI(r.Context(), userIDOrEmpty(r), id); err != nil {
 		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "internal"})
 		return
 	}
@@ -1598,11 +1211,11 @@ func (h *Handlers) dismissFYI(w http.ResponseWriter, r *http.Request) {
 }
 
 func (h *Handlers) getSummarySettings(w http.ResponseWriter, r *http.Request) {
-	if h.Summaries == nil {
+	if h.SummariesQueries == nil {
 		writeJSON(w, http.StatusServiceUnavailable, map[string]string{"error": "summaries not configured"})
 		return
 	}
-	row, err := h.Summaries.GetSummarySettings(r.Context(), userIDOrEmpty(r))
+	row, err := h.SummariesQueries.GetSummarySettings(r.Context(), userIDOrEmpty(r))
 	if err != nil {
 		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "internal"})
 		return
@@ -1624,7 +1237,7 @@ func (h *Handlers) getSummarySettings(w http.ResponseWriter, r *http.Request) {
 }
 
 func (h *Handlers) updateSummarySettings(w http.ResponseWriter, r *http.Request) {
-	if h.Summaries == nil {
+	if h.SummariesQueries == nil {
 		writeJSON(w, http.StatusServiceUnavailable, map[string]string{"error": "summaries not configured"})
 		return
 	}
@@ -1637,17 +1250,7 @@ func (h *Handlers) updateSummarySettings(w http.ResponseWriter, r *http.Request)
 		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid json"})
 		return
 	}
-	row := domainmessages.SummarySettingsRow{
-		UserID:               userIDOrEmpty(r),
-		IncludeCategorySlugs: body.Include,
-		ExcludeCategorySlugs: body.Exclude,
-		ChunkSize:            body.ChunkSize,
-		UpdatedAt:            time.Now().UTC(),
-	}
-	if row.ChunkSize <= 0 {
-		row.ChunkSize = 12
-	}
-	if err := h.Summaries.UpsertSummarySettings(r.Context(), row); err != nil {
+	if err := h.SummariesQueries.SaveSummarySettings(r.Context(), userIDOrEmpty(r), body.Include, body.Exclude, body.ChunkSize); err != nil {
 		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "internal"})
 		return
 	}
@@ -1655,11 +1258,11 @@ func (h *Handlers) updateSummarySettings(w http.ResponseWriter, r *http.Request)
 }
 
 func (h *Handlers) getSchedules(w http.ResponseWriter, r *http.Request) {
-	if h.Schedules == nil {
+	if h.SchedulesQueries == nil {
 		writeJSON(w, http.StatusServiceUnavailable, map[string]string{"error": "schedules not configured"})
 		return
 	}
-	rows, err := h.Schedules.ListSchedulesByUser(r.Context(), userIDOrEmpty(r))
+	rows, err := h.SchedulesQueries.ListSchedulesByUser(r.Context(), userIDOrEmpty(r))
 	if err != nil {
 		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "internal"})
 		return
@@ -1687,11 +1290,11 @@ func (h *Handlers) getSchedules(w http.ResponseWriter, r *http.Request) {
 	}
 	// The page offers exactly the jobs a schedule can run, in pipeline order,
 	// rather than a free-text field where a typo schedules nothing.
-	writeJSON(w, http.StatusOK, map[string]any{"chains": out, "available_jobs": appjobs.SchedulableJobs})
+	writeJSON(w, http.StatusOK, map[string]any{"chains": out, "available_jobs": domainjobs.SchedulableJobs})
 }
 
 func (h *Handlers) updateSchedules(w http.ResponseWriter, r *http.Request) {
-	if h.Schedules == nil {
+	if h.SchedulesQueries == nil {
 		writeJSON(w, http.StatusServiceUnavailable, map[string]string{"error": "schedules not configured"})
 		return
 	}
@@ -1709,16 +1312,9 @@ func (h *Handlers) updateSchedules(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid json"})
 		return
 	}
-	now := time.Now().UTC()
-	rows := make([]domainjobs.ScheduleChainRow, 0, len(body.Chains))
+	inputs := make([]domainjobs.ScheduleInput, 0, len(body.Chains))
 	for _, in := range body.Chains {
-		id := uuid.New()
-		if strings.TrimSpace(in.ID) != "" {
-			parsed, err := uuid.Parse(in.ID)
-			if err == nil {
-				id = parsed
-			}
-		}
+		id, _ := uuid.Parse(in.ID)
 		var accountID *uuid.UUID
 		if in.AccountID != nil && strings.TrimSpace(*in.AccountID) != "" {
 			aid, err := uuid.Parse(strings.TrimSpace(*in.AccountID))
@@ -1728,40 +1324,10 @@ func (h *Handlers) updateSchedules(w http.ResponseWriter, r *http.Request) {
 			}
 			accountID = &aid
 		}
-		if in.IntervalMinutes <= 0 {
-			in.IntervalMinutes = 10
-		}
-		if in.IntervalMinutes > 1440 {
-			in.IntervalMinutes = 1440
-		}
-		name := strings.TrimSpace(in.Name)
-		if name == "" {
-			name = "Scheduled chain"
-		}
-		if len(in.Jobs) == 0 {
-			writeJSON(w, http.StatusUnprocessableEntity, map[string]string{"error": fmt.Sprintf("%q needs at least one step", name)})
-			return
-		}
-		jobs, err := appjobs.DefaultRegistry().NormalizeScheduleChain(in.Jobs)
-		if err != nil {
-			writeJSON(w, http.StatusUnprocessableEntity, map[string]string{"error": fmt.Sprintf("%q cannot run: %v", name, err)})
-			return
-		}
-		rows = append(rows, domainjobs.ScheduleChainRow{
-			ID:              id,
-			UserID:          userIDOrEmpty(r),
-			Name:            name,
-			AccountID:       accountID,
-			Jobs:            jobs,
-			IntervalMinutes: in.IntervalMinutes,
-			Enabled:         in.Enabled,
-			NextRunAt:       now.Add(time.Duration(in.IntervalMinutes) * time.Minute),
-			CreatedAt:       now,
-			UpdatedAt:       now,
-		})
+		inputs = append(inputs, domainjobs.ScheduleInput{ID: id, Name: in.Name, AccountID: accountID, Jobs: in.Jobs, IntervalMinutes: in.IntervalMinutes, Enabled: in.Enabled})
 	}
-	if err := h.Schedules.ReplaceSchedulesByUser(r.Context(), userIDOrEmpty(r), rows); err != nil {
-		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "internal"})
+	if err := h.SchedulesQueries.SaveSchedules(r.Context(), userIDOrEmpty(r), inputs); err != nil {
+		writeOperationError(w, err)
 		return
 	}
 	writeJSON(w, http.StatusOK, map[string]any{"status": "success"})
@@ -1769,7 +1335,7 @@ func (h *Handlers) updateSchedules(w http.ResponseWriter, r *http.Request) {
 
 func (h *Handlers) listRuns(w http.ResponseWriter, r *http.Request) {
 	uid := userIDOrEmpty(r)
-	if h.JobStore != nil {
+	if h.JobStoreQueries != nil {
 		filter, err := parseJobStoreListFilter(r)
 		if err != nil {
 			writeJSON(w, http.StatusBadRequest, map[string]string{"error": err.Error()})
@@ -1788,7 +1354,7 @@ func (h *Handlers) listRuns(w http.ResponseWriter, r *http.Request) {
 				return
 			}
 		}
-		page, err := h.JobStore.List(r.Context(), filter)
+		page, err := h.JobStoreQueries.List(r.Context(), filter)
 		if err != nil {
 			h.Log.Error("list runs", "err", err)
 			switch {
@@ -1811,7 +1377,7 @@ func (h *Handlers) listRuns(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusOK, out)
 		return
 	}
-	if h.JobRuns == nil {
+	if h.JobRunsQueries == nil {
 		writeJSON(w, http.StatusServiceUnavailable, map[string]string{"error": "job runs not configured"})
 		return
 	}
@@ -1842,7 +1408,7 @@ func (h *Handlers) listRuns(w http.ResponseWriter, r *http.Request) {
 		}
 		filter.Offset = n
 	}
-	rows, err := h.JobRuns.ListJobRuns(r.Context(), uid, filter)
+	rows, err := h.JobRunsQueries.ListJobRuns(r.Context(), uid, filter)
 	if err != nil {
 		h.Log.Error("list runs", "err", err)
 		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "internal"})
@@ -1862,8 +1428,8 @@ func (h *Handlers) getRun(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	uid := userIDOrEmpty(r)
-	if h.JobStore != nil {
-		row, err := h.JobStore.Get(r.Context(), uid, id)
+	if h.JobStoreQueries != nil {
+		row, err := h.JobStoreQueries.Get(r.Context(), uid, id)
 		if err != nil {
 			if errors.Is(err, domainjobs.ErrJobNotFound) {
 				writeJSON(w, http.StatusNotFound, map[string]string{"error": "not found"})
@@ -1882,11 +1448,11 @@ func (h *Handlers) getRun(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusOK, item)
 		return
 	}
-	if h.JobRuns == nil {
+	if h.JobRunsQueries == nil {
 		writeJSON(w, http.StatusServiceUnavailable, map[string]string{"error": "job runs not configured"})
 		return
 	}
-	row, err := h.JobRuns.GetJobRun(r.Context(), uid, id)
+	row, err := h.JobRunsQueries.GetJobRun(r.Context(), uid, id)
 	if err != nil {
 		h.Log.Error("get run", "err", err)
 		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "internal"})
@@ -1900,7 +1466,7 @@ func (h *Handlers) getRun(w http.ResponseWriter, r *http.Request) {
 }
 
 func (h *Handlers) cancelRun(w http.ResponseWriter, r *http.Request) {
-	if h.JobStore == nil {
+	if h.JobStoreQueries == nil {
 		writeJSON(w, http.StatusServiceUnavailable, map[string]string{"error": "cancel requires dynamodb job store"})
 		return
 	}
@@ -1909,7 +1475,7 @@ func (h *Handlers) cancelRun(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "bad id"})
 		return
 	}
-	row, err := h.JobStore.RequestCancel(r.Context(), userIDOrEmpty(r), id, time.Now().UTC(), h.jobTerminalTTL())
+	row, err := h.JobStoreQueries.CancelRun(r.Context(), userIDOrEmpty(r), id)
 	if err != nil {
 		if errors.Is(err, domainjobs.ErrJobNotFound) {
 			writeJSON(w, http.StatusNotFound, map[string]string{"error": "not found"})
@@ -2008,22 +1574,18 @@ func parseJobStoreListFilter(r *http.Request) (domainjobs.JobListFilter, error) 
 	return filter, nil
 }
 
-func (h *Handlers) authorizeAccount(ctx context.Context, userID, accountID uuid.UUID) (bool, error) {
-	if h.Accounts == nil {
+func (h *Handlers) authorizeAccount(ctx context.Context, user, id uuid.UUID) (bool, error) {
+	if h.AccountsQueries == nil {
 		return true, nil
 	}
-	row, _, err := h.Accounts.GetAccount(ctx, userID, accountID)
-	if err != nil {
-		return false, err
-	}
-	return row != nil, nil
+	return h.AccountsQueries.OwnsAccount(ctx, user, id)
 }
 
 func (h *Handlers) enqueueAccountJob(ctx context.Context, userID, accountID uuid.UUID, jobType string, payload domainjobs.JobPayload) (*domainjobs.JobRecord, error) {
-	if h.JobEnqueuer == nil {
+	if h.JobRequests == nil {
 		return nil, fmt.Errorf("job queue not configured")
 	}
-	return h.JobEnqueuer.Enqueue(ctx, domainjobs.CreateJobInput{
+	return h.JobRequests.Submit(ctx, domainjobs.CreateJobInput{
 		JobType:     jobType,
 		UserID:      userID,
 		AccountID:   &accountID,
@@ -2047,25 +1609,10 @@ func (h *Handlers) jobStoreListItems(ctx context.Context, userID uuid.UUID, rows
 
 func (h *Handlers) jobStoreItem(ctx context.Context, userID uuid.UUID, row domainjobs.JobRecord) (jobRunItem, error) {
 	var accountID *string
-	var accountLabel *string
+	accountLabel := row.AccountLabel
 	if row.AccountID != nil {
-		s := row.AccountID.String()
-		accountID = &s
-		if h.Accounts != nil {
-			account, _, err := h.Accounts.GetAccount(ctx, userID, *row.AccountID)
-			if err != nil {
-				return jobRunItem{}, err
-			}
-			if account != nil {
-				label := strings.TrimSpace(account.Label)
-				if label == "" {
-					label = strings.TrimSpace(account.PrimaryEmail)
-				}
-				if label != "" {
-					accountLabel = &label
-				}
-			}
-		}
+		value := row.AccountID.String()
+		accountID = &value
 	}
 	return jobRunItem{
 		ID:              row.ID.String(),
@@ -2108,13 +1655,6 @@ func timePtrString(t time.Time) *string {
 	}
 	s := t.UTC().Format(time.RFC3339Nano)
 	return &s
-}
-
-func (h *Handlers) jobTerminalTTL() time.Duration {
-	if h.JobTerminalTTL > 0 {
-		return h.JobTerminalTTL
-	}
-	return 30 * 24 * time.Hour
 }
 
 func writeAcceptedJob(w http.ResponseWriter, id uuid.UUID) {

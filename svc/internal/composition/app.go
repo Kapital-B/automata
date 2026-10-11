@@ -5,12 +5,12 @@ import (
 	"database/sql"
 	"errors"
 	"fmt"
+	asynqqueue "github.com/Kapital-B/automata/svc/internal/adapters/outbound/asynq"
 	"github.com/go-chi/chi/v5"
 	"log/slog"
 	"net/http"
 	"strings"
 
-	asynqadapter "github.com/Kapital-B/automata/svc/internal/adapters/inbound/asynq"
 	httphandler "github.com/Kapital-B/automata/svc/internal/adapters/inbound/http"
 	dynamodbjobs "github.com/Kapital-B/automata/svc/internal/adapters/outbound/dynamodbjobs"
 	googleoauth "github.com/Kapital-B/automata/svc/internal/adapters/outbound/google"
@@ -59,6 +59,8 @@ import (
 	awsconfig "github.com/aws/aws-sdk-go-v2/config"
 	"github.com/aws/aws-sdk-go-v2/service/dynamodb"
 
+	queries "github.com/Kapital-B/automata/svc/internal/application/queries"
+	submissions "github.com/Kapital-B/automata/svc/internal/application/submissions"
 	"github.com/google/uuid"
 )
 
@@ -107,7 +109,7 @@ type Runtime struct {
 	Execution   *appjobs.ExecutionService
 	Enqueuer    *appjobs.Enqueuer
 	Registry    *appjobs.Registry
-	QueueClient *asynqadapter.QueueClient
+	QueueClient *asynqqueue.QueueClient
 	JobStore    domainjobs.JobStore
 }
 
@@ -146,7 +148,7 @@ func Build(ctx context.Context, log *slog.Logger, cfg configuration.Config, opts
 	}
 
 	if opts.EnableAsynq && !cfg.JobsInline {
-		rt.QueueClient = asynqadapter.NewQueueClient(cfg.RedisAddr, cfg.AsynqPrefix)
+		rt.QueueClient = asynqqueue.NewQueueClient(cfg.RedisAddr, cfg.AsynqPrefix)
 	}
 	if opts.EnableJobStore && strings.TrimSpace(cfg.JobsTableName) != "" {
 		store, err := buildJobStore(ctx, cfg)
@@ -586,51 +588,48 @@ func (r *Runtime) buildServices(ctx context.Context) error {
 	}
 
 	h := &httphandler.Handlers{
-		Log:                  r.Log,
-		AccountSvc:           accountSvc,
-		ConnectorSvc:         connectorSvc,
-		SyncSvc:              syncSvc,
-		CategorizeSvc:        categorizeSvc,
-		SummarizeSvc:         summarizeSvc,
-		AutoDraftSvc:         autoDraftSvc,
-		DraftsSvc:            &appmessages.DraftLifecycleService{Summaries: repo, Messages: repo, Mailboxes: mailboxes},
-		ForwardRulesSvc:      forwardRulesSvc,
-		AuthSvc:              authSvc,
-		ContactSvc:           contactSvc,
-		ProjectSvc:           projectSvc,
-		IssueSvc:             issueSvc,
-		TodoSvc:              todoSvc,
-		FactSvc:              factSvc,
-		InterpretSvc:         interpretSvc,
-		ReconcileSvc:         reconcileSvc,
-		DecisionSvc:          decisionSvc,
-		AttentionSvc:         attentionSvc,
-		OverviewSvc:          overviewSvc,
-		ProjectAISvc:         projectAISvc,
-		Accounts:             repo,
-		Messages:             repo,
-		JobRuns:              jobRuns,
-		JobStore:             r.JobStore,
-		JobEnqueuer:          r.Enqueuer,
-		JobTerminalTTL:       r.Config.JobTerminalRetention,
-		JobsInline:           r.Config.JobsInline,
-		Summaries:            repo,
-		Forwards:             repo,
-		Schedules:            repo,
-		OAuthStates:          repo,
-		Users:                repo,
-		Contacts:             repo,
-		Projects:             repo,
-		Assignments:          repo,
-		Issues:               repo,
+		Log:             r.Log,
+		AccountSvc:      accountSvc,
+		ConnectorSvc:    connectorSvc,
+		SyncSvc:         syncSvc,
+		CategorizeSvc:   categorizeSvc,
+		SummarizeSvc:    summarizeSvc,
+		AutoDraftSvc:    autoDraftSvc,
+		DraftsSvc:       &appmessages.DraftLifecycleService{Summaries: repo, Messages: repo, Mailboxes: mailboxes},
+		ForwardRulesSvc: forwardRulesSvc,
+		AuthSvc:         authSvc,
+		ContactSvc:      contactSvc,
+		ProjectSvc:      projectSvc,
+		IssueSvc:        issueSvc,
+		TodoSvc:         todoSvc,
+		FactSvc:         factSvc,
+		InterpretSvc:    interpretSvc,
+		ReconcileSvc:    reconcileSvc,
+		DecisionSvc:     decisionSvc,
+		AttentionSvc:    attentionSvc,
+		OverviewSvc:     overviewSvc,
+		ProjectAISvc:    projectAISvc,
+		AccountsQueries: &queries.Service{Accounts: repo},
+		MessagesQueries: &queries.Service{Messages: repo, Assignments: repo}, JobRunsQueries: &queries.Service{JobRuns: jobRuns},
+		JobStoreQueries: &queries.Service{JobStore: r.JobStore, Accounts: repo, TerminalTTL: r.Config.JobTerminalRetention},
+
+		JobTerminalTTL: r.Config.JobTerminalRetention,
+
+		SummariesQueries: &queries.Service{Summaries: repo},
+		ForwardsQueries:  &queries.Service{Forwards: repo, Accounts: repo},
+
+		SchedulesQueries: &queries.Service{Schedules: repo},
+
+		UsersQueries: &queries.Service{Users: repo},
+
 		Dashboard:            r.Config.DashboardBaseURL,
 		SuccessPath:          r.Config.OAuthSuccessPath,
 		ConnectorSuccessPath: r.Config.SlackSuccessPath,
 		ErrorPath:            r.Config.OAuthErrorPath,
 		AuthSuccessPath:      r.Config.AuthSuccessPath,
 		AuthErrorPath:        r.Config.AuthErrorPath,
-		StateTTL:             r.Config.OAuthStateTTL, TokenVerifier: security.JWT{Secret: r.Config.JWTSecret}, JobQueue: r.QueueClient,
-		CORSOrigins: r.Config.CORSOrigins,
+		StateTTL:             r.Config.OAuthStateTTL, TokenVerifier: security.JWT{Secret: r.Config.JWTSecret},
+		CORSOrigins: r.Config.CORSOrigins, AccountJobs: &submissions.Service{Inline: r.Config.JobsInline, Accounts: repo, Durable: r.Enqueuer, Legacy: r.QueueClient, Runs: jobRuns, Sync: syncSvc, Categorize: categorizeSvc, Summarize: summarizeSvc, Draft: autoDraftSvc, Forward: forwardRulesSvc, Connectors: connectorSvc, Projects: projectSvc}, ConnectorJobs: &submissions.Service{Inline: r.Config.JobsInline, Accounts: repo, Durable: r.Enqueuer, Legacy: r.QueueClient, Runs: jobRuns, Sync: syncSvc, Categorize: categorizeSvc, Summarize: summarizeSvc, Draft: autoDraftSvc, Forward: forwardRulesSvc, Connectors: connectorSvc, Projects: projectSvc}, Extraction: &submissions.Service{Inline: r.Config.JobsInline, Accounts: repo, Durable: r.Enqueuer, Legacy: r.QueueClient, Runs: jobRuns, Sync: syncSvc, Categorize: categorizeSvc, Summarize: summarizeSvc, Draft: autoDraftSvc, Forward: forwardRulesSvc, Connectors: connectorSvc, Projects: projectSvc}, JobRequests: &submissions.Service{Inline: r.Config.JobsInline, Accounts: repo, Durable: r.Enqueuer, Legacy: r.QueueClient, Runs: jobRuns, Sync: syncSvc, Categorize: categorizeSvc, Summarize: summarizeSvc, Draft: autoDraftSvc, Forward: forwardRulesSvc, Connectors: connectorSvc, Projects: projectSvc},
 	}
 	r.Handlers = h
 	router := h.Routes()

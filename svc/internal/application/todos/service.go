@@ -7,6 +7,7 @@ package todos
 import (
 	"context"
 	"errors"
+	domainissues "github.com/Kapital-B/automata/svc/internal/domain/issues"
 	"time"
 
 	domainauth "github.com/Kapital-B/automata/svc/internal/domain/auth"
@@ -15,27 +16,9 @@ import (
 	"github.com/google/uuid"
 )
 
-// ErrNotFound covers a project the caller is not on and a to-do that is not
-// open on the project, so neither can be probed for.
-var ErrNotFound = errors.New("not found")
+var ErrNotFound = domainissues.TodoErrNotFound
 
-// Todo is an open to-do as one member sees it.
-type Todo struct {
-	ID          uuid.UUID
-	Text        string
-	OwnerUserID uuid.UUID
-	// OwnerLabel is "You" for the caller's own and the owner's email
-	// otherwise; users have no display name yet.
-	OwnerLabel string
-	Mine       bool
-	DueAt      *time.Time
-	CreatedAt  time.Time
-	IssueID    *uuid.UUID
-	IssueTitle string
-	// AccountID and MessageID open the message, so only the owner gets them.
-	AccountID *uuid.UUID
-	MessageID *uuid.UUID
-}
+type Todo = domainissues.TodoTodo
 
 type Service struct {
 	Users     domainauth.UserRepository

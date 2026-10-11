@@ -4,7 +4,7 @@ import (
 	"context"
 	"crypto/rand"
 	"encoding/base64"
-	"errors"
+
 	"fmt"
 	"strings"
 	"time"
@@ -23,16 +23,9 @@ func NewService(d Deps) *Service {
 	return &Service{deps: d}
 }
 
-type StartConnectInput struct {
-	Provider      string
-	MsAccountKind domainacc.MsAccountKind
-	LabelHint     *string
-}
+type StartConnectInput = domainaccounts.AccountStartConnectInput
 
-type StartConnectOutput struct {
-	AuthorizationURL string
-	State            string
-}
+type StartConnectOutput = domainaccounts.AccountStartConnectOutput
 
 // mailboxConnectFlow is the OAuth state flow for connecting any provider's
 // mailbox. The value predates provider support, which is why it says m365:
@@ -97,11 +90,9 @@ func randomState() (string, error) {
 	return base64.RawURLEncoding.EncodeToString(b), nil
 }
 
-var ErrInvalidOAuthState = errors.New("invalid oauth state")
+var ErrInvalidOAuthState = domainaccounts.AccountErrInvalidOAuthState
 
-type CompleteOAuthResult struct {
-	AccountID uuid.UUID
-}
+type CompleteOAuthResult = domainaccounts.AccountCompleteOAuthResult
 
 func (s *Service) CompleteOAuth(ctx context.Context, code, state string) (*CompleteOAuthResult, error) {
 	flow, stateUserID, payloadJSON, ok, err := s.deps.OAuthState.TakeOAuthState(ctx, state)
@@ -130,12 +121,7 @@ func (s *Service) CompleteOAuth(ctx context.Context, code, state string) (*Compl
 	return &CompleteOAuthResult{AccountID: id}, nil
 }
 
-// ConnectWithPasswordInput is a typed-in mailbox connection.
-type ConnectWithPasswordInput struct {
-	Provider  string
-	Request   domainaccounts.PasswordConnectRequest
-	LabelHint *string
-}
+type ConnectWithPasswordInput = domainaccounts.AccountConnectWithPasswordInput
 
 // ConnectWithPassword verifies typed-in credentials against the provider and
 // stores the mailbox. A failure the user can fix wraps
@@ -233,12 +219,7 @@ const (
 	ConnectPassword = "password"
 )
 
-// ProviderInfo is a mailbox provider a user can connect here.
-type ProviderInfo struct {
-	Provider     string
-	Connect      string
-	Capabilities domainaccounts.MailboxCapabilities
-}
+type ProviderInfo = domainaccounts.AccountProviderInfo
 
 // Providers lists what can be connected, in a stable order, so the UI offers
 // only what this deployment is configured for.

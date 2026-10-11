@@ -3,11 +3,10 @@ package http
 import (
 	"encoding/json"
 	"errors"
+	domainauth "github.com/Kapital-B/automata/svc/internal/domain/auth"
 	"net/http"
 	"net/url"
 	"strings"
-
-	"github.com/Kapital-B/automata/svc/internal/application/auth"
 )
 
 type registerBody struct {
@@ -27,7 +26,7 @@ func (h *Handlers) register(w http.ResponseWriter, r *http.Request) {
 	}
 	id, err := h.AuthSvc.Register(r.Context(), body.Email, body.Password)
 	if err != nil {
-		if errors.Is(err, auth.ErrEmailTaken) {
+		if errors.Is(err, domainauth.AuthErrEmailTaken) {
 			writeJSON(w, http.StatusConflict, map[string]string{"error": "email taken"})
 			return
 		}
@@ -63,7 +62,7 @@ func (h *Handlers) loginPassword(w http.ResponseWriter, r *http.Request) {
 	}
 	pair, err := h.AuthSvc.LoginPassword(r.Context(), body.Email, body.Password)
 	if err != nil {
-		if errors.Is(err, auth.ErrInvalidCredentials) {
+		if errors.Is(err, domainauth.AuthErrInvalidCredentials) {
 			writeJSON(w, http.StatusUnauthorized, map[string]string{"error": "invalid credentials"})
 			return
 		}
@@ -107,7 +106,7 @@ func (h *Handlers) authMicrosoftCallback(w http.ResponseWriter, r *http.Request)
 	}
 	pair, err := h.AuthSvc.CompleteMicrosoftLogin(r.Context(), code, state)
 	if err != nil {
-		if errors.Is(err, auth.ErrInvalidOAuthState) {
+		if errors.Is(err, domainauth.AuthErrInvalidOAuthState) {
 			h.redirectAuthError(w, r, "invalid_state")
 			return
 		}
@@ -149,7 +148,7 @@ func (h *Handlers) authGoogleCallback(w http.ResponseWriter, r *http.Request) {
 	}
 	pair, err := h.AuthSvc.CompleteGoogleLogin(r.Context(), code, state)
 	if err != nil {
-		if errors.Is(err, auth.ErrInvalidOAuthState) {
+		if errors.Is(err, domainauth.AuthErrInvalidOAuthState) {
 			h.redirectAuthError(w, r, "invalid_state")
 			return
 		}
@@ -176,7 +175,7 @@ func (h *Handlers) authRefresh(w http.ResponseWriter, r *http.Request) {
 	}
 	pair, err := h.AuthSvc.RefreshTokens(r.Context(), body.RefreshToken)
 	if err != nil {
-		if errors.Is(err, auth.ErrInvalidRefreshToken) {
+		if errors.Is(err, domainauth.AuthErrInvalidRefreshToken) {
 			writeJSON(w, http.StatusUnauthorized, map[string]string{"error": "invalid refresh token"})
 			return
 		}
@@ -195,20 +194,20 @@ func (h *Handlers) me(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusUnauthorized, map[string]string{"error": "unauthorized"})
 		return
 	}
-	email, err := h.Users.GetUserByID(r.Context(), uid)
+	profile, err := h.UsersQueries.GetUserProfile(r.Context(), uid)
 	if err != nil {
 		h.Log.Error("me", "err", err)
 		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "internal"})
 		return
 	}
-	resp := map[string]any{"user_id": uid.String(), "email": email}
-	if orgID, err := h.Users.GetHomeOrganisationID(r.Context(), uid); err == nil {
-		resp["home_organisation_id"] = orgID.String()
+	resp := map[string]any{"user_id": uid.String(), "email": profile.Email}
+	if profile.HomeOrganisationID != nil {
+		resp["home_organisation_id"] = profile.HomeOrganisationID.String()
 	}
 	writeJSON(w, http.StatusOK, resp)
 }
 
-func (h *Handlers) redirectAuthSuccess(w http.ResponseWriter, r *http.Request, pair auth.TokenPair) {
+func (h *Handlers) redirectAuthSuccess(w http.ResponseWriter, r *http.Request, pair domainauth.AuthTokenPair) {
 	base := strings.TrimRight(h.Dashboard, "/") + h.AuthSuccessPath
 	u, err := url.Parse(base)
 	if err != nil {

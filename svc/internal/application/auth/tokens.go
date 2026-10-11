@@ -4,6 +4,7 @@ import (
 	"crypto/rand"
 	"crypto/sha256"
 	"encoding/base64"
+	domainauth "github.com/Kapital-B/automata/svc/internal/domain/auth"
 )
 
 // NewRefreshToken returns a URL-safe random string (32 bytes raw).
@@ -21,8 +22,4 @@ func HashRefreshToken(raw string) string {
 	return base64.RawURLEncoding.EncodeToString(h[:])
 }
 
-// TokenPair is issued after successful authentication.
-type TokenPair struct {
-	AccessToken  string
-	RefreshToken string
-}
+type TokenPair = domainauth.AuthTokenPair

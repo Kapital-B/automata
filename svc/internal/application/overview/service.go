@@ -6,8 +6,6 @@ package overview
 import (
 	"context"
 	domainattention "github.com/Kapital-B/automata/svc/internal/domain/attention"
-	"strings"
-	"time"
 
 	domainauth "github.com/Kapital-B/automata/svc/internal/domain/auth"
 	domainprojects "github.com/Kapital-B/automata/svc/internal/domain/projects"
@@ -21,25 +19,9 @@ const (
 	defaultProjectLimit  = 8
 )
 
-// Kind values the feed can emit. Requests naming anything else are rejected
-// rather than silently returning everything.
-var validKinds = map[string]struct{}{
-	"decision_proposed":      {},
-	"decision_accepted":      {},
-	"decision_withdrawn":     {},
-	"fact_recorded":          {},
-	"fact_superseded":        {},
-	"contradiction_opened":   {},
-	"contradiction_resolved": {},
-	"issue_opened":           {},
-	"issue_resolved":         {},
-}
+var validKinds = domainprojects.OverviewValidKinds
 
-// ValidKind reports whether kind is one the feed emits.
-func ValidKind(kind string) bool {
-	_, ok := validKinds[strings.TrimSpace(kind)]
-	return ok
-}
+var ValidKind = domainprojects.OverviewValidKind
 
 type Service struct {
 	Users     domainauth.UserRepository
@@ -50,31 +32,11 @@ type Service struct {
 
 type AttentionCounts = domainattention.AttentionCounts
 
-// Counts is the metric-card payload.
-type Counts struct {
-	NeedsYou           int
-	TriageUnassigned   int
-	TriageProvisional  int
-	OpenContradictions int
-	ProvisionalFacts   int
-	ProposedDecisions  int
-	ActiveProjects     int
-}
+type Counts = domainprojects.OverviewViewCounts
 
-// Project is one row of the Home projects list.
-type Project struct {
-	ID             uuid.UUID
-	Code           string
-	Name           string
-	Teaser         string
-	LastActivityAt *time.Time
-	AttentionCount int
-}
+type Project = domainprojects.OverviewViewProject
 
-type Result struct {
-	Counts   Counts
-	Projects []Project
-}
+type Result = domainprojects.OverviewResult
 
 func (s *Service) homeOrg(ctx context.Context, userID uuid.UUID) (uuid.UUID, error) {
 	return s.Users.GetHomeOrganisationID(ctx, userID)
@@ -135,20 +97,9 @@ func (s *Service) Get(ctx context.Context, userID uuid.UUID) (*Result, error) {
 	return out, nil
 }
 
-// ActivityInput is a validated feed request.
-type ActivityInput struct {
-	Limit     int
-	Before    *time.Time
-	BeforeID  *uuid.UUID
-	Kinds     []string
-	ProjectID *uuid.UUID
-}
+type ActivityInput = domainprojects.OverviewActivityInput
 
-type ActivityPage struct {
-	Items      []domainprojects.ActivityItem
-	NextBefore *time.Time
-	NextID     *uuid.UUID
-}
+type ActivityPage = domainprojects.OverviewActivityPage
 
 // Activity returns one page of the change feed, newest first.
 func (s *Service) Activity(ctx context.Context, userID uuid.UUID, in ActivityInput) (*ActivityPage, error) {

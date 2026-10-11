@@ -44,11 +44,7 @@ type ForwardRulesService struct {
 	Now func() time.Time
 }
 
-type ForwardRulesOptions struct {
-	RunID   *uuid.UUID
-	Trigger string
-	Since   *time.Time
-}
+type ForwardRulesOptions = domainmessages.MessageForwardRulesOptions
 
 func (s *ForwardRulesService) now() time.Time {
 	if s.Now != nil {
@@ -57,24 +53,9 @@ func (s *ForwardRulesService) now() time.Time {
 	return time.Now().UTC()
 }
 
-// RuleScopeStart is the earliest received time a rule considers.
-func RuleScopeStart(rule domainmessages.ForwardRuleRow) time.Time {
-	if rule.ApplyFrom != nil {
-		return rule.ApplyFrom.UTC()
-	}
-	return rule.CreatedAt.UTC()
-}
+var RuleScopeStart = domainmessages.MessageRuleScopeStart
 
-// ForwardChunkResult reports one page of a forward run.
-type ForwardChunkResult struct {
-	Processed int
-	Forwarded int
-	Skipped   int
-	Failed    int
-	Pending   int
-	Next      *domainmessages.ForwardCandidateCursor
-	Done      bool
-}
+type ForwardChunkResult = domainmessages.MessageForwardChunkResult
 
 // activeRule is an enabled rule that can run: its destination is still
 // allowlisted and its condition is valid. Anything else is blocked, which is
@@ -84,25 +65,9 @@ type activeRule struct {
 	condition string
 }
 
-// ForwardRuleBlock says why an enabled rule is not running, or "" if it is.
-func ForwardRuleBlock(rule domainmessages.ForwardRuleRow, allowed map[string]struct{}) string {
-	if _, ok := allowed[strings.ToLower(strings.TrimSpace(rule.ForwardTo))]; !ok {
-		return "its destination is no longer on the allowlist"
-	}
-	if _, _, err := NormalizeForwardRule(rule.Mode, json.RawMessage(rule.ConditionJSON)); err != nil {
-		return "its condition is invalid: " + err.Error()
-	}
-	return ""
-}
+var ForwardRuleBlock = domainmessages.MessageForwardRuleBlock
 
-// AllowlistSet builds the lookup ForwardRuleBlock uses.
-func AllowlistSet(rows []domainmessages.ForwardAllowlistRow) map[string]struct{} {
-	out := map[string]struct{}{}
-	for _, row := range rows {
-		out[strings.ToLower(strings.TrimSpace(row.Email))] = struct{}{}
-	}
-	return out
-}
+var AllowlistSet = domainmessages.MessageAllowlistSet
 
 func (s *ForwardRulesService) activeRules(ctx context.Context, userID, accountID uuid.UUID) ([]activeRule, error) {
 	allowRows, err := s.Forwards.ListForwardAllowlist(ctx, userID)
@@ -455,18 +420,7 @@ func (s *ForwardRulesService) failRun(ctx context.Context, runID uuid.UUID, err 
 	return uuid.Nil, err
 }
 
-// ForwardPreview is what switching a rule on for existing mail would do.
-type ForwardPreview struct {
-	// InScope is how many messages the rule would look at.
-	InScope int
-	// Matched is how many of them a logic rule matches; nil for an AI rule,
-	// which cannot be counted without asking the model about each one.
-	Matched *int
-	// Capped means the mailbox is bigger than the preview reads, so both
-	// counts are lower bounds.
-	Capped  bool
-	Samples []domainmessages.MessageRow
-}
+type ForwardPreview = domainmessages.MessageForwardPreview
 
 const (
 	previewMaxMessages = 5000

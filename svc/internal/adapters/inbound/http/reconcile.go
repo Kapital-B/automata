@@ -3,12 +3,11 @@ package http
 import (
 	"encoding/json"
 	"errors"
+	domaincontradictions "github.com/Kapital-B/automata/svc/internal/domain/contradictions"
 	"github.com/go-chi/chi/v5"
 	"net/http"
 	"strings"
 	"time"
-
-	appreconcile "github.com/Kapital-B/automata/svc/internal/application/reconcile"
 
 	"github.com/google/uuid"
 )
@@ -32,7 +31,7 @@ func (h *Handlers) reconcileProject(w http.ResponseWriter, r *http.Request) {
 		InterpretationIDs []string `json:"interpretation_ids"`
 	}
 	_ = json.NewDecoder(r.Body).Decode(&body)
-	in := appreconcile.ReconcileInput{}
+	in := domaincontradictions.ReconciliationReconcileInput{}
 	for _, idStr := range body.InterpretationIDs {
 		id, err := uuid.Parse(strings.TrimSpace(idStr))
 		if err != nil {
@@ -102,7 +101,7 @@ func (h *Handlers) resolveContradiction(w http.ResponseWriter, r *http.Request) 
 		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "bad json"})
 		return
 	}
-	in := appreconcile.ResolveInput{Resolution: body.Resolution, ResolutionNote: body.ResolutionNote}
+	in := domaincontradictions.ReconciliationResolveInput{Resolution: body.Resolution, ResolutionNote: body.ResolutionNote}
 	if body.KeepFactVersionID != nil && strings.TrimSpace(*body.KeepFactVersionID) != "" {
 		kid, err := uuid.Parse(*body.KeepFactVersionID)
 		if err != nil {
@@ -121,18 +120,18 @@ func (h *Handlers) resolveContradiction(w http.ResponseWriter, r *http.Request) 
 
 func writeReconcileError(w http.ResponseWriter, err error) {
 	switch {
-	case errors.Is(err, appreconcile.ErrNotFound):
+	case errors.Is(err, domaincontradictions.ReconciliationErrNotFound):
 		writeJSON(w, http.StatusNotFound, map[string]string{"error": "not found"})
-	case errors.Is(err, appreconcile.ErrNothingToReconcile):
+	case errors.Is(err, domaincontradictions.ReconciliationErrNothingToReconcile):
 		writeJSON(w, http.StatusUnprocessableEntity, map[string]string{"error": err.Error()})
-	case errors.Is(err, appreconcile.ErrInvalidResolution), errors.Is(err, appreconcile.ErrNotOpen):
+	case errors.Is(err, domaincontradictions.ReconciliationErrInvalidResolution), errors.Is(err, domaincontradictions.ReconciliationErrNotOpen):
 		writeJSON(w, http.StatusBadRequest, map[string]string{"error": err.Error()})
 	default:
 		writeJSON(w, http.StatusBadRequest, map[string]string{"error": err.Error()})
 	}
 }
 
-func contradictionJSON(v appreconcile.ContradictionView) map[string]any {
+func contradictionJSON(v domaincontradictions.ReconciliationContradictionView) map[string]any {
 	c := v.Contradiction
 	out := map[string]any{
 		"id":              c.ID.String(),

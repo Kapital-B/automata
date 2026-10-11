@@ -46,10 +46,10 @@ func NewService(users domainauth.UserRepository, sessions domainauth.AuthSession
 	}
 }
 
-var ErrEmailTaken = errors.New("email already registered")
-var ErrInvalidCredentials = errors.New("invalid email or password")
-var ErrInvalidOAuthState = errors.New("invalid oauth state")
-var ErrInvalidRefreshToken = errors.New("invalid refresh token")
+var ErrEmailTaken = domainauth.AuthErrEmailTaken
+var ErrInvalidCredentials = domainauth.AuthErrInvalidCredentials
+var ErrInvalidOAuthState = domainauth.AuthErrInvalidOAuthState
+var ErrInvalidRefreshToken = domainauth.AuthErrInvalidRefreshToken
 
 // IssueTokens creates a new access + refresh pair for an already-authenticated user (e.g. after register).
 func (s *Service) IssueTokens(ctx context.Context, userID uuid.UUID) (TokenPair, error) {

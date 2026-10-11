@@ -19,11 +19,13 @@ import (
 	appaccounts "github.com/Kapital-B/automata/svc/internal/application/accounts"
 	"github.com/Kapital-B/automata/svc/internal/application/auth"
 	appmessages "github.com/Kapital-B/automata/svc/internal/application/messages"
+	queries "github.com/Kapital-B/automata/svc/internal/application/queries"
+	submissions "github.com/Kapital-B/automata/svc/internal/application/submissions"
 	"github.com/google/uuid"
 	_ "modernc.org/sqlite"
+	// fakeAccessToken is a JWT-shaped string with a tid claim for Graph tenant parsing.
 )
 
-// fakeAccessToken is a JWT-shaped string with a tid claim for Graph tenant parsing.
 func fakeAccessToken(tenantID string) string {
 	header := base64.RawURLEncoding.EncodeToString([]byte(`{"alg":"none","typ":"JWT"}`))
 	payload, _ := json.Marshal(map[string]string{"tid": tenantID})
@@ -125,8 +127,8 @@ func TestOAuthStartConnectAndCallbackCreatesAccount(t *testing.T) {
 	h := &Handlers{
 		Log:        slog.New(slog.NewTextHandler(io.Discard, nil)),
 		AccountSvc: accountSvc, SyncSvc: syncSvc, AuthSvc: authSvc,
-		Accounts: repo, Messages: repo, JobRuns: repo, OAuthStates: repo, Users: repo,
-		Dashboard: "http://dashboard.test", SuccessPath: "/connected", ErrorPath: "/error", TokenVerifier: security.JWT{Secret: jwtSecret},
+		AccountsQueries: &queries.Service{Accounts: repo}, MessagesQueries: &queries.Service{Messages: repo}, JobRunsQueries: &queries.Service{JobRuns: repo}, UsersQueries: &queries.Service{Users: repo},
+		Dashboard: "http://dashboard.test", SuccessPath: "/connected", ErrorPath: "/error", TokenVerifier: security.JWT{Secret: jwtSecret}, AccountJobs: &submissions.Service{Accounts: repo, Runs: repo, Sync: syncSvc}, ConnectorJobs: &submissions.Service{Accounts: repo, Runs: repo, Sync: syncSvc}, Extraction: &submissions.Service{Accounts: repo, Runs: repo, Sync: syncSvc}, JobRequests: &submissions.Service{Accounts: repo, Runs: repo, Sync: syncSvc},
 	}
 	api := httptest.NewServer(h.Routes())
 	defer api.Close()
@@ -230,8 +232,8 @@ func TestOAuthCallbackInvalidStateRedirectsError(t *testing.T) {
 	h := &Handlers{
 		Log:        slog.New(slog.NewTextHandler(io.Discard, nil)),
 		AccountSvc: accountSvc, SyncSvc: syncSvc, AuthSvc: authSvc,
-		Accounts: repo, Messages: repo, JobRuns: repo, OAuthStates: repo, Users: repo,
-		Dashboard: "http://dashboard.test", SuccessPath: "/ok", ErrorPath: "/err", TokenVerifier: security.JWT{Secret: jwtSecret},
+		AccountsQueries: &queries.Service{Accounts: repo}, MessagesQueries: &queries.Service{Messages: repo}, JobRunsQueries: &queries.Service{JobRuns: repo}, UsersQueries: &queries.Service{Users: repo},
+		Dashboard: "http://dashboard.test", SuccessPath: "/ok", ErrorPath: "/err", TokenVerifier: security.JWT{Secret: jwtSecret}, AccountJobs: &submissions.Service{Accounts: repo, Runs: repo, Sync: syncSvc}, ConnectorJobs: &submissions.Service{Accounts: repo, Runs: repo, Sync: syncSvc}, Extraction: &submissions.Service{Accounts: repo, Runs: repo, Sync: syncSvc}, JobRequests: &submissions.Service{Accounts: repo, Runs: repo, Sync: syncSvc},
 	}
 	api := httptest.NewServer(h.Routes())
 	defer api.Close()
@@ -252,7 +254,7 @@ func TestOAuthCallbackInvalidStateRedirectsError(t *testing.T) {
 func TestOAuthCallbackAccessDeniedRedirects(t *testing.T) {
 	jwtSecret := []byte("abcdefghijklmnopqrstuvwxyz123456")
 	h := &Handlers{
-		Dashboard: "http://d.test", ErrorPath: "/err", TokenVerifier: security.JWT{Secret: jwtSecret},
+		Dashboard: "http://d.test", ErrorPath: "/err", TokenVerifier: security.JWT{Secret: jwtSecret}, AccountJobs: &submissions.Service{}, ConnectorJobs: &submissions.Service{}, Extraction: &submissions.Service{}, JobRequests: &submissions.Service{},
 	}
 	req, _ := http.NewRequest(http.MethodGet, "/cb?error=access_denied", nil)
 	rr := httptest.NewRecorder()

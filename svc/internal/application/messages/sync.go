@@ -37,29 +37,11 @@ type SyncService struct {
 	ContactsEnqueuer domainjobs.JobEnqueuer
 }
 
-type SyncResult struct {
-	JobRunID         uuid.UUID
-	MessagesUpserted int
-}
+type SyncResult = domainmessages.MessageSyncResult
 
-type SyncOptions struct {
-	RunID   *uuid.UUID
-	Trigger string
-	// Force starts from an empty delta link instead of the stored one. Graph
-	// only resends messages that changed, so a row whose content was lost
-	// locally is never repaired by an ordinary run; a forced one refetches the
-	// full payloads.
-	Force bool
-}
+type SyncOptions = domainmessages.MessageSyncOptions
 
-type SyncChunkResult struct {
-	MessagesUpserted int
-	Fetched          int
-	DeltaReused      bool
-	DeltaResetReason string
-	NextCursor       *domainjobs.JobCursor
-	Done             bool
-}
+type SyncChunkResult = domainmessages.MessageSyncChunkResult
 
 func (s *SyncService) SyncInbox(ctx context.Context, userID uuid.UUID, accountID uuid.UUID) (*SyncResult, error) {
 	return s.SyncInboxWithOptions(ctx, userID, accountID, SyncOptions{})

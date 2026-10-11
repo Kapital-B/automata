@@ -20,5 +20,16 @@
     "passing_test_cases": 528,
     "skipped_test_cases": 0,
     "live_dsql": false
+  },
+  {
+    "phase": "R3",
+    "go": "go1.24.0 linux/amd64",
+    "command": "go test -count=1 -p 2 -json ./...",
+    "postgres": true,
+    "dynamodb_local": true,
+    "passing_packages": 36,
+    "passing_test_cases": 529,
+    "skipped_test_cases": 0,
+    "live_dsql": false
   }
 ]

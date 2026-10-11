@@ -2,9 +2,9 @@ package attention
 
 import (
 	"context"
+	domainattention "github.com/Kapital-B/automata/svc/internal/domain/attention"
 	"sort"
 	"strings"
-	"time"
 
 	domainauth "github.com/Kapital-B/automata/svc/internal/domain/auth"
 	domaincontradictions "github.com/Kapital-B/automata/svc/internal/domain/contradictions"
@@ -27,40 +27,11 @@ const (
 	WhyMailActionItem      = "mail_action_item"
 )
 
-type Item struct {
-	ID          string `json:"id"`
-	WhyMe       string `json:"why_me"`
-	Title       string `json:"title"`
-	ProjectID   string `json:"project_id,omitempty"`
-	ProjectName string `json:"project_name,omitempty"`
-	RefType     string `json:"ref_type"`
-	RefID       string `json:"ref_id"`
-	AccountID   string `json:"account_id,omitempty"`
-	MessageID   string `json:"message_id,omitempty"`
-	// IssueID and IssueTitle name the issue a mail to-do's message is on, so
-	// the to-do reads as part of that piece of project work.
-	IssueID    string     `json:"issue_id,omitempty"`
-	IssueTitle string     `json:"issue_title,omitempty"`
-	DueAt      *time.Time `json:"due_at,omitempty"`
-	// OccurredAt dates the underlying row, so the list can be ordered by
-	// recency within a why_me group.
-	OccurredAt time.Time `json:"occurred_at"`
-}
+type Item = domainattention.AttentionItem
 
-type Counts struct {
-	Total               int `json:"total"`
-	IssueAssignee       int `json:"issue_assignee"`
-	MemberRole          int `json:"member_role"`
-	ProvisionalFact     int `json:"provisional_fact"`
-	ProvisionalDecision int `json:"provisional_decision"`
-	OpenContradiction   int `json:"open_contradiction"`
-	MailActionItem      int `json:"mail_action_item"`
-}
+type Counts = domainattention.AttentionViewCounts
 
-type Result struct {
-	Items  []Item `json:"items"`
-	Counts Counts `json:"counts"`
-}
+type Result = domainattention.AttentionResult
 
 type Service struct {
 	Users          domainauth.UserRepository

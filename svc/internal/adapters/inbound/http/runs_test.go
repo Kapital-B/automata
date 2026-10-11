@@ -17,6 +17,8 @@ import (
 	appaccounts "github.com/Kapital-B/automata/svc/internal/application/accounts"
 	"github.com/Kapital-B/automata/svc/internal/application/auth"
 	appmessages "github.com/Kapital-B/automata/svc/internal/application/messages"
+	queries "github.com/Kapital-B/automata/svc/internal/application/queries"
+	submissions "github.com/Kapital-B/automata/svc/internal/application/submissions"
 	domainacc "github.com/Kapital-B/automata/svc/internal/domain/accounts"
 	domainaccounts "github.com/Kapital-B/automata/svc/internal/domain/accounts"
 	"github.com/google/uuid"
@@ -53,8 +55,8 @@ func newRunsTestServer(t *testing.T) (*httptest.Server, *sqlite.Repository, uuid
 	h := &Handlers{
 		Log:        slog.New(slog.NewTextHandler(io.Discard, nil)),
 		AccountSvc: accountSvc, SyncSvc: syncSvc, AuthSvc: authSvc,
-		Accounts: repo, Messages: repo, JobRuns: repo, OAuthStates: repo, Users: repo,
-		Dashboard: "http://localhost:5173", SuccessPath: "/ok", ErrorPath: "/err", TokenVerifier: security.JWT{Secret: jwtSecret},
+		AccountsQueries: &queries.Service{Accounts: repo}, MessagesQueries: &queries.Service{Messages: repo}, JobRunsQueries: &queries.Service{JobRuns: repo}, UsersQueries: &queries.Service{Users: repo},
+		Dashboard: "http://localhost:5173", SuccessPath: "/ok", ErrorPath: "/err", TokenVerifier: security.JWT{Secret: jwtSecret}, AccountJobs: &submissions.Service{Accounts: repo, Runs: repo, Sync: syncSvc}, ConnectorJobs: &submissions.Service{Accounts: repo, Runs: repo, Sync: syncSvc}, Extraction: &submissions.Service{Accounts: repo, Runs: repo, Sync: syncSvc}, JobRequests: &submissions.Service{Accounts: repo, Runs: repo, Sync: syncSvc},
 	}
 	srv := httptest.NewServer(h.Routes())
 	t.Cleanup(srv.Close)

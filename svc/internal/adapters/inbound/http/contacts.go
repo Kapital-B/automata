@@ -4,14 +4,12 @@ import (
 	"database/sql"
 	"encoding/json"
 	"errors"
+	domaincontacts "github.com/Kapital-B/automata/svc/internal/domain/contacts"
 	"github.com/go-chi/chi/v5"
 	"net/http"
 	"strconv"
 	"strings"
 	"time"
-
-	appcontacts "github.com/Kapital-B/automata/svc/internal/application/contacts"
-	domaincontacts "github.com/Kapital-B/automata/svc/internal/domain/contacts"
 
 	"github.com/google/uuid"
 )
@@ -161,7 +159,7 @@ func (h *Handlers) createContact(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid json"})
 		return
 	}
-	in := appcontacts.CreateContactInput{
+	in := domaincontacts.ContactCreateContactInput{
 		DisplayName: body.DisplayName,
 		Company:     body.Company,
 	}

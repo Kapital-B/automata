@@ -18,6 +18,8 @@ import (
 	domainaccounts "github.com/Kapital-B/automata/svc/internal/domain/accounts"
 
 	security "github.com/Kapital-B/automata/svc/internal/adapters/outbound/security"
+	queries "github.com/Kapital-B/automata/svc/internal/application/queries"
+	submissions "github.com/Kapital-B/automata/svc/internal/application/submissions"
 	"github.com/google/uuid"
 	_ "modernc.org/sqlite"
 )
@@ -39,7 +41,7 @@ func TestProjectsHTTPIsolation(t *testing.T) {
 	}
 	h := &Handlers{
 		Log: slog.Default(), AuthSvc: authSvc, ProjectSvc: projectSvc,
-		Users: repo, Contacts: repo, Messages: repo, Projects: repo, Assignments: repo, TokenVerifier: security.JWT{Secret: jwtSecret},
+		UsersQueries: &queries.Service{Users: repo}, MessagesQueries: &queries.Service{Messages: repo, Assignments: repo}, TokenVerifier: security.JWT{Secret: jwtSecret}, AccountJobs: &submissions.Service{Projects: projectSvc}, ConnectorJobs: &submissions.Service{Projects: projectSvc}, Extraction: &submissions.Service{Projects: projectSvc}, JobRequests: &submissions.Service{Projects: projectSvc},
 	}
 	srv := httptest.NewServer(h.Routes())
 	defer srv.Close()
@@ -102,7 +104,7 @@ func TestAssignMessageHTTP(t *testing.T) {
 	}
 	h := &Handlers{
 		Log: slog.Default(), AuthSvc: authSvc, ProjectSvc: projectSvc,
-		Users: repo, Messages: repo, Projects: repo, Assignments: repo, TokenVerifier: security.JWT{Secret: jwtSecret},
+		UsersQueries: &queries.Service{Users: repo}, MessagesQueries: &queries.Service{Messages: repo, Assignments: repo}, TokenVerifier: security.JWT{Secret: jwtSecret}, AccountJobs: &submissions.Service{Projects: projectSvc}, ConnectorJobs: &submissions.Service{Projects: projectSvc}, Extraction: &submissions.Service{Projects: projectSvc}, JobRequests: &submissions.Service{Projects: projectSvc},
 	}
 	srv := httptest.NewServer(h.Routes())
 	defer srv.Close()

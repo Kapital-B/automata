@@ -2,18 +2,17 @@ package http
 
 import (
 	"errors"
+	domainissues "github.com/Kapital-B/automata/svc/internal/domain/issues"
 	"github.com/go-chi/chi/v5"
 	"net/http"
 	"time"
-
-	apptodos "github.com/Kapital-B/automata/svc/internal/application/todos"
 
 	"github.com/google/uuid"
 )
 
 // todoJSON renders a to-do for one member. Only the owner gets the account
 // and message ids: the mail behind a shared to-do stays private.
-func todoJSON(t apptodos.Todo) map[string]any {
+func todoJSON(t domainissues.TodoTodo) map[string]any {
 	out := map[string]any{
 		"id":            t.ID.String(),
 		"text":          t.Text,
@@ -91,7 +90,7 @@ func (h *Handlers) completeProjectTodo(w http.ResponseWriter, r *http.Request) {
 }
 
 func (h *Handlers) writeTodoError(w http.ResponseWriter, err error) {
-	if errors.Is(err, apptodos.ErrNotFound) {
+	if errors.Is(err, domainissues.TodoErrNotFound) {
 		writeJSON(w, http.StatusNotFound, map[string]string{"error": "not found"})
 		return
 	}

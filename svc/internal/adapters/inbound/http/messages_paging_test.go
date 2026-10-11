@@ -17,6 +17,8 @@ import (
 	domainaccounts "github.com/Kapital-B/automata/svc/internal/domain/accounts"
 
 	security "github.com/Kapital-B/automata/svc/internal/adapters/outbound/security"
+	queries "github.com/Kapital-B/automata/svc/internal/application/queries"
+	submissions "github.com/Kapital-B/automata/svc/internal/application/submissions"
 	"github.com/google/uuid"
 	_ "modernc.org/sqlite"
 )
@@ -35,7 +37,7 @@ func TestListMessagesKeysetPaging(t *testing.T) {
 	authSvc := auth.NewService(repo, repo, repo, nil, nil, security.JWT{Secret: jwtSecret, TTL: time.Hour}, security.BcryptHasher{}, 30*24*time.Hour)
 	h := &Handlers{
 		Log: slog.Default(), AuthSvc: authSvc,
-		Users: repo, Messages: repo, Projects: repo, Assignments: repo, TokenVerifier: security.JWT{Secret: jwtSecret},
+		UsersQueries: &queries.Service{Users: repo}, MessagesQueries: &queries.Service{Messages: repo, Assignments: repo}, TokenVerifier: security.JWT{Secret: jwtSecret}, AccountJobs: &submissions.Service{}, ConnectorJobs: &submissions.Service{}, Extraction: &submissions.Service{}, JobRequests: &submissions.Service{},
 	}
 	srv := httptest.NewServer(h.Routes())
 	defer srv.Close()

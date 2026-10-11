@@ -15,11 +15,13 @@ import (
 	"github.com/Kapital-B/automata/svc/internal/adapters/outbound/persistence/sqlite"
 	"github.com/Kapital-B/automata/svc/internal/adapters/outbound/security"
 	appaccounts "github.com/Kapital-B/automata/svc/internal/application/accounts"
+	queries "github.com/Kapital-B/automata/svc/internal/application/queries"
+	submissions "github.com/Kapital-B/automata/svc/internal/application/submissions"
 	domainaccounts "github.com/Kapital-B/automata/svc/internal/domain/accounts"
 	"github.com/google/uuid"
+	// recordingPasswordConnector accepts one password and records what it saw.
 )
 
-// recordingPasswordConnector accepts one password and records what it saw.
 type recordingPasswordConnector struct {
 	password string
 	got      domainaccounts.PasswordConnectRequest
@@ -51,7 +53,7 @@ func TestConnectIMAPStoresAVerifiedAccountAndReportsRejections(t *testing.T) {
 				appaccounts.ProviderIMAP: &imapmail.Provider{},
 			}},
 		}),
-		Accounts: repo, Users: repo, TokenVerifier: security.JWT{Secret: []byte("abcdefghijklmnopqrstuvwxyz123456")},
+		AccountsQueries: &queries.Service{Accounts: repo}, UsersQueries: &queries.Service{Users: repo}, TokenVerifier: security.JWT{Secret: []byte("abcdefghijklmnopqrstuvwxyz123456")}, AccountJobs: &submissions.Service{Accounts: repo}, ConnectorJobs: &submissions.Service{Accounts: repo}, Extraction: &submissions.Service{Accounts: repo}, JobRequests: &submissions.Service{Accounts: repo},
 	}
 	api := httptest.NewServer(h.Routes())
 	defer api.Close()

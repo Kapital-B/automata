@@ -3,7 +3,7 @@ package projects
 import (
 	"context"
 	"encoding/json"
-	"errors"
+
 	"fmt"
 	"regexp"
 	"strings"
@@ -21,12 +21,10 @@ import (
 	"github.com/google/uuid"
 )
 
-var (
-	ErrNotFound      = errors.New("not found")
-	ErrInvalidCode   = errors.New("invalid project code")
-	ErrCodeTaken     = errors.New("project code already exists")
-	ErrCodeImmutable = errors.New("project code is immutable")
-)
+var ErrNotFound = domainprojects.ProjectErrNotFound
+var ErrInvalidCode = domainprojects.ProjectErrInvalidCode
+var ErrCodeTaken = domainprojects.ProjectErrCodeTaken
+var ErrCodeImmutable = domainprojects.ProjectErrCodeImmutable
 
 // Service handles project CRUD and manual assignment.
 type Service struct {
@@ -54,10 +52,7 @@ func (s *Service) List(ctx context.Context, userID uuid.UUID, filter domainproje
 	return s.Projects.ListProjects(ctx, orgID, filter)
 }
 
-type ProjectDetail struct {
-	Project domainprojects.ProjectRow
-	Member  *domainprojects.ProjectMemberRow
-}
+type ProjectDetail = domainprojects.ProjectProjectDetail
 
 func (s *Service) Get(ctx context.Context, userID, projectID uuid.UUID) (*ProjectDetail, error) {
 	orgID, err := s.homeOrg(ctx, userID)
@@ -78,19 +73,7 @@ func (s *Service) Get(ctx context.Context, userID, projectID uuid.UUID) (*Projec
 	return &ProjectDetail{Project: *p, Member: m}, nil
 }
 
-type CreateProjectInput struct {
-	Name              string
-	Code              string
-	Description       *string
-	Client            *string
-	Keywords          []string
-	MemberRole        string
-	Discipline        *string
-	Responsibilities  *string
-	CurrentScope      *string
-	ApprovalAuthority *string
-	OutOfScope        *string
-}
+type CreateProjectInput = domainprojects.ProjectCreateProjectInput
 
 func (s *Service) Create(ctx context.Context, userID uuid.UUID, in CreateProjectInput) (*domainprojects.ProjectRow, error) {
 	orgID, err := s.homeOrg(ctx, userID)
@@ -135,13 +118,7 @@ func (s *Service) Create(ctx context.Context, userID uuid.UUID, in CreateProject
 	return &project, nil
 }
 
-type UpdateProjectInput struct {
-	Name        *string
-	Description *string
-	Client      *string
-	Keywords    *[]string
-	Archive     *bool
-}
+type UpdateProjectInput = domainprojects.ProjectUpdateProjectInput
 
 func (s *Service) Update(ctx context.Context, userID, projectID uuid.UUID, in UpdateProjectInput) (*domainprojects.ProjectRow, error) {
 	orgID, err := s.homeOrg(ctx, userID)
@@ -182,14 +159,7 @@ func (s *Service) Update(ctx context.Context, userID, projectID uuid.UUID, in Up
 	return p, nil
 }
 
-type UpdateMemberInput struct {
-	Role              *string
-	Discipline        *string
-	Responsibilities  *string
-	CurrentScope      *string
-	ApprovalAuthority *string
-	OutOfScope        *string
-}
+type UpdateMemberInput = domainprojects.ProjectUpdateMemberInput
 
 func (s *Service) UpdateMember(ctx context.Context, userID, projectID uuid.UUID, in UpdateMemberInput) (*domainprojects.ProjectMemberRow, error) {
 	orgID, err := s.homeOrg(ctx, userID)
@@ -235,11 +205,7 @@ func (s *Service) UpdateMember(ctx context.Context, userID, projectID uuid.UUID,
 	return m, nil
 }
 
-type AssignInput struct {
-	ProjectID *uuid.UUID
-	Scope     domainprojects.AssignScope
-	Status    domainprojects.AssignmentStatus
-}
+type AssignInput = domainprojects.ProjectAssignInput
 
 func (s *Service) AssignMessage(ctx context.Context, userID, messageID uuid.UUID, in AssignInput) (*domainprojects.EffectiveAssignment, error) {
 	orgID, err := s.homeOrg(ctx, userID)
@@ -374,19 +340,10 @@ func (s *Service) upsertParticipantsFromMessage(ctx context.Context, orgID, proj
 	return nil
 }
 
-var (
-	ErrInvalidChannel = errors.New("invalid channel")
-	ErrInvalidBody    = errors.New("body_text required")
-)
+var ErrInvalidChannel = domainprojects.ProjectErrInvalidChannel
+var ErrInvalidBody = domainprojects.ProjectErrInvalidBody
 
-type CreateManualInput struct {
-	Channel               string
-	OccurredAt            time.Time
-	Title                 string
-	BodyText              string
-	ProjectID             *uuid.UUID
-	ParticipantContactIDs []uuid.UUID
-}
+type CreateManualInput = domainprojects.ProjectCreateManualInput
 
 func (s *Service) CreateManualItem(ctx context.Context, userID uuid.UUID, in CreateManualInput) (*domainprojects.ManualItemRow, error) {
 	if s.Manuals == nil {
@@ -534,48 +491,9 @@ type AssignService struct {
 	LLM         domainai.LLMClient
 }
 
-type AssignChunkResult struct {
-	MessagesProcessed int
-	MessagesAssigned  int
-	NextCursor        *domainjobs.JobCursor
-	Done              bool
-	Tally             assignTally
-}
+type AssignChunkResult = domainprojects.ProjectAssignChunkResult
 
-// assignTally breaks a run down by outcome so a run that scored nothing is
-// distinguishable from a run that failed.
-type assignTally struct {
-	CommittedRule  int
-	ProvisionalLLM int
-	Unscored       int
-	Errors         int
-}
-
-func (t *assignTally) record(o assignOutcome) {
-	switch o {
-	case outcomeCommittedRule:
-		t.CommittedRule++
-	case outcomeProvisionalLLM:
-		t.ProvisionalLLM++
-	default:
-		t.Unscored++
-	}
-}
-
-func (t assignTally) assigned() int {
-	return t.CommittedRule + t.ProvisionalLLM
-}
-
-func (t assignTally) meta(considered int) map[string]any {
-	return map[string]any{
-		"messages_considered": considered,
-		"assigned":            t.assigned(),
-		"committed_rule":      t.CommittedRule,
-		"provisional_llm":     t.ProvisionalLLM,
-		"unscored":            t.Unscored,
-		"errors":              t.Errors,
-	}
-}
+type assignTally = domainprojects.ProjectAssignTally
 
 func (s *AssignService) AssignAfterSync(ctx context.Context, userID, accountID uuid.UUID) error {
 	orgID, err := s.Users.GetHomeOrganisationID(ctx, userID)
@@ -612,7 +530,7 @@ func (s *AssignService) AssignAfterSync(ctx context.Context, userID, accountID u
 			}
 			continue
 		}
-		tally.record(outcome)
+		tally.Record(outcome)
 		if outcome == outcomeUnscored {
 			unscored = append(unscored, msg)
 		}
@@ -630,7 +548,7 @@ func (s *AssignService) AssignAfterSync(ctx context.Context, userID, accountID u
 		tally.Unscored -= n
 	}
 	if s.JobRuns != nil && runID != nil {
-		meta, _ := json.Marshal(tally.meta(len(msgs)))
+		meta, _ := json.Marshal(tally.Meta(len(msgs)))
 		finished := time.Now().UTC()
 		status := "success"
 		var errMsg *string
@@ -684,7 +602,7 @@ func (s *AssignService) AssignAccountChunk(ctx context.Context, run domainjobs.R
 		if err != nil {
 			return nil, err
 		}
-		tally.record(outcome)
+		tally.Record(outcome)
 		if outcome == outcomeUnscored {
 			unscored = append(unscored, msg)
 		}
@@ -697,7 +615,7 @@ func (s *AssignService) AssignAccountChunk(ctx context.Context, run domainjobs.R
 	tally.Unscored -= n
 	out := &AssignChunkResult{
 		MessagesProcessed: len(msgs),
-		MessagesAssigned:  tally.assigned(),
+		MessagesAssigned:  tally.Assigned(),
 		Done:              done,
 		Tally:             tally,
 	}
@@ -708,14 +626,11 @@ func (s *AssignService) AssignAccountChunk(ctx context.Context, run domainjobs.R
 	return out, nil
 }
 
-// assignOutcome records what the scorer decided, for run metadata.
-type assignOutcome int
+type assignOutcome = domainprojects.ProjectAssignOutcome
 
-const (
-	outcomeUnscored assignOutcome = iota
-	outcomeCommittedRule
-	outcomeProvisionalLLM
-)
+const outcomeUnscored = domainprojects.ProjectOutcomeUnscored
+const outcomeCommittedRule = domainprojects.ProjectOutcomeCommittedRule
+const outcomeProvisionalLLM = domainprojects.ProjectOutcomeProvisionalLLM
 
 // tryAssignOne resolves one message against the project set.
 //

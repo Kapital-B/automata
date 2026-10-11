@@ -3,12 +3,11 @@ package http
 import (
 	"encoding/json"
 	"errors"
+	domainfacts "github.com/Kapital-B/automata/svc/internal/domain/facts"
 	"github.com/go-chi/chi/v5"
 	"net/http"
 	"strings"
 	"time"
-
-	appfacts "github.com/Kapital-B/automata/svc/internal/application/facts"
 
 	"github.com/google/uuid"
 )
@@ -28,7 +27,7 @@ func (h *Handlers) listProjectFacts(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "bad id"})
 		return
 	}
-	include := appfacts.ListInclude{}
+	include := domainfacts.FactListInclude{}
 	for _, part := range strings.Split(r.URL.Query().Get("include"), ",") {
 		switch strings.TrimSpace(strings.ToLower(part)) {
 		case "proposed":
@@ -151,7 +150,7 @@ func (h *Handlers) createProjectFact(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 	}
-	in := appfacts.CreateInput{
+	in := domainfacts.FactCreateInput{
 		SubjectKey: body.SubjectKey,
 		Label:      body.Label,
 		Value:      value,
@@ -175,7 +174,7 @@ func (h *Handlers) createProjectFact(w http.ResponseWriter, r *http.Request) {
 		in.SupersedesVersionID = &id
 	}
 	for _, ev := range body.Evidence {
-		ref := appfacts.EvidenceRef{}
+		ref := domainfacts.FactEvidenceRef{}
 		if ev.MessageID != nil && strings.TrimSpace(*ev.MessageID) != "" {
 			id, err := uuid.Parse(*ev.MessageID)
 			if err != nil {
@@ -244,7 +243,7 @@ func (h *Handlers) confirmFactVersion(w http.ResponseWriter, r *http.Request) {
 		SupersedesVersionID *string `json:"supersedes_version_id"`
 	}
 	_ = json.NewDecoder(r.Body).Decode(&body)
-	in := appfacts.ConfirmInput{}
+	in := domainfacts.FactConfirmInput{}
 	if body.SupersedesVersionID != nil && strings.TrimSpace(*body.SupersedesVersionID) != "" {
 		sid, err := uuid.Parse(*body.SupersedesVersionID)
 		if err != nil {
@@ -307,7 +306,7 @@ func (h *Handlers) addFactEvidence(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "bad json"})
 		return
 	}
-	ref := appfacts.EvidenceRef{}
+	ref := domainfacts.FactEvidenceRef{}
 	if body.MessageID != nil && strings.TrimSpace(*body.MessageID) != "" {
 		mid, err := uuid.Parse(*body.MessageID)
 		if err != nil {
@@ -362,22 +361,22 @@ func (h *Handlers) removeFactEvidence(w http.ResponseWriter, r *http.Request) {
 
 func writeFactError(w http.ResponseWriter, err error) {
 	switch {
-	case errors.Is(err, appfacts.ErrNotFound):
+	case errors.Is(err, domainfacts.FactErrNotFound):
 		writeJSON(w, http.StatusNotFound, map[string]string{"error": "not found"})
-	case errors.Is(err, appfacts.ErrSupersedeRequired), errors.Is(err, appfacts.ErrInvalidSupersedes):
+	case errors.Is(err, domainfacts.FactErrSupersedeRequired), errors.Is(err, domainfacts.FactErrInvalidSupersedes):
 		writeJSON(w, http.StatusConflict, map[string]string{"error": err.Error()})
-	case errors.Is(err, appfacts.ErrInvalidSubjectKey),
-		errors.Is(err, appfacts.ErrInvalidStatus),
-		errors.Is(err, appfacts.ErrInvalidEvidence),
-		errors.Is(err, appfacts.ErrWrongProject),
-		errors.Is(err, appfacts.ErrNotProposed):
+	case errors.Is(err, domainfacts.FactErrInvalidSubjectKey),
+		errors.Is(err, domainfacts.FactErrInvalidStatus),
+		errors.Is(err, domainfacts.FactErrInvalidEvidence),
+		errors.Is(err, domainfacts.FactErrWrongProject),
+		errors.Is(err, domainfacts.FactErrNotProposed):
 		writeJSON(w, http.StatusBadRequest, map[string]string{"error": err.Error()})
 	default:
 		writeJSON(w, http.StatusBadRequest, map[string]string{"error": err.Error()})
 	}
 }
 
-func factJSON(v appfacts.FactView) map[string]any {
+func factJSON(v domainfacts.FactFactView) map[string]any {
 	f := v.Fact
 	out := map[string]any{
 		"id":              f.ID.String(),

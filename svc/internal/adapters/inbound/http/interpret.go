@@ -3,13 +3,12 @@ package http
 import (
 	"encoding/json"
 	"errors"
+	domaininterpretations "github.com/Kapital-B/automata/svc/internal/domain/interpretations"
 	"github.com/go-chi/chi/v5"
 	"io"
 	"net/http"
 	"strings"
 	"time"
-
-	appinterpret "github.com/Kapital-B/automata/svc/internal/application/interpret"
 
 	"github.com/google/uuid"
 )
@@ -45,7 +44,7 @@ func (h *Handlers) interpretProject(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "async interpret not supported in 2b"})
 		return
 	}
-	in := appinterpret.RunInput{Trigger: "api"}
+	in := domaininterpretations.InterpretationRunInput{Trigger: "api"}
 	if body.AccountID != nil && strings.TrimSpace(*body.AccountID) != "" {
 		aid, err := uuid.Parse(*body.AccountID)
 		if err != nil {
@@ -138,22 +137,22 @@ func (h *Handlers) dismissInterpretation(w http.ResponseWriter, r *http.Request)
 
 func writeInterpretError(w http.ResponseWriter, err error) {
 	switch {
-	case errors.Is(err, appinterpret.ErrNotFound):
+	case errors.Is(err, domaininterpretations.InterpretationErrNotFound):
 		writeJSON(w, http.StatusNotFound, map[string]string{"error": "not found"})
-	case errors.Is(err, appinterpret.ErrLLMUnavailable):
+	case errors.Is(err, domaininterpretations.InterpretationErrLLMUnavailable):
 		writeJSON(w, http.StatusServiceUnavailable, map[string]string{"error": "llm not configured"})
-	case errors.Is(err, appinterpret.ErrMixedAccounts):
+	case errors.Is(err, domaininterpretations.InterpretationErrMixedAccounts):
 		writeJSON(w, http.StatusConflict, map[string]string{"error": err.Error()})
-	case errors.Is(err, appinterpret.ErrNothingToInterpret):
+	case errors.Is(err, domaininterpretations.InterpretationErrNothingToInterpret):
 		writeJSON(w, http.StatusUnprocessableEntity, map[string]string{"error": err.Error()})
-	case errors.Is(err, appinterpret.ErrNotPending):
+	case errors.Is(err, domaininterpretations.InterpretationErrNotPending):
 		writeJSON(w, http.StatusBadRequest, map[string]string{"error": err.Error()})
 	default:
 		writeJSON(w, http.StatusBadRequest, map[string]string{"error": err.Error()})
 	}
 }
 
-func interpretationJSON(v appinterpret.InterpretationView) map[string]any {
+func interpretationJSON(v domaininterpretations.InterpretationInterpretationView) map[string]any {
 	row := v.Interpretation
 	out := map[string]any{
 		"id":              row.ID.String(),

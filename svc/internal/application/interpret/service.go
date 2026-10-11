@@ -22,13 +22,11 @@ import (
 	"github.com/google/uuid"
 )
 
-var (
-	ErrNotFound           = errors.New("not found")
-	ErrLLMUnavailable     = errors.New("llm not configured")
-	ErrMixedAccounts      = errors.New("cannot mix mail account_id values in one interpret call")
-	ErrNothingToInterpret = errors.New("no correspondence to interpret")
-	ErrNotPending         = errors.New("interpretation is not pending")
-)
+var ErrNotFound = domaininterpretations.InterpretationErrNotFound
+var ErrLLMUnavailable = domaininterpretations.InterpretationErrLLMUnavailable
+var ErrMixedAccounts = domaininterpretations.InterpretationErrMixedAccounts
+var ErrNothingToInterpret = domaininterpretations.InterpretationErrNothingToInterpret
+var ErrNotPending = domaininterpretations.InterpretationErrNotPending
 
 // Service runs Stage A interpret and manages pending candidates.
 type Service struct {
@@ -53,34 +51,11 @@ func (s *Service) homeOrg(ctx context.Context, userID uuid.UUID) (uuid.UUID, err
 	return s.Users.GetHomeOrganisationID(ctx, userID)
 }
 
-type RunInput struct {
-	AccountID           *uuid.UUID
-	MessageIDs          []uuid.UUID
-	ManualItemIDs       []uuid.UUID
-	ConnectorMessageIDs []uuid.UUID
-	Trigger             string // api | schedule (stored on job_runs)
-}
+type RunInput = domaininterpretations.InterpretationRunInput
 
-type InterpretationView struct {
-	Interpretation domaininterpretations.InterpretationRow
-	Sources        []domaininterpretations.InterpretationSourceRow
-	Candidates     []CandidateView
-}
+type InterpretationView = domaininterpretations.InterpretationInterpretationView
 
-type CandidateView struct {
-	Kind                string
-	SubjectKey          string
-	Label               string
-	Title               string
-	Value               any
-	Unit                string
-	Statement           string
-	MessageIDs          []string
-	ManualItemIDs       []string
-	ConnectorMessageIDs []string
-	Confidence          float64
-	Reason              string
-}
+type CandidateView = domaininterpretations.InterpretationCandidateView
 
 type interpretLLMPayload struct {
 	SchemaVersion int                  `json:"schema_version"`

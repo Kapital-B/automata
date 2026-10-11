@@ -1,13 +1,12 @@
 package http
 
 import (
+	domainprojects "github.com/Kapital-B/automata/svc/internal/domain/projects"
+	"github.com/google/uuid"
 	"net/http"
 	"strconv"
 	"strings"
 	"time"
-
-	appoverview "github.com/Kapital-B/automata/svc/internal/application/overview"
-	"github.com/google/uuid"
 )
 
 // overview serves the Home metric cards and project list in one request.
@@ -69,7 +68,7 @@ func (h *Handlers) activity(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	in := appoverview.ActivityInput{}
+	in := domainprojects.OverviewActivityInput{}
 	q := r.URL.Query()
 	if v := strings.TrimSpace(q.Get("limit")); v != "" {
 		n, err := strconv.Atoi(v)
@@ -112,7 +111,7 @@ func (h *Handlers) activity(w http.ResponseWriter, r *http.Request) {
 			if kind == "" {
 				continue
 			}
-			if !appoverview.ValidKind(kind) {
+			if !domainprojects.OverviewValidKind(kind) {
 				writeJSON(w, http.StatusBadRequest, map[string]string{"error": "bad kind: " + kind})
 				return
 			}

@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/Kapital-B/automata/svc/internal/adapters/outbound/security"
+	submissions "github.com/Kapital-B/automata/svc/internal/application/submissions"
 	domainai "github.com/Kapital-B/automata/svc/internal/domain/ai"
 	"github.com/google/uuid"
 )
@@ -125,7 +126,7 @@ func TestPublicRouteMatchIsMethodSpecific(t *testing.T) {
 }
 
 func TestCORSPreflightDoesNotRequireBearerToken(t *testing.T) {
-	h := &Handlers{TokenVerifier: security.JWT{Secret: testJWTSecret}, CORSOrigins: []string{"https://example.com"}}
+	h := &Handlers{TokenVerifier: security.JWT{Secret: testJWTSecret}, CORSOrigins: []string{"https://example.com"}, AccountJobs: &submissions.Service{}, ConnectorJobs: &submissions.Service{}, Extraction: &submissions.Service{}, JobRequests: &submissions.Service{}}
 	req := httptest.NewRequest(http.MethodOptions, "/api/accounts", nil)
 	req.Header.Set("Origin", "https://example.com")
 	req.Header.Set("Access-Control-Request-Method", http.MethodGet)

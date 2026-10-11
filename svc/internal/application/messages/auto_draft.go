@@ -24,25 +24,11 @@ type AutoDraftService struct {
 	ModelLabel string
 }
 
-type AutoDraftOptions struct {
-	RunID      *uuid.UUID
-	Trigger    string
-	OnlyUnseen bool
-	MessageID  *uuid.UUID
-	Force      bool
-}
+type AutoDraftOptions = domainmessages.MessageAutoDraftOptions
 
-type AutoDraftResult struct {
-	JobRunID        uuid.UUID
-	ActionItemsSeen int
-	DraftsGenerated int
-}
+type AutoDraftResult = domainmessages.MessageAutoDraftResult
 
-type AutoDraftChunkResult struct {
-	ActionItemsSeen int
-	DraftsGenerated int
-	Done            bool
-}
+type AutoDraftChunkResult = domainmessages.MessageAutoDraftChunkResult
 
 type autoDraftPayload struct {
 	Subject string `json:"subject"`

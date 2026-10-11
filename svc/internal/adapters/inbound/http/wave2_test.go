@@ -22,7 +22,9 @@ import (
 	appinterpret "github.com/Kapital-B/automata/svc/internal/application/interpret"
 	appprojectai "github.com/Kapital-B/automata/svc/internal/application/projectai"
 	appprojects "github.com/Kapital-B/automata/svc/internal/application/projects"
+	queries "github.com/Kapital-B/automata/svc/internal/application/queries"
 	appreconcile "github.com/Kapital-B/automata/svc/internal/application/reconcile"
+	submissions "github.com/Kapital-B/automata/svc/internal/application/submissions"
 	domainai "github.com/Kapital-B/automata/svc/internal/domain/ai"
 	"github.com/google/uuid"
 	_ "modernc.org/sqlite"
@@ -80,7 +82,7 @@ func setupWave2HTTP(t *testing.T) (*httptest.Server, *auth.Service, *sqlite.Repo
 		Log: slog.Default(), AuthSvc: authSvc, ProjectSvc: projectSvc,
 		FactSvc: factSvc, InterpretSvc: interpretSvc, ReconcileSvc: reconcileSvc,
 		DecisionSvc: decisionSvc, AttentionSvc: attentionSvc, ProjectAISvc: projectAISvc,
-		Users: repo, Projects: repo, Messages: repo, JobRuns: repo, TokenVerifier: security.JWT{Secret: jwtSecret},
+		UsersQueries: &queries.Service{Users: repo}, MessagesQueries: &queries.Service{Messages: repo}, JobRunsQueries: &queries.Service{JobRuns: repo}, TokenVerifier: security.JWT{Secret: jwtSecret}, AccountJobs: &submissions.Service{Runs: repo, Projects: projectSvc}, ConnectorJobs: &submissions.Service{Runs: repo, Projects: projectSvc}, Extraction: &submissions.Service{Runs: repo, Projects: projectSvc}, JobRequests: &submissions.Service{Runs: repo, Projects: projectSvc},
 	}
 	srv := httptest.NewServer(h.Routes())
 	t.Cleanup(srv.Close)

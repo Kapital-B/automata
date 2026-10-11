@@ -3,7 +3,8 @@ package issues
 import (
 	"context"
 	"encoding/json"
-	"errors"
+	domainissues "github.com/Kapital-B/automata/svc/internal/domain/issues"
+
 	"fmt"
 	"strings"
 
@@ -12,24 +13,12 @@ import (
 	"github.com/google/uuid"
 )
 
-var (
-	ErrLLMUnavailable   = errors.New("llm not configured")
-	ErrNothingToSuggest = errors.New("no unassigned correspondence to suggest from")
-)
+var ErrLLMUnavailable = domainissues.IssueErrLLMUnavailable
+var ErrNothingToSuggest = domainissues.IssueErrNothingToSuggest
 
-// SuggestInput scopes an LLM issue proposal.
-type SuggestInput struct {
-	// AccountID optional: when set, only mail from this account is considered (with manuals).
-	AccountID *uuid.UUID
-}
+type SuggestInput = domainissues.IssueSuggestInput
 
-// SuggestResult is a proposal the user must confirm via Create.
-type SuggestResult struct {
-	Title      string
-	ItemRefs   []ItemRef
-	Confidence float64
-	Reason     string
-}
+type SuggestResult = domainissues.IssueSuggestResult
 
 type suggestLLMPayload struct {
 	SchemaVersion int      `json:"schema_version"`

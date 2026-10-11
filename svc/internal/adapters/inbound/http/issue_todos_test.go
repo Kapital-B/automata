@@ -21,14 +21,16 @@ import (
 	domainmessages "github.com/Kapital-B/automata/svc/internal/domain/messages"
 
 	security "github.com/Kapital-B/automata/svc/internal/adapters/outbound/security"
+	queries "github.com/Kapital-B/automata/svc/internal/application/queries"
+	submissions "github.com/Kapital-B/automata/svc/internal/application/submissions"
 	"github.com/google/uuid"
 	_ "modernc.org/sqlite"
+	// A project's to-dos are shared with its members: each sees everyone's, only
+	// the owner gets the ids that open the mail, and any member can close one.
+	// The issue page reads the same list, and resolving with complete_todos
+	// closes it.
 )
 
-// A project's to-dos are shared with its members: each sees everyone's, only
-// the owner gets the ids that open the mail, and any member can close one.
-// The issue page reads the same list, and resolving with complete_todos
-// closes it.
 func TestProjectAndIssueTodosHTTP(t *testing.T) {
 	db, err := sql.Open("sqlite", "file:issuetodoshttp?mode=memory&cache=shared")
 	if err != nil {
@@ -52,7 +54,7 @@ func TestProjectAndIssueTodosHTTP(t *testing.T) {
 	}
 	h := &Handlers{
 		Log: slog.Default(), AuthSvc: authSvc, ProjectSvc: projectSvc, IssueSvc: issueSvc, TodoSvc: todoSvc,
-		Users: repo, Projects: repo, Assignments: repo, Issues: repo, Messages: repo, TokenVerifier: security.JWT{Secret: jwtSecret},
+		UsersQueries: &queries.Service{Users: repo}, MessagesQueries: &queries.Service{Messages: repo, Assignments: repo}, TokenVerifier: security.JWT{Secret: jwtSecret}, AccountJobs: &submissions.Service{Projects: projectSvc}, ConnectorJobs: &submissions.Service{Projects: projectSvc}, Extraction: &submissions.Service{Projects: projectSvc}, JobRequests: &submissions.Service{Projects: projectSvc},
 	}
 	srv := httptest.NewServer(h.Routes())
 	defer srv.Close()

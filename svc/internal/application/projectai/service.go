@@ -3,7 +3,7 @@ package projectai
 import (
 	"context"
 	"encoding/json"
-	"errors"
+
 	"fmt"
 	domainattention "github.com/Kapital-B/automata/svc/internal/domain/attention"
 	"strings"
@@ -22,11 +22,9 @@ import (
 	"github.com/google/uuid"
 )
 
-var (
-	ErrNotFound       = errors.New("not found")
-	ErrLLMUnavailable = errors.New("llm not configured")
-	ErrEmptyQuestion  = errors.New("question required")
-)
+var ErrNotFound = domainprojects.ProjectAIErrNotFound
+var ErrLLMUnavailable = domainprojects.ProjectAIErrLLMUnavailable
+var ErrEmptyQuestion = domainprojects.ProjectAIErrEmptyQuestion
 
 type Service struct {
 	Users     domainauth.UserRepository
@@ -72,19 +70,9 @@ func acrossAskLimits() contextLimits {
 	return contextLimits{Facts: 16, Decisions: 8, Issues: 8, Timeline: 6}
 }
 
-type Citation struct {
-	Type        string `json:"type"`
-	ID          string `json:"id"`
-	ProjectID   string `json:"project_id,omitempty"`
-	ProjectCode string `json:"project_code,omitempty"`
-	ProjectName string `json:"project_name,omitempty"`
-}
+type Citation = domainprojects.ProjectAICitation
 
-type Answer struct {
-	Answer     string     `json:"answer"`
-	Citations  []Citation `json:"citations"`
-	Confidence float64    `json:"confidence"`
-}
+type Answer = domainprojects.ProjectAIAnswer
 
 type askLLMPayload struct {
 	SchemaVersion int        `json:"schema_version"`

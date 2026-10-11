@@ -3,7 +3,7 @@ package reconcile
 import (
 	"context"
 	"encoding/json"
-	"errors"
+
 	"fmt"
 	"strconv"
 	"strings"
@@ -25,12 +25,10 @@ import (
 	"github.com/google/uuid"
 )
 
-var (
-	ErrNotFound           = errors.New("not found")
-	ErrNothingToReconcile = errors.New("no pending interpretations to reconcile")
-	ErrInvalidResolution  = errors.New("invalid resolution")
-	ErrNotOpen            = errors.New("contradiction is not open")
-)
+var ErrNotFound = domaincontradictions.ReconciliationErrNotFound
+var ErrNothingToReconcile = domaincontradictions.ReconciliationErrNothingToReconcile
+var ErrInvalidResolution = domaincontradictions.ReconciliationErrInvalidResolution
+var ErrNotOpen = domaincontradictions.ReconciliationErrNotOpen
 
 // Service applies Stage B reconcile outcomes and manages contradictions.
 type Service struct {
@@ -47,39 +45,15 @@ type Service struct {
 	JobRuns    domainjobs.JobRunRepository
 }
 
-type ReconcileInput struct {
-	InterpretationIDs []uuid.UUID // empty = all pending
-}
+type ReconcileInput = domaincontradictions.ReconciliationReconcileInput
 
-type CandidateOutcome struct {
-	Kind            string `json:"kind"`
-	Outcome         string `json:"outcome"`
-	Subject         string `json:"subject_key,omitempty"`
-	Reason          string `json:"reason"`
-	FactID          string `json:"fact_id,omitempty"`
-	VersionID       string `json:"version_id,omitempty"`
-	DecisionID      string `json:"decision_id,omitempty"`
-	IssueID         string `json:"issue_id,omitempty"`
-	ContradictionID string `json:"contradiction_id,omitempty"`
-}
+type CandidateOutcome = domaincontradictions.ReconciliationCandidateOutcome
 
-type ReconcileResult struct {
-	ProcessedInterpretations int                `json:"processed_interpretations"`
-	Outcomes                 []CandidateOutcome `json:"outcomes"`
-	ContradictionsOpened     int                `json:"contradictions_opened"`
-}
+type ReconcileResult = domaincontradictions.ReconciliationReconcileResult
 
-type ContradictionView struct {
-	Contradiction domaincontradictions.ContradictionRow
-	Sides         []domaincontradictions.ContradictionSideRow
-}
+type ContradictionView = domaincontradictions.ReconciliationContradictionView
 
-type ResolveInput struct {
-	Resolution          string
-	KeepFactVersionID   *uuid.UUID
-	RejectFactVersionID *uuid.UUID
-	ResolutionNote      string
-}
+type ResolveInput = domaincontradictions.ReconciliationResolveInput
 
 type candidatePayload struct {
 	Kind          string          `json:"kind"`

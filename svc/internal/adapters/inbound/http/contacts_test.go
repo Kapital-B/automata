@@ -15,6 +15,8 @@ import (
 	security "github.com/Kapital-B/automata/svc/internal/adapters/outbound/security"
 	"github.com/Kapital-B/automata/svc/internal/application/auth"
 	appcontacts "github.com/Kapital-B/automata/svc/internal/application/contacts"
+	queries "github.com/Kapital-B/automata/svc/internal/application/queries"
+	submissions "github.com/Kapital-B/automata/svc/internal/application/submissions"
 	"github.com/google/uuid"
 	_ "modernc.org/sqlite"
 )
@@ -34,7 +36,7 @@ func TestContactsIsolationAndMergeHTTP(t *testing.T) {
 	contactSvc := &appcontacts.Service{Users: repo, Contacts: repo, Messages: repo}
 	h := &Handlers{
 		Log: slog.Default(), AuthSvc: authSvc, ContactSvc: contactSvc,
-		Users: repo, Contacts: repo, Messages: repo, TokenVerifier: security.JWT{Secret: jwtSecret},
+		UsersQueries: &queries.Service{Users: repo}, MessagesQueries: &queries.Service{Messages: repo}, TokenVerifier: security.JWT{Secret: jwtSecret}, AccountJobs: &submissions.Service{}, ConnectorJobs: &submissions.Service{}, Extraction: &submissions.Service{}, JobRequests: &submissions.Service{},
 	}
 	srv := httptest.NewServer(h.Routes())
 	defer srv.Close()

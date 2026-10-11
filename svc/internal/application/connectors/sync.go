@@ -13,21 +13,11 @@ import (
 	"github.com/google/uuid"
 )
 
-type SyncResult struct {
-	JobRunID         uuid.UUID
-	MessagesUpserted int
-}
+type SyncResult = domainconnectors.ConnectorSyncResult
 
-type SyncOptions struct {
-	RunID   *uuid.UUID
-	Trigger string
-}
+type SyncOptions = domainconnectors.ConnectorSyncOptions
 
-type ConnectorSyncChunkResult struct {
-	MessagesUpserted int
-	NextCursor       *domainjobs.JobCursor
-	Done             bool
-}
+type ConnectorSyncChunkResult = domainconnectors.ConnectorConnectorSyncChunkResult
 
 func (s *Service) SyncConnector(ctx context.Context, userID, connectorAccountID uuid.UUID) (*SyncResult, error) {
 	return s.SyncConnectorWithOptions(ctx, userID, connectorAccountID, SyncOptions{})

@@ -23,23 +23,11 @@ type CategorizeService struct {
 	JobRuns  domainjobs.JobRunRepository
 }
 
-type CategorizeResult struct {
-	JobRunID            uuid.UUID
-	MessagesCategorized int
-}
+type CategorizeResult = domainmessages.MessageCategorizeResult
 
-type CategorizeOptions struct {
-	Recategorize bool
-	RunID        *uuid.UUID
-	Trigger      string
-}
+type CategorizeOptions = domainmessages.MessageCategorizeOptions
 
-type CategorizeChunkResult struct {
-	MessagesCategorized int
-	MessagesScanned     int
-	NextCursor          *domainjobs.JobCursor
-	Done                bool
-}
+type CategorizeChunkResult = domainmessages.MessageCategorizeChunkResult
 
 type categorizePayload struct {
 	SchemaVersion int      `json:"schema_version"`
