@@ -1,0 +1,626 @@
+{
+  "recorded_on": "2026-10-11",
+  "revision": "7c06bca5666ff69af771734f1754cc18965ba08c",
+  "scope": "Existing working tree, including pre-existing svc/cmd/seeddev and svc/README.md changes. R0 adds only architecture tests and documentation.",
+  "go_version": "go1.27.0 linux/amd64",
+  "module_go_version": "1.24.0",
+  "command": "go test -count=1 -p 2 -json ./...",
+  "working_directory": "svc",
+  "environment": {
+    "GOPROXY": "off",
+    "GOSUMDB": "off",
+    "GOCACHE": "/dev/shm/automata-r0-go-cache",
+    "GOTMPDIR": "/dev/shm/automata-r0-go-tmp",
+    "AUTOMATA_TEST_POSTGRES_DSN": "postgres://automata:automata@127.0.0.1:55432/automata?sslmode=disable",
+    "AUTOMATA_TEST_DDB_ENDPOINT": "http://127.0.0.1:18000"
+  },
+  "integration_coverage": {
+    "postgres": "Existing automata-ci-pg container; tests create and clean unique schemas.",
+    "dynamodb": "Task-owned in-memory DynamoDB Local container.",
+    "live_aurora_dsql": "Not run; existing DSQL lint and local runtime-helper tests ran.",
+    "live_mail_providers": "Not run; existing stub/contract tests ran."
+  },
+  "before": {
+    "started_at": "2026-10-11T07:53:00.594135666+02:00",
+    "finished_at": "2026-10-11T07:53:58.965238295+02:00",
+    "exit_code": 0,
+    "top_level_tests_passed": 302,
+    "test_cases_passed": 455,
+    "test_cases_skipped": 0,
+    "test_cases_failed": 0,
+    "packages_passed": 33,
+    "packages_without_tests": 24,
+    "packages_failed": 0,
+    "package_results": [
+      {
+        "package": "cmd/api",
+        "outcome": "no test files",
+        "elapsed_seconds": 0
+      },
+      {
+        "package": "cmd/migrate",
+        "outcome": "no test files",
+        "elapsed_seconds": 0
+      },
+      {
+        "package": "cmd/scheduler",
+        "outcome": "no test files",
+        "elapsed_seconds": 0
+      },
+      {
+        "package": "cmd/seeddev",
+        "outcome": "pass",
+        "elapsed_seconds": 0.439
+      },
+      {
+        "package": "cmd/server",
+        "outcome": "no test files",
+        "elapsed_seconds": 0
+      },
+      {
+        "package": "cmd/worker",
+        "outcome": "no test files",
+        "elapsed_seconds": 0
+      },
+      {
+        "package": "internal/adapters/inbound/asynq",
+        "outcome": "no test files",
+        "elapsed_seconds": 0
+      },
+      {
+        "package": "internal/adapters/inbound/http",
+        "outcome": "pass",
+        "elapsed_seconds": 3.698
+      },
+      {
+        "package": "internal/adapters/outbound/dynamodbjobs",
+        "outcome": "pass",
+        "elapsed_seconds": 0.895
+      },
+      {
+        "package": "internal/adapters/outbound/google",
+        "outcome": "pass",
+        "elapsed_seconds": 0.013
+      },
+      {
+        "package": "internal/adapters/outbound/imapmail",
+        "outcome": "pass",
+        "elapsed_seconds": 0.112
+      },
+      {
+        "package": "internal/adapters/outbound/jobstoretest",
+        "outcome": "no test files",
+        "elapsed_seconds": 0
+      },
+      {
+        "package": "internal/adapters/outbound/llm",
+        "outcome": "pass",
+        "elapsed_seconds": 0.004
+      },
+      {
+        "package": "internal/adapters/outbound/mailboxtest",
+        "outcome": "no test files",
+        "elapsed_seconds": 0
+      },
+      {
+        "package": "internal/adapters/outbound/mailmime",
+        "outcome": "pass",
+        "elapsed_seconds": 0.002
+      },
+      {
+        "package": "internal/adapters/outbound/memoryjobs",
+        "outcome": "pass",
+        "elapsed_seconds": 0.002
+      },
+      {
+        "package": "internal/adapters/outbound/microsoft",
+        "outcome": "pass",
+        "elapsed_seconds": 1.014
+      },
+      {
+        "package": "internal/adapters/outbound/persistence/factory",
+        "outcome": "pass",
+        "elapsed_seconds": 0.003
+      },
+      {
+        "package": "internal/adapters/outbound/persistence/migrate",
+        "outcome": "pass",
+        "elapsed_seconds": 0.008
+      },
+      {
+        "package": "internal/adapters/outbound/persistence/postgres",
+        "outcome": "pass",
+        "elapsed_seconds": 54.135
+      },
+      {
+        "package": "internal/adapters/outbound/persistence/sqlite",
+        "outcome": "pass",
+        "elapsed_seconds": 1.4849999999999999
+      },
+      {
+        "package": "internal/adapters/outbound/persistence/sqlkit",
+        "outcome": "pass",
+        "elapsed_seconds": 0.002
+      },
+      {
+        "package": "internal/adapters/outbound/persistencetest",
+        "outcome": "no test files",
+        "elapsed_seconds": 0
+      },
+      {
+        "package": "internal/adapters/outbound/security",
+        "outcome": "no test files",
+        "elapsed_seconds": 0
+      },
+      {
+        "package": "internal/adapters/outbound/slack",
+        "outcome": "no test files",
+        "elapsed_seconds": 0
+      },
+      {
+        "package": "internal/application/accounts",
+        "outcome": "pass",
+        "elapsed_seconds": 0.214
+      },
+      {
+        "package": "internal/application/attention",
+        "outcome": "pass",
+        "elapsed_seconds": 0.186
+      },
+      {
+        "package": "internal/application/auth",
+        "outcome": "pass",
+        "elapsed_seconds": 0.063
+      },
+      {
+        "package": "internal/application/connectors",
+        "outcome": "pass",
+        "elapsed_seconds": 0.024
+      },
+      {
+        "package": "internal/application/contacts",
+        "outcome": "pass",
+        "elapsed_seconds": 0.082
+      },
+      {
+        "package": "internal/application/decisions",
+        "outcome": "pass",
+        "elapsed_seconds": 0.065
+      },
+      {
+        "package": "internal/application/facts",
+        "outcome": "pass",
+        "elapsed_seconds": 0.306
+      },
+      {
+        "package": "internal/application/interpret",
+        "outcome": "pass",
+        "elapsed_seconds": 0.365
+      },
+      {
+        "package": "internal/application/issues",
+        "outcome": "pass",
+        "elapsed_seconds": 0.607
+      },
+      {
+        "package": "internal/application/jobkit",
+        "outcome": "pass",
+        "elapsed_seconds": 0.001
+      },
+      {
+        "package": "internal/application/joblistcursor",
+        "outcome": "no test files",
+        "elapsed_seconds": 0
+      },
+      {
+        "package": "internal/application/jobs",
+        "outcome": "pass",
+        "elapsed_seconds": 0.064
+      },
+      {
+        "package": "internal/application/messages",
+        "outcome": "pass",
+        "elapsed_seconds": 0.73
+      },
+      {
+        "package": "internal/application/overview",
+        "outcome": "no test files",
+        "elapsed_seconds": 0
+      },
+      {
+        "package": "internal/application/ports/driven",
+        "outcome": "no test files",
+        "elapsed_seconds": 0
+      },
+      {
+        "package": "internal/application/projectai",
+        "outcome": "pass",
+        "elapsed_seconds": 0.56
+      },
+      {
+        "package": "internal/application/projects",
+        "outcome": "pass",
+        "elapsed_seconds": 0.028
+      },
+      {
+        "package": "internal/application/reconcile",
+        "outcome": "pass",
+        "elapsed_seconds": 0.363
+      },
+      {
+        "package": "internal/application/retrieval",
+        "outcome": "pass",
+        "elapsed_seconds": 0.002
+      },
+      {
+        "package": "internal/application/todos",
+        "outcome": "no test files",
+        "elapsed_seconds": 0
+      },
+      {
+        "package": "internal/composition",
+        "outcome": "no test files",
+        "elapsed_seconds": 0
+      },
+      {
+        "package": "internal/configuration",
+        "outcome": "pass",
+        "elapsed_seconds": 0.002
+      },
+      {
+        "package": "internal/domain/accounts",
+        "outcome": "no test files",
+        "elapsed_seconds": 0
+      },
+      {
+        "package": "internal/domain/contacts",
+        "outcome": "no test files",
+        "elapsed_seconds": 0
+      },
+      {
+        "package": "internal/domain/contradictions",
+        "outcome": "no test files",
+        "elapsed_seconds": 0
+      },
+      {
+        "package": "internal/domain/decisions",
+        "outcome": "no test files",
+        "elapsed_seconds": 0
+      },
+      {
+        "package": "internal/domain/facts",
+        "outcome": "no test files",
+        "elapsed_seconds": 0
+      },
+      {
+        "package": "internal/domain/interpretations",
+        "outcome": "no test files",
+        "elapsed_seconds": 0
+      },
+      {
+        "package": "internal/domain/issues",
+        "outcome": "no test files",
+        "elapsed_seconds": 0
+      },
+      {
+        "package": "internal/domain/mailtext",
+        "outcome": "pass",
+        "elapsed_seconds": 0.001
+      },
+      {
+        "package": "internal/domain/organisations",
+        "outcome": "no test files",
+        "elapsed_seconds": 0
+      },
+      {
+        "package": "internal/domain/projects",
+        "outcome": "pass",
+        "elapsed_seconds": 0.002
+      }
+    ]
+  },
+  "after": {
+    "started_at": "2026-10-11T08:00:34.889825313+02:00",
+    "finished_at": "2026-10-11T08:01:33.112958182+02:00",
+    "exit_code": 0,
+    "top_level_tests_passed": 309,
+    "test_cases_passed": 489,
+    "test_cases_skipped": 0,
+    "test_cases_failed": 0,
+    "packages_passed": 34,
+    "packages_without_tests": 24,
+    "packages_failed": 0,
+    "package_results": [
+      {
+        "package": "cmd/api",
+        "outcome": "no test files",
+        "elapsed_seconds": 0
+      },
+      {
+        "package": "cmd/migrate",
+        "outcome": "no test files",
+        "elapsed_seconds": 0
+      },
+      {
+        "package": "cmd/scheduler",
+        "outcome": "no test files",
+        "elapsed_seconds": 0
+      },
+      {
+        "package": "cmd/seeddev",
+        "outcome": "pass",
+        "elapsed_seconds": 0.393
+      },
+      {
+        "package": "cmd/server",
+        "outcome": "no test files",
+        "elapsed_seconds": 0
+      },
+      {
+        "package": "cmd/worker",
+        "outcome": "no test files",
+        "elapsed_seconds": 0
+      },
+      {
+        "package": "internal/adapters/inbound/asynq",
+        "outcome": "no test files",
+        "elapsed_seconds": 0
+      },
+      {
+        "package": "internal/adapters/inbound/http",
+        "outcome": "pass",
+        "elapsed_seconds": 3.661
+      },
+      {
+        "package": "internal/adapters/outbound/dynamodbjobs",
+        "outcome": "pass",
+        "elapsed_seconds": 0.351
+      },
+      {
+        "package": "internal/adapters/outbound/google",
+        "outcome": "pass",
+        "elapsed_seconds": 0.014
+      },
+      {
+        "package": "internal/adapters/outbound/imapmail",
+        "outcome": "pass",
+        "elapsed_seconds": 0.107
+      },
+      {
+        "package": "internal/adapters/outbound/jobstoretest",
+        "outcome": "no test files",
+        "elapsed_seconds": 0
+      },
+      {
+        "package": "internal/adapters/outbound/llm",
+        "outcome": "pass",
+        "elapsed_seconds": 0.004
+      },
+      {
+        "package": "internal/adapters/outbound/mailboxtest",
+        "outcome": "no test files",
+        "elapsed_seconds": 0
+      },
+      {
+        "package": "internal/adapters/outbound/mailmime",
+        "outcome": "pass",
+        "elapsed_seconds": 0.002
+      },
+      {
+        "package": "internal/adapters/outbound/memoryjobs",
+        "outcome": "pass",
+        "elapsed_seconds": 0.002
+      },
+      {
+        "package": "internal/adapters/outbound/microsoft",
+        "outcome": "pass",
+        "elapsed_seconds": 1.015
+      },
+      {
+        "package": "internal/adapters/outbound/persistence/factory",
+        "outcome": "pass",
+        "elapsed_seconds": 0.003
+      },
+      {
+        "package": "internal/adapters/outbound/persistence/migrate",
+        "outcome": "pass",
+        "elapsed_seconds": 0.008
+      },
+      {
+        "package": "internal/adapters/outbound/persistence/postgres",
+        "outcome": "pass",
+        "elapsed_seconds": 54.521
+      },
+      {
+        "package": "internal/adapters/outbound/persistence/sqlite",
+        "outcome": "pass",
+        "elapsed_seconds": 1.4809999999999999
+      },
+      {
+        "package": "internal/adapters/outbound/persistence/sqlkit",
+        "outcome": "pass",
+        "elapsed_seconds": 0.002
+      },
+      {
+        "package": "internal/adapters/outbound/persistencetest",
+        "outcome": "no test files",
+        "elapsed_seconds": 0
+      },
+      {
+        "package": "internal/adapters/outbound/security",
+        "outcome": "no test files",
+        "elapsed_seconds": 0
+      },
+      {
+        "package": "internal/adapters/outbound/slack",
+        "outcome": "no test files",
+        "elapsed_seconds": 0
+      },
+      {
+        "package": "internal/application/accounts",
+        "outcome": "pass",
+        "elapsed_seconds": 0.223
+      },
+      {
+        "package": "internal/application/attention",
+        "outcome": "pass",
+        "elapsed_seconds": 0.186
+      },
+      {
+        "package": "internal/application/auth",
+        "outcome": "pass",
+        "elapsed_seconds": 0.063
+      },
+      {
+        "package": "internal/application/connectors",
+        "outcome": "pass",
+        "elapsed_seconds": 0.024
+      },
+      {
+        "package": "internal/application/contacts",
+        "outcome": "pass",
+        "elapsed_seconds": 0.086
+      },
+      {
+        "package": "internal/application/decisions",
+        "outcome": "pass",
+        "elapsed_seconds": 0.065
+      },
+      {
+        "package": "internal/application/facts",
+        "outcome": "pass",
+        "elapsed_seconds": 0.3
+      },
+      {
+        "package": "internal/application/interpret",
+        "outcome": "pass",
+        "elapsed_seconds": 0.359
+      },
+      {
+        "package": "internal/application/issues",
+        "outcome": "pass",
+        "elapsed_seconds": 0.606
+      },
+      {
+        "package": "internal/application/jobkit",
+        "outcome": "pass",
+        "elapsed_seconds": 0.002
+      },
+      {
+        "package": "internal/application/joblistcursor",
+        "outcome": "no test files",
+        "elapsed_seconds": 0
+      },
+      {
+        "package": "internal/application/jobs",
+        "outcome": "pass",
+        "elapsed_seconds": 0.066
+      },
+      {
+        "package": "internal/application/messages",
+        "outcome": "pass",
+        "elapsed_seconds": 0.719
+      },
+      {
+        "package": "internal/application/overview",
+        "outcome": "no test files",
+        "elapsed_seconds": 0
+      },
+      {
+        "package": "internal/application/ports/driven",
+        "outcome": "no test files",
+        "elapsed_seconds": 0
+      },
+      {
+        "package": "internal/application/projectai",
+        "outcome": "pass",
+        "elapsed_seconds": 0.538
+      },
+      {
+        "package": "internal/application/projects",
+        "outcome": "pass",
+        "elapsed_seconds": 0.025
+      },
+      {
+        "package": "internal/application/reconcile",
+        "outcome": "pass",
+        "elapsed_seconds": 0.361
+      },
+      {
+        "package": "internal/application/retrieval",
+        "outcome": "pass",
+        "elapsed_seconds": 0.002
+      },
+      {
+        "package": "internal/application/todos",
+        "outcome": "no test files",
+        "elapsed_seconds": 0
+      },
+      {
+        "package": "internal/architecture",
+        "outcome": "pass",
+        "elapsed_seconds": 0.045
+      },
+      {
+        "package": "internal/composition",
+        "outcome": "no test files",
+        "elapsed_seconds": 0
+      },
+      {
+        "package": "internal/configuration",
+        "outcome": "pass",
+        "elapsed_seconds": 0.002
+      },
+      {
+        "package": "internal/domain/accounts",
+        "outcome": "no test files",
+        "elapsed_seconds": 0
+      },
+      {
+        "package": "internal/domain/contacts",
+        "outcome": "no test files",
+        "elapsed_seconds": 0
+      },
+      {
+        "package": "internal/domain/contradictions",
+        "outcome": "no test files",
+        "elapsed_seconds": 0
+      },
+      {
+        "package": "internal/domain/decisions",
+        "outcome": "no test files",
+        "elapsed_seconds": 0
+      },
+      {
+        "package": "internal/domain/facts",
+        "outcome": "no test files",
+        "elapsed_seconds": 0
+      },
+      {
+        "package": "internal/domain/interpretations",
+        "outcome": "no test files",
+        "elapsed_seconds": 0
+      },
+      {
+        "package": "internal/domain/issues",
+        "outcome": "no test files",
+        "elapsed_seconds": 0
+      },
+      {
+        "package": "internal/domain/mailtext",
+        "outcome": "pass",
+        "elapsed_seconds": 0.001
+      },
+      {
+        "package": "internal/domain/organisations",
+        "outcome": "no test files",
+        "elapsed_seconds": 0
+      },
+      {
+        "package": "internal/domain/projects",
+        "outcome": "pass",
+        "elapsed_seconds": 0.001
+      }
+    ]
+  }
+}

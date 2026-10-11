@@ -1,0 +1,516 @@
+{
+  "imports": [
+    {
+      "from": "internal/adapters/inbound/asynq",
+      "to": "internal/application/connectors",
+      "remove_by": "R3",
+      "reason": "Replace concrete application dependencies with domain-owned use-case ports."
+    },
+    {
+      "from": "internal/adapters/inbound/asynq",
+      "to": "internal/application/messages",
+      "remove_by": "R3",
+      "reason": "Replace concrete application dependencies with domain-owned use-case ports."
+    },
+    {
+      "from": "internal/adapters/inbound/asynq",
+      "to": "internal/application/ports/driven",
+      "remove_by": "R1",
+      "reason": "Move application-owned port contracts and signature types into domain."
+    },
+    {
+      "from": "internal/adapters/inbound/http",
+      "to": "internal/adapters/outbound/security",
+      "remove_by": "R2",
+      "reason": "Isolate security, SQL outcomes, and infrastructure helpers behind domain contracts."
+    },
+    {
+      "from": "internal/adapters/inbound/http",
+      "to": "internal/application/accounts",
+      "remove_by": "R3",
+      "reason": "Replace concrete application dependencies with domain-owned use-case ports."
+    },
+    {
+      "from": "internal/adapters/inbound/http",
+      "to": "internal/application/attention",
+      "remove_by": "R3",
+      "reason": "Replace concrete application dependencies with domain-owned use-case ports."
+    },
+    {
+      "from": "internal/adapters/inbound/http",
+      "to": "internal/application/auth",
+      "remove_by": "R3",
+      "reason": "Replace concrete application dependencies with domain-owned use-case ports."
+    },
+    {
+      "from": "internal/adapters/inbound/http",
+      "to": "internal/application/connectors",
+      "remove_by": "R3",
+      "reason": "Replace concrete application dependencies with domain-owned use-case ports."
+    },
+    {
+      "from": "internal/adapters/inbound/http",
+      "to": "internal/application/contacts",
+      "remove_by": "R3",
+      "reason": "Replace concrete application dependencies with domain-owned use-case ports."
+    },
+    {
+      "from": "internal/adapters/inbound/http",
+      "to": "internal/application/decisions",
+      "remove_by": "R3",
+      "reason": "Replace concrete application dependencies with domain-owned use-case ports."
+    },
+    {
+      "from": "internal/adapters/inbound/http",
+      "to": "internal/application/facts",
+      "remove_by": "R3",
+      "reason": "Replace concrete application dependencies with domain-owned use-case ports."
+    },
+    {
+      "from": "internal/adapters/inbound/http",
+      "to": "internal/application/interpret",
+      "remove_by": "R3",
+      "reason": "Replace concrete application dependencies with domain-owned use-case ports."
+    },
+    {
+      "from": "internal/adapters/inbound/http",
+      "to": "internal/application/issues",
+      "remove_by": "R3",
+      "reason": "Replace concrete application dependencies with domain-owned use-case ports."
+    },
+    {
+      "from": "internal/adapters/inbound/http",
+      "to": "internal/application/jobs",
+      "remove_by": "R3",
+      "reason": "Replace concrete application dependencies with domain-owned use-case ports."
+    },
+    {
+      "from": "internal/adapters/inbound/http",
+      "to": "internal/application/messages",
+      "remove_by": "R3",
+      "reason": "Replace concrete application dependencies with domain-owned use-case ports."
+    },
+    {
+      "from": "internal/adapters/inbound/http",
+      "to": "internal/application/overview",
+      "remove_by": "R3",
+      "reason": "Replace concrete application dependencies with domain-owned use-case ports."
+    },
+    {
+      "from": "internal/adapters/inbound/http",
+      "to": "internal/application/ports/driven",
+      "remove_by": "R1",
+      "reason": "Move application-owned port contracts and signature types into domain."
+    },
+    {
+      "from": "internal/adapters/inbound/http",
+      "to": "internal/application/projectai",
+      "remove_by": "R3",
+      "reason": "Replace concrete application dependencies with domain-owned use-case ports."
+    },
+    {
+      "from": "internal/adapters/inbound/http",
+      "to": "internal/application/projects",
+      "remove_by": "R3",
+      "reason": "Replace concrete application dependencies with domain-owned use-case ports."
+    },
+    {
+      "from": "internal/adapters/inbound/http",
+      "to": "internal/application/reconcile",
+      "remove_by": "R3",
+      "reason": "Replace concrete application dependencies with domain-owned use-case ports."
+    },
+    {
+      "from": "internal/adapters/inbound/http",
+      "to": "internal/application/todos",
+      "remove_by": "R3",
+      "reason": "Replace concrete application dependencies with domain-owned use-case ports."
+    },
+    {
+      "from": "internal/adapters/outbound/dynamodbjobs",
+      "to": "internal/application/joblistcursor",
+      "remove_by": "R2",
+      "reason": "Isolate security, SQL outcomes, and infrastructure helpers behind domain contracts."
+    },
+    {
+      "from": "internal/adapters/outbound/dynamodbjobs",
+      "to": "internal/application/ports/driven",
+      "remove_by": "R1",
+      "reason": "Move application-owned port contracts and signature types into domain."
+    },
+    {
+      "from": "internal/adapters/outbound/google",
+      "to": "internal/application/ports/driven",
+      "remove_by": "R1",
+      "reason": "Move application-owned port contracts and signature types into domain."
+    },
+    {
+      "from": "internal/adapters/outbound/imapmail",
+      "to": "internal/application/ports/driven",
+      "remove_by": "R1",
+      "reason": "Move application-owned port contracts and signature types into domain."
+    },
+    {
+      "from": "internal/adapters/outbound/llm",
+      "to": "internal/application/ports/driven",
+      "remove_by": "R1",
+      "reason": "Move application-owned port contracts and signature types into domain."
+    },
+    {
+      "from": "internal/adapters/outbound/mailmime",
+      "to": "internal/application/ports/driven",
+      "remove_by": "R1",
+      "reason": "Move application-owned port contracts and signature types into domain."
+    },
+    {
+      "from": "internal/adapters/outbound/memoryjobs",
+      "to": "internal/application/joblistcursor",
+      "remove_by": "R2",
+      "reason": "Isolate security, SQL outcomes, and infrastructure helpers behind domain contracts."
+    },
+    {
+      "from": "internal/adapters/outbound/memoryjobs",
+      "to": "internal/application/ports/driven",
+      "remove_by": "R1",
+      "reason": "Move application-owned port contracts and signature types into domain."
+    },
+    {
+      "from": "internal/adapters/outbound/microsoft",
+      "to": "internal/application/ports/driven",
+      "remove_by": "R1",
+      "reason": "Move application-owned port contracts and signature types into domain."
+    },
+    {
+      "from": "internal/adapters/outbound/persistence/postgres",
+      "to": "internal/application/ports/driven",
+      "remove_by": "R1",
+      "reason": "Move application-owned port contracts and signature types into domain."
+    },
+    {
+      "from": "internal/adapters/outbound/persistence/sqlite",
+      "to": "internal/application/ports/driven",
+      "remove_by": "R1",
+      "reason": "Move application-owned port contracts and signature types into domain."
+    },
+    {
+      "from": "internal/adapters/outbound/persistence/sqlkit",
+      "to": "internal/application/ports/driven",
+      "remove_by": "R1",
+      "reason": "Move application-owned port contracts and signature types into domain."
+    },
+    {
+      "from": "internal/adapters/outbound/slack",
+      "to": "internal/application/ports/driven",
+      "remove_by": "R1",
+      "reason": "Move application-owned port contracts and signature types into domain."
+    },
+    {
+      "from": "internal/application/auth",
+      "to": "database/sql",
+      "remove_by": "R2",
+      "reason": "Isolate security, SQL outcomes, and infrastructure helpers behind domain contracts."
+    },
+    {
+      "from": "internal/application/auth",
+      "to": "golang.org/x/crypto/bcrypt",
+      "remove_by": "R2",
+      "reason": "Isolate security, SQL outcomes, and infrastructure helpers behind domain contracts."
+    },
+    {
+      "from": "internal/application/auth",
+      "to": "internal/adapters/outbound/security",
+      "remove_by": "R2",
+      "reason": "Isolate security, SQL outcomes, and infrastructure helpers behind domain contracts."
+    },
+    {
+      "from": "internal/application/facts",
+      "to": "database/sql",
+      "remove_by": "R2",
+      "reason": "Isolate security, SQL outcomes, and infrastructure helpers behind domain contracts."
+    },
+    {
+      "from": "internal/application/interpret",
+      "to": "database/sql",
+      "remove_by": "R2",
+      "reason": "Isolate security, SQL outcomes, and infrastructure helpers behind domain contracts."
+    },
+    {
+      "from": "internal/application/jobs",
+      "to": "database/sql",
+      "remove_by": "R2",
+      "reason": "Isolate security, SQL outcomes, and infrastructure helpers behind domain contracts."
+    },
+    {
+      "from": "internal/application/reconcile",
+      "to": "database/sql",
+      "remove_by": "R2",
+      "reason": "Isolate security, SQL outcomes, and infrastructure helpers behind domain contracts."
+    }
+  ],
+  "contracts": [
+    {
+      "package": "internal/application/jobs",
+      "name": "ChainEnqueuer",
+      "remove_by": "R1",
+      "reason": "Move this application-owned contract into its owning domain context."
+    },
+    {
+      "package": "internal/application/jobs",
+      "name": "EffectAuditReconciler",
+      "remove_by": "R1",
+      "reason": "Move this application-owned contract into its owning domain context."
+    },
+    {
+      "package": "internal/application/jobs",
+      "name": "ScheduleCASRepository",
+      "remove_by": "R1",
+      "reason": "Move this application-owned contract into its owning domain context."
+    },
+    {
+      "package": "internal/application/messages",
+      "name": "SyncService.Assign",
+      "remove_by": "R1",
+      "reason": "Move this application-owned contract into its owning domain context."
+    },
+    {
+      "package": "internal/application/messages",
+      "name": "SyncService.Resolve",
+      "remove_by": "R1",
+      "reason": "Move this application-owned contract into its owning domain context."
+    },
+    {
+      "package": "internal/application/overview",
+      "name": "AttentionCounts",
+      "remove_by": "R1",
+      "reason": "Move this application-owned contract into its owning domain context."
+    },
+    {
+      "package": "internal/application/ports/driven",
+      "name": "AccountRepository",
+      "remove_by": "R1",
+      "reason": "Move this application-owned contract into its owning domain context."
+    },
+    {
+      "package": "internal/application/ports/driven",
+      "name": "AssignmentRepository",
+      "remove_by": "R1",
+      "reason": "Move this application-owned contract into its owning domain context."
+    },
+    {
+      "package": "internal/application/ports/driven",
+      "name": "AuthSessionRepository",
+      "remove_by": "R1",
+      "reason": "Move this application-owned contract into its owning domain context."
+    },
+    {
+      "package": "internal/application/ports/driven",
+      "name": "ConnectorRepository",
+      "remove_by": "R1",
+      "reason": "Move this application-owned contract into its owning domain context."
+    },
+    {
+      "package": "internal/application/ports/driven",
+      "name": "ContactRepository",
+      "remove_by": "R1",
+      "reason": "Move this application-owned contract into its owning domain context."
+    },
+    {
+      "package": "internal/application/ports/driven",
+      "name": "ContradictionRepository",
+      "remove_by": "R1",
+      "reason": "Move this application-owned contract into its owning domain context."
+    },
+    {
+      "package": "internal/application/ports/driven",
+      "name": "DecisionRepository",
+      "remove_by": "R1",
+      "reason": "Move this application-owned contract into its owning domain context."
+    },
+    {
+      "package": "internal/application/ports/driven",
+      "name": "FactRepository",
+      "remove_by": "R1",
+      "reason": "Move this application-owned contract into its owning domain context."
+    },
+    {
+      "package": "internal/application/ports/driven",
+      "name": "ForwardRepository",
+      "remove_by": "R1",
+      "reason": "Move this application-owned contract into its owning domain context."
+    },
+    {
+      "package": "internal/application/ports/driven",
+      "name": "GoogleOAuth",
+      "remove_by": "R1",
+      "reason": "Move this application-owned contract into its owning domain context."
+    },
+    {
+      "package": "internal/application/ports/driven",
+      "name": "InterpretationRepository",
+      "remove_by": "R1",
+      "reason": "Move this application-owned contract into its owning domain context."
+    },
+    {
+      "package": "internal/application/ports/driven",
+      "name": "IssueRepository",
+      "remove_by": "R1",
+      "reason": "Move this application-owned contract into its owning domain context."
+    },
+    {
+      "package": "internal/application/ports/driven",
+      "name": "JobEnqueuer",
+      "remove_by": "R1",
+      "reason": "Move this application-owned contract into its owning domain context."
+    },
+    {
+      "package": "internal/application/ports/driven",
+      "name": "JobExecutionPort",
+      "remove_by": "R1",
+      "reason": "Move this application-owned contract into its owning domain context."
+    },
+    {
+      "package": "internal/application/ports/driven",
+      "name": "JobExecutor",
+      "remove_by": "R1",
+      "reason": "Move this application-owned contract into its owning domain context."
+    },
+    {
+      "package": "internal/application/ports/driven",
+      "name": "JobRunRepository",
+      "remove_by": "R1",
+      "reason": "Move this application-owned contract into its owning domain context."
+    },
+    {
+      "package": "internal/application/ports/driven",
+      "name": "JobStore",
+      "remove_by": "R1",
+      "reason": "Move this application-owned contract into its owning domain context."
+    },
+    {
+      "package": "internal/application/ports/driven",
+      "name": "LLMClient",
+      "remove_by": "R1",
+      "reason": "Move this application-owned contract into its owning domain context."
+    },
+    {
+      "package": "internal/application/ports/driven",
+      "name": "LLMClientWithOptions",
+      "remove_by": "R1",
+      "reason": "Move this application-owned contract into its owning domain context."
+    },
+    {
+      "package": "internal/application/ports/driven",
+      "name": "LLMUsageRepository",
+      "remove_by": "R1",
+      "reason": "Move this application-owned contract into its owning domain context."
+    },
+    {
+      "package": "internal/application/ports/driven",
+      "name": "MailProvider",
+      "remove_by": "R1",
+      "reason": "Move this application-owned contract into its owning domain context."
+    },
+    {
+      "package": "internal/application/ports/driven",
+      "name": "Mailbox",
+      "remove_by": "R1",
+      "reason": "Move this application-owned contract into its owning domain context."
+    },
+    {
+      "package": "internal/application/ports/driven",
+      "name": "ManualItemRepository",
+      "remove_by": "R1",
+      "reason": "Move this application-owned contract into its owning domain context."
+    },
+    {
+      "package": "internal/application/ports/driven",
+      "name": "MessageRepository",
+      "remove_by": "R1",
+      "reason": "Move this application-owned contract into its owning domain context."
+    },
+    {
+      "package": "internal/application/ports/driven",
+      "name": "MessageSearchRepository",
+      "remove_by": "R1",
+      "reason": "Move this application-owned contract into its owning domain context."
+    },
+    {
+      "package": "internal/application/ports/driven",
+      "name": "MicrosoftOAuth",
+      "remove_by": "R1",
+      "reason": "Move this application-owned contract into its owning domain context."
+    },
+    {
+      "package": "internal/application/ports/driven",
+      "name": "OAuthMailConnector",
+      "remove_by": "R1",
+      "reason": "Move this application-owned contract into its owning domain context."
+    },
+    {
+      "package": "internal/application/ports/driven",
+      "name": "OAuthStateRepository",
+      "remove_by": "R1",
+      "reason": "Move this application-owned contract into its owning domain context."
+    },
+    {
+      "package": "internal/application/ports/driven",
+      "name": "OrganisationRepository",
+      "remove_by": "R1",
+      "reason": "Move this application-owned contract into its owning domain context."
+    },
+    {
+      "package": "internal/application/ports/driven",
+      "name": "PasswordMailConnector",
+      "remove_by": "R1",
+      "reason": "Move this application-owned contract into its owning domain context."
+    },
+    {
+      "package": "internal/application/ports/driven",
+      "name": "ProjectRepository",
+      "remove_by": "R1",
+      "reason": "Move this application-owned contract into its owning domain context."
+    },
+    {
+      "package": "internal/application/ports/driven",
+      "name": "ScheduleRepository",
+      "remove_by": "R1",
+      "reason": "Move this application-owned contract into its owning domain context."
+    },
+    {
+      "package": "internal/application/ports/driven",
+      "name": "SlackClient",
+      "remove_by": "R1",
+      "reason": "Move this application-owned contract into its owning domain context."
+    },
+    {
+      "package": "internal/application/ports/driven",
+      "name": "SummaryRepository",
+      "remove_by": "R1",
+      "reason": "Move this application-owned contract into its owning domain context."
+    },
+    {
+      "package": "internal/application/ports/driven",
+      "name": "TimelineRepository",
+      "remove_by": "R1",
+      "reason": "Move this application-owned contract into its owning domain context."
+    },
+    {
+      "package": "internal/application/ports/driven",
+      "name": "TokenVault",
+      "remove_by": "R1",
+      "reason": "Move this application-owned contract into its owning domain context."
+    },
+    {
+      "package": "internal/application/ports/driven",
+      "name": "UserRepository",
+      "remove_by": "R1",
+      "reason": "Move this application-owned contract into its owning domain context."
+    },
+    {
+      "package": "internal/application/projectai",
+      "name": "AttentionProjects",
+      "remove_by": "R1",
+      "reason": "Move this application-owned contract into its owning domain context."
+    }
+  ]
+}
