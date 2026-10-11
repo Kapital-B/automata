@@ -46,48 +46,43 @@ func NewService(users domainauth.UserRepository, sessions domainauth.AuthSession
 	}
 }
 
-var ErrEmailTaken = domainauth.AuthErrEmailTaken
-var ErrInvalidCredentials = domainauth.AuthErrInvalidCredentials
-var ErrInvalidOAuthState = domainauth.AuthErrInvalidOAuthState
-var ErrInvalidRefreshToken = domainauth.AuthErrInvalidRefreshToken
-
 // IssueTokens creates a new access + refresh pair for an already-authenticated user (e.g. after register).
-func (s *Service) IssueTokens(ctx context.Context, userID uuid.UUID) (TokenPair, error) {
+func (s *Service) IssueTokens(ctx context.Context, userID uuid.UUID) (domainauth.AuthTokenPair, error) {
 	return s.issueTokenPair(ctx, userID)
 }
 
-func (s *Service) issueTokenPair(ctx context.Context, userID uuid.UUID) (TokenPair, error) {
+func (s *Service) issueTokenPair(ctx context.Context, userID uuid.UUID) (domainauth.AuthTokenPair, error) {
 	access, err := s.Tokens.Issue(userID)
 	if err != nil {
-		return TokenPair{}, err
+		return domainauth.AuthTokenPair{}, err
 	}
 	rawRefresh, err := NewRefreshToken()
 	if err != nil {
-		return TokenPair{}, err
+		return domainauth.AuthTokenPair{}, err
 	}
 	hash := HashRefreshToken(rawRefresh)
 	sid := uuid.New()
 	now := time.Now().UTC()
 	exp := now.Add(s.RefreshTTL)
 	if err := s.Sessions.InsertAuthSession(ctx, sid, userID, hash, now, exp); err != nil {
-		return TokenPair{}, err
+		return domainauth.AuthTokenPair{}, err
 	}
-	return TokenPair{AccessToken: access, RefreshToken: rawRefresh}, nil
+	return domainauth.AuthTokenPair{AccessToken: access, RefreshToken: rawRefresh}, nil
 }
 
 // RefreshTokens consumes a refresh token and returns a new pair (rotation).
-func (s *Service) RefreshTokens(ctx context.Context, rawRefresh string) (TokenPair, error) {
+func (s *Service) RefreshTokens(ctx context.Context, rawRefresh string) (domainauth.AuthTokenPair, error) {
 	rawRefresh = strings.TrimSpace(rawRefresh)
 	if rawRefresh == "" {
-		return TokenPair{}, ErrInvalidRefreshToken
+		return domainauth.AuthTokenPair{}, domainauth.AuthErrInvalidRefreshToken
 	}
 	hash := HashRefreshToken(rawRefresh)
 	userID, ok, err := s.Sessions.ConsumeAuthSession(ctx, hash)
 	if err != nil {
-		return TokenPair{}, err
+		return domainauth.AuthTokenPair{}, err
 	}
 	if !ok {
-		return TokenPair{}, ErrInvalidRefreshToken
+		return domainauth.AuthTokenPair{}, domainauth.AuthErrInvalidRefreshToken
 	}
 	return s.issueTokenPair(ctx, userID)
 }
@@ -102,7 +97,7 @@ func (s *Service) Register(ctx context.Context, email, password string) (uuid.UU
 		return uuid.Nil, err
 	}
 	if _, _, err := s.Users.GetUserByEmail(ctx, email); err == nil {
-		return uuid.Nil, ErrEmailTaken
+		return uuid.Nil, domainauth.AuthErrEmailTaken
 	} else if !errors.Is(err, domainshared.ErrNotFound) {
 		return uuid.Nil, err
 	}
@@ -115,20 +110,20 @@ func (s *Service) Register(ctx context.Context, email, password string) (uuid.UU
 	return id, nil
 }
 
-func (s *Service) LoginPassword(ctx context.Context, email, password string) (TokenPair, error) {
+func (s *Service) LoginPassword(ctx context.Context, email, password string) (domainauth.AuthTokenPair, error) {
 	email = strings.TrimSpace(strings.ToLower(email))
 	id, ph, err := s.Users.GetUserByEmail(ctx, email)
 	if err != nil {
 		if errors.Is(err, domainshared.ErrNotFound) {
-			return TokenPair{}, ErrInvalidCredentials
+			return domainauth.AuthTokenPair{}, domainauth.AuthErrInvalidCredentials
 		}
-		return TokenPair{}, err
+		return domainauth.AuthTokenPair{}, err
 	}
 	if ph == nil {
-		return TokenPair{}, ErrInvalidCredentials
+		return domainauth.AuthTokenPair{}, domainauth.AuthErrInvalidCredentials
 	}
 	if s.Passwords.Verify(*ph, password) != nil {
-		return TokenPair{}, ErrInvalidCredentials
+		return domainauth.AuthTokenPair{}, domainauth.AuthErrInvalidCredentials
 	}
 	return s.issueTokenPair(ctx, id)
 }
@@ -151,17 +146,17 @@ func (s *Service) StartMicrosoftLogin(ctx context.Context) (authURL, state strin
 	return u, st, nil
 }
 
-func (s *Service) CompleteMicrosoftLogin(ctx context.Context, code, state string) (TokenPair, error) {
+func (s *Service) CompleteMicrosoftLogin(ctx context.Context, code, state string) (domainauth.AuthTokenPair, error) {
 	flow, _, _, ok, err := s.OAuthState.TakeOAuthState(ctx, state)
 	if err != nil {
-		return TokenPair{}, err
+		return domainauth.AuthTokenPair{}, err
 	}
 	if !ok || flow != flowAuthMicrosoft {
-		return TokenPair{}, ErrInvalidOAuthState
+		return domainauth.AuthTokenPair{}, domainauth.AuthErrInvalidOAuthState
 	}
 	identity, err := s.MSAuth.ExchangeIdentity(ctx, code)
 	if err != nil {
-		return TokenPair{}, err
+		return domainauth.AuthTokenPair{}, err
 	}
 	return s.finishExternalLogin(ctx, "microsoft", identity.Subject, identity.Email)
 }
@@ -184,31 +179,31 @@ func (s *Service) StartGoogleLogin(ctx context.Context) (authURL, state string, 
 	return u, st, nil
 }
 
-func (s *Service) CompleteGoogleLogin(ctx context.Context, code, state string) (TokenPair, error) {
+func (s *Service) CompleteGoogleLogin(ctx context.Context, code, state string) (domainauth.AuthTokenPair, error) {
 	flow, _, _, ok, err := s.OAuthState.TakeOAuthState(ctx, state)
 	if err != nil {
-		return TokenPair{}, err
+		return domainauth.AuthTokenPair{}, err
 	}
 	if !ok || flow != flowAuthGoogle {
-		return TokenPair{}, ErrInvalidOAuthState
+		return domainauth.AuthTokenPair{}, domainauth.AuthErrInvalidOAuthState
 	}
 	res, err := s.Google.ExchangeCode(ctx, code)
 	if err != nil {
-		return TokenPair{}, err
+		return domainauth.AuthTokenPair{}, err
 	}
 	return s.finishExternalLogin(ctx, "google", res.ProviderSubject, res.Email)
 }
 
-func (s *Service) finishExternalLogin(ctx context.Context, provider, subject, email string) (TokenPair, error) {
+func (s *Service) finishExternalLogin(ctx context.Context, provider, subject, email string) (domainauth.AuthTokenPair, error) {
 	email = strings.TrimSpace(strings.ToLower(email))
 	if email == "" {
-		return TokenPair{}, fmt.Errorf("identity provider did not return email")
+		return domainauth.AuthTokenPair{}, fmt.Errorf("identity provider did not return email")
 	}
 	now := time.Now().UTC()
 	if uid, ok, err := s.Users.FindIdentity(ctx, provider, subject); err == nil && ok {
 		return s.issueTokenPair(ctx, uid)
 	} else if err != nil {
-		return TokenPair{}, err
+		return domainauth.AuthTokenPair{}, err
 	}
 	existingID, _, err := s.Users.GetUserByEmail(ctx, email)
 	if err == nil {
@@ -216,16 +211,16 @@ func (s *Service) finishExternalLogin(ctx context.Context, provider, subject, em
 			if strings.Contains(strings.ToLower(err.Error()), "unique") {
 				return s.issueTokenPair(ctx, existingID)
 			}
-			return TokenPair{}, err
+			return domainauth.AuthTokenPair{}, err
 		}
 		return s.issueTokenPair(ctx, existingID)
 	}
 	if !errors.Is(err, domainshared.ErrNotFound) {
-		return TokenPair{}, err
+		return domainauth.AuthTokenPair{}, err
 	}
 	id := uuid.New()
 	if _, err := s.Users.CreateUserWithHomeOrg(ctx, id, email, nil, now, provider, subject, email); err != nil {
-		return TokenPair{}, err
+		return domainauth.AuthTokenPair{}, err
 	}
 	return s.issueTokenPair(ctx, id)
 }

@@ -105,10 +105,11 @@ type Runtime struct {
 	Handlers    *httphandler.Handlers
 	ChiRouter   *chi.Mux
 	Router      http.Handler
-	Scheduler   *appjobs.SchedulerService
-	Execution   *appjobs.ExecutionService
+	Scheduler   domainjobs.JobSchedulerUseCases
+	Execution   domainjobs.JobExecutionPort
+	execution   *appjobs.ExecutionService
 	Enqueuer    *appjobs.Enqueuer
-	Registry    *appjobs.Registry
+	Registry    *domainjobs.Registry
 	QueueClient *asynqqueue.QueueClient
 	JobStore    domainjobs.JobStore
 }
@@ -144,7 +145,7 @@ func Build(ctx context.Context, log *slog.Logger, cfg configuration.Config, opts
 		Log:        log,
 		DB:         db,
 		Repository: repo,
-		Registry:   appjobs.DefaultRegistry(),
+		Registry:   domainjobs.DefaultRegistry(),
 	}
 
 	if opts.EnableAsynq && !cfg.JobsInline {
@@ -162,7 +163,7 @@ func Build(ctx context.Context, log *slog.Logger, cfg configuration.Config, opts
 		if leaseOwner == "" {
 			leaseOwner = "worker"
 		}
-		rt.Execution = &appjobs.ExecutionService{
+		rt.execution = &appjobs.ExecutionService{
 			Store:       store,
 			Executors:   nil,
 			LeaseOwner:  leaseOwner,
@@ -170,6 +171,7 @@ func Build(ctx context.Context, log *slog.Logger, cfg configuration.Config, opts
 			TerminalTTL: cfg.JobTerminalRetention,
 			Log:         log,
 		}
+		rt.Execution = rt.execution
 	}
 
 	if err := rt.buildServices(ctx); err != nil {
@@ -286,17 +288,17 @@ func (r *Runtime) buildServices(ctx context.Context) error {
 		Accounts: repo,
 		Vault:    vault,
 		Providers: map[string]domainaccounts.MailProvider{
-			appaccounts.ProviderM365: m365,
+			domainaccounts.AccountProviderM365: m365,
 		},
 	}
 	mailConnectors := map[string]domainaccounts.OAuthMailConnector{
-		appaccounts.ProviderM365: m365,
+		domainaccounts.AccountProviderM365: m365,
 	}
 	// IMAP needs no app registration, so it is always available.
 	imapProvider := &imapmail.Provider{}
-	mailboxes.Providers[appaccounts.ProviderIMAP] = imapProvider
+	mailboxes.Providers[domainaccounts.AccountProviderIMAP] = imapProvider
 	passwordConnectors := map[string]domainaccounts.PasswordMailConnector{
-		appaccounts.ProviderIMAP: imapProvider,
+		domainaccounts.AccountProviderIMAP: imapProvider,
 	}
 	// Google is optional: without a mail client configured, Google accounts
 	// cannot be connected and any that exist report an unsupported provider.
@@ -409,7 +411,7 @@ func (r *Runtime) buildServices(ctx context.Context) error {
 		}
 		pid := projectID
 		_, err := r.Enqueuer.EnqueueChain(ctx, userID, nil, domainjobs.JobTriggerAPI,
-			[]string{appjobs.TypeInterpretProject, appjobs.TypeReconcileProject},
+			[]string{domainjobs.TypeInterpretProject, domainjobs.TypeReconcileProject},
 			domainjobs.JobPayload{ProjectID: &pid}, nil, nil)
 		// A held lock means extraction is already queued or running for this
 		// project: the coalescing working as intended, not a failure.
@@ -556,8 +558,8 @@ func (r *Runtime) buildServices(ctx context.Context) error {
 	}
 	authSvc := auth.NewService(repo, repo, repo, microsoft.SignIn{OAuth: msAuthOAuth}, googleClient, security.JWT{Secret: r.Config.JWTSecret, TTL: r.Config.JWTTTL}, security.BcryptHasher{}, r.Config.RefreshTTL)
 
-	if r.Execution != nil {
-		r.Execution.Executors = appjobs.NewExecutorRegistry(appjobs.ExecutorDeps{
+	if r.execution != nil {
+		r.execution.Executors = appjobs.NewExecutorRegistry(appjobs.ExecutorDeps{
 			Store:            r.JobStore,
 			Sync:             syncSvc,
 			SyncSlack:        connectorSvc,
@@ -587,6 +589,8 @@ func (r *Runtime) buildServices(ctx context.Context) error {
 		Log:               r.Log,
 	}
 
+	querySvc := &queries.Service{Accounts: repo, Assignments: repo, Forwards: repo, JobRuns: jobRuns, JobStore: r.JobStore, Messages: repo, Schedules: repo, Summaries: repo, Users: repo, TerminalTTL: r.Config.JobTerminalRetention}
+	submissionSvc := &submissions.Service{Inline: r.Config.JobsInline, Accounts: repo, Durable: r.Enqueuer, Legacy: r.QueueClient, Runs: jobRuns, Sync: syncSvc, Categorize: categorizeSvc, Summarize: summarizeSvc, Draft: autoDraftSvc, Forward: forwardRulesSvc, Connectors: connectorSvc, Projects: projectSvc}
 	h := &httphandler.Handlers{
 		Log:             r.Log,
 		AccountSvc:      accountSvc,
@@ -609,18 +613,17 @@ func (r *Runtime) buildServices(ctx context.Context) error {
 		AttentionSvc:    attentionSvc,
 		OverviewSvc:     overviewSvc,
 		ProjectAISvc:    projectAISvc,
-		AccountsQueries: &queries.Service{Accounts: repo},
-		MessagesQueries: &queries.Service{Messages: repo, Assignments: repo}, JobRunsQueries: &queries.Service{JobRuns: jobRuns},
-		JobStoreQueries: &queries.Service{JobStore: r.JobStore, Accounts: repo, TerminalTTL: r.Config.JobTerminalRetention},
+		AccountsQueries: querySvc,
+		MessagesQueries: querySvc,
+		JobRunsQueries:  querySvc,
+		JobStoreQueries: querySvc,
 
-		JobTerminalTTL: r.Config.JobTerminalRetention,
+		SummariesQueries: querySvc,
+		ForwardsQueries:  querySvc,
 
-		SummariesQueries: &queries.Service{Summaries: repo},
-		ForwardsQueries:  &queries.Service{Forwards: repo, Accounts: repo},
+		SchedulesQueries: querySvc,
 
-		SchedulesQueries: &queries.Service{Schedules: repo},
-
-		UsersQueries: &queries.Service{Users: repo},
+		UsersQueries: querySvc,
 
 		Dashboard:            r.Config.DashboardBaseURL,
 		SuccessPath:          r.Config.OAuthSuccessPath,
@@ -628,8 +631,13 @@ func (r *Runtime) buildServices(ctx context.Context) error {
 		ErrorPath:            r.Config.OAuthErrorPath,
 		AuthSuccessPath:      r.Config.AuthSuccessPath,
 		AuthErrorPath:        r.Config.AuthErrorPath,
-		StateTTL:             r.Config.OAuthStateTTL, TokenVerifier: security.JWT{Secret: r.Config.JWTSecret},
-		CORSOrigins: r.Config.CORSOrigins, AccountJobs: &submissions.Service{Inline: r.Config.JobsInline, Accounts: repo, Durable: r.Enqueuer, Legacy: r.QueueClient, Runs: jobRuns, Sync: syncSvc, Categorize: categorizeSvc, Summarize: summarizeSvc, Draft: autoDraftSvc, Forward: forwardRulesSvc, Connectors: connectorSvc, Projects: projectSvc}, ConnectorJobs: &submissions.Service{Inline: r.Config.JobsInline, Accounts: repo, Durable: r.Enqueuer, Legacy: r.QueueClient, Runs: jobRuns, Sync: syncSvc, Categorize: categorizeSvc, Summarize: summarizeSvc, Draft: autoDraftSvc, Forward: forwardRulesSvc, Connectors: connectorSvc, Projects: projectSvc}, Extraction: &submissions.Service{Inline: r.Config.JobsInline, Accounts: repo, Durable: r.Enqueuer, Legacy: r.QueueClient, Runs: jobRuns, Sync: syncSvc, Categorize: categorizeSvc, Summarize: summarizeSvc, Draft: autoDraftSvc, Forward: forwardRulesSvc, Connectors: connectorSvc, Projects: projectSvc}, JobRequests: &submissions.Service{Inline: r.Config.JobsInline, Accounts: repo, Durable: r.Enqueuer, Legacy: r.QueueClient, Runs: jobRuns, Sync: syncSvc, Categorize: categorizeSvc, Summarize: summarizeSvc, Draft: autoDraftSvc, Forward: forwardRulesSvc, Connectors: connectorSvc, Projects: projectSvc},
+		StateTTL:             r.Config.OAuthStateTTL,
+		TokenVerifier:        security.JWT{Secret: r.Config.JWTSecret},
+		CORSOrigins:          r.Config.CORSOrigins,
+		AccountJobs:          submissionSvc,
+		ConnectorJobs:        submissionSvc,
+		Extraction:           submissionSvc,
+		JobRequests:          submissionSvc,
 	}
 	r.Handlers = h
 	router := h.Routes()

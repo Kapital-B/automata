@@ -27,8 +27,6 @@ type recipientPayload struct {
 	Address string `json:"address"`
 }
 
-type ResolveChunkResult = domaincontacts.ContactResolveChunkResult
-
 // ResolveMessage resolves From/To/Cc on one stored message into the user's home organisation.
 func (s *ResolveService) ResolveMessage(ctx context.Context, userID, messageID uuid.UUID) error {
 	orgID, err := s.Users.GetHomeOrganisationID(ctx, userID)
@@ -67,7 +65,7 @@ func (s *ResolveService) BackfillAccount(ctx context.Context, userID, accountID 
 // resolveChunkSize bounds one chunk of contact resolution.
 const resolveChunkSize = 100
 
-func (s *ResolveService) ResolveAccountChunk(ctx context.Context, run domainjobs.RunContext) (*ResolveChunkResult, error) {
+func (s *ResolveService) ResolveAccountChunk(ctx context.Context, run domainjobs.RunContext) (*domaincontacts.ContactResolveChunkResult, error) {
 	if s == nil || s.Users == nil || s.Messages == nil || s.Contacts == nil {
 		return nil, fmt.Errorf("resolve service not configured")
 	}
@@ -82,7 +80,7 @@ func (s *ResolveService) ResolveAccountChunk(ctx context.Context, run domainjobs
 	if err != nil {
 		return nil, err
 	}
-	return &ResolveChunkResult{MessagesProcessed: processed, Done: done}, nil
+	return &domaincontacts.ContactResolveChunkResult{MessagesProcessed: processed, Done: done}, nil
 }
 
 // resolveNextBatch resolves the next unresolved messages on an account and
@@ -208,11 +206,7 @@ func (s *Service) List(ctx context.Context, userID uuid.UUID, filter domainconta
 	return s.Contacts.ListContacts(ctx, orgID, filter)
 }
 
-type ContactDetail = domaincontacts.ContactContactDetail
-
-type RecentMessageRef = domaincontacts.ContactRecentMessageRef
-
-func (s *Service) Get(ctx context.Context, userID, contactID uuid.UUID) (*ContactDetail, error) {
+func (s *Service) Get(ctx context.Context, userID, contactID uuid.UUID) (*domaincontacts.ContactContactDetail, error) {
 	orgID, err := s.homeOrg(ctx, userID)
 	if err != nil {
 		return nil, err
@@ -232,13 +226,13 @@ func (s *Service) Get(ctx context.Context, userID, contactID uuid.UUID) (*Contac
 	if err != nil {
 		return nil, err
 	}
-	recent := make([]RecentMessageRef, 0, len(recentIDs))
+	recent := make([]domaincontacts.ContactRecentMessageRef, 0, len(recentIDs))
 	for _, mid := range recentIDs {
 		msg, err := s.Messages.GetMessage(ctx, userID, mid)
 		if err != nil || msg == nil {
 			continue
 		}
-		ref := RecentMessageRef{MessageID: mid, AccountID: msg.AccountID, Subject: msg.Subject, ReceivedAt: msg.ReceivedAt}
+		ref := domaincontacts.ContactRecentMessageRef{MessageID: mid, AccountID: msg.AccountID, Subject: msg.Subject, ReceivedAt: msg.ReceivedAt}
 		var from struct {
 			Name    string `json:"name"`
 			Address string `json:"address"`
@@ -252,7 +246,7 @@ func (s *Service) Get(ctx context.Context, userID, contactID uuid.UUID) (*Contac
 	if err != nil {
 		return nil, err
 	}
-	return &ContactDetail{
+	return &domaincontacts.ContactContactDetail{
 		Contact:         *c,
 		Identities:      idents,
 		RecentMessages:  recent,
@@ -260,9 +254,7 @@ func (s *Service) Get(ctx context.Context, userID, contactID uuid.UUID) (*Contac
 	}, nil
 }
 
-type CreateContactInput = domaincontacts.ContactCreateContactInput
-
-func (s *Service) Create(ctx context.Context, userID uuid.UUID, in CreateContactInput) (*domaincontacts.ContactRow, error) {
+func (s *Service) Create(ctx context.Context, userID uuid.UUID, in domaincontacts.ContactCreateContactInput) (*domaincontacts.ContactRow, error) {
 	orgID, err := s.homeOrg(ctx, userID)
 	if err != nil {
 		return nil, err

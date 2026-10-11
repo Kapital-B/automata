@@ -164,7 +164,7 @@ func TestCompletedChainDeletesItsLockRow(t *testing.T) {
 	account := uuid.New()
 	enq := &jobs.Enqueuer{Store: store}
 	first, err := enq.EnqueueChain(ctx, user, &account, domainjobs.JobTriggerAPI,
-		[]string{jobs.TypeSync, jobs.TypeResolveContacts}, domainjobs.JobPayload{}, nil, nil)
+		[]string{domainjobs.TypeSync, domainjobs.TypeResolveContacts}, domainjobs.JobPayload{}, nil, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -190,7 +190,7 @@ func TestCompletedChainDeletesItsLockRow(t *testing.T) {
 		var next *domainjobs.CreateJobInput
 		if len(running.RemainingJobs) > 0 {
 			next = &domainjobs.CreateJobInput{
-				ID:            jobs.DeterministicJobID(running.ChainID, running.StepIndex+1, running.RemainingJobs[0]),
+				ID:            domainjobs.DeterministicJobID(running.ChainID, running.StepIndex+1, running.RemainingJobs[0]),
 				JobType:       running.RemainingJobs[0],
 				UserID:        running.UserID,
 				AccountID:     running.AccountID,

@@ -394,7 +394,7 @@ Exactly-once delivery to Microsoft Graph is impossible. `forward_rules` therefor
 
 LLM calls may repeat, but their resulting DSQL writes must be deterministic/upserted. Network/DSQL infrastructure errors are retriable **except when the forwarding classification above says delivery is ambiguous**. Malformed payloads and deterministic validation failures become terminal `failed`.
 
-HTTP handlers and the scheduler **stop calling Asynq**. Introduce a driven port, e.g. `JobEnqueuer`:
+HTTP handlers and the scheduler **stop calling Asynq**. Use the domain-owned outbound port `internal/domain/jobs.JobEnqueuer`:
 
 | Implementation | When | Behaviour |
 | -------------- | ---- | --------- |
@@ -610,7 +610,7 @@ Lambda has no durable local disk. SQLite in `/tmp` is lost on freeze/recycle and
 
 ### 5.2 Approach
 
-1. Add a **Postgres-dialect adapter** (e.g. `…/persistence/postgres`) implementing the same `driven.*` ports. Hosted target is **DSQL**; local/CI can use vanilla Postgres. DSQL-specific DDL (generated-column uniques, `CREATE INDEX ASYNC`, chunked deletes) is specified in [addendum-aurora-dsql.md](addendum-aurora-dsql.md).
+1. Add a **Postgres-dialect adapter** (e.g. `…/persistence/postgres`) implementing the same context-owned `domain/<context>` repository ports. Hosted target is **DSQL**; local/CI can use vanilla Postgres. DSQL-specific DDL (generated-column uniques, `CREATE INDEX ASYNC`, chunked deletes) is specified in [addendum-aurora-dsql.md](addendum-aurora-dsql.md).
 2. Keep SQLite **for unit tests**. Do not compile SQLite-only `PRAGMA` / `INSERT OR IGNORE` / `COLLATE NOCASE` into the AWS path.
 3. Rewrite migrations as a **current-schema baseline plus forward migrations**, split by engine:
    - `migrations/common/`: tables, columns, constraints, and data changes accepted by both Postgres and DSQL;

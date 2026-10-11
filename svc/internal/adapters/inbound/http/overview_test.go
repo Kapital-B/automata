@@ -1,6 +1,10 @@
 package http
 
 import (
+	domainprojects "github.com/Kapital-B/automata/svc/internal/domain/projects"
+)
+
+import (
 	"context"
 	"database/sql"
 	"encoding/json"
@@ -86,7 +90,7 @@ func TestOverviewHTTP(t *testing.T) {
 	ctx := context.Background()
 	now := time.Now().UTC()
 
-	p, err := f.projectSvc.Create(ctx, f.userID, appprojects.CreateProjectInput{Name: "Cooling", Code: "DC01"})
+	p, err := f.projectSvc.Create(ctx, f.userID, domainprojects.ProjectCreateProjectInput{Name: "Cooling", Code: "DC01"})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -130,7 +134,7 @@ func TestActivityHTTP(t *testing.T) {
 	ctx := context.Background()
 	now := time.Now().UTC()
 
-	p, err := f.projectSvc.Create(ctx, f.userID, appprojects.CreateProjectInput{Name: "Cooling", Code: "DC01"})
+	p, err := f.projectSvc.Create(ctx, f.userID, domainprojects.ProjectCreateProjectInput{Name: "Cooling", Code: "DC01"})
 	if err != nil {
 		t.Fatal(err)
 	}

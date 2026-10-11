@@ -18,13 +18,6 @@ import (
 	"github.com/google/uuid"
 )
 
-var ErrNotFound = domainissues.IssueErrNotFound
-var ErrInvalidStatus = domainissues.IssueErrInvalidStatus
-var ErrDualAssignee = domainissues.IssueErrDualAssignee
-var ErrItemConflict = domainissues.IssueErrItemConflict
-var ErrWrongProject = domainissues.IssueErrWrongProject
-var ErrInvalidItemRef = domainissues.IssueErrInvalidItemRef
-
 // Service handles issue CRUD and trail links.
 type Service struct {
 	Users       domainauth.UserRepository
@@ -50,17 +43,7 @@ func (s *Service) HasLLM() bool {
 	return s != nil && s.LLM != nil
 }
 
-type IssueView = domainissues.IssueIssueView
-
-type TrailItem = domainissues.IssueTrailItem
-
-type CreateInput = domainissues.IssueCreateInput
-
-type ItemRef = domainissues.IssueItemRef
-
-type UpdateInput = domainissues.IssueUpdateInput
-
-func (s *Service) List(ctx context.Context, userID, projectID uuid.UUID) ([]IssueView, error) {
+func (s *Service) List(ctx context.Context, userID, projectID uuid.UUID) ([]domainissues.IssueIssueView, error) {
 	orgID, err := s.homeOrg(ctx, userID)
 	if err != nil {
 		return nil, err
@@ -70,7 +53,7 @@ func (s *Service) List(ctx context.Context, userID, projectID uuid.UUID) ([]Issu
 		return nil, err
 	}
 	if p == nil {
-		return nil, ErrNotFound
+		return nil, domainissues.IssueErrNotFound
 	}
 	rows, err := s.Issues.ListIssuesByProject(ctx, orgID, projectID)
 	if err != nil {
@@ -80,9 +63,9 @@ func (s *Service) List(ctx context.Context, userID, projectID uuid.UUID) ([]Issu
 	if err != nil {
 		return nil, err
 	}
-	out := make([]IssueView, 0, len(rows))
+	out := make([]domainissues.IssueIssueView, 0, len(rows))
 	for _, row := range rows {
-		out = append(out, IssueView{
+		out = append(out, domainissues.IssueIssueView{
 			Issue: row, AwaitingMe: awaitingMe(row, userID),
 			AssigneeLabel: s.assigneeLabel(ctx, orgID, userID, row),
 			ItemCount:     counts[row.ID],
@@ -91,7 +74,7 @@ func (s *Service) List(ctx context.Context, userID, projectID uuid.UUID) ([]Issu
 	return out, nil
 }
 
-func (s *Service) Get(ctx context.Context, userID, issueID uuid.UUID) (*IssueView, error) {
+func (s *Service) Get(ctx context.Context, userID, issueID uuid.UUID) (*domainissues.IssueIssueView, error) {
 	orgID, err := s.homeOrg(ctx, userID)
 	if err != nil {
 		return nil, err
@@ -101,13 +84,13 @@ func (s *Service) Get(ctx context.Context, userID, issueID uuid.UUID) (*IssueVie
 		return nil, err
 	}
 	if row == nil {
-		return nil, ErrNotFound
+		return nil, domainissues.IssueErrNotFound
 	}
 	items, err := s.Issues.ListIssueItems(ctx, issueID)
 	if err != nil {
 		return nil, err
 	}
-	trail := make([]TrailItem, 0, len(items))
+	trail := make([]domainissues.IssueTrailItem, 0, len(items))
 	for _, it := range items {
 		trail = append(trail, s.enrichTrailItem(ctx, userID, orgID, it))
 	}
@@ -127,14 +110,14 @@ func (s *Service) Get(ctx context.Context, userID, issueID uuid.UUID) (*IssueVie
 		}
 		return ai.Before(*aj)
 	})
-	var todos []apptodos.Todo
+	var todos []domainissues.TodoTodo
 	if s.Todos != nil {
 		todos, err = s.Todos.ForIssue(ctx, userID, row.ProjectID, issueID)
 		if err != nil {
 			return nil, err
 		}
 	}
-	return &IssueView{
+	return &domainissues.IssueIssueView{
 		Issue: *row, AwaitingMe: awaitingMe(*row, userID),
 		AssigneeLabel: s.assigneeLabel(ctx, orgID, userID, *row),
 		Items:         trail,
@@ -152,7 +135,7 @@ func sourceOrHuman(src string) string {
 	return src
 }
 
-func (s *Service) Create(ctx context.Context, userID, projectID uuid.UUID, in CreateInput) (*IssueView, error) {
+func (s *Service) Create(ctx context.Context, userID, projectID uuid.UUID, in domainissues.IssueCreateInput) (*domainissues.IssueIssueView, error) {
 	orgID, err := s.homeOrg(ctx, userID)
 	if err != nil {
 		return nil, err
@@ -162,14 +145,14 @@ func (s *Service) Create(ctx context.Context, userID, projectID uuid.UUID, in Cr
 		return nil, err
 	}
 	if p == nil || p.ArchivedAt != nil {
-		return nil, ErrNotFound
+		return nil, domainissues.IssueErrNotFound
 	}
 	member, err := s.Projects.GetProjectMember(ctx, projectID, userID)
 	if err != nil {
 		return nil, err
 	}
 	if member == nil {
-		return nil, ErrNotFound
+		return nil, domainissues.IssueErrNotFound
 	}
 	title := strings.TrimSpace(in.Title)
 	if title == "" {
@@ -204,7 +187,7 @@ func (s *Service) Create(ctx context.Context, userID, projectID uuid.UUID, in Cr
 	return s.Get(ctx, userID, row.ID)
 }
 
-func (s *Service) Update(ctx context.Context, userID, issueID uuid.UUID, in UpdateInput) (*IssueView, error) {
+func (s *Service) Update(ctx context.Context, userID, issueID uuid.UUID, in domainissues.IssueUpdateInput) (*domainissues.IssueIssueView, error) {
 	orgID, err := s.homeOrg(ctx, userID)
 	if err != nil {
 		return nil, err
@@ -214,7 +197,7 @@ func (s *Service) Update(ctx context.Context, userID, issueID uuid.UUID, in Upda
 		return nil, err
 	}
 	if row == nil {
-		return nil, ErrNotFound
+		return nil, domainissues.IssueErrNotFound
 	}
 	if in.Title != nil {
 		row.Title = strings.TrimSpace(*in.Title)
@@ -226,7 +209,7 @@ func (s *Service) Update(ctx context.Context, userID, issueID uuid.UUID, in Upda
 	if in.Status != nil {
 		st := domainissues.Status(strings.TrimSpace(*in.Status))
 		if !st.Valid() {
-			return nil, ErrInvalidStatus
+			return nil, domainissues.IssueErrInvalidStatus
 		}
 		resolving = st == domainissues.StatusResolved && row.Status != string(st)
 		// Stamp the transition, not the edit: updated_at moves every time the
@@ -263,7 +246,7 @@ func (s *Service) Update(ctx context.Context, userID, issueID uuid.UUID, in Upda
 	return s.Get(ctx, userID, issueID)
 }
 
-func (s *Service) AddItem(ctx context.Context, userID, issueID uuid.UUID, ref ItemRef) (*IssueView, error) {
+func (s *Service) AddItem(ctx context.Context, userID, issueID uuid.UUID, ref domainissues.IssueItemRef) (*domainissues.IssueIssueView, error) {
 	orgID, err := s.homeOrg(ctx, userID)
 	if err != nil {
 		return nil, err
@@ -273,7 +256,7 @@ func (s *Service) AddItem(ctx context.Context, userID, issueID uuid.UUID, ref It
 		return nil, err
 	}
 	if row == nil {
-		return nil, ErrNotFound
+		return nil, domainissues.IssueErrNotFound
 	}
 	if err := s.addItemInternal(ctx, userID, orgID, *row, ref); err != nil {
 		return nil, err
@@ -281,7 +264,7 @@ func (s *Service) AddItem(ctx context.Context, userID, issueID uuid.UUID, ref It
 	return s.Get(ctx, userID, issueID)
 }
 
-func (s *Service) RemoveItem(ctx context.Context, userID, issueID, itemID uuid.UUID) (*IssueView, error) {
+func (s *Service) RemoveItem(ctx context.Context, userID, issueID, itemID uuid.UUID) (*domainissues.IssueIssueView, error) {
 	orgID, err := s.homeOrg(ctx, userID)
 	if err != nil {
 		return nil, err
@@ -291,19 +274,19 @@ func (s *Service) RemoveItem(ctx context.Context, userID, issueID, itemID uuid.U
 		return nil, err
 	}
 	if row == nil {
-		return nil, ErrNotFound
+		return nil, domainissues.IssueErrNotFound
 	}
 	if err := s.Issues.RemoveIssueItem(ctx, orgID, issueID, itemID); err != nil {
-		return nil, ErrNotFound
+		return nil, domainissues.IssueErrNotFound
 	}
 	return s.Get(ctx, userID, issueID)
 }
 
-func (s *Service) addItemInternal(ctx context.Context, userID, orgID uuid.UUID, issue domainissues.IssueRow, ref ItemRef) error {
+func (s *Service) addItemInternal(ctx context.Context, userID, orgID uuid.UUID, issue domainissues.IssueRow, ref domainissues.IssueItemRef) error {
 	hasMsg := ref.MessageID != nil
 	hasManual := ref.ManualItemID != nil
 	if hasMsg == hasManual {
-		return ErrInvalidItemRef
+		return domainissues.IssueErrInvalidItemRef
 	}
 	if hasMsg {
 		existing, err := s.Issues.FindIssueIDByMessage(ctx, *ref.MessageID)
@@ -311,14 +294,14 @@ func (s *Service) addItemInternal(ctx context.Context, userID, orgID uuid.UUID, 
 			return err
 		}
 		if existing != nil {
-			return ErrItemConflict
+			return domainissues.IssueErrItemConflict
 		}
 		eff, err := s.Assignments.EffectiveAssignment(ctx, userID, *ref.MessageID)
 		if err != nil {
 			return err
 		}
 		if eff == nil || eff.ProjectID == nil || *eff.ProjectID != issue.ProjectID {
-			return ErrWrongProject
+			return domainissues.IssueErrWrongProject
 		}
 	} else {
 		existing, err := s.Issues.FindIssueIDByManualItem(ctx, *ref.ManualItemID)
@@ -326,14 +309,14 @@ func (s *Service) addItemInternal(ctx context.Context, userID, orgID uuid.UUID, 
 			return err
 		}
 		if existing != nil {
-			return ErrItemConflict
+			return domainissues.IssueErrItemConflict
 		}
 		manual, err := s.Manuals.GetManualItem(ctx, orgID, *ref.ManualItemID)
 		if err != nil {
 			return err
 		}
 		if manual == nil || manual.ProjectID == nil || *manual.ProjectID != issue.ProjectID {
-			return ErrWrongProject
+			return domainissues.IssueErrWrongProject
 		}
 	}
 	now := time.Now().UTC()
@@ -345,7 +328,7 @@ func (s *Service) addItemInternal(ctx context.Context, userID, orgID uuid.UUID, 
 
 func (s *Service) validateAssignee(ctx context.Context, orgID, projectID uuid.UUID, userID, contactID *uuid.UUID) error {
 	if !domainissues.ValidAssigneeXOR(userID != nil, contactID != nil) {
-		return ErrDualAssignee
+		return domainissues.IssueErrDualAssignee
 	}
 	if userID != nil {
 		m, err := s.Projects.GetProjectMember(ctx, projectID, *userID)
@@ -362,7 +345,7 @@ func (s *Service) validateAssignee(ctx context.Context, orgID, projectID uuid.UU
 			return err
 		}
 		if c == nil {
-			return ErrNotFound
+			return domainissues.IssueErrNotFound
 		}
 	}
 	return nil
@@ -390,8 +373,8 @@ func (s *Service) assigneeLabel(ctx context.Context, orgID, caller uuid.UUID, ro
 	return "Unassigned"
 }
 
-func (s *Service) enrichTrailItem(ctx context.Context, userID, orgID uuid.UUID, it domainissues.IssueItemRow) TrailItem {
-	out := TrailItem{Item: it}
+func (s *Service) enrichTrailItem(ctx context.Context, userID, orgID uuid.UUID, it domainissues.IssueItemRow) domainissues.IssueTrailItem {
+	out := domainissues.IssueTrailItem{Item: it}
 	if it.MessageID != nil {
 		out.Source = "mail"
 		msg, err := s.Messages.GetMessage(ctx, userID, *it.MessageID)
@@ -428,7 +411,7 @@ func (s *Service) enrichTrailItem(ctx context.Context, userID, orgID uuid.UUID, 
 //
 // Distinct from resolving, which means the work is done. Keeping them separate
 // preserves the signal for whether extraction is proposing useful issues.
-func (s *Service) Discard(ctx context.Context, userID, issueID uuid.UUID) (*IssueView, error) {
+func (s *Service) Discard(ctx context.Context, userID, issueID uuid.UUID) (*domainissues.IssueIssueView, error) {
 	orgID, err := s.homeOrg(ctx, userID)
 	if err != nil {
 		return nil, err
@@ -438,7 +421,7 @@ func (s *Service) Discard(ctx context.Context, userID, issueID uuid.UUID) (*Issu
 		return nil, err
 	}
 	if row == nil {
-		return nil, ErrNotFound
+		return nil, domainissues.IssueErrNotFound
 	}
 	if row.DiscardedAt == nil {
 		now := time.Now().UTC()

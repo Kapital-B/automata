@@ -17,10 +17,10 @@ Backend CI already runs `go test ./...`, which includes this package. No separat
 - Application may depend on domain/application packages, but not infrastructure implementations. Domain/application imports of SQL or HTTP packages are rejected; other third-party imports are rejected except UUID.
 - Inbound adapters may depend on domain and inbound/shared adapter helpers. Outbound adapters may depend on domain and outbound/shared adapter helpers. Composition, configuration, and entrypoints keep their wiring responsibilities.
 - Dependencies are followed through Automata-owned production packages. A new caller cannot inherit an existing package's permission to reach infrastructure. Third-party libraries' private import graphs are not traversed.
-- Existing named application interfaces and nonempty inline struct-field interfaces have exact ownership exceptions. New contracts in those forms must be defined in domain. Type aliases to domain contracts are allowed during R1.
+- Named application interfaces and nonempty inline struct-field interfaces must be defined in domain. The completed migration has no ownership or dependency exceptions. A final check rejects application compatibility aliases and forwarded domain symbols, and the old `application/ports` package must remain absent.
 - Every exception identifies one originating package/dependency or one contract, a reason, and its removal phase. New violations, duplicate/invalid exceptions, and stale exceptions fail the check.
 
-The source check supplements Go compilation: it does not replace compiler detection of package cycles, inspect business semantics, detect every possible form of anonymous interface, or prove that DTOs are mapped correctly. The baseline's direct HTTP calls and missing-record behavior remain explicit R2/R3 work.
+The source check supplements Go compilation: it does not replace compiler detection of package cycles, inspect business semantics, detect every possible form of anonymous interface, or prove that DTOs are mapped correctly. HTTP and workers invoke domain-owned inbound ports; application services implement orchestration, and outbound adapters implement persistence/security/queue ports. Compile-time assertions and adapter contract suites complement the source checks.
 
 ## Test rules
 

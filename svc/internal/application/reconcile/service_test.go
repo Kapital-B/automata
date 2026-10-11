@@ -1,6 +1,12 @@
 package reconcile_test
 
 import (
+	domaincontradictions "github.com/Kapital-B/automata/svc/internal/domain/contradictions"
+	domainfacts "github.com/Kapital-B/automata/svc/internal/domain/facts"
+	domainprojects "github.com/Kapital-B/automata/svc/internal/domain/projects"
+)
+
+import (
 	"context"
 	"database/sql"
 	"encoding/json"
@@ -51,7 +57,7 @@ func setupReconcile(t *testing.T, name string) (*sqlite.Repository, *appfacts.Se
 	if err != nil {
 		t.Fatal(err)
 	}
-	proj, err := projectSvc.Create(context.Background(), userID, appprojects.CreateProjectInput{Name: "Cooling", Code: "DC01"})
+	proj, err := projectSvc.Create(context.Background(), userID, domainprojects.ProjectCreateProjectInput{Name: "Cooling", Code: "DC01"})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -85,7 +91,7 @@ func TestReconcileConfirmNewAndReinforce(t *testing.T) {
 		}},
 	})
 	insertPendingInterp(t, repo, orgID, projectID, string(payload))
-	res, err := reconcileSvc.Run(ctx, userID, projectID, appreconcile.ReconcileInput{})
+	res, err := reconcileSvc.Run(ctx, userID, projectID, domaincontradictions.ReconciliationReconcileInput{})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -100,7 +106,7 @@ func TestReconcileConfirmNewAndReinforce(t *testing.T) {
 		}},
 	})
 	insertPendingInterp(t, repo, orgID, projectID, string(payload2))
-	res2, err := reconcileSvc.Run(ctx, userID, projectID, appreconcile.ReconcileInput{})
+	res2, err := reconcileSvc.Run(ctx, userID, projectID, domaincontradictions.ReconciliationReconcileInput{})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -116,7 +122,7 @@ func TestReconcileContradictionAndResolveSupersede(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	first, err := factSvc.Create(ctx, userID, projectID, appfacts.CreateInput{
+	first, err := factSvc.Create(ctx, userID, projectID, domainfacts.FactCreateInput{
 		SubjectKey: "pump.p03.duty_kw", Label: "Pump P-03 duty", Value: 75.0, Unit: strPtr("kW"), Confirm: true,
 	})
 	if err != nil {
@@ -131,7 +137,7 @@ func TestReconcileContradictionAndResolveSupersede(t *testing.T) {
 		}},
 	})
 	insertPendingInterp(t, repo, orgID, projectID, string(payload))
-	res, err := reconcileSvc.Run(ctx, userID, projectID, appreconcile.ReconcileInput{})
+	res, err := reconcileSvc.Run(ctx, userID, projectID, domaincontradictions.ReconciliationReconcileInput{})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -147,7 +153,7 @@ func TestReconcileContradictionAndResolveSupersede(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	view, err := reconcileSvc.Resolve(ctx, userID, cid, appreconcile.ResolveInput{
+	view, err := reconcileSvc.Resolve(ctx, userID, cid, domaincontradictions.ReconciliationResolveInput{
 		Resolution: "supersede", KeepFactVersionID: &proposedID,
 	})
 	if err != nil {

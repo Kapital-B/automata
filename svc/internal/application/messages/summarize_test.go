@@ -66,7 +66,7 @@ func TestSummarizeConsidersUnseenBySummarySeenNotReceivedAt(t *testing.T) {
 		LLM:       &fakeLLM{responses: []string{llmJSON}},
 		JobRuns:   repo,
 	}
-	_, err := svc.SummarizeAccount(context.Background(), userID, accountID, SummarizeOptions{
+	_, err := svc.SummarizeAccount(context.Background(), userID, accountID, domainmessages.MessageSummarizeOptions{
 		Trigger: "schedule",
 		Since:   ptrTime(time.Date(2026, 4, 28, 13, 24, 11, 0, time.UTC)),
 	})
@@ -128,7 +128,7 @@ func TestSummarizeMarksExcludedBySettingsAsSeenWithoutLLM(t *testing.T) {
 		},
 		JobRuns: repo,
 	}
-	if _, err := svc.SummarizeAccount(context.Background(), userID, accountID, SummarizeOptions{Trigger: "schedule"}); err != nil {
+	if _, err := svc.SummarizeAccount(context.Background(), userID, accountID, domainmessages.MessageSummarizeOptions{Trigger: "schedule"}); err != nil {
 		t.Fatal(err)
 	}
 	if calls != 0 {
@@ -152,10 +152,10 @@ func TestSummarizeSecondRunFindsNoUnseenMessages(t *testing.T) {
 		LLM:       &fakeLLM{responses: []string{llmJSON, llmJSON}},
 		JobRuns:   repo,
 	}
-	if _, err := svc.SummarizeAccount(context.Background(), userID, accountID, SummarizeOptions{Trigger: "schedule"}); err != nil {
+	if _, err := svc.SummarizeAccount(context.Background(), userID, accountID, domainmessages.MessageSummarizeOptions{Trigger: "schedule"}); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := svc.SummarizeAccount(context.Background(), userID, accountID, SummarizeOptions{Trigger: "schedule"}); err != nil {
+	if _, err := svc.SummarizeAccount(context.Background(), userID, accountID, domainmessages.MessageSummarizeOptions{Trigger: "schedule"}); err != nil {
 		t.Fatal(err)
 	}
 	rows, err := repo.ListMessages(context.Background(), userID, domainmessages.MessageListFilter{
@@ -194,7 +194,7 @@ func TestSummarizeDoesNotDuplicateOpenActionItem(t *testing.T) {
 		LLM:       &fakeLLM{responses: []string{llmJSON}},
 		JobRuns:   repo,
 	}
-	if _, err := svc.SummarizeAccount(context.Background(), userID, accountID, SummarizeOptions{Trigger: "schedule"}); err != nil {
+	if _, err := svc.SummarizeAccount(context.Background(), userID, accountID, domainmessages.MessageSummarizeOptions{Trigger: "schedule"}); err != nil {
 		t.Fatal(err)
 	}
 	var n int

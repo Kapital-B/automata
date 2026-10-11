@@ -22,12 +22,6 @@ import (
 	"github.com/google/uuid"
 )
 
-var ErrNotFound = domaininterpretations.InterpretationErrNotFound
-var ErrLLMUnavailable = domaininterpretations.InterpretationErrLLMUnavailable
-var ErrMixedAccounts = domaininterpretations.InterpretationErrMixedAccounts
-var ErrNothingToInterpret = domaininterpretations.InterpretationErrNothingToInterpret
-var ErrNotPending = domaininterpretations.InterpretationErrNotPending
-
 // Service runs Stage A interpret and manages pending candidates.
 type Service struct {
 	Users           domainauth.UserRepository
@@ -50,12 +44,6 @@ func (s *Service) HasLLM() bool {
 func (s *Service) homeOrg(ctx context.Context, userID uuid.UUID) (uuid.UUID, error) {
 	return s.Users.GetHomeOrganisationID(ctx, userID)
 }
-
-type RunInput = domaininterpretations.InterpretationRunInput
-
-type InterpretationView = domaininterpretations.InterpretationInterpretationView
-
-type CandidateView = domaininterpretations.InterpretationCandidateView
 
 type interpretLLMPayload struct {
 	SchemaVersion int                  `json:"schema_version"`
@@ -104,19 +92,19 @@ func (s *Service) requireProjectMember(ctx context.Context, userID, projectID uu
 		return uuid.Nil, err
 	}
 	if p == nil {
-		return uuid.Nil, ErrNotFound
+		return uuid.Nil, domaininterp.InterpretationErrNotFound
 	}
 	member, err := s.Projects.GetProjectMember(ctx, projectID, userID)
 	if err != nil {
 		return uuid.Nil, err
 	}
 	if member == nil {
-		return uuid.Nil, ErrNotFound
+		return uuid.Nil, domaininterpretations.InterpretationErrNotFound
 	}
 	return orgID, nil
 }
 
-func (s *Service) ListPending(ctx context.Context, userID, projectID uuid.UUID) ([]InterpretationView, error) {
+func (s *Service) ListPending(ctx context.Context, userID, projectID uuid.UUID) ([]domaininterpretations.InterpretationInterpretationView, error) {
 	orgID, err := s.requireProjectMember(ctx, userID, projectID)
 	if err != nil {
 		return nil, err
@@ -125,7 +113,7 @@ func (s *Service) ListPending(ctx context.Context, userID, projectID uuid.UUID) 
 	if err != nil {
 		return nil, err
 	}
-	out := make([]InterpretationView, 0, len(rows))
+	out := make([]domaininterp.InterpretationInterpretationView, 0, len(rows))
 	for _, row := range rows {
 		view, err := s.buildView(ctx, row)
 		if err != nil {
@@ -136,7 +124,7 @@ func (s *Service) ListPending(ctx context.Context, userID, projectID uuid.UUID) 
 	return out, nil
 }
 
-func (s *Service) Dismiss(ctx context.Context, userID, interpretationID uuid.UUID) (*InterpretationView, error) {
+func (s *Service) Dismiss(ctx context.Context, userID, interpretationID uuid.UUID) (*domaininterpretations.InterpretationInterpretationView, error) {
 	orgID, err := s.homeOrg(ctx, userID)
 	if err != nil {
 		return nil, err
@@ -146,18 +134,18 @@ func (s *Service) Dismiss(ctx context.Context, userID, interpretationID uuid.UUI
 		return nil, err
 	}
 	if row == nil {
-		return nil, ErrNotFound
+		return nil, domaininterpretations.InterpretationErrNotFound
 	}
 	if _, err := s.requireProjectMember(ctx, userID, row.ProjectID); err != nil {
 		return nil, err
 	}
 	if row.Status != string(domaininterp.StatusPending) {
-		return nil, ErrNotPending
+		return nil, domaininterp.InterpretationErrNotPending
 	}
 	now := time.Now().UTC()
 	if err := s.Interpretations.UpdateInterpretationStatus(ctx, orgID, interpretationID, string(domaininterp.StatusDismissed), now); err != nil {
 		if errors.Is(err, domainshared.ErrNotFound) {
-			return nil, ErrNotFound
+			return nil, domaininterpretations.InterpretationErrNotFound
 		}
 		return nil, err
 	}
@@ -167,9 +155,9 @@ func (s *Service) Dismiss(ctx context.Context, userID, interpretationID uuid.UUI
 }
 
 // Run interprets project correspondence into a pending candidate payload. Never writes facts.
-func (s *Service) Run(ctx context.Context, userID, projectID uuid.UUID, in RunInput) (*InterpretationView, error) {
+func (s *Service) Run(ctx context.Context, userID, projectID uuid.UUID, in domaininterpretations.InterpretationRunInput) (*domaininterpretations.InterpretationInterpretationView, error) {
 	if s.LLM == nil {
-		return nil, ErrLLMUnavailable
+		return nil, domaininterpretations.InterpretationErrLLMUnavailable
 	}
 	orgID, err := s.requireProjectMember(ctx, userID, projectID)
 	if err != nil {
@@ -180,7 +168,7 @@ func (s *Service) Run(ctx context.Context, userID, projectID uuid.UUID, in RunIn
 		return nil, err
 	}
 	if p == nil || p.ArchivedAt != nil {
-		return nil, ErrNotFound
+		return nil, domaininterpretations.InterpretationErrNotFound
 	}
 
 	items, accountID, err := s.resolveItems(ctx, userID, orgID, projectID, in)
@@ -188,7 +176,7 @@ func (s *Service) Run(ctx context.Context, userID, projectID uuid.UUID, in RunIn
 		return nil, err
 	}
 	if len(items) == 0 {
-		return nil, ErrNothingToInterpret
+		return nil, domaininterpretations.InterpretationErrNothingToInterpret
 	}
 
 	activeFacts, err := s.loadActiveFactContext(ctx, orgID, projectID)
@@ -271,7 +259,7 @@ func (s *Service) Run(ctx context.Context, userID, projectID uuid.UUID, in RunIn
 	return s.buildView(ctx, row)
 }
 
-func (s *Service) resolveItems(ctx context.Context, userID, orgID, projectID uuid.UUID, in RunInput) ([]interpretItem, *uuid.UUID, error) {
+func (s *Service) resolveItems(ctx context.Context, userID, orgID, projectID uuid.UUID, in domaininterp.InterpretationRunInput) ([]interpretItem, *uuid.UUID, error) {
 	explicit := len(in.MessageIDs) > 0 || len(in.ManualItemIDs) > 0 || len(in.ConnectorMessageIDs) > 0
 	items := make([]interpretItem, 0)
 
@@ -296,10 +284,10 @@ func (s *Service) resolveItems(ctx context.Context, userID, orgID, projectID uui
 				aid := msg.AccountID
 				mailAccount = &aid
 			} else if msg.AccountID != *mailAccount {
-				return nil, nil, ErrMixedAccounts
+				return nil, nil, domaininterpretations.InterpretationErrMixedAccounts
 			}
 			if in.AccountID != nil && msg.AccountID != *in.AccountID {
-				return nil, nil, ErrMixedAccounts
+				return nil, nil, domaininterpretations.InterpretationErrMixedAccounts
 			}
 			title := msg.Subject
 			snippet := ""
@@ -346,13 +334,13 @@ func (s *Service) resolveItems(ctx context.Context, userID, orgID, projectID uui
 			})
 		}
 		if in.AccountID != nil && mailAccount != nil && *mailAccount != *in.AccountID {
-			return nil, nil, ErrMixedAccounts
+			return nil, nil, domaininterpretations.InterpretationErrMixedAccounts
 		}
 		return items, mailAccount, nil
 	}
 
 	if s.Timeline == nil {
-		return nil, nil, ErrNothingToInterpret
+		return nil, nil, domaininterpretations.InterpretationErrNothingToInterpret
 	}
 	timeline, err := s.Timeline.ListProjectTimeline(ctx, userID, orgID, projectID, domainprojects.TimelineFilter{
 		Source: "all", Limit: 40,
@@ -444,27 +432,27 @@ func (s *Service) loadActiveFactContext(ctx context.Context, orgID, projectID uu
 	return out, nil
 }
 
-func (s *Service) buildView(ctx context.Context, row domaininterpretations.InterpretationRow) (*InterpretationView, error) {
+func (s *Service) buildView(ctx context.Context, row domaininterpretations.InterpretationRow) (*domaininterpretations.InterpretationInterpretationView, error) {
 	sources, err := s.Interpretations.ListInterpretationSources(ctx, row.ID)
 	if err != nil {
 		return nil, err
 	}
 	var payload interpretLLMPayload
 	_ = json.Unmarshal([]byte(row.PayloadJSON), &payload)
-	cands := make([]CandidateView, 0, len(payload.Candidates))
+	cands := make([]domaininterpretations.InterpretationCandidateView, 0, len(payload.Candidates))
 	for _, c := range payload.Candidates {
 		var value any
 		if len(c.Value) > 0 {
 			_ = json.Unmarshal(c.Value, &value)
 		}
-		cands = append(cands, CandidateView{
+		cands = append(cands, domaininterpretations.InterpretationCandidateView{
 			Kind: c.Kind, SubjectKey: c.SubjectKey, Label: c.Label, Title: c.Title, Value: value,
 			Unit: c.Unit, Statement: c.Statement, MessageIDs: c.MessageIDs,
 			ManualItemIDs: c.ManualItemIDs, ConnectorMessageIDs: c.ConnectorMessageIDs,
 			Confidence: c.Confidence, Reason: c.Reason,
 		})
 	}
-	return &InterpretationView{Interpretation: row, Sources: sources, Candidates: cands}, nil
+	return &domaininterp.InterpretationInterpretationView{Interpretation: row, Sources: sources, Candidates: cands}, nil
 }
 
 // bodyOrSnippet prefers the stored body, which manual and connector timeline

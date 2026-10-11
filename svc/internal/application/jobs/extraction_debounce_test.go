@@ -44,8 +44,8 @@ func TestSchedulerEnqueuesExtractionForDueProjects(t *testing.T) {
 	sched := &appjobs.SchedulerService{
 		Store:    store,
 		Projects: projects,
-		Enqueuer: &appjobs.Enqueuer{Store: store, Registry: appjobs.DefaultRegistry()},
-		Registry: appjobs.DefaultRegistry(),
+		Enqueuer: &appjobs.Enqueuer{Store: store, Registry: domainjobs.DefaultRegistry()},
+		Registry: domainjobs.DefaultRegistry(),
 	}
 
 	if err := sched.Tick(context.Background(), time.Now().UTC()); err != nil {
@@ -71,7 +71,7 @@ func TestSchedulerEnqueuesExtractionForDueProjects(t *testing.T) {
 		}
 	}
 	for _, id := range []uuid.UUID{projectA, projectB} {
-		if seen[id] != appjobs.TypeInterpretProject {
+		if seen[id] != domainjobs.TypeInterpretProject {
 			t.Errorf("project %s enqueued as %q, want interpret_project", id, seen[id])
 		}
 	}
@@ -84,9 +84,9 @@ func TestSchedulerCoalescesExtractionAndSurvivesLockConflicts(t *testing.T) {
 	projectID := uuid.New()
 	owner := uuid.New()
 	projects := &stubDueProjects{due: []domainprojects.DueProject{{ProjectID: projectID, OwnerUserID: owner}}}
-	enq := &appjobs.Enqueuer{Store: store, Registry: appjobs.DefaultRegistry()}
+	enq := &appjobs.Enqueuer{Store: store, Registry: domainjobs.DefaultRegistry()}
 	sched := &appjobs.SchedulerService{
-		Store: store, Projects: projects, Enqueuer: enq, Registry: appjobs.DefaultRegistry(),
+		Store: store, Projects: projects, Enqueuer: enq, Registry: domainjobs.DefaultRegistry(),
 	}
 	ctx := context.Background()
 
@@ -118,8 +118,8 @@ func TestSchedulerSkipsExtractionWithoutProjects(t *testing.T) {
 	store := memoryjobs.NewStore()
 	sched := &appjobs.SchedulerService{
 		Store:    store,
-		Enqueuer: &appjobs.Enqueuer{Store: store, Registry: appjobs.DefaultRegistry()},
-		Registry: appjobs.DefaultRegistry(),
+		Enqueuer: &appjobs.Enqueuer{Store: store, Registry: domainjobs.DefaultRegistry()},
+		Registry: domainjobs.DefaultRegistry(),
 	}
 	if err := sched.Tick(context.Background(), time.Now().UTC()); err != nil {
 		t.Fatalf("the pass must be optional: %v", err)

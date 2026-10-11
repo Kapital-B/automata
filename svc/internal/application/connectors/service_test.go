@@ -1,6 +1,10 @@
 package connectors_test
 
 import (
+	domainconnectors "github.com/Kapital-B/automata/svc/internal/domain/connectors"
+)
+
+import (
 	"context"
 	"database/sql"
 	"net/url"
@@ -40,7 +44,7 @@ func TestFakeSlackConnectBindSyncTimelineIdempotent(t *testing.T) {
 		Users: repo, Projects: repo, Assignments: repo, Manuals: repo,
 		Timeline: repo, Contacts: repo, Messages: repo,
 	}
-	project, err := projectService.Create(ctx, userID, appprojects.CreateProjectInput{
+	project, err := projectService.Create(ctx, userID, domainprojects.ProjectCreateProjectInput{
 		Name: "Data Centre 01", Code: "DC01",
 	})
 	if err != nil {
@@ -58,7 +62,7 @@ func TestFakeSlackConnectBindSyncTimelineIdempotent(t *testing.T) {
 		Slack: slackClient, Vault: vault, JobRuns: repo,
 	}
 
-	start, err := service.StartConnect(ctx, userID, connectors.StartConnectInput{Provider: "slack"})
+	start, err := service.StartConnect(ctx, userID, domainconnectors.ConnectorStartConnectInput{Provider: "slack"})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -72,7 +76,7 @@ func TestFakeSlackConnectBindSyncTimelineIdempotent(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err := service.CreateBinding(ctx, userID, connected.ConnectorAccountID, connectors.CreateBindingInput{
+	if _, err := service.CreateBinding(ctx, userID, connected.ConnectorAccountID, domainconnectors.ConnectorCreateBindingInput{
 		ExternalChannelID: "C_FAKE_DC01", ProjectID: &project.ID,
 	}); err != nil {
 		t.Fatal(err)

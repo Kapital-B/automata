@@ -1,6 +1,11 @@
 package projectai_test
 
 import (
+	domaindecisions "github.com/Kapital-B/automata/svc/internal/domain/decisions"
+	domainfacts "github.com/Kapital-B/automata/svc/internal/domain/facts"
+)
+
+import (
 	"context"
 	"database/sql"
 	"encoding/json"
@@ -101,11 +106,11 @@ func TestAskAcrossEvalCapsContextToAttentionAndRecent(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	dc01, err := projectSvc.Create(ctx, userID, appprojects.CreateProjectInput{Name: "Cooling", Code: "DC01"})
+	dc01, err := projectSvc.Create(ctx, userID, domainprojects.ProjectCreateProjectInput{Name: "Cooling", Code: "DC01"})
 	if err != nil {
 		t.Fatal(err)
 	}
-	view, err := factSvc.Create(ctx, userID, dc01.ID, appfacts.CreateInput{
+	view, err := factSvc.Create(ctx, userID, dc01.ID, domainfacts.FactCreateInput{
 		SubjectKey: "pump.p03.duty_kw", Label: "Pump P-03 duty", Value: 90.0, Unit: strPtr("kW"), Confirm: true,
 	})
 	if err != nil {
@@ -113,7 +118,7 @@ func TestAskAcrossEvalCapsContextToAttentionAndRecent(t *testing.T) {
 	}
 	if _, err := (&appdecisions.Service{
 		Users: repo, Projects: repo, Decisions: repo, Issues: repo, Assignments: repo, Manuals: repo, Messages: repo,
-	}).Create(ctx, userID, dc01.ID, appdecisions.CreateInput{
+	}).Create(ctx, userID, dc01.ID, domaindecisions.DecisionCreateInput{
 		Statement: "Approve vendor quote", Confirm: false,
 	}); err != nil {
 		t.Fatal(err)
@@ -126,7 +131,7 @@ func TestAskAcrossEvalCapsContextToAttentionAndRecent(t *testing.T) {
 
 	droppedCode := ""
 	for i := 0; i < 9; i++ {
-		p, err := projectSvc.Create(ctx, userID, appprojects.CreateProjectInput{
+		p, err := projectSvc.Create(ctx, userID, domainprojects.ProjectCreateProjectInput{
 			Name: fmt.Sprintf("Site %d", i), Code: fmt.Sprintf("S%02d", i),
 		})
 		if err != nil {

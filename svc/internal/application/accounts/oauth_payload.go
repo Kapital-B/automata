@@ -18,7 +18,7 @@ type mailboxOAuthPayload struct {
 }
 
 func EncodeMailboxOAuthPayload(provider string, kind accounts.MsAccountKind, label *string) (string, error) {
-	b, err := json.Marshal(mailboxOAuthPayload{Provider: ProviderKey(provider), MsAccountKind: string(kind), Label: label})
+	b, err := json.Marshal(mailboxOAuthPayload{Provider: accounts.AccountProviderKey(provider), MsAccountKind: string(kind), Label: label})
 	if err != nil {
 		return "", err
 	}
@@ -30,9 +30,9 @@ func DecodeMailboxOAuthPayload(s string) (string, accounts.MsAccountKind, *strin
 	if err := json.Unmarshal([]byte(s), &p); err != nil {
 		return "", "", nil, err
 	}
-	provider := ProviderKey(p.Provider)
+	provider := accounts.AccountProviderKey(p.Provider)
 	k := accounts.MsAccountKind(p.MsAccountKind)
-	if provider == ProviderM365 && !k.Valid() {
+	if provider == accounts.AccountProviderM365 && !k.Valid() {
 		return "", "", nil, fmt.Errorf("invalid ms_account_kind in state")
 	}
 	return provider, k, p.Label, nil

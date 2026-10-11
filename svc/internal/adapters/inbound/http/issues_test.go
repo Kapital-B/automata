@@ -1,6 +1,10 @@
 package http
 
 import (
+	domainprojects "github.com/Kapital-B/automata/svc/internal/domain/projects"
+)
+
+import (
 	"bytes"
 	"context"
 	"database/sql"
@@ -49,7 +53,7 @@ func TestIssuesHTTPOrgIsolation(t *testing.T) {
 
 	userA, tokensA := registerAndLogin(t, authSvc, "ia@example.com", "password123")
 	_, tokensB := registerAndLogin(t, authSvc, "ib@example.com", "password123")
-	p, err := projectSvc.Create(context.Background(), userA, appprojects.CreateProjectInput{Name: "Cooling", Code: "DC01"})
+	p, err := projectSvc.Create(context.Background(), userA, domainprojects.ProjectCreateProjectInput{Name: "Cooling", Code: "DC01"})
 	if err != nil {
 		t.Fatal(err)
 	}

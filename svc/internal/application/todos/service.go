@@ -16,10 +16,6 @@ import (
 	"github.com/google/uuid"
 )
 
-var ErrNotFound = domainissues.TodoErrNotFound
-
-type Todo = domainissues.TodoTodo
-
 type Service struct {
 	Users     domainauth.UserRepository
 	Projects  domainprojects.ProjectRepository
@@ -27,7 +23,7 @@ type Service struct {
 }
 
 // ForProject lists the project's open to-dos, the caller's first.
-func (s *Service) ForProject(ctx context.Context, caller, projectID uuid.UUID) ([]Todo, error) {
+func (s *Service) ForProject(ctx context.Context, caller, projectID uuid.UUID) ([]domainissues.TodoTodo, error) {
 	orgID, err := s.member(ctx, caller, projectID)
 	if err != nil {
 		return nil, err
@@ -36,8 +32,8 @@ func (s *Service) ForProject(ctx context.Context, caller, projectID uuid.UUID) (
 	if err != nil {
 		return nil, err
 	}
-	mine := make([]Todo, 0, len(rows))
-	theirs := make([]Todo, 0)
+	mine := make([]domainissues.TodoTodo, 0, len(rows))
+	theirs := make([]domainissues.TodoTodo, 0)
 	for _, r := range rows {
 		t := view(caller, r)
 		if t.Mine {
@@ -52,15 +48,15 @@ func (s *Service) ForProject(ctx context.Context, caller, projectID uuid.UUID) (
 // ForIssue lists the project's open to-dos whose message is on the issue. A
 // caller who is not on the project sees none rather than an error, so the
 // issue itself still opens.
-func (s *Service) ForIssue(ctx context.Context, caller, projectID, issueID uuid.UUID) ([]Todo, error) {
+func (s *Service) ForIssue(ctx context.Context, caller, projectID, issueID uuid.UUID) ([]domainissues.TodoTodo, error) {
 	all, err := s.ForProject(ctx, caller, projectID)
-	if errors.Is(err, ErrNotFound) {
+	if errors.Is(err, domainissues.TodoErrNotFound) {
 		return nil, nil
 	}
 	if err != nil {
 		return nil, err
 	}
-	out := make([]Todo, 0)
+	out := make([]domainissues.TodoTodo, 0)
 	for _, t := range all {
 		if t.IssueID != nil && *t.IssueID == issueID {
 			out = append(out, t)
@@ -80,7 +76,7 @@ func (s *Service) Complete(ctx context.Context, caller, projectID, todoID uuid.U
 			return s.Summaries.CompleteActionItem(ctx, todoID, caller, time.Now().UTC())
 		}
 	}
-	return ErrNotFound
+	return domainissues.TodoErrNotFound
 }
 
 // CompleteForIssue closes every open to-do on the issue and returns how many.
@@ -109,20 +105,20 @@ func (s *Service) member(ctx context.Context, caller, projectID uuid.UUID) (uuid
 		return uuid.Nil, err
 	}
 	if p == nil {
-		return uuid.Nil, ErrNotFound
+		return uuid.Nil, domainissues.TodoErrNotFound
 	}
 	m, err := s.Projects.GetProjectMember(ctx, projectID, caller)
 	if err != nil {
 		return uuid.Nil, err
 	}
 	if m == nil {
-		return uuid.Nil, ErrNotFound
+		return uuid.Nil, domainissues.TodoErrNotFound
 	}
 	return orgID, nil
 }
 
-func view(caller uuid.UUID, r domainmessages.ProjectTodoRow) Todo {
-	t := Todo{
+func view(caller uuid.UUID, r domainmessages.ProjectTodoRow) domainissues.TodoTodo {
+	t := domainissues.TodoTodo{
 		ID:          r.Item.ID,
 		Text:        r.Item.Text,
 		OwnerUserID: r.Item.UserID,

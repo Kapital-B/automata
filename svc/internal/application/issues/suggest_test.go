@@ -1,6 +1,10 @@
 package issues_test
 
 import (
+	domainissues "github.com/Kapital-B/automata/svc/internal/domain/issues"
+)
+
+import (
 	"context"
 	"encoding/json"
 	"errors"
@@ -8,8 +12,6 @@ import (
 	"testing"
 	"time"
 
-	appissues "github.com/Kapital-B/automata/svc/internal/application/issues"
-	appprojects "github.com/Kapital-B/automata/svc/internal/application/projects"
 	domainai "github.com/Kapital-B/automata/svc/internal/domain/ai"
 	domainprojects "github.com/Kapital-B/automata/svc/internal/domain/projects"
 	"github.com/google/uuid"
@@ -32,7 +34,7 @@ func (f *fakeLLM) ChatCompletion(ctx context.Context, messages []domainai.LLMMes
 func TestSuggestReturnsProposalWithoutCreating(t *testing.T) {
 	_, repo, issueSvc, projectSvc, userID, projectID, accountID := setupIssues(t, "issuesuggest")
 	ctx := context.Background()
-	manual, err := projectSvc.CreateManualItem(ctx, userID, appprojects.CreateManualInput{
+	manual, err := projectSvc.CreateManualItem(ctx, userID, domainprojects.ProjectCreateManualInput{
 		Channel: "teams", OccurredAt: time.Now().UTC(), Title: "Teams pump note",
 		BodyText: "Need 90 kW for P-03", ProjectID: &projectID,
 	})
@@ -49,7 +51,7 @@ func TestSuggestReturnsProposalWithoutCreating(t *testing.T) {
 	}); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := projectSvc.AssignMessage(ctx, userID, msgID, appprojects.AssignInput{
+	if _, err := projectSvc.AssignMessage(ctx, userID, msgID, domainprojects.ProjectAssignInput{
 		ProjectID: &projectID, Scope: domainprojects.ScopeThread, Status: domainprojects.StatusCommitted,
 	}); err != nil {
 		t.Fatal(err)
@@ -68,7 +70,7 @@ func TestSuggestReturnsProposalWithoutCreating(t *testing.T) {
 	issueSvc.LLM = llm
 	issueSvc.Timeline = repo
 
-	res, err := issueSvc.Suggest(ctx, userID, projectID, appissues.SuggestInput{})
+	res, err := issueSvc.Suggest(ctx, userID, projectID, domainissues.IssueSuggestInput{})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -98,7 +100,7 @@ func TestSuggestRejectsForeignIDsAndSingleAccount(t *testing.T) {
 	}); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := projectSvc.AssignMessage(ctx, userID, msgID, appprojects.AssignInput{
+	if _, err := projectSvc.AssignMessage(ctx, userID, msgID, domainprojects.ProjectAssignInput{
 		ProjectID: &projectID, Scope: domainprojects.ScopeThread, Status: domainprojects.StatusCommitted,
 	}); err != nil {
 		t.Fatal(err)
@@ -112,7 +114,7 @@ func TestSuggestRejectsForeignIDsAndSingleAccount(t *testing.T) {
 	})
 	issueSvc.LLM = &fakeLLM{content: string(payload)}
 	issueSvc.Timeline = repo
-	res, err := issueSvc.Suggest(ctx, userID, projectID, appissues.SuggestInput{})
+	res, err := issueSvc.Suggest(ctx, userID, projectID, domainissues.IssueSuggestInput{})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -123,8 +125,8 @@ func TestSuggestRejectsForeignIDsAndSingleAccount(t *testing.T) {
 
 func TestSuggestRequiresLLM(t *testing.T) {
 	_, _, issueSvc, _, userID, projectID, _ := setupIssues(t, "issuesuggest3")
-	_, err := issueSvc.Suggest(context.Background(), userID, projectID, appissues.SuggestInput{})
-	if !errors.Is(err, appissues.ErrLLMUnavailable) {
+	_, err := issueSvc.Suggest(context.Background(), userID, projectID, domainissues.IssueSuggestInput{})
+	if !errors.Is(err, domainissues.IssueErrLLMUnavailable) {
 		t.Fatalf("got %v", err)
 	}
 }

@@ -47,7 +47,7 @@ func setupIssues(t *testing.T, name string) (*sql.DB, *sqlite.Repository, *appis
 	if err != nil {
 		t.Fatal(err)
 	}
-	proj, err := projectSvc.Create(context.Background(), userID, appprojects.CreateProjectInput{Name: "Cooling", Code: "DC01"})
+	proj, err := projectSvc.Create(context.Background(), userID, domainprojects.ProjectCreateProjectInput{Name: "Cooling", Code: "DC01"})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -63,7 +63,7 @@ func setupIssues(t *testing.T, name string) (*sql.DB, *sqlite.Repository, *appis
 
 func TestCreateIssueDefaultsAssigneeToCaller(t *testing.T) {
 	_, _, issueSvc, _, userID, projectID, _ := setupIssues(t, "issuecreate")
-	view, err := issueSvc.Create(context.Background(), userID, projectID, appissues.CreateInput{Title: "Pump P-03"})
+	view, err := issueSvc.Create(context.Background(), userID, projectID, domainissues.IssueCreateInput{Title: "Pump P-03"})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -86,10 +86,10 @@ func TestRejectDualAssignee(t *testing.T) {
 		t.Fatal(err)
 	}
 	cid, uid := contactID, userID
-	_, err := issueSvc.Create(context.Background(), userID, projectID, appissues.CreateInput{
+	_, err := issueSvc.Create(context.Background(), userID, projectID, domainissues.IssueCreateInput{
 		Title: "Bad", AssigneeUserID: &uid, AssigneeContactID: &cid,
 	})
-	if !errors.Is(err, appissues.ErrDualAssignee) {
+	if !errors.Is(err, domainissues.IssueErrDualAssignee) {
 		t.Fatalf("want dual assignee err, got %v", err)
 	}
 }
@@ -107,12 +107,12 @@ func TestAttachMailAndManualAndConflict(t *testing.T) {
 	}); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := projectSvc.AssignMessage(ctx, userID, msgID, appprojects.AssignInput{
+	if _, err := projectSvc.AssignMessage(ctx, userID, msgID, domainprojects.ProjectAssignInput{
 		ProjectID: &projectID, Scope: domainprojects.ScopeThread, Status: domainprojects.StatusCommitted,
 	}); err != nil {
 		t.Fatal(err)
 	}
-	manual, err := projectSvc.CreateManualItem(ctx, userID, appprojects.CreateManualInput{
+	manual, err := projectSvc.CreateManualItem(ctx, userID, domainprojects.ProjectCreateManualInput{
 		Channel: "teams", OccurredAt: time.Now().UTC(), Title: "Teams note", BodyText: "90 kW",
 		ProjectID: &projectID,
 	})
@@ -120,23 +120,23 @@ func TestAttachMailAndManualAndConflict(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	view, err := issueSvc.Create(ctx, userID, projectID, appissues.CreateInput{Title: "Pump P-03"})
+	view, err := issueSvc.Create(ctx, userID, projectID, domainissues.IssueCreateInput{Title: "Pump P-03"})
 	if err != nil {
 		t.Fatal(err)
 	}
-	view, err = issueSvc.AddItem(ctx, userID, view.Issue.ID, appissues.ItemRef{MessageID: &msgID})
+	view, err = issueSvc.AddItem(ctx, userID, view.Issue.ID, domainissues.IssueItemRef{MessageID: &msgID})
 	if err != nil {
 		t.Fatal(err)
 	}
-	view, err = issueSvc.AddItem(ctx, userID, view.Issue.ID, appissues.ItemRef{ManualItemID: &manual.ID})
+	view, err = issueSvc.AddItem(ctx, userID, view.Issue.ID, domainissues.IssueItemRef{ManualItemID: &manual.ID})
 	if err != nil {
 		t.Fatal(err)
 	}
 	if len(view.Items) != 2 {
 		t.Fatalf("want 2 items, got %d", len(view.Items))
 	}
-	_, err = issueSvc.AddItem(ctx, userID, view.Issue.ID, appissues.ItemRef{MessageID: &msgID})
-	if !errors.Is(err, appissues.ErrItemConflict) {
+	_, err = issueSvc.AddItem(ctx, userID, view.Issue.ID, domainissues.IssueItemRef{MessageID: &msgID})
+	if !errors.Is(err, domainissues.IssueErrItemConflict) {
 		t.Fatalf("want conflict, got %v", err)
 	}
 }
@@ -152,13 +152,13 @@ func TestDeleteMessageSurvivesIssue(t *testing.T) {
 	}); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := projectSvc.AssignMessage(ctx, userID, msgID, appprojects.AssignInput{
+	if _, err := projectSvc.AssignMessage(ctx, userID, msgID, domainprojects.ProjectAssignInput{
 		ProjectID: &projectID, Scope: domainprojects.ScopeThread, Status: domainprojects.StatusCommitted,
 	}); err != nil {
 		t.Fatal(err)
 	}
-	view, err := issueSvc.Create(ctx, userID, projectID, appissues.CreateInput{
-		Title: "Survives", ItemRefs: []appissues.ItemRef{{MessageID: &msgID}},
+	view, err := issueSvc.Create(ctx, userID, projectID, domainissues.IssueCreateInput{
+		Title: "Survives", ItemRefs: []domainissues.IssueItemRef{{MessageID: &msgID}},
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -181,7 +181,7 @@ func TestDeleteMessageSurvivesIssue(t *testing.T) {
 func TestAwaitingMeAndPatchStatus(t *testing.T) {
 	_, _, issueSvc, _, userID, projectID, _ := setupIssues(t, "issueawait")
 	ctx := context.Background()
-	view, err := issueSvc.Create(ctx, userID, projectID, appissues.CreateInput{Title: "Wait"})
+	view, err := issueSvc.Create(ctx, userID, projectID, domainissues.IssueCreateInput{Title: "Wait"})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -189,7 +189,7 @@ func TestAwaitingMeAndPatchStatus(t *testing.T) {
 		t.Fatal("open should not be awaiting_me")
 	}
 	st := "awaiting_input"
-	view, err = issueSvc.Update(ctx, userID, view.Issue.ID, appissues.UpdateInput{Status: &st})
+	view, err = issueSvc.Update(ctx, userID, view.Issue.ID, domainissues.IssueUpdateInput{Status: &st})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -201,20 +201,20 @@ func TestAwaitingMeAndPatchStatus(t *testing.T) {
 func TestTimelineUnassignedToIssue(t *testing.T) {
 	_, repo, issueSvc, projectSvc, userID, projectID, _ := setupIssues(t, "issuetimeline")
 	ctx := context.Background()
-	manual, err := projectSvc.CreateManualItem(ctx, userID, appprojects.CreateManualInput{
+	manual, err := projectSvc.CreateManualItem(ctx, userID, domainprojects.ProjectCreateManualInput{
 		Channel: "note", OccurredAt: time.Now().UTC(), Title: "A", BodyText: "b", ProjectID: &projectID,
 	})
 	if err != nil {
 		t.Fatal(err)
 	}
-	view, err := issueSvc.Create(ctx, userID, projectID, appissues.CreateInput{Title: "I"})
+	view, err := issueSvc.Create(ctx, userID, projectID, domainissues.IssueCreateInput{Title: "I"})
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err := issueSvc.AddItem(ctx, userID, view.Issue.ID, appissues.ItemRef{ManualItemID: &manual.ID}); err != nil {
+	if _, err := issueSvc.AddItem(ctx, userID, view.Issue.ID, domainissues.IssueItemRef{ManualItemID: &manual.ID}); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := projectSvc.CreateManualItem(ctx, userID, appprojects.CreateManualInput{
+	if _, err := projectSvc.CreateManualItem(ctx, userID, domainprojects.ProjectCreateManualInput{
 		Channel: "note", OccurredAt: time.Now().UTC(), Title: "Unlinked", BodyText: "x", ProjectID: &projectID,
 	}); err != nil {
 		t.Fatal(err)
@@ -266,7 +266,7 @@ func TestIssueTodosFromTrailAndCompleteOnResolve(t *testing.T) {
 	}
 	onTrail := newMsg("Pump duty", "c-1")
 	elsewhere := newMsg("Invoice", "c-2")
-	if _, err := projectSvc.AssignMessage(ctx, userID, onTrail, appprojects.AssignInput{
+	if _, err := projectSvc.AssignMessage(ctx, userID, onTrail, domainprojects.ProjectAssignInput{
 		ProjectID: &projectID, Scope: domainprojects.ScopeThread, Status: domainprojects.StatusCommitted,
 	}); err != nil {
 		t.Fatal(err)
@@ -283,11 +283,11 @@ func TestIssueTodosFromTrailAndCompleteOnResolve(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	view, err := issueSvc.Create(ctx, userID, projectID, appissues.CreateInput{Title: "Pump P-03"})
+	view, err := issueSvc.Create(ctx, userID, projectID, domainissues.IssueCreateInput{Title: "Pump P-03"})
 	if err != nil {
 		t.Fatal(err)
 	}
-	view, err = issueSvc.AddItem(ctx, userID, view.Issue.ID, appissues.ItemRef{MessageID: &onTrail})
+	view, err = issueSvc.AddItem(ctx, userID, view.Issue.ID, domainissues.IssueItemRef{MessageID: &onTrail})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -366,21 +366,21 @@ func TestIssueTodosFromTrailAndCompleteOnResolve(t *testing.T) {
 	resolved, reopened := "resolved", "open"
 
 	// Resolving without asking leaves the to-dos alone.
-	if _, err := issueSvc.Update(ctx, userID, view.Issue.ID, appissues.UpdateInput{Status: &resolved}); err != nil {
+	if _, err := issueSvc.Update(ctx, userID, view.Issue.ID, domainissues.IssueUpdateInput{Status: &resolved}); err != nil {
 		t.Fatal(err)
 	}
 	if n := openCount(); n != 3 {
 		t.Fatalf("resolve alone closed to-dos: %d open, want 3", n)
 	}
 	// Asking to complete them on an update that does not resolve does nothing.
-	if _, err := issueSvc.Update(ctx, userID, view.Issue.ID, appissues.UpdateInput{Status: &reopened, CompleteTodos: true}); err != nil {
+	if _, err := issueSvc.Update(ctx, userID, view.Issue.ID, domainissues.IssueUpdateInput{Status: &reopened, CompleteTodos: true}); err != nil {
 		t.Fatal(err)
 	}
 	if n := openCount(); n != 3 {
 		t.Fatalf("reopening closed to-dos: %d open, want 3", n)
 	}
 
-	view, err = issueSvc.Update(ctx, userID, view.Issue.ID, appissues.UpdateInput{Status: &resolved, CompleteTodos: true})
+	view, err = issueSvc.Update(ctx, userID, view.Issue.ID, domainissues.IssueUpdateInput{Status: &resolved, CompleteTodos: true})
 	if err != nil {
 		t.Fatal(err)
 	}

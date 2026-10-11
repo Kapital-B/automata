@@ -1,6 +1,6 @@
 # RFC: Domain-Owned Ports and Service Boundaries
 
-**Status:** R0–R3 complete; R4–R4 proposed
+**Status:** R0–R4 complete
 
 **Related:** [Initial specification §2.4](initial.md#24-backend-project-structure-ddd-hexagonal-ports-and-adapters), [AWS deployment](aws-deployment.md), [Multi-provider mail RFC](rfc-multi-provider-mail.md)
 
@@ -223,7 +223,7 @@ Completion requires all of the following:
 8. Relevant behavior tests pass with no intended API, persisted-format, or deployment changes.
 9. [Initial specification §2.4](initial.md#24-backend-project-structure-ddd-hexagonal-ports-and-adapters) states the new ownership/layout. AWS job and mailbox contract examples reference the new domain definitions; historical implementation records are clearly identified.
 
-These are implementation gates for the complete refactor. R0's inventory, architecture check and baseline validation are recorded in §10; the remaining refactor has not been completed.
+These gates are implemented and validated. R0's original inventory and baseline are recorded in §10; phase validation and the final implementation are recorded in §11.
 
 ## 9. Risks and decisions
 
@@ -244,7 +244,7 @@ The first migration should preserve existing interfaces and representations wher
 
 R0 was completed on 2026-10-11. The [baseline report](r0-domain-owned-ports-baseline.md) records working-tree scope, helper seams, absence/idempotency behavior and validation limits. The [source inventory](r0-domain-owned-ports-inventory.md) lists all 44 application-owned contracts, 98 central supporting types, 41 dependency exceptions and 66 direct HTTP dependency calls.
 
-The [architecture check](../../svc/internal/architecture/README.md) enforces domain isolation immediately and tracks exact existing exceptions with removal phases. Full before/after test runs passed with local Postgres and DynamoDB contracts enabled; [package-level evidence](r0-domain-owned-ports-test-results.json) records the results. R1–R4 remain to be implemented.
+The [architecture check](../../svc/internal/architecture/README.md) enforces domain isolation immediately and tracks exact existing exceptions with removal phases. Full before/after test runs passed with local Postgres and DynamoDB contracts enabled; [package-level evidence](r0-domain-owned-ports-test-results.json) records the results. At R0 exit, R1–R4 remained to be implemented; their completion is recorded in §11.
 
 ## 11. Migration execution
 
@@ -255,3 +255,7 @@ Validation used Go 1.24.0 with both local databases enabled; the full fresh suit
 R2 injected domain-owned token, password and Microsoft identity capabilities; moved the cursor codec into outbound adapters; translated SQL absence at every public repository boundary; and removed all ten R2 import exceptions, including transitive SQL paths. Cross-adapter tests enforce the R0 absence matrix, and compatibility tests cover JWTs, bcrypt and Microsoft identity claim selection. Full fresh validation on Go 1.24.0 passed 528 test cases with Postgres and DynamoDB Local enabled and no skips.
 
 R3 introduced domain-owned inbound contracts and signature models, application query and submission workflows, and legacy job orchestration. HTTP handlers translate transport data and call use-case ports. Asynq production and consumption now live in outbound and inbound adapters respectively, sharing only their versioned transport payload. All 18 R3 dependency exceptions were removed. Additional focused checks passed for submission compensation, summary defaults, and HTTP compatibility after the full gate. Full fresh validation on Go 1.24.0 passed 529 test cases with Postgres and DynamoDB Local enabled and no skips.
+
+The implemented package layout and canonical contract examples are documented in [the current architecture reference](domain-owned-ports-architecture.md). Source links in the R0 inventory describe the original baseline paths; removed packages can be inspected at the R0 commit (`a55a4fb`).
+
+R4 removed every application compatibility alias and forwarding symbol and deleted application/ports/driven. Inbound query contracts now expose only their used operations. Composition shares query/submission implementations and exposes domain execution/tick contracts to worker and scheduler entrypoints. Schedule normalization belongs to domain. Concrete repositories and remaining provider/security implementations have compile-time port assertions. Final architecture checks reject compatibility seams and nonempty migration debt. Current architecture, initial specification and deployment/provider contract examples were updated. Protocol and schedule-policy checks passed alongside the existing bounded-query, persistence, mailbox, auth and job suites. Full fresh validation on Go 1.24.0 passed 533 test cases with Postgres and DynamoDB Local enabled and no skips.

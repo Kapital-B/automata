@@ -1,6 +1,10 @@
 package http
 
 import (
+	domainprojects "github.com/Kapital-B/automata/svc/internal/domain/projects"
+)
+
+import (
 	"bytes"
 	"context"
 	"database/sql"
@@ -62,7 +66,7 @@ func TestProjectAndIssueTodosHTTP(t *testing.T) {
 	ctx := context.Background()
 	now := time.Now().UTC()
 	userID, tokens := registerAndLogin(t, authSvc, "todos@example.com", "password123")
-	p, err := projectSvc.Create(ctx, userID, appprojects.CreateProjectInput{Name: "Cooling", Code: "DC01"})
+	p, err := projectSvc.Create(ctx, userID, domainprojects.ProjectCreateProjectInput{Name: "Cooling", Code: "DC01"})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -92,7 +96,7 @@ func TestProjectAndIssueTodosHTTP(t *testing.T) {
 	}}); err != nil {
 		t.Fatal(err)
 	}
-	view, err := issueSvc.Create(ctx, userID, p.ID, appissues.CreateInput{Title: "Pump P-03"})
+	view, err := issueSvc.Create(ctx, userID, p.ID, domainissues.IssueCreateInput{Title: "Pump P-03"})
 	if err != nil {
 		t.Fatal(err)
 	}

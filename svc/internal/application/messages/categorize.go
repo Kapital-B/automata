@@ -23,19 +23,13 @@ type CategorizeService struct {
 	JobRuns  domainjobs.JobRunRepository
 }
 
-type CategorizeResult = domainmessages.MessageCategorizeResult
-
-type CategorizeOptions = domainmessages.MessageCategorizeOptions
-
-type CategorizeChunkResult = domainmessages.MessageCategorizeChunkResult
-
 type categorizePayload struct {
 	SchemaVersion int      `json:"schema_version"`
 	CategorySlug  string   `json:"category_slug"`
 	Confidence    *float64 `json:"confidence"`
 }
 
-func (s *CategorizeService) CategorizeAccount(ctx context.Context, userID, accountID uuid.UUID, opts CategorizeOptions) (*CategorizeResult, error) {
+func (s *CategorizeService) CategorizeAccount(ctx context.Context, userID, accountID uuid.UUID, opts domainmessages.MessageCategorizeOptions) (*domainmessages.MessageCategorizeResult, error) {
 	if s == nil || s.Messages == nil || s.LLM == nil {
 		return nil, fmt.Errorf("categorize service not configured")
 	}
@@ -48,7 +42,7 @@ func (s *CategorizeService) CategorizeAccount(ctx context.Context, userID, accou
 		trigger = "api"
 	}
 	started := time.Now().UTC()
-	fail := func(err error) (*CategorizeResult, error) {
+	fail := func(err error) (*domainmessages.MessageCategorizeResult, error) {
 		if s.JobRuns != nil {
 			msg := err.Error()
 			_ = s.JobRuns.UpdateJobRunStatus(ctx, jobID, "failed", timePtr(time.Now().UTC()), &msg, `{}`)
@@ -141,7 +135,7 @@ func (s *CategorizeService) CategorizeAccount(ctx context.Context, userID, accou
 		meta := fmt.Sprintf(`{"messages_categorized":%d,"recategorize":%t}`, count, opts.Recategorize)
 		_ = s.JobRuns.UpdateJobRunStatus(ctx, jobID, "success", timePtr(time.Now().UTC()), nil, meta)
 	}
-	return &CategorizeResult{JobRunID: jobID, MessagesCategorized: count}, nil
+	return &domainmessages.MessageCategorizeResult{JobRunID: jobID, MessagesCategorized: count}, nil
 }
 
 func (s *CategorizeService) classifyMessage(ctx context.Context, m domainmessages.MessageRow, categories []domainmessages.CategoryDefinitionRow) (*categorizePayload, error) {
@@ -277,7 +271,7 @@ func fallbackCategorySlug(categories []domainmessages.CategoryDefinitionRow) str
 	return sorted[0].Slug
 }
 
-func (s *CategorizeService) CategorizeChunk(ctx context.Context, run domainjobs.RunContext) (*CategorizeChunkResult, error) {
+func (s *CategorizeService) CategorizeChunk(ctx context.Context, run domainjobs.RunContext) (*domainmessages.MessageCategorizeChunkResult, error) {
 	if s == nil || s.Messages == nil || s.LLM == nil {
 		return nil, fmt.Errorf("categorize service not configured")
 	}
@@ -345,7 +339,7 @@ func (s *CategorizeService) CategorizeChunk(ctx context.Context, run domainjobs.
 		}
 		count++
 	}
-	out := &CategorizeChunkResult{
+	out := &domainmessages.MessageCategorizeChunkResult{
 		MessagesCategorized: count,
 		MessagesScanned:     len(rows),
 		Done:                done,

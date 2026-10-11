@@ -119,7 +119,7 @@ func TestAssignBatchPartialFailure(t *testing.T) {
 	ctx := context.Background()
 	now := time.Now().UTC()
 
-	p, err := f.projectSvc.Create(ctx, f.userID, appprojects.CreateProjectInput{Name: "Cooling", Code: "DC01"})
+	p, err := f.projectSvc.Create(ctx, f.userID, domainprojects.ProjectCreateProjectInput{Name: "Cooling", Code: "DC01"})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -178,11 +178,11 @@ func TestAssignBatchFiresHookOncePerProject(t *testing.T) {
 	ctx := context.Background()
 	now := time.Now().UTC()
 
-	p1, err := f.projectSvc.Create(ctx, f.userID, appprojects.CreateProjectInput{Name: "Cooling", Code: "DC01"})
+	p1, err := f.projectSvc.Create(ctx, f.userID, domainprojects.ProjectCreateProjectInput{Name: "Cooling", Code: "DC01"})
 	if err != nil {
 		t.Fatal(err)
 	}
-	p2, err := f.projectSvc.Create(ctx, f.userID, appprojects.CreateProjectInput{Name: "Heating", Code: "DC02"})
+	p2, err := f.projectSvc.Create(ctx, f.userID, domainprojects.ProjectCreateProjectInput{Name: "Heating", Code: "DC02"})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -224,7 +224,7 @@ func TestAssignBatchIsIdempotent(t *testing.T) {
 	f := newBatchFixture(t, "batchidem")
 	ctx := context.Background()
 	now := time.Now().UTC()
-	p, err := f.projectSvc.Create(ctx, f.userID, appprojects.CreateProjectInput{Name: "Cooling", Code: "DC01"})
+	p, err := f.projectSvc.Create(ctx, f.userID, domainprojects.ProjectCreateProjectInput{Name: "Cooling", Code: "DC01"})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -248,7 +248,7 @@ func TestAssignBatchIsIdempotent(t *testing.T) {
 
 func TestAssignBatchRejectsOversizedRequest(t *testing.T) {
 	f := newBatchFixture(t, "batchcap")
-	items := make([]map[string]any, appprojects.MaxBatchAssignItems+1)
+	items := make([]map[string]any, domainprojects.ProjectMaxBatchAssignItems+1)
 	for i := range items {
 		items[i] = map[string]any{"kind": "message", "id": uuid.NewString(), "scope": "thread"}
 	}
@@ -265,7 +265,7 @@ func TestAssignBatchClearsAssignment(t *testing.T) {
 	f := newBatchFixture(t, "batchclear")
 	ctx := context.Background()
 	now := time.Now().UTC()
-	p, err := f.projectSvc.Create(ctx, f.userID, appprojects.CreateProjectInput{Name: "Cooling", Code: "DC01"})
+	p, err := f.projectSvc.Create(ctx, f.userID, domainprojects.ProjectCreateProjectInput{Name: "Cooling", Code: "DC01"})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -292,7 +292,7 @@ func TestAssignBatchPreservesItemOrder(t *testing.T) {
 	f := newBatchFixture(t, "batchorder")
 	ctx := context.Background()
 	now := time.Now().UTC()
-	p, err := f.projectSvc.Create(ctx, f.userID, appprojects.CreateProjectInput{Name: "Cooling", Code: "DC01"})
+	p, err := f.projectSvc.Create(ctx, f.userID, domainprojects.ProjectCreateProjectInput{Name: "Cooling", Code: "DC01"})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -342,7 +342,7 @@ func TestAssignBatchWritesAcrossChunkBoundary(t *testing.T) {
 	f := newBatchFixture(t, "batchchunk")
 	ctx := context.Background()
 	now := time.Now().UTC()
-	p, err := f.projectSvc.Create(ctx, f.userID, appprojects.CreateProjectInput{Name: "Cooling", Code: "DC01"})
+	p, err := f.projectSvc.Create(ctx, f.userID, domainprojects.ProjectCreateProjectInput{Name: "Cooling", Code: "DC01"})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -431,7 +431,7 @@ func TestBatchMarksAndRestoresNotRelevant(t *testing.T) {
 func TestBatchRejectsProjectAndNotRelevantTogether(t *testing.T) {
 	f := newBatchFixture(t, "batchbothflags")
 	ctx := context.Background()
-	p, err := f.projectSvc.Create(ctx, f.userID, appprojects.CreateProjectInput{Name: "Cooling", Code: "DC01"})
+	p, err := f.projectSvc.Create(ctx, f.userID, domainprojects.ProjectCreateProjectInput{Name: "Cooling", Code: "DC01"})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -493,7 +493,7 @@ func TestAssignBatchFilesAMessageWithNoConversation(t *testing.T) {
 	ctx := context.Background()
 	now := time.Now().UTC()
 
-	p, err := f.projectSvc.Create(ctx, f.userID, appprojects.CreateProjectInput{Name: "Cooling", Code: "DC01"})
+	p, err := f.projectSvc.Create(ctx, f.userID, domainprojects.ProjectCreateProjectInput{Name: "Cooling", Code: "DC01"})
 	if err != nil {
 		t.Fatal(err)
 	}

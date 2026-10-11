@@ -19,24 +19,12 @@ const (
 	defaultProjectLimit  = 8
 )
 
-var validKinds = domainprojects.OverviewValidKinds
-
-var ValidKind = domainprojects.OverviewValidKind
-
 type Service struct {
 	Users     domainauth.UserRepository
 	Projects  domainprojects.ProjectRepository
-	Attention AttentionCounts
+	Attention domainattention.AttentionCounts
 	Triage    domainprojects.AssignmentRepository
 }
-
-type AttentionCounts = domainattention.AttentionCounts
-
-type Counts = domainprojects.OverviewViewCounts
-
-type Project = domainprojects.OverviewViewProject
-
-type Result = domainprojects.OverviewResult
 
 func (s *Service) homeOrg(ctx context.Context, userID uuid.UUID) (uuid.UUID, error) {
 	return s.Users.GetHomeOrganisationID(ctx, userID)
@@ -46,7 +34,7 @@ func (s *Service) homeOrg(ctx context.Context, userID uuid.UUID) (uuid.UUID, err
 //
 // Each source is one query. The page this backs previously issued a request
 // per project from the browser; that fan-out is what this replaces.
-func (s *Service) Get(ctx context.Context, userID uuid.UUID) (*Result, error) {
+func (s *Service) Get(ctx context.Context, userID uuid.UUID) (*domainprojects.OverviewResult, error) {
 	orgID, err := s.homeOrg(ctx, userID)
 	if err != nil {
 		return nil, err
@@ -56,7 +44,7 @@ func (s *Service) Get(ctx context.Context, userID uuid.UUID) (*Result, error) {
 	if err != nil {
 		return nil, err
 	}
-	out := &Result{Counts: Counts{
+	out := &domainprojects.OverviewResult{Counts: domainprojects.OverviewViewCounts{
 		OpenContradictions: counts.OpenContradictions,
 		ProvisionalFacts:   counts.ProvisionalFacts,
 		ProposedDecisions:  counts.ProposedDecisions,
@@ -86,9 +74,9 @@ func (s *Service) Get(ctx context.Context, userID uuid.UUID) (*Result, error) {
 	if err != nil {
 		return nil, err
 	}
-	out.Projects = make([]Project, 0, len(projects))
+	out.Projects = make([]domainprojects.OverviewViewProject, 0, len(projects))
 	for _, p := range projects {
-		out.Projects = append(out.Projects, Project{
+		out.Projects = append(out.Projects, domainprojects.OverviewViewProject{
 			ID: p.ID, Code: p.Code, Name: p.Name, Teaser: p.Teaser,
 			LastActivityAt: p.LastActivityAt,
 			AttentionCount: perProject[p.ID],
@@ -97,12 +85,8 @@ func (s *Service) Get(ctx context.Context, userID uuid.UUID) (*Result, error) {
 	return out, nil
 }
 
-type ActivityInput = domainprojects.OverviewActivityInput
-
-type ActivityPage = domainprojects.OverviewActivityPage
-
 // Activity returns one page of the change feed, newest first.
-func (s *Service) Activity(ctx context.Context, userID uuid.UUID, in ActivityInput) (*ActivityPage, error) {
+func (s *Service) Activity(ctx context.Context, userID uuid.UUID, in domainprojects.OverviewActivityInput) (*domainprojects.OverviewActivityPage, error) {
 	orgID, err := s.homeOrg(ctx, userID)
 	if err != nil {
 		return nil, err
@@ -125,7 +109,7 @@ func (s *Service) Activity(ctx context.Context, userID uuid.UUID, in ActivityInp
 	if err != nil {
 		return nil, err
 	}
-	page := &ActivityPage{Items: items}
+	page := &domainprojects.OverviewActivityPage{Items: items}
 	// Only offer a cursor when the page was full; a short page is the end.
 	if len(items) == limit {
 		last := items[len(items)-1]

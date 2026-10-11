@@ -1,6 +1,11 @@
 package interpret_test
 
 import (
+	domainfacts "github.com/Kapital-B/automata/svc/internal/domain/facts"
+	domaininterpretations "github.com/Kapital-B/automata/svc/internal/domain/interpretations"
+)
+
+import (
 	"context"
 	"database/sql"
 	"encoding/json"
@@ -70,7 +75,7 @@ func setupInterpret(t *testing.T, name string) (*sqlite.Repository, *appinterpre
 	if err != nil {
 		t.Fatal(err)
 	}
-	proj, err := projectSvc.Create(context.Background(), userID, appprojects.CreateProjectInput{Name: "Cooling", Code: "DC01"})
+	proj, err := projectSvc.Create(context.Background(), userID, domainprojects.ProjectCreateProjectInput{Name: "Cooling", Code: "DC01"})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -87,7 +92,7 @@ func setupInterpret(t *testing.T, name string) (*sqlite.Repository, *appinterpre
 func TestRunPersistsPendingWithoutCreatingFacts(t *testing.T) {
 	repo, interpSvc, projectSvc, factSvc, userID, projectID, accountID := setupInterpret(t, "interprun")
 	ctx := context.Background()
-	manual, err := projectSvc.CreateManualItem(ctx, userID, appprojects.CreateManualInput{
+	manual, err := projectSvc.CreateManualItem(ctx, userID, domainprojects.ProjectCreateManualInput{
 		Channel: "teams", OccurredAt: time.Now().UTC(), Title: "Teams note",
 		BodyText: "Pump P-03 duty is 90 kW", ProjectID: &projectID,
 	})
@@ -104,7 +109,7 @@ func TestRunPersistsPendingWithoutCreatingFacts(t *testing.T) {
 	}); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := projectSvc.AssignMessage(ctx, userID, msgID, appprojects.AssignInput{
+	if _, err := projectSvc.AssignMessage(ctx, userID, msgID, domainprojects.ProjectAssignInput{
 		ProjectID: &projectID, Scope: domainprojects.ScopeThread, Status: domainprojects.StatusCommitted,
 	}); err != nil {
 		t.Fatal(err)
@@ -124,7 +129,7 @@ func TestRunPersistsPendingWithoutCreatingFacts(t *testing.T) {
 	})
 	interpSvc.LLM = &fakeLLM{content: string(payload)}
 
-	view, err := interpSvc.Run(ctx, userID, projectID, appinterpret.RunInput{
+	view, err := interpSvc.Run(ctx, userID, projectID, domaininterpretations.InterpretationRunInput{
 		MessageIDs: []uuid.UUID{msgID}, ManualItemIDs: []uuid.UUID{manual.ID},
 	})
 	if err != nil {
@@ -140,7 +145,7 @@ func TestRunPersistsPendingWithoutCreatingFacts(t *testing.T) {
 		t.Fatalf("sources %d", len(view.Sources))
 	}
 
-	facts, err := factSvc.List(ctx, userID, projectID, appfacts.ListInclude{Proposed: true, History: true})
+	facts, err := factSvc.List(ctx, userID, projectID, domainfacts.FactListInclude{Proposed: true, History: true})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -157,7 +162,7 @@ func TestRunPersistsPendingWithoutCreatingFacts(t *testing.T) {
 func TestDismissPending(t *testing.T) {
 	repo, interpSvc, projectSvc, _, userID, projectID, _ := setupInterpret(t, "interpdismiss")
 	ctx := context.Background()
-	manual, err := projectSvc.CreateManualItem(ctx, userID, appprojects.CreateManualInput{
+	manual, err := projectSvc.CreateManualItem(ctx, userID, domainprojects.ProjectCreateManualInput{
 		Channel: "teams", OccurredAt: time.Now().UTC(), Title: "Note",
 		BodyText: "75 kW", ProjectID: &projectID,
 	})
@@ -171,7 +176,7 @@ func TestDismissPending(t *testing.T) {
 		},
 	})
 	interpSvc.LLM = &fakeLLM{content: string(payload)}
-	view, err := interpSvc.Run(ctx, userID, projectID, appinterpret.RunInput{
+	view, err := interpSvc.Run(ctx, userID, projectID, domaininterpretations.InterpretationRunInput{
 		ManualItemIDs: []uuid.UUID{manual.ID},
 	})
 	if err != nil {
@@ -220,25 +225,25 @@ func TestMixedAccountsRejected(t *testing.T) {
 		}); err != nil {
 			t.Fatal(err)
 		}
-		if _, err := projectSvc.AssignMessage(ctx, userID, pair.id, appprojects.AssignInput{
+		if _, err := projectSvc.AssignMessage(ctx, userID, pair.id, domainprojects.ProjectAssignInput{
 			ProjectID: &projectID, Scope: domainprojects.ScopeThread, Status: domainprojects.StatusCommitted,
 		}); err != nil {
 			t.Fatal(err)
 		}
 	}
 	interpSvc.LLM = &fakeLLM{content: `{"schema_version":1,"project_id":"` + projectID.String() + `","candidates":[]}`}
-	_, err := interpSvc.Run(ctx, userID, projectID, appinterpret.RunInput{
+	_, err := interpSvc.Run(ctx, userID, projectID, domaininterpretations.InterpretationRunInput{
 		MessageIDs: []uuid.UUID{msg1, msg2},
 	})
-	if !errors.Is(err, appinterpret.ErrMixedAccounts) {
+	if !errors.Is(err, domaininterpretations.InterpretationErrMixedAccounts) {
 		t.Fatalf("want mixed accounts, got %v", err)
 	}
 }
 
 func TestLLMUnavailable(t *testing.T) {
 	_, interpSvc, _, _, userID, projectID, _ := setupInterpret(t, "interpnollm")
-	_, err := interpSvc.Run(context.Background(), userID, projectID, appinterpret.RunInput{})
-	if !errors.Is(err, appinterpret.ErrLLMUnavailable) {
+	_, err := interpSvc.Run(context.Background(), userID, projectID, domaininterpretations.InterpretationRunInput{})
+	if !errors.Is(err, domaininterpretations.InterpretationErrLLMUnavailable) {
 		t.Fatalf("want llm unavailable, got %v", err)
 	}
 }
@@ -246,8 +251,8 @@ func TestLLMUnavailable(t *testing.T) {
 func TestNothingToInterpret(t *testing.T) {
 	_, interpSvc, _, _, userID, projectID, _ := setupInterpret(t, "interpempty")
 	interpSvc.LLM = &fakeLLM{content: `{"schema_version":1,"candidates":[]}`}
-	_, err := interpSvc.Run(context.Background(), userID, projectID, appinterpret.RunInput{})
-	if !errors.Is(err, appinterpret.ErrNothingToInterpret) {
+	_, err := interpSvc.Run(context.Background(), userID, projectID, domaininterpretations.InterpretationRunInput{})
+	if !errors.Is(err, domaininterpretations.InterpretationErrNothingToInterpret) {
 		t.Fatalf("want nothing, got %v", err)
 	}
 }
@@ -276,7 +281,7 @@ func TestRunPromptCarriesTheStoredBodyNotTheListSnippet(t *testing.T) {
 	}); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := projectSvc.AssignMessage(ctx, userID, msgID, appprojects.AssignInput{
+	if _, err := projectSvc.AssignMessage(ctx, userID, msgID, domainprojects.ProjectAssignInput{
 		ProjectID: &projectID, Scope: domainprojects.ScopeThread, Status: domainprojects.StatusCommitted,
 	}); err != nil {
 		t.Fatal(err)
@@ -286,7 +291,7 @@ func TestRunPromptCarriesTheStoredBodyNotTheListSnippet(t *testing.T) {
 	interpSvc.LLM = llm
 
 	// No explicit ids: this is the path the extraction job takes.
-	if _, err := interpSvc.Run(ctx, userID, projectID, appinterpret.RunInput{}); err != nil {
+	if _, err := interpSvc.Run(ctx, userID, projectID, domaininterpretations.InterpretationRunInput{}); err != nil {
 		t.Fatal(err)
 	}
 	if len(llm.prompts) == 0 {

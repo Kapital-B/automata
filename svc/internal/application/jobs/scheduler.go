@@ -20,12 +20,6 @@ const (
 	DefaultPendingWakeAfter    = 2 * time.Minute
 )
 
-type ScheduleCASRepository = domainjobs.ScheduleCASRepository
-
-type EffectAuditReconciler = domainjobs.EffectAuditReconciler
-
-type ChainEnqueuer = domainjobs.ChainEnqueuer
-
 type SchedulerService struct {
 	OAuthStates domainauth.OAuthStateRepository
 	Schedules   domainjobs.ScheduleRepository
@@ -33,9 +27,9 @@ type SchedulerService struct {
 	// Projects is optional; without it the extraction debounce pass is skipped.
 	Projects         domainprojects.ProjectRepository
 	Store            domainjobs.JobStore
-	Enqueuer         ChainEnqueuer
-	Registry         *Registry
-	EffectReconciler EffectAuditReconciler
+	Enqueuer         domainjobs.ChainEnqueuer
+	Registry         *domainjobs.Registry
+	EffectReconciler domainjobs.EffectAuditReconciler
 	OAuthStateTTL    time.Duration
 	PendingWakeAfter time.Duration
 	// ExtractQuietFor and ExtractCeiling debounce project extraction: run once
@@ -121,7 +115,7 @@ func (s *SchedulerService) enqueueDueExtractions(ctx context.Context, now time.T
 	for _, project := range due {
 		pid := project.ProjectID
 		_, err := s.Enqueuer.EnqueueChain(ctx, project.OwnerUserID, nil, domainjobs.JobTriggerSchedule,
-			[]string{TypeInterpretProject, TypeReconcileProject},
+			[]string{domainjobs.TypeInterpretProject, domainjobs.TypeReconcileProject},
 			domainjobs.JobPayload{ProjectID: &pid}, nil, nil)
 		if err != nil {
 			// Already queued or running for this project: the coalescing
@@ -151,11 +145,11 @@ func (s *SchedulerService) deleteExpiredOAuthStates(ctx context.Context, now tim
 	return s.OAuthStates.DeleteExpiredStates(ctx, now.Add(-ttl))
 }
 
-func (s *SchedulerService) registry() *Registry {
+func (s *SchedulerService) registry() *domainjobs.Registry {
 	if s.Registry != nil {
 		return s.Registry
 	}
-	return DefaultRegistry()
+	return domainjobs.DefaultRegistry()
 }
 
 func (s *SchedulerService) enqueueDueSchedules(ctx context.Context, now time.Time) error {
@@ -369,7 +363,7 @@ func (s *SchedulerService) targetAccounts(ctx context.Context, chain domainjobs.
 }
 
 func (s *SchedulerService) markScheduleExecuted(ctx context.Context, id uuid.UUID, scheduledFor, lastRunAt, nextRunAt time.Time) error {
-	if repo, ok := s.Schedules.(ScheduleCASRepository); ok {
+	if repo, ok := s.Schedules.(domainjobs.ScheduleCASRepository); ok {
 		_, err := repo.MarkScheduleExecutedIfDue(ctx, id, scheduledFor, lastRunAt, nextRunAt)
 		return err
 	}
@@ -396,9 +390,9 @@ func (s *SchedulerService) pendingWakeAfter() time.Duration {
 	return s.PendingWakeAfter
 }
 
-func ValidateScheduleChain(chain []string, reg *Registry) error {
+func ValidateScheduleChain(chain []string, reg *domainjobs.Registry) error {
 	if reg == nil {
-		reg = DefaultRegistry()
+		reg = domainjobs.DefaultRegistry()
 	}
 	_, err := reg.ValidateChain(chain)
 	if err != nil {

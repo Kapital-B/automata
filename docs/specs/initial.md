@@ -85,28 +85,34 @@ svc/
   cmd/server/                # HTTP API entrypoint: wiring, listen, graceful shutdown
   cmd/worker/                # optional: separate binary for jobs when isolation is needed
   internal/
-    domain/                  # entities, value objects, domain services, invariants
+    domain/                  # entities, policies, inbound/outbound ports and their models
       accounts/
       messages/
       shared/                # cross-cutting value types (e.g. identifiers) if needed
     application/             # use cases; orchestration only
       accounts/
       messages/
-      ports/                 # driven port interfaces consumed by application
     adapters/
       inbound/
-        http/                # e.g. chi/echo/std net/http handlers → application use cases
-        schedule/            # cron / ticker entrypoints → same use cases as HTTP
+        http/                # transport mapping → domain-owned inbound use-case ports
+        asynq/               # task decoding → domain-owned execution ports
       outbound/
         persistence/         # sqlite/postgres repositories implementing ports
         microsoft/           # OAuth2 (authorization code) + Graph HTTP; map DTOs → domain
-        security/            # token encryption at rest, etc.
+        security/            # encryption, access tokens and password hashing
+        asynq/               # queue production behind domain-owned outbound ports
+      shared/                # versioned transport helpers shared by adapters
+    composition/             # wire concrete adapters and application services
   migrations/                # SQL migrations (goose, golang-migrate, Atlas, etc.)
 ```
 
-**Composition root:** construct repositories, token vault, and mail clients in **`cmd/server/main.go`** (or a dedicated `internal/wiring` package) and pass them into application constructors. **Scheduled jobs** and **HTTP handlers** call the **same** application services, matching [§1](#1-system-context).
+**Port ownership:** define every inbound and outbound port and its signature models in the owning `internal/domain/<context>` package. Domain imports only domain packages, permitted standard-library packages and the UUID value library; application implements use cases and consumes outbound ports without importing infrastructure.
 
-**Bounded contexts:** start with **`internal/domain/accounts`** and **`internal/domain/messages`** (and matching `application/` packages). Add further subtrees as features land (categorization, summaries, forwarding), each behind **ports** rather than leaking infrastructure into domain.
+**Composition root:** construct repositories, security adapters and mail clients in **`internal/composition`**, called by **`cmd/server/main.go`**, and inject them into application services. **Scheduled jobs** and **HTTP handlers** call the **same** application services, matching [§1](#1-system-context).
+
+**Bounded contexts:** start with **`internal/domain/accounts`** and **`internal/domain/messages`** (and matching `application/` packages). The service also has auth, connectors, contacts, projects, issues, facts, interpretations, contradictions, decisions, attention, jobs and AI contexts. Each owns its **ports** and contract models.
+
+The completed migration and enforced dependency rules are recorded in [the domain-owned-ports RFC](rfc-domain-owned-ports.md) and [the architecture checks](../../svc/internal/architecture/README.md).
 
 **PostgreSQL** remains the natural choice for **later** multi-process hosting or heavier workloads; the **persistence adapter** stays behind repository ports so the store can be swapped without changing domain or application code.
 

@@ -1,6 +1,11 @@
 package reconcile_test
 
 import (
+	domaincontradictions "github.com/Kapital-B/automata/svc/internal/domain/contradictions"
+	domainprojects "github.com/Kapital-B/automata/svc/internal/domain/projects"
+)
+
+import (
 	"context"
 	"database/sql"
 	"testing"
@@ -58,7 +63,7 @@ func setupIssueReconcile(t *testing.T, name string) (*sqlite.Repository, *appiss
 	if err != nil {
 		t.Fatal(err)
 	}
-	proj, err := projectSvc.Create(ctx, userID, appprojects.CreateProjectInput{Name: "Cooling", Code: "DC01"})
+	proj, err := projectSvc.Create(ctx, userID, domainprojects.ProjectCreateProjectInput{Name: "Cooling", Code: "DC01"})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -76,7 +81,7 @@ func TestReconcileCreatesIssueFromCandidate(t *testing.T) {
 	ctx := context.Background()
 	insertPendingInterp(t, repo, orgID, projectID, issuePayload("P-03 seal is leaking", "Reported on site Tuesday"))
 
-	res, err := reconcileSvc.Run(ctx, userID, projectID, appreconcile.ReconcileInput{})
+	res, err := reconcileSvc.Run(ctx, userID, projectID, domaincontradictions.ReconciliationReconcileInput{})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -111,12 +116,12 @@ func TestReconcileReinforcesMatchingIssue(t *testing.T) {
 	ctx := context.Background()
 
 	insertPendingInterp(t, repo, orgID, projectID, issuePayload("P-03 seal is leaking", "first report"))
-	if _, err := reconcileSvc.Run(ctx, userID, projectID, appreconcile.ReconcileInput{}); err != nil {
+	if _, err := reconcileSvc.Run(ctx, userID, projectID, domaincontradictions.ReconciliationReconcileInput{}); err != nil {
 		t.Fatal(err)
 	}
 	// Restated with different casing and spacing.
 	insertPendingInterp(t, repo, orgID, projectID, issuePayload("p-03  Seal Is Leaking", "second report"))
-	res, err := reconcileSvc.Run(ctx, userID, projectID, appreconcile.ReconcileInput{})
+	res, err := reconcileSvc.Run(ctx, userID, projectID, domaincontradictions.ReconciliationReconcileInput{})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -139,7 +144,7 @@ func TestDiscardedIssueIsNotRecreated(t *testing.T) {
 	ctx := context.Background()
 
 	insertPendingInterp(t, repo, orgID, projectID, issuePayload("Noise from the AI", "not useful"))
-	if _, err := reconcileSvc.Run(ctx, userID, projectID, appreconcile.ReconcileInput{}); err != nil {
+	if _, err := reconcileSvc.Run(ctx, userID, projectID, domaincontradictions.ReconciliationReconcileInput{}); err != nil {
 		t.Fatal(err)
 	}
 	issues, err := repo.ListIssuesByProject(ctx, orgID, projectID)
@@ -168,7 +173,7 @@ func TestDiscardedIssueIsNotRecreated(t *testing.T) {
 
 	// The same candidate arrives again.
 	insertPendingInterp(t, repo, orgID, projectID, issuePayload("Noise from the AI", "again"))
-	if _, err := reconcileSvc.Run(ctx, userID, projectID, appreconcile.ReconcileInput{}); err != nil {
+	if _, err := reconcileSvc.Run(ctx, userID, projectID, domaincontradictions.ReconciliationReconcileInput{}); err != nil {
 		t.Fatal(err)
 	}
 	after, err := repo.ListIssuesByProject(ctx, orgID, projectID)
@@ -201,7 +206,7 @@ func TestReconcileIgnoresIssuesWhenNotConfigured(t *testing.T) {
 		Contradictions: repo, JobRuns: repo,
 	}
 	insertPendingInterp(t, repo, orgID, projectID, issuePayload("Something", "note"))
-	res, err := bare.Run(ctx, userID, projectID, appreconcile.ReconcileInput{})
+	res, err := bare.Run(ctx, userID, projectID, domaincontradictions.ReconciliationReconcileInput{})
 	if err != nil {
 		t.Fatal(err)
 	}

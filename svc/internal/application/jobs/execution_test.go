@@ -17,16 +17,16 @@ type cancellingExecutor struct {
 	now   time.Time
 }
 
-func (e *cancellingExecutor) JobType() string { return TypeCategorize }
+func (e *cancellingExecutor) JobType() string { return domainjobs.TypeCategorize }
 
 func (e *cancellingExecutor) ExecuteChunk(ctx context.Context, run domainjobs.RunContext) (domainjobs.ChunkResult, error) {
-	_, err := e.store.RequestCancel(ctx, e.user, run.RunID, e.now, DefaultTerminalTTL)
+	_, err := e.store.RequestCancel(ctx, e.user, run.RunID, e.now, domainjobs.DefaultTerminalTTL)
 	if err != nil {
 		return domainjobs.ChunkResult{}, err
 	}
 	return domainjobs.ChunkResult{
 		Done:          false,
-		NextCursor:    &domainjobs.JobCursor{Kind: string(CursorMessageKeyset), Value: "after:1"},
+		NextCursor:    &domainjobs.JobCursor{Kind: string(domainjobs.CursorMessageKeyset), Value: "after:1"},
 		ProgressDelta: domainjobs.JobProgress{Processed: 1},
 	}, nil
 }
@@ -39,7 +39,7 @@ func TestHandleStreamRecordCancelsAtChunkBoundary(t *testing.T) {
 
 	enqueuer := Enqueuer{Store: store}
 	job, err := enqueuer.Enqueue(ctx, domainjobs.CreateJobInput{
-		JobType:     TypeCategorize,
+		JobType:     domainjobs.TypeCategorize,
 		UserID:      userID,
 		TriggerKind: domainjobs.JobTriggerAPI,
 		ChainID:     uuid.New(),
@@ -52,7 +52,7 @@ func TestHandleStreamRecordCancelsAtChunkBoundary(t *testing.T) {
 	service := ExecutionService{
 		Store: store,
 		Executors: ExecutorRegistry{
-			TypeCategorize: &cancellingExecutor{store: store, user: userID, now: now.Add(time.Second)},
+			domainjobs.TypeCategorize: &cancellingExecutor{store: store, user: userID, now: now.Add(time.Second)},
 		},
 		LeaseOwner: "test-worker",
 	}
@@ -79,7 +79,7 @@ type scopeRecordingExecutor struct {
 	user, account *uuid.UUID
 }
 
-func (e *scopeRecordingExecutor) JobType() string { return TypeCategorize }
+func (e *scopeRecordingExecutor) JobType() string { return domainjobs.TypeCategorize }
 
 func (e *scopeRecordingExecutor) ExecuteChunk(ctx context.Context, run domainjobs.RunContext) (domainjobs.ChunkResult, error) {
 	e.user, e.account = domainai.UsageScopeFrom(ctx)
@@ -92,7 +92,7 @@ func TestRunSynchronousSetsUsageScope(t *testing.T) {
 	ctx := context.Background()
 	userID, accountID := uuid.New(), uuid.New()
 	exec := &scopeRecordingExecutor{}
-	service := ExecutionService{Store: memoryjobs.NewStore(), Executors: ExecutorRegistry{TypeCategorize: exec}, LeaseOwner: "test-worker"}
+	service := ExecutionService{Store: memoryjobs.NewStore(), Executors: ExecutorRegistry{domainjobs.TypeCategorize: exec}, LeaseOwner: "test-worker"}
 	if _, err := service.RunSynchronous(ctx, domainjobs.CreateJobInput{
 		UserID:      userID,
 		AccountID:   &accountID,

@@ -25,11 +25,6 @@ import (
 	"github.com/google/uuid"
 )
 
-var ErrNotFound = domaincontradictions.ReconciliationErrNotFound
-var ErrNothingToReconcile = domaincontradictions.ReconciliationErrNothingToReconcile
-var ErrInvalidResolution = domaincontradictions.ReconciliationErrInvalidResolution
-var ErrNotOpen = domaincontradictions.ReconciliationErrNotOpen
-
 // Service applies Stage B reconcile outcomes and manages contradictions.
 type Service struct {
 	Users           domainauth.UserRepository
@@ -44,16 +39,6 @@ type Service struct {
 	IssuesRepo domainissues.IssueRepository
 	JobRuns    domainjobs.JobRunRepository
 }
-
-type ReconcileInput = domaincontradictions.ReconciliationReconcileInput
-
-type CandidateOutcome = domaincontradictions.ReconciliationCandidateOutcome
-
-type ReconcileResult = domaincontradictions.ReconciliationReconcileResult
-
-type ContradictionView = domaincontradictions.ReconciliationContradictionView
-
-type ResolveInput = domaincontradictions.ReconciliationResolveInput
 
 type candidatePayload struct {
 	Kind          string          `json:"kind"`
@@ -87,19 +72,19 @@ func (s *Service) requireMember(ctx context.Context, userID, projectID uuid.UUID
 		return uuid.Nil, err
 	}
 	if p == nil {
-		return uuid.Nil, ErrNotFound
+		return uuid.Nil, domaincontr.ReconciliationErrNotFound
 	}
 	m, err := s.Projects.GetProjectMember(ctx, projectID, userID)
 	if err != nil {
 		return uuid.Nil, err
 	}
 	if m == nil {
-		return uuid.Nil, ErrNotFound
+		return uuid.Nil, domaincontr.ReconciliationErrNotFound
 	}
 	return orgID, nil
 }
 
-func (s *Service) Run(ctx context.Context, userID, projectID uuid.UUID, in ReconcileInput) (*ReconcileResult, error) {
+func (s *Service) Run(ctx context.Context, userID, projectID uuid.UUID, in domaincontr.ReconciliationReconcileInput) (*domaincontr.ReconciliationReconcileResult, error) {
 	orgID, err := s.requireMember(ctx, userID, projectID)
 	if err != nil {
 		return nil, err
@@ -123,7 +108,7 @@ func (s *Service) Run(ctx context.Context, userID, projectID uuid.UUID, in Recon
 		}
 	}
 	if len(selected) == 0 {
-		return nil, ErrNothingToReconcile
+		return nil, domaincontr.ReconciliationErrNothingToReconcile
 	}
 
 	now := time.Now().UTC()
@@ -133,7 +118,7 @@ func (s *Service) Run(ctx context.Context, userID, projectID uuid.UUID, in Recon
 		_ = s.JobRuns.InsertJobRun(ctx, runID, uuid.Nil, "reconcile_project", "api", "success", now, now, nil, string(meta))
 	}
 
-	result := &ReconcileResult{Outcomes: make([]CandidateOutcome, 0)}
+	result := &domaincontradictions.ReconciliationReconcileResult{Outcomes: make([]domaincontr.ReconciliationCandidateOutcome, 0)}
 	for _, interp := range selected {
 		outs, opened, err := s.reconcileOne(ctx, userID, orgID, projectID, interp)
 		if err != nil {
@@ -147,10 +132,10 @@ func (s *Service) Run(ctx context.Context, userID, projectID uuid.UUID, in Recon
 	return result, nil
 }
 
-func (s *Service) reconcileOne(ctx context.Context, userID, orgID, projectID uuid.UUID, interp domaininterpretations.InterpretationRow) ([]CandidateOutcome, int, error) {
+func (s *Service) reconcileOne(ctx context.Context, userID, orgID, projectID uuid.UUID, interp domaininterpretations.InterpretationRow) ([]domaincontr.ReconciliationCandidateOutcome, int, error) {
 	var root payloadRoot
 	_ = json.Unmarshal([]byte(interp.PayloadJSON), &root)
-	outs := make([]CandidateOutcome, 0, len(root.Candidates))
+	outs := make([]domaincontr.ReconciliationCandidateOutcome, 0, len(root.Candidates))
 	opened := 0
 	for _, c := range root.Candidates {
 		kind := strings.ToLower(strings.TrimSpace(c.Kind))
@@ -177,7 +162,7 @@ func (s *Service) reconcileOne(ctx context.Context, userID, orgID, projectID uui
 			}
 			outs = append(outs, out)
 		default:
-			outs = append(outs, CandidateOutcome{Kind: kind, Outcome: "ignore", Reason: "unknown candidate kind"})
+			outs = append(outs, domaincontr.ReconciliationCandidateOutcome{Kind: kind, Outcome: "ignore", Reason: "unknown candidate kind"})
 		}
 	}
 	return outs, opened, nil
@@ -188,9 +173,9 @@ func (s *Service) reconcileOne(ctx context.Context, userID, orgID, projectID uui
 // An issue is a prompt to look at something, not an assertion about what is
 // true, so a wrong one costs attention rather than correctness — the opposite
 // trade-off from a decision. Discarding is one action.
-func (s *Service) reconcileIssueCandidate(ctx context.Context, userID, orgID, projectID uuid.UUID, c candidatePayload) (CandidateOutcome, error) {
+func (s *Service) reconcileIssueCandidate(ctx context.Context, userID, orgID, projectID uuid.UUID, c candidatePayload) (domaincontr.ReconciliationCandidateOutcome, error) {
 	if s.Issues == nil || s.IssuesRepo == nil {
-		return CandidateOutcome{Kind: "issue", Outcome: "ignore", Reason: "issues not configured"}, nil
+		return domaincontradictions.ReconciliationCandidateOutcome{Kind: "issue", Outcome: "ignore", Reason: "issues not configured"}, nil
 	}
 	title := strings.TrimSpace(c.Title)
 	if title == "" {
@@ -198,12 +183,12 @@ func (s *Service) reconcileIssueCandidate(ctx context.Context, userID, orgID, pr
 		title = strings.TrimSpace(c.Statement)
 	}
 	if title == "" {
-		return CandidateOutcome{Kind: "issue", Outcome: "ignore", Reason: "empty title"}, nil
+		return domaincontr.ReconciliationCandidateOutcome{Kind: "issue", Outcome: "ignore", Reason: "empty title"}, nil
 	}
 
 	existing, err := s.IssuesRepo.ListIssuesByProject(ctx, orgID, projectID)
 	if err != nil {
-		return CandidateOutcome{}, err
+		return domaincontr.ReconciliationCandidateOutcome{}, err
 	}
 	norm := normalizeValue(title)
 	for _, iss := range existing {
@@ -218,86 +203,86 @@ func (s *Service) reconcileIssueCandidate(ctx context.Context, userID, orgID, pr
 		for _, ref := range evidenceFromCandidate(c) {
 			_ = s.addIssueEvidence(ctx, orgID, iss.ID, ref)
 		}
-		return CandidateOutcome{
+		return domaincontr.ReconciliationCandidateOutcome{
 			Kind: "issue", Outcome: "reinforce", Reason: "matches an open issue",
 			IssueID: iss.ID.String(),
 		}, nil
 	}
 
-	refs := make([]appissues.ItemRef, 0)
+	refs := make([]domainissues.IssueItemRef, 0)
 	for _, ref := range evidenceFromCandidate(c) {
-		refs = append(refs, appissues.ItemRef{MessageID: ref.MessageID, ManualItemID: ref.ManualItemID})
+		refs = append(refs, domainissues.IssueItemRef{MessageID: ref.MessageID, ManualItemID: ref.ManualItemID})
 	}
-	view, err := s.Issues.Create(ctx, userID, projectID, appissues.CreateInput{
+	view, err := s.Issues.Create(ctx, userID, projectID, domainissues.IssueCreateInput{
 		Title:               title,
 		CurrentPositionNote: strings.TrimSpace(c.Statement),
 		ItemRefs:            refs,
 		Source:              string(domainissues.SourceLLM),
 	})
 	if err != nil {
-		return CandidateOutcome{}, err
+		return domaincontr.ReconciliationCandidateOutcome{}, err
 	}
-	return CandidateOutcome{
+	return domaincontr.ReconciliationCandidateOutcome{
 		Kind: "issue", Outcome: "confirm_new", Reason: "new issue from interpretation",
 		IssueID: view.Issue.ID.String(),
 	}, nil
 }
 
-func (s *Service) addIssueEvidence(ctx context.Context, orgID, issueID uuid.UUID, ref appfacts.EvidenceRef) error {
+func (s *Service) addIssueEvidence(ctx context.Context, orgID, issueID uuid.UUID, ref domainfacts.FactEvidenceRef) error {
 	return s.IssuesRepo.AddIssueItem(ctx, domainissues.IssueItemRow{
 		ID: uuid.New(), IssueID: issueID, MessageID: ref.MessageID,
 		ManualItemID: ref.ManualItemID, AddedAt: time.Now().UTC(),
 	})
 }
 
-func (s *Service) reconcileDecisionCandidate(ctx context.Context, userID, projectID uuid.UUID, c candidatePayload) (CandidateOutcome, error) {
+func (s *Service) reconcileDecisionCandidate(ctx context.Context, userID, projectID uuid.UUID, c candidatePayload) (domaincontr.ReconciliationCandidateOutcome, error) {
 	if s.Decisions == nil {
-		return CandidateOutcome{Kind: "decision", Outcome: "ignore", Reason: "decisions not configured"}, nil
+		return domaincontradictions.ReconciliationCandidateOutcome{Kind: "decision", Outcome: "ignore", Reason: "decisions not configured"}, nil
 	}
 	statement := strings.TrimSpace(c.Statement)
 	if statement == "" {
-		return CandidateOutcome{Kind: "decision", Outcome: "ignore", Reason: "empty statement"}, nil
+		return domaincontradictions.ReconciliationCandidateOutcome{Kind: "decision", Outcome: "ignore", Reason: "empty statement"}, nil
 	}
 	norm := normalizeValue(statement)
 	existing, err := s.Decisions.List(ctx, userID, projectID, string(domaindec.StatusAccepted))
 	if err != nil {
-		return CandidateOutcome{}, err
+		return domaincontr.ReconciliationCandidateOutcome{}, err
 	}
 	for _, v := range existing {
 		if normalizeValue(v.Decision.Statement) == norm {
 			for _, ref := range evidenceFromCandidate(c) {
-				_, _ = s.Decisions.AddEvidence(ctx, userID, v.Decision.ID, appdecisions.EvidenceRef{
+				_, _ = s.Decisions.AddEvidence(ctx, userID, v.Decision.ID, domaindec.DecisionEvidenceRef{
 					MessageID: ref.MessageID, ManualItemID: ref.ManualItemID,
 				})
 			}
-			return CandidateOutcome{
+			return domaincontr.ReconciliationCandidateOutcome{
 				Kind: "decision", Outcome: "reinforce", Reason: "compatible with accepted decision",
 				DecisionID: v.Decision.ID.String(),
 			}, nil
 		}
 	}
-	evidence := make([]appdecisions.EvidenceRef, 0)
+	evidence := make([]domaindec.DecisionEvidenceRef, 0)
 	for _, ref := range evidenceFromCandidate(c) {
-		evidence = append(evidence, appdecisions.EvidenceRef{MessageID: ref.MessageID, ManualItemID: ref.ManualItemID})
+		evidence = append(evidence, domaindec.DecisionEvidenceRef{MessageID: ref.MessageID, ManualItemID: ref.ManualItemID})
 	}
-	view, err := s.Decisions.Create(ctx, userID, projectID, appdecisions.CreateInput{
+	view, err := s.Decisions.Create(ctx, userID, projectID, domaindec.DecisionCreateInput{
 		Statement: statement, Confirm: false, Evidence: evidence,
 		Source: string(domaindec.SourceLLM), Confidence: &c.Confidence,
 	})
 	if err != nil {
-		return CandidateOutcome{}, err
+		return domaincontr.ReconciliationCandidateOutcome{}, err
 	}
-	return CandidateOutcome{
+	return domaincontr.ReconciliationCandidateOutcome{
 		Kind: "decision", Outcome: "confirm_new", Reason: "proposed decision from interpretation",
 		DecisionID: view.Decision.ID.String(),
 	}, nil
 }
 
-func (s *Service) reconcileFactCandidate(ctx context.Context, userID, orgID, projectID, interpID uuid.UUID, c candidatePayload) (CandidateOutcome, bool, error) {
+func (s *Service) reconcileFactCandidate(ctx context.Context, userID, orgID, projectID, interpID uuid.UUID, c candidatePayload) (domaincontr.ReconciliationCandidateOutcome, bool, error) {
 	subject := strings.TrimSpace(strings.ToLower(c.SubjectKey))
 	label := strings.TrimSpace(c.Label)
 	if !domainfacts.ValidSubjectKey(subject) || label == "" {
-		return CandidateOutcome{Kind: "fact", Outcome: "ignore", Reason: "invalid subject/label"}, false, nil
+		return domaincontr.ReconciliationCandidateOutcome{Kind: "fact", Outcome: "ignore", Reason: "invalid subject/label"}, false, nil
 	}
 	var value any
 	if len(c.Value) > 0 {
@@ -313,22 +298,22 @@ func (s *Service) reconcileFactCandidate(ctx context.Context, userID, orgID, pro
 
 	existing, err := s.FactsRepo.GetFactBySubject(ctx, orgID, projectID, subject)
 	if err != nil {
-		return CandidateOutcome{}, false, err
+		return domaincontr.ReconciliationCandidateOutcome{}, false, err
 	}
 	if existing == nil {
-		view, err := s.Facts.Create(ctx, userID, projectID, appfacts.CreateInput{
+		view, err := s.Facts.Create(ctx, userID, projectID, domainfacts.FactCreateInput{
 			SubjectKey: subject, Label: label, Value: value, Unit: unitPtr,
 			Confirm: true, Evidence: evidence, Source: string(domainfacts.SourceLLM),
 			InterpretationID: &interpID, Confidence: &conf,
 		})
 		if err != nil {
-			return CandidateOutcome{}, false, err
+			return domaincontr.ReconciliationCandidateOutcome{}, false, err
 		}
 		vid := ""
 		if len(view.Versions) > 0 {
 			vid = view.Versions[len(view.Versions)-1].Version.ID.String()
 		}
-		return CandidateOutcome{
+		return domaincontr.ReconciliationCandidateOutcome{
 			Kind: "fact", Outcome: "confirm_new", Subject: subject, Reason: "no prior subject",
 			FactID: view.Fact.ID.String(), VersionID: vid,
 		}, false, nil
@@ -336,22 +321,22 @@ func (s *Service) reconcileFactCandidate(ctx context.Context, userID, orgID, pro
 
 	active, err := s.FactsRepo.GetActiveFactVersion(ctx, existing.ID)
 	if err != nil {
-		return CandidateOutcome{}, false, err
+		return domaincontr.ReconciliationCandidateOutcome{}, false, err
 	}
 	if active == nil {
-		view, err := s.Facts.Create(ctx, userID, projectID, appfacts.CreateInput{
+		view, err := s.Facts.Create(ctx, userID, projectID, domainfacts.FactCreateInput{
 			SubjectKey: subject, Label: label, Value: value, Unit: unitPtr,
 			Confirm: true, Evidence: evidence, Source: string(domainfacts.SourceLLM),
 			InterpretationID: &interpID, Confidence: &conf,
 		})
 		if err != nil {
-			return CandidateOutcome{}, false, err
+			return domaincontr.ReconciliationCandidateOutcome{}, false, err
 		}
 		vid := ""
 		if len(view.Versions) > 0 {
 			vid = view.Versions[len(view.Versions)-1].Version.ID.String()
 		}
-		return CandidateOutcome{
+		return domaincontr.ReconciliationCandidateOutcome{
 			Kind: "fact", Outcome: "confirm_new", Subject: subject, Reason: "no active version",
 			FactID: view.Fact.ID.String(), VersionID: vid,
 		}, false, nil
@@ -362,20 +347,20 @@ func (s *Service) reconcileFactCandidate(ctx context.Context, userID, orgID, pro
 		for _, ref := range evidence {
 			_, _ = s.Facts.AddEvidence(ctx, userID, active.ID, ref)
 		}
-		return CandidateOutcome{
+		return domaincontr.ReconciliationCandidateOutcome{
 			Kind: "fact", Outcome: "reinforce", Subject: subject, Reason: "compatible with active value",
 			FactID: existing.ID.String(), VersionID: active.ID.String(),
 		}, false, nil
 	}
 
 	// Incompatible: high confidence → propose supersede; low → contradiction.
-	view, err := s.Facts.Create(ctx, userID, projectID, appfacts.CreateInput{
+	view, err := s.Facts.Create(ctx, userID, projectID, domainfacts.FactCreateInput{
 		SubjectKey: subject, Label: label, Value: value, Unit: unitPtr,
 		Confirm: false, SupersedesVersionID: &active.ID, Evidence: evidence,
 		Source: string(domainfacts.SourceLLM), InterpretationID: &interpID, Confidence: &conf,
 	})
 	if err != nil {
-		return CandidateOutcome{}, false, err
+		return domaincontr.ReconciliationCandidateOutcome{}, false, err
 	}
 	var proposedID uuid.UUID
 	for _, v := range view.Versions {
@@ -384,7 +369,7 @@ func (s *Service) reconcileFactCandidate(ctx context.Context, userID, orgID, pro
 		}
 	}
 	if conf >= 0.7 {
-		return CandidateOutcome{
+		return domaincontr.ReconciliationCandidateOutcome{
 			Kind: "fact", Outcome: "supersede", Subject: subject,
 			Reason: "incompatible value; proposed supersession",
 			FactID: existing.ID.String(), VersionID: proposedID.String(),
@@ -399,7 +384,7 @@ func (s *Service) reconcileFactCandidate(ctx context.Context, userID, orgID, pro
 		CreatedAt: now, UpdatedAt: now,
 	}
 	if err := s.Contradictions.CreateContradiction(ctx, contr); err != nil {
-		return CandidateOutcome{}, false, err
+		return domaincontradictions.ReconciliationCandidateOutcome{}, false, err
 	}
 	_ = s.Contradictions.AddContradictionSide(ctx, domaincontradictions.ContradictionSideRow{
 		ID: uuid.New(), ContradictionID: contr.ID, FactVersionID: &active.ID,
@@ -407,7 +392,7 @@ func (s *Service) reconcileFactCandidate(ctx context.Context, userID, orgID, pro
 	_ = s.Contradictions.AddContradictionSide(ctx, domaincontradictions.ContradictionSideRow{
 		ID: uuid.New(), ContradictionID: contr.ID, FactVersionID: &proposedID,
 	})
-	return CandidateOutcome{
+	return domaincontr.ReconciliationCandidateOutcome{
 		Kind: "fact", Outcome: "contradiction", Subject: subject,
 		Reason: "competing values without safe supersede",
 		FactID: existing.ID.String(), VersionID: proposedID.String(),
@@ -415,7 +400,7 @@ func (s *Service) reconcileFactCandidate(ctx context.Context, userID, orgID, pro
 	}, true, nil
 }
 
-func (s *Service) ListContradictions(ctx context.Context, userID, projectID uuid.UUID, status string) ([]ContradictionView, error) {
+func (s *Service) ListContradictions(ctx context.Context, userID, projectID uuid.UUID, status string) ([]domaincontr.ReconciliationContradictionView, error) {
 	orgID, err := s.requireMember(ctx, userID, projectID)
 	if err != nil {
 		return nil, err
@@ -424,18 +409,18 @@ func (s *Service) ListContradictions(ctx context.Context, userID, projectID uuid
 	if err != nil {
 		return nil, err
 	}
-	out := make([]ContradictionView, 0, len(rows))
+	out := make([]domaincontr.ReconciliationContradictionView, 0, len(rows))
 	for _, row := range rows {
 		sides, err := s.Contradictions.ListContradictionSides(ctx, row.ID)
 		if err != nil {
 			return nil, err
 		}
-		out = append(out, ContradictionView{Contradiction: row, Sides: sides})
+		out = append(out, domaincontr.ReconciliationContradictionView{Contradiction: row, Sides: sides})
 	}
 	return out, nil
 }
 
-func (s *Service) Resolve(ctx context.Context, userID, contradictionID uuid.UUID, in ResolveInput) (*ContradictionView, error) {
+func (s *Service) Resolve(ctx context.Context, userID, contradictionID uuid.UUID, in domaincontr.ReconciliationResolveInput) (*domaincontr.ReconciliationContradictionView, error) {
 	orgID, err := s.homeOrg(ctx, userID)
 	if err != nil {
 		return nil, err
@@ -445,17 +430,17 @@ func (s *Service) Resolve(ctx context.Context, userID, contradictionID uuid.UUID
 		return nil, err
 	}
 	if row == nil {
-		return nil, ErrNotFound
+		return nil, domaincontradictions.ReconciliationErrNotFound
 	}
 	if _, err := s.requireMember(ctx, userID, row.ProjectID); err != nil {
 		return nil, err
 	}
 	if row.Status != string(domaincontr.StatusOpen) {
-		return nil, ErrNotOpen
+		return nil, domaincontradictions.ReconciliationErrNotOpen
 	}
 	res := domaincontr.Resolution(strings.TrimSpace(in.Resolution))
 	if !res.Valid() {
-		return nil, ErrInvalidResolution
+		return nil, domaincontradictions.ReconciliationErrInvalidResolution
 	}
 	sides, err := s.Contradictions.ListContradictionSides(ctx, row.ID)
 	if err != nil {
@@ -483,7 +468,7 @@ func (s *Service) Resolve(ctx context.Context, userID, contradictionID uuid.UUID
 				reject = side.FactVersionID
 			}
 		}
-		_, err := s.Facts.Confirm(ctx, userID, *keep, appfacts.ConfirmInput{SupersedesVersionID: reject})
+		_, err := s.Facts.Confirm(ctx, userID, *keep, domainfacts.FactConfirmInput{SupersedesVersionID: reject})
 		if err != nil {
 			return nil, err
 		}
@@ -528,18 +513,18 @@ func (s *Service) Resolve(ctx context.Context, userID, contradictionID uuid.UUID
 		return nil, err
 	}
 	sides, _ = s.Contradictions.ListContradictionSides(ctx, row.ID)
-	return &ContradictionView{Contradiction: *row, Sides: sides}, nil
+	return &domaincontradictions.ReconciliationContradictionView{Contradiction: *row, Sides: sides}, nil
 }
 
-func evidenceFromCandidate(c candidatePayload) []appfacts.EvidenceRef {
-	out := make([]appfacts.EvidenceRef, 0)
+func evidenceFromCandidate(c candidatePayload) []domainfacts.FactEvidenceRef {
+	out := make([]domainfacts.FactEvidenceRef, 0)
 	for _, idStr := range c.MessageIDs {
 		id, err := uuid.Parse(strings.TrimSpace(idStr))
 		if err != nil {
 			continue
 		}
 		mid := id
-		out = append(out, appfacts.EvidenceRef{MessageID: &mid})
+		out = append(out, domainfacts.FactEvidenceRef{MessageID: &mid})
 	}
 	for _, idStr := range c.ManualItemIDs {
 		id, err := uuid.Parse(strings.TrimSpace(idStr))
@@ -547,7 +532,7 @@ func evidenceFromCandidate(c candidatePayload) []appfacts.EvidenceRef {
 			continue
 		}
 		mid := id
-		out = append(out, appfacts.EvidenceRef{ManualItemID: &mid})
+		out = append(out, domainfacts.FactEvidenceRef{ManualItemID: &mid})
 	}
 	return out
 }

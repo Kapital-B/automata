@@ -16,13 +16,6 @@ import (
 	"github.com/google/uuid"
 )
 
-var ErrNotFound = domaindecisions.DecisionErrNotFound
-var ErrNotProposed = domaindecisions.DecisionErrNotProposed
-var ErrInvalidStatus = domaindecisions.DecisionErrInvalidStatus
-var ErrWrongProject = domaindecisions.DecisionErrWrongProject
-var ErrBadAssignee = domaindecisions.DecisionErrBadAssignee
-var ErrBadEvidence = domaindecisions.DecisionErrBadEvidence
-
 type Service struct {
 	Users       domainauth.UserRepository
 	Projects    domainprojects.ProjectRepository
@@ -32,14 +25,6 @@ type Service struct {
 	Manuals     domainprojects.ManualItemRepository
 	Messages    domainmessages.MessageRepository
 }
-
-type EvidenceRef = domaindecisions.DecisionEvidenceRef
-
-type DecisionView = domaindecisions.DecisionDecisionView
-
-type CreateInput = domaindecisions.DecisionCreateInput
-
-type PatchInput = domaindecisions.DecisionPatchInput
 
 func (s *Service) homeOrg(ctx context.Context, userID uuid.UUID) (uuid.UUID, error) {
 	return s.Users.GetHomeOrganisationID(ctx, userID)
@@ -55,19 +40,19 @@ func (s *Service) requireMember(ctx context.Context, userID, projectID uuid.UUID
 		return uuid.Nil, err
 	}
 	if p == nil {
-		return uuid.Nil, ErrNotFound
+		return uuid.Nil, domaindec.DecisionErrNotFound
 	}
 	m, err := s.Projects.GetProjectMember(ctx, projectID, userID)
 	if err != nil {
 		return uuid.Nil, err
 	}
 	if m == nil {
-		return uuid.Nil, ErrNotFound
+		return uuid.Nil, domaindec.DecisionErrNotFound
 	}
 	return orgID, nil
 }
 
-func (s *Service) List(ctx context.Context, userID, projectID uuid.UUID, status string) ([]DecisionView, error) {
+func (s *Service) List(ctx context.Context, userID, projectID uuid.UUID, status string) ([]domaindec.DecisionDecisionView, error) {
 	orgID, err := s.requireMember(ctx, userID, projectID)
 	if err != nil {
 		return nil, err
@@ -76,18 +61,18 @@ func (s *Service) List(ctx context.Context, userID, projectID uuid.UUID, status 
 	if err != nil {
 		return nil, err
 	}
-	out := make([]DecisionView, 0, len(rows))
+	out := make([]domaindec.DecisionDecisionView, 0, len(rows))
 	for _, row := range rows {
 		ev, err := s.Decisions.ListDecisionEvidence(ctx, row.ID)
 		if err != nil {
 			return nil, err
 		}
-		out = append(out, DecisionView{Decision: row, Evidence: ev})
+		out = append(out, domaindec.DecisionDecisionView{Decision: row, Evidence: ev})
 	}
 	return out, nil
 }
 
-func (s *Service) ListAcceptedRecent(ctx context.Context, userID, projectID uuid.UUID, limit int) ([]DecisionView, error) {
+func (s *Service) ListAcceptedRecent(ctx context.Context, userID, projectID uuid.UUID, limit int) ([]domaindec.DecisionDecisionView, error) {
 	views, err := s.List(ctx, userID, projectID, string(domaindec.StatusAccepted))
 	if err != nil {
 		return nil, err
@@ -98,7 +83,7 @@ func (s *Service) ListAcceptedRecent(ctx context.Context, userID, projectID uuid
 	return views[:limit], nil
 }
 
-func (s *Service) Get(ctx context.Context, userID, decisionID uuid.UUID) (*DecisionView, error) {
+func (s *Service) Get(ctx context.Context, userID, decisionID uuid.UUID) (*domaindec.DecisionDecisionView, error) {
 	orgID, err := s.homeOrg(ctx, userID)
 	if err != nil {
 		return nil, err
@@ -108,7 +93,7 @@ func (s *Service) Get(ctx context.Context, userID, decisionID uuid.UUID) (*Decis
 		return nil, err
 	}
 	if row == nil {
-		return nil, ErrNotFound
+		return nil, domaindec.DecisionErrNotFound
 	}
 	if _, err := s.requireMember(ctx, userID, row.ProjectID); err != nil {
 		return nil, err
@@ -117,10 +102,10 @@ func (s *Service) Get(ctx context.Context, userID, decisionID uuid.UUID) (*Decis
 	if err != nil {
 		return nil, err
 	}
-	return &DecisionView{Decision: *row, Evidence: ev}, nil
+	return &domaindec.DecisionDecisionView{Decision: *row, Evidence: ev}, nil
 }
 
-func (s *Service) Create(ctx context.Context, userID, projectID uuid.UUID, in CreateInput) (*DecisionView, error) {
+func (s *Service) Create(ctx context.Context, userID, projectID uuid.UUID, in domaindec.DecisionCreateInput) (*domaindec.DecisionDecisionView, error) {
 	orgID, err := s.requireMember(ctx, userID, projectID)
 	if err != nil {
 		return nil, err
@@ -130,14 +115,14 @@ func (s *Service) Create(ctx context.Context, userID, projectID uuid.UUID, in Cr
 		return nil, err
 	}
 	if p == nil || p.ArchivedAt != nil {
-		return nil, ErrNotFound
+		return nil, domaindec.DecisionErrNotFound
 	}
 	statement := strings.TrimSpace(in.Statement)
 	if statement == "" {
 		return nil, fmt.Errorf("statement required")
 	}
 	if !domaindec.ValidAssigneeXOR(in.AssigneeUserID != nil, in.AssigneeContactID != nil) {
-		return nil, ErrBadAssignee
+		return nil, domaindec.DecisionErrBadAssignee
 	}
 	if in.IssueID != nil {
 		iss, err := s.Issues.GetIssue(ctx, orgID, *in.IssueID)
@@ -145,7 +130,7 @@ func (s *Service) Create(ctx context.Context, userID, projectID uuid.UUID, in Cr
 			return nil, err
 		}
 		if iss == nil || iss.ProjectID != projectID {
-			return nil, ErrWrongProject
+			return nil, domaindec.DecisionErrWrongProject
 		}
 	}
 	for _, ref := range in.Evidence {
@@ -197,13 +182,13 @@ func (s *Service) Create(ctx context.Context, userID, projectID uuid.UUID, in Cr
 	return s.Get(ctx, userID, row.ID)
 }
 
-func (s *Service) Confirm(ctx context.Context, userID, decisionID uuid.UUID) (*DecisionView, error) {
+func (s *Service) Confirm(ctx context.Context, userID, decisionID uuid.UUID) (*domaindec.DecisionDecisionView, error) {
 	view, err := s.Get(ctx, userID, decisionID)
 	if err != nil {
 		return nil, err
 	}
 	if view.Decision.Status != string(domaindec.StatusProposed) {
-		return nil, ErrNotProposed
+		return nil, domaindec.DecisionErrNotProposed
 	}
 	now := time.Now().UTC()
 	row := view.Decision
@@ -225,13 +210,13 @@ func (s *Service) Confirm(ctx context.Context, userID, decisionID uuid.UUID) (*D
 	return s.Get(ctx, userID, decisionID)
 }
 
-func (s *Service) Withdraw(ctx context.Context, userID, decisionID uuid.UUID) (*DecisionView, error) {
+func (s *Service) Withdraw(ctx context.Context, userID, decisionID uuid.UUID) (*domaindec.DecisionDecisionView, error) {
 	view, err := s.Get(ctx, userID, decisionID)
 	if err != nil {
 		return nil, err
 	}
 	if view.Decision.Status != string(domaindec.StatusProposed) && view.Decision.Status != string(domaindec.StatusAccepted) {
-		return nil, ErrInvalidStatus
+		return nil, domaindec.DecisionErrInvalidStatus
 	}
 	now := time.Now().UTC()
 	row := view.Decision
@@ -243,13 +228,13 @@ func (s *Service) Withdraw(ctx context.Context, userID, decisionID uuid.UUID) (*
 	return s.Get(ctx, userID, decisionID)
 }
 
-func (s *Service) Patch(ctx context.Context, userID, decisionID uuid.UUID, in PatchInput) (*DecisionView, error) {
+func (s *Service) Patch(ctx context.Context, userID, decisionID uuid.UUID, in domaindec.DecisionPatchInput) (*domaindecisions.DecisionDecisionView, error) {
 	view, err := s.Get(ctx, userID, decisionID)
 	if err != nil {
 		return nil, err
 	}
 	if view.Decision.Status != string(domaindec.StatusProposed) {
-		return nil, ErrNotProposed
+		return nil, domaindec.DecisionErrNotProposed
 	}
 	row := view.Decision
 	if in.Statement != nil {
@@ -264,7 +249,7 @@ func (s *Service) Patch(ctx context.Context, userID, decisionID uuid.UUID, in Pa
 		row.AssigneeContactID = nil
 	} else if in.AssigneeUserID != nil || in.AssigneeContactID != nil {
 		if !domaindec.ValidAssigneeXOR(in.AssigneeUserID != nil, in.AssigneeContactID != nil) {
-			return nil, ErrBadAssignee
+			return nil, domaindec.DecisionErrBadAssignee
 		}
 		row.AssigneeUserID = in.AssigneeUserID
 		row.AssigneeContactID = in.AssigneeContactID
@@ -276,7 +261,7 @@ func (s *Service) Patch(ctx context.Context, userID, decisionID uuid.UUID, in Pa
 	return s.Get(ctx, userID, decisionID)
 }
 
-func (s *Service) AddEvidence(ctx context.Context, userID, decisionID uuid.UUID, ref EvidenceRef) (*DecisionView, error) {
+func (s *Service) AddEvidence(ctx context.Context, userID, decisionID uuid.UUID, ref domaindec.DecisionEvidenceRef) (*domaindec.DecisionDecisionView, error) {
 	view, err := s.Get(ctx, userID, decisionID)
 	if err != nil {
 		return nil, err
@@ -293,11 +278,11 @@ func (s *Service) AddEvidence(ctx context.Context, userID, decisionID uuid.UUID,
 	return s.Get(ctx, userID, decisionID)
 }
 
-func (s *Service) validateEvidence(ctx context.Context, userID, orgID, projectID uuid.UUID, ref EvidenceRef) error {
+func (s *Service) validateEvidence(ctx context.Context, userID, orgID, projectID uuid.UUID, ref domaindec.DecisionEvidenceRef) error {
 	msgSet := ref.MessageID != nil
 	manSet := ref.ManualItemID != nil
 	if !domaindec.ValidEvidenceXOR(msgSet, manSet) {
-		return ErrBadEvidence
+		return domaindec.DecisionErrBadEvidence
 	}
 	if msgSet {
 		// Message must be assigned to project (reuse fact pattern via assignment check if available).
@@ -312,10 +297,10 @@ func (s *Service) validateEvidence(ctx context.Context, userID, orgID, projectID
 			return err
 		}
 		if item == nil {
-			return ErrNotFound
+			return domaindec.DecisionErrNotFound
 		}
 		if item.ProjectID == nil || *item.ProjectID != projectID {
-			return ErrWrongProject
+			return domaindec.DecisionErrWrongProject
 		}
 	}
 	return nil

@@ -1,6 +1,10 @@
 package http
 
 import (
+	domainprojects "github.com/Kapital-B/automata/svc/internal/domain/projects"
+)
+
+import (
 	"context"
 	"database/sql"
 	"encoding/json"
@@ -46,14 +50,14 @@ func TestExtractProjectQueuesChain(t *testing.T) {
 		Log: slog.Default(), AuthSvc: authSvc, ProjectSvc: projectSvc,
 		UsersQueries: &queries.Service{Users: repo}, MessagesQueries: &queries.Service{Messages: repo, Assignments: repo},
 
-		JobStoreQueries: &queries.Service{JobStore: store}, TokenVerifier: security.JWT{Secret: jwtSecret}, AccountJobs: &submissions.Service{Durable: &appjobs.Enqueuer{Store: store, Registry: appjobs.DefaultRegistry()}, Projects: projectSvc}, ConnectorJobs: &submissions.Service{Durable: &appjobs.Enqueuer{Store: store, Registry: appjobs.DefaultRegistry()}, Projects: projectSvc}, Extraction: &submissions.Service{Durable: &appjobs.Enqueuer{Store: store, Registry: appjobs.DefaultRegistry()}, Projects: projectSvc}, JobRequests: &submissions.Service{Durable: &appjobs.Enqueuer{Store: store, Registry: appjobs.DefaultRegistry()}, Projects: projectSvc},
+		JobStoreQueries: &queries.Service{JobStore: store}, TokenVerifier: security.JWT{Secret: jwtSecret}, AccountJobs: &submissions.Service{Durable: &appjobs.Enqueuer{Store: store, Registry: domainjobs.DefaultRegistry()}, Projects: projectSvc}, ConnectorJobs: &submissions.Service{Durable: &appjobs.Enqueuer{Store: store, Registry: domainjobs.DefaultRegistry()}, Projects: projectSvc}, Extraction: &submissions.Service{Durable: &appjobs.Enqueuer{Store: store, Registry: domainjobs.DefaultRegistry()}, Projects: projectSvc}, JobRequests: &submissions.Service{Durable: &appjobs.Enqueuer{Store: store, Registry: domainjobs.DefaultRegistry()}, Projects: projectSvc},
 	}
 	srv := httptest.NewServer(h.Routes())
 	defer srv.Close()
 
 	userA, tokensA := registerAndLogin(t, authSvc, "xa@example.com", "password123")
 	_, tokensB := registerAndLogin(t, authSvc, "xb@example.com", "password123")
-	p, err := projectSvc.Create(context.Background(), userA, appprojects.CreateProjectInput{Name: "Cooling", Code: "DC02"})
+	p, err := projectSvc.Create(context.Background(), userA, domainprojects.ProjectCreateProjectInput{Name: "Cooling", Code: "DC02"})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -95,11 +99,11 @@ func TestExtractProjectQueuesChain(t *testing.T) {
 		t.Fatalf("queued %d jobs, want 1", len(page.Jobs))
 	}
 	job := page.Jobs[0]
-	if job.JobType != appjobs.TypeInterpretProject {
-		t.Fatalf("head job is %q, want %q", job.JobType, appjobs.TypeInterpretProject)
+	if job.JobType != domainjobs.TypeInterpretProject {
+		t.Fatalf("head job is %q, want %q", job.JobType, domainjobs.TypeInterpretProject)
 	}
-	if len(job.RemainingJobs) != 1 || job.RemainingJobs[0] != appjobs.TypeReconcileProject {
-		t.Fatalf("remaining jobs %v, want [%s]", job.RemainingJobs, appjobs.TypeReconcileProject)
+	if len(job.RemainingJobs) != 1 || job.RemainingJobs[0] != domainjobs.TypeReconcileProject {
+		t.Fatalf("remaining jobs %v, want [%s]", job.RemainingJobs, domainjobs.TypeReconcileProject)
 	}
 	if job.Payload.ProjectID == nil || *job.Payload.ProjectID != p.ID {
 		t.Fatalf("payload project %v, want %s", job.Payload.ProjectID, p.ID)

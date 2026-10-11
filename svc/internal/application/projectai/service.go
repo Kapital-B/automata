@@ -22,10 +22,6 @@ import (
 	"github.com/google/uuid"
 )
 
-var ErrNotFound = domainprojects.ProjectAIErrNotFound
-var ErrLLMUnavailable = domainprojects.ProjectAIErrLLMUnavailable
-var ErrEmptyQuestion = domainprojects.ProjectAIErrEmptyQuestion
-
 type Service struct {
 	Users     domainauth.UserRepository
 	Projects  domainprojects.ProjectRepository
@@ -35,7 +31,7 @@ type Service struct {
 	Timeline  domainprojects.TimelineRepository
 	JobRuns   domainjobs.JobRunRepository
 	LLM       domainai.LLMClient
-	Attention AttentionProjects
+	Attention domainattention.AttentionProjects
 	// Resolver finds the projects, contacts and keywords a question names.
 	// Search finds matching mail. Assignments tags hits with their project.
 	// All three are optional; without them answers use the project
@@ -49,9 +45,6 @@ const (
 	maxSearchHits      = 8
 	searchSnippetRunes = 240
 )
-
-// AttentionProjects reports home-org projects that currently need operator input.
-type AttentionProjects = domainattention.AttentionProjects
 
 const maxAskAcrossProjects = 8
 
@@ -70,15 +63,11 @@ func acrossAskLimits() contextLimits {
 	return contextLimits{Facts: 16, Decisions: 8, Issues: 8, Timeline: 6}
 }
 
-type Citation = domainprojects.ProjectAICitation
-
-type Answer = domainprojects.ProjectAIAnswer
-
 type askLLMPayload struct {
-	SchemaVersion int        `json:"schema_version"`
-	Answer        string     `json:"answer"`
-	Citations     []Citation `json:"citations"`
-	Confidence    float64    `json:"confidence"`
+	SchemaVersion int                                `json:"schema_version"`
+	Answer        string                             `json:"answer"`
+	Citations     []domainprojects.ProjectAICitation `json:"citations"`
+	Confidence    float64                            `json:"confidence"`
 }
 
 type contextPack struct {
@@ -87,7 +76,7 @@ type contextPack struct {
 	Issues       map[string]struct{}
 	Messages     map[string]struct{}
 	ManualItems  map[string]struct{}
-	CiteMeta     map[string]Citation
+	CiteMeta     map[string]domainprojects.ProjectAICitation
 	Prompt       string
 }
 
@@ -98,7 +87,7 @@ func newContextPack() *contextPack {
 		Issues:       map[string]struct{}{},
 		Messages:     map[string]struct{}{},
 		ManualItems:  map[string]struct{}{},
-		CiteMeta:     map[string]Citation{},
+		CiteMeta:     map[string]domainprojects.ProjectAICitation{},
 	}
 }
 
@@ -107,7 +96,7 @@ func (p *contextPack) noteCite(typ, id string, project domainprojects.ProjectRow
 		return
 	}
 	key := typ + ":" + id
-	cite := Citation{Type: typ, ID: id}
+	cite := domainprojects.ProjectAICitation{Type: typ, ID: id}
 	// Mail that is not filed to a project is cited without one, rather than
 	// with the nil project ID.
 	if project.ID != uuid.Nil {
@@ -158,10 +147,10 @@ func (s *Service) HasLLM() bool {
 	return s != nil && s.LLM != nil
 }
 
-func (s *Service) Ask(ctx context.Context, userID, projectID uuid.UUID, question string) (*Answer, error) {
+func (s *Service) Ask(ctx context.Context, userID, projectID uuid.UUID, question string) (*domainprojects.ProjectAIAnswer, error) {
 	q := strings.TrimSpace(question)
 	if q == "" {
-		return nil, ErrEmptyQuestion
+		return nil, domainprojects.ProjectAIErrEmptyQuestion
 	}
 	orgID, err := s.Users.GetHomeOrganisationID(ctx, userID)
 	if err != nil {
@@ -172,11 +161,11 @@ func (s *Service) Ask(ctx context.Context, userID, projectID uuid.UUID, question
 		return nil, err
 	}
 	if p == nil {
-		return nil, ErrNotFound
+		return nil, domainprojects.ProjectAIErrNotFound
 	}
 	m, err := s.Projects.GetProjectMember(ctx, projectID, userID)
 	if err != nil || m == nil {
-		return nil, ErrNotFound
+		return nil, domainprojects.ProjectAIErrNotFound
 	}
 
 	pack, err := s.buildContext(ctx, userID, orgID, *p, singleAskLimits())
@@ -204,10 +193,10 @@ func (s *Service) Ask(ctx context.Context, userID, projectID uuid.UUID, question
 }
 
 // AskAcross answers a question over the caller's accessible home-org projects.
-func (s *Service) AskAcross(ctx context.Context, userID uuid.UUID, question string) (*Answer, error) {
+func (s *Service) AskAcross(ctx context.Context, userID uuid.UUID, question string) (*domainprojects.ProjectAIAnswer, error) {
 	q := strings.TrimSpace(question)
 	if q == "" {
-		return nil, ErrEmptyQuestion
+		return nil, domainprojects.ProjectAIErrEmptyQuestion
 	}
 	orgID, err := s.Users.GetHomeOrganisationID(ctx, userID)
 	if err != nil {
@@ -359,7 +348,7 @@ func addRetrievalMeta(meta map[string]any, res *retrieval.Resolution, hits int) 
 	meta["search_hits"] = hits
 }
 
-func (s *Service) runAsk(ctx context.Context, question string, pack *contextPack, jobMeta map[string]any, multi bool) (*Answer, error) {
+func (s *Service) runAsk(ctx context.Context, question string, pack *contextPack, jobMeta map[string]any, multi bool) (*domainprojects.ProjectAIAnswer, error) {
 	now := time.Now().UTC()
 	runID := uuid.New()
 	jobType := "project_ai"
@@ -368,7 +357,7 @@ func (s *Service) runAsk(ctx context.Context, question string, pack *contextPack
 		_ = s.JobRuns.InsertJobRun(ctx, runID, uuid.Nil, jobType, "api", "running", now, now, nil, string(meta))
 	}
 
-	var out *Answer
+	var out *domainprojects.ProjectAIAnswer
 	if s.LLM == nil {
 		out = s.heuristicAnswer(question, pack)
 		if s.JobRuns != nil {
@@ -378,7 +367,7 @@ func (s *Service) runAsk(ctx context.Context, question string, pack *contextPack
 		if out != nil {
 			return out, nil
 		}
-		return nil, ErrLLMUnavailable
+		return nil, domainprojects.ProjectAIErrLLMUnavailable
 	}
 
 	parsed, err := s.callAskLLM(ctx, pack.Prompt, question, multi)
@@ -393,7 +382,7 @@ func (s *Service) runAsk(ctx context.Context, question string, pack *contextPack
 			return nil, err
 		}
 	} else {
-		out = &Answer{
+		out = &domainprojects.ProjectAIAnswer{
 			Answer:     strings.TrimSpace(parsed.Answer),
 			Citations:  filterCitations(parsed.Citations, pack),
 			Confidence: parsed.Confidence,
@@ -599,7 +588,7 @@ func (s *Service) callAskLLM(ctx context.Context, contextText, question string, 
 	return tryDecode(resp2.Content)
 }
 
-func (s *Service) heuristicAnswer(question string, pack *contextPack) *Answer {
+func (s *Service) heuristicAnswer(question string, pack *contextPack) *domainprojects.ProjectAIAnswer {
 	q := strings.ToLower(question)
 	for _, line := range strings.Split(pack.Prompt, "\n") {
 		if !strings.Contains(line, "fact_version_id=") {
@@ -625,13 +614,13 @@ func (s *Service) heuristicAnswer(question string, pack *contextPack) *Answer {
 		if label != "" {
 			ans = label + " is " + val
 		}
-		cite := Citation{Type: "fact_version", ID: vid}
+		cite := domainprojects.ProjectAICitation{Type: "fact_version", ID: vid}
 		if meta, ok := pack.CiteMeta["fact_version:"+vid]; ok {
 			cite = meta
 		}
-		return &Answer{
+		return &domainprojects.ProjectAIAnswer{
 			Answer:     ans,
-			Citations:  []Citation{cite},
+			Citations:  []domainprojects.ProjectAICitation{cite},
 			Confidence: 0.85,
 		}
 	}
@@ -685,8 +674,8 @@ func extractQuoted(line, key string) string {
 	return extractAttr(line, key)
 }
 
-func filterCitations(in []Citation, pack *contextPack) []Citation {
-	out := make([]Citation, 0, len(in))
+func filterCitations(in []domainprojects.ProjectAICitation, pack *contextPack) []domainprojects.ProjectAICitation {
+	out := make([]domainprojects.ProjectAICitation, 0, len(in))
 	seen := map[string]struct{}{}
 	for _, c := range in {
 		typ := strings.TrimSpace(strings.ToLower(c.Type))
@@ -715,7 +704,7 @@ func filterCitations(in []Citation, pack *contextPack) []Citation {
 			continue
 		}
 		seen[key] = struct{}{}
-		cite := Citation{Type: typ, ID: id}
+		cite := domainprojects.ProjectAICitation{Type: typ, ID: id}
 		if meta, found := pack.CiteMeta[key]; found {
 			cite = meta
 		}

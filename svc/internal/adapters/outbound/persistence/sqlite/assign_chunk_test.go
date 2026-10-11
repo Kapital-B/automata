@@ -1,6 +1,10 @@
 package sqlite_test
 
 import (
+	domainprojects "github.com/Kapital-B/automata/svc/internal/domain/projects"
+)
+
+import (
 	"context"
 	"database/sql"
 	"testing"
@@ -31,7 +35,7 @@ func TestAssignChunkKeysetVisitsEveryMessage(t *testing.T) {
 	ctx := context.Background()
 	userID, _, accountID := seedUserAccount(t, repo)
 
-	if _, err := svc.Create(ctx, userID, appprojects.CreateProjectInput{Name: "Cooling Upgrade", Code: "DC01"}); err != nil {
+	if _, err := svc.Create(ctx, userID, domainprojects.ProjectCreateProjectInput{Name: "Cooling Upgrade", Code: "DC01"}); err != nil {
 		t.Fatal(err)
 	}
 

@@ -18,7 +18,7 @@ Not as much as it looks, and not where you would expect.
 
 The domain already disagrees with that constraint: `accounts.KindCommon` exists in Go and would be rejected by the database. Nothing constructs it today, so it has never failed.
 
-**The port is a vendor API, not a capability.** `driven.MicrosoftGraph` is eight methods that mix reading, sending, and Graph's own id resolution:
+**The port is a vendor API, not a capability.** `domain/accounts.MicrosoftGraph (historical Graph-specific contract)` is eight methods that mix reading, sending, and Graph's own id resolution:
 
 | Method | What it really is |
 | ------ | ----------------- |
@@ -35,7 +35,7 @@ Four services depend on it directly: `SyncService`, `DraftService`, `ForwardRule
 
 **Sync state assumes one cursor.** `account_sync_state.delta_link` is a Graph delta link. There is already an unused `cursor_json` column beside it, written as NULL and never read — free space for provider-specific state.
 
-**Google exists but only for sign-in.** `driven.GoogleOAuth` returns a subject and an email for login. It has no mail scopes and no client. Adding Gmail is not "finishing" it; it is a new adapter that happens to share an OAuth registration.
+**Google exists but only for sign-in.** `domain/auth.GoogleOAuth` returns a subject and an email for login. It has no mail scopes and no client. Adding Gmail is not "finishing" it; it is a new adapter that happens to share an OAuth registration.
 
 ---
 
@@ -73,7 +73,7 @@ Capability declaration (§4) is therefore not a way to disable the feature. It e
 
 ## 4. Proposal: a capability-declaring mailbox port
 
-Replace direct `MicrosoftGraph` use with a `driven.Mailbox` port, obtained per account from a registry keyed on `provider`.
+Replace direct `MicrosoftGraph` use with a `domain/accounts.Mailbox` port, obtained per account from a registry keyed on `provider`.
 
 The important design choice is that this is **not** a lowest-common-denominator interface. Reducing every provider to what IMAP can do would throw away Graph's server-side forward, which is the better behaviour. Instead the port declares what it supports:
 
@@ -207,7 +207,7 @@ They already are for Microsoft, and the reason is structural rather than cosmeti
 
 Google mail follows the same shape: its own flow constant (`google_mail`), its own OAuth client, its own scopes.
 
-`driven.GoogleOAuth` stays as it is — it serves sign-in, returns a subject and an email, and has no mail scopes. The mail client is a new adapter that happens to talk to the same vendor. Sharing one registration would couple the consent screen and every future scope change to the login path, and would make "sign in with Google" ask for mailbox access, which is both worse for the user and harder to get verified.
+`domain/auth.GoogleOAuth` stays as it is — it serves sign-in, returns a subject and an email, and has no mail scopes. The mail client is a new adapter that happens to talk to the same vendor. Sharing one registration would couple the consent screen and every future scope change to the login path, and would make "sign in with Google" ask for mailbox access, which is both worse for the user and harder to get verified.
 
 **Decision: separate OAuth client, separate flow, multiple Google mailboxes per user** — the same arrangement Microsoft already has.
 
@@ -222,14 +222,14 @@ No, initially. Polling on the existing scheduler tick is consistent with how Gra
 | Slice | Name | Delivers |
 | ----- | ---- | -------- |
 | **R0** | Two spikes, no code | §5.1 against the dev cluster (does DSQL accept `DROP NOT NULL`?) and §5.4's current Google verification requirement. Both have lead times and both can change the shape of what follows. |
-| **R1** | Extract the port | `driven.Mailbox` + registry; Graph becomes one implementation; **no behaviour change**, no new provider |
+| **R1** | Extract the port | `domain/accounts.Mailbox` + registry; Graph becomes one implementation; **no behaviour change**, no new provider |
 | **R2** | Google | Gmail adapter, own OAuth client and `google_mail` flow, `historyId` cursor, forward via the MIME fallback. Internal-use in one Workspace domain; several Google mailboxes per user, as Microsoft already allows. |
 | **R3** | IMAP/SMTP | Adapter, credential envelope, connection settings UI with a well-known-host table. Answers the on-premises Exchange question as a side effect. |
 | **R4** | Capability-aware UI | Features a provider cannot do are visibly unavailable, not silently degraded |
 
 Google leads because it is the largest addressable population after Microsoft 365 and the cleanest second implementation: OAuth we partly have, a real incremental cursor, and a REST API. IMAP follows because one adapter covers everything else — Fastmail, Zoho, hosted cPanel mail, Proton via bridge, and on-premises Exchange with IMAP enabled.
 
-The order also derisks the port deliberately. Gmail stresses *different cursor, no server-side forward*; IMAP stresses *no OAuth, two transports, weak ids*. If `driven.Mailbox` survives both, it will survive EWS should anyone ever need it.
+The order also derisks the port deliberately. Gmail stresses *different cursor, no server-side forward*; IMAP stresses *no OAuth, two transports, weak ids*. If `domain/accounts.Mailbox` survives both, it will survive EWS should anyone ever need it.
 
 R1 is the whole bet. If the port is right, R2 and R3 are adapters and a settings form. If it is wrong, every slice after it pays for it.
 
@@ -301,11 +301,11 @@ What shipped, slice by slice, and where it departs from the sections above.
 - **No `google_mail` flow.** `oauth_states.flow` is also an unnamed CHECK over a fixed list — the same trap as PR #9 — so every mailbox connect reuses flow `m365_mail`, with the provider carried in the server-side state payload. The separation §5.5 cares about, sign-in versus mailbox connect, is still enforced by the flow; the provider in the payload was written by us, not supplied by the client.
 - **No `provider_config_json` (§5.2).** The accounts table has no such column. IMAP server settings ride in the encrypted credential next to the password, which is the only place they are read. Credentials are disambiguated by the `provider` column (which has no CHECK) and, for Google and IMAP, a `type` tag inside the blob; the Microsoft blob keeps its original untagged shape so existing rows decode unchanged.
 
-**R1.** `driven.Mailbox` with declared capabilities, `driven.MailProvider` to open one from a stored credential, and `appaccounts.MailboxOpener` as the single place that decrypts, picks the adapter, persists rotated credentials, and marks an account `expired` when the provider rejects its credentials outright (`ErrCredentialsRejected`). Services never see a token. The shared contract suite (`mailboxtest`) runs against every adapter; since R3 it also checks that resuming with no new mail returns nothing.
+**R1.** `domain/accounts.Mailbox` with declared capabilities, `domain/accounts.MailProvider` to open one from a stored credential, and `appaccounts.MailboxOpener` as the single place that decrypts, picks the adapter, persists rotated credentials, and marks an account `expired` when the provider rejects its credentials outright (`ErrCredentialsRejected`). Services never see a token. The shared contract suite (`mailboxtest`) runs against every adapter; since R3 it also checks that resuming with no new mail returns nothing.
 
 **R2.** Gmail over the REST API: `format=full` to sync, `format=raw` only to reply or forward, history replay for increments with a 404 reported as an expired cursor, forward as the original attached `message/rfc822`. Enabled only when `GOOGLE_MAIL_CLIENT_ID` and its secret are configured; otherwise Google is simply not offered.
 
-**R3.** One IMAP/SMTP adapter, always available. Implicit TLS or STARTTLS only. Both servers are logged into before anything is stored, and failures come back as a 422 naming the cause (`driven.ConnectRejectedError`). Sync walks INBOX by UID under a `UIDVALIDITY`-scoped cursor; a changed `UIDVALIDITY` is an expired cursor. Message ids are the `Message-ID` header, which survives renumbering, with a UID fallback for mail that has none. Removals are not reported (`ReportsRemovals: false`). Every operation dials, works and logs out; nothing is held open across a worker chunk. Tests run the contract against real go-imap and go-smtp servers over TLS in-process, so this provider has CI coverage without a container.
+**R3.** One IMAP/SMTP adapter, always available. Implicit TLS or STARTTLS only. Both servers are logged into before anything is stored, and failures come back as a 422 naming the cause (`domain/accounts.ConnectRejectedError`). Sync walks INBOX by UID under a `UIDVALIDITY`-scoped cursor; a changed `UIDVALIDITY` is an expired cursor. Message ids are the `Message-ID` header, which survives renumbering, with a UID fallback for mail that has none. Removals are not reported (`ReportsRemovals: false`). Every operation dials, works and logs out; nothing is held open across a worker chunk. Tests run the contract against real go-imap and go-smtp servers over TLS in-process, so this provider has CI coverage without a container.
 
 **R4.** Providers declare capabilities without opening a mailbox. `GET /api/accounts/providers` tells the UI what this deployment can connect; the account list carries each account's capabilities. The connect dialog starts from a provider choice, the IMAP form fills servers from well-known presets, expired accounts reconnect through their own provider's flow (the server restores the existing account rather than adding one), and a forward rule on an account without server-side forward warns and asks before it is saved.
 

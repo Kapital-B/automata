@@ -10,39 +10,6 @@ import (
 	"unicode/utf8"
 )
 
-const ForwardModeLogic = domainmessages.MessageForwardModeLogic
-const ForwardModeLLM = domainmessages.MessageForwardModeLLM
-
-const ForwardFieldHasAttachments = domainmessages.MessageForwardFieldHasAttachments
-const ForwardFieldCategory = domainmessages.MessageForwardFieldCategory
-const ForwardFieldFrom = domainmessages.MessageForwardFieldFrom
-const ForwardFieldSubject = domainmessages.MessageForwardFieldSubject
-const ForwardOpEquals = domainmessages.MessageForwardOpEquals
-const ForwardOpContains = domainmessages.MessageForwardOpContains
-const ForwardOpDomain = domainmessages.MessageForwardOpDomain
-
-var forwardFieldOps = domainmessages.MessageForwardFieldOps
-
-const maxForwardPredicates = domainmessages.MessageMaxForwardPredicates
-const maxForwardPromptLen = domainmessages.MessageMaxForwardPromptLen
-const categoryWait = domainmessages.MessageCategoryWait
-
-type ForwardRuleError = domainmessages.MessageForwardRuleError
-
-var ruleError = domainmessages.MessageRuleError
-
-type forwardLogicCondition = domainmessages.MessageForwardLogicCondition
-
-type forwardPredicate = domainmessages.MessageForwardPredicate
-
-type forwardLLMCondition = domainmessages.MessageForwardLLMCondition
-
-var NormalizeForwardRule = domainmessages.MessageNormalizeForwardRule
-
-var strictUnmarshal = domainmessages.MessageStrictUnmarshal
-
-var normalizePredicate = domainmessages.MessageNormalizePredicate
-
 // ruleVerdict is what a rule concluded about one message.
 type ruleVerdict struct {
 	match bool
@@ -53,7 +20,7 @@ type ruleVerdict struct {
 
 // evaluateLogic applies a normalized logic condition.
 func evaluateLogic(conditionJSON string, msg domainmessages.MessageRow, now time.Time) (ruleVerdict, error) {
-	var c forwardLogicCondition
+	var c domainmessages.MessageForwardLogicCondition
 	if err := json.Unmarshal([]byte(conditionJSON), &c); err != nil {
 		return ruleVerdict{}, err
 	}
@@ -62,7 +29,7 @@ func evaluateLogic(conditionJSON string, msg domainmessages.MessageRow, now time
 		return ruleVerdict{}, fmt.Errorf("rule has no conditions")
 	}
 	for _, p := range c.All {
-		if p.Field == ForwardFieldCategory && msg.CategorySlug == nil && now.Sub(msg.ReceivedAt) < categoryWait {
+		if p.Field == domainmessages.MessageForwardFieldCategory && msg.CategorySlug == nil && now.Sub(msg.ReceivedAt) < domainmessages.MessageCategoryWait {
 			return ruleVerdict{waiting: true, reason: "waiting for the message to be categorised"}, nil
 		}
 		if !predicateMatches(msg, p) {
@@ -81,43 +48,41 @@ func senderOf(fromJSON string) (name, address string) {
 	return from.Name, strings.ToLower(strings.TrimSpace(from.Address))
 }
 
-func predicateMatches(msg domainmessages.MessageRow, p forwardPredicate) bool {
+func predicateMatches(msg domainmessages.MessageRow, p domainmessages.MessageForwardPredicate) bool {
 	switch p.Field {
-	case ForwardFieldHasAttachments:
+	case domainmessages.MessageForwardFieldHasAttachments:
 		want, ok := p.Value.(bool)
 		return ok && msg.HasAttachments == want
-	case ForwardFieldCategory:
+	case domainmessages.MessageForwardFieldCategory:
 		got := ""
 		if msg.CategorySlug != nil {
 			got = strings.ToLower(strings.TrimSpace(*msg.CategorySlug))
 		}
 		return got == fmt.Sprint(p.Value)
-	case ForwardFieldFrom:
+	case domainmessages.MessageForwardFieldFrom:
 		want := fmt.Sprint(p.Value)
 		name, addr := senderOf(msg.FromJSON)
 		switch p.Op {
-		case ForwardOpEquals:
+		case domainmessages.MessageForwardOpEquals:
 			return addr == want
-		case ForwardOpContains:
+		case domainmessages.MessageForwardOpContains:
 			return strings.Contains(addr, want) || strings.Contains(strings.ToLower(name), want)
-		case ForwardOpDomain:
+		case domainmessages.MessageForwardOpDomain:
 			domain := addr[strings.LastIndex(addr, "@")+1:]
 			return domain == want || strings.HasSuffix(domain, "."+want)
 		}
-	case ForwardFieldSubject:
+	case domainmessages.MessageForwardFieldSubject:
 		want := fmt.Sprint(p.Value)
 		subject := strings.ToLower(strings.TrimSpace(msg.Subject))
 		switch p.Op {
-		case ForwardOpEquals:
+		case domainmessages.MessageForwardOpEquals:
 			return subject == want
-		case ForwardOpContains:
+		case domainmessages.MessageForwardOpContains:
 			return strings.Contains(subject, want)
 		}
 	}
 	return false
 }
-
-var ValidForwardAddress = domainmessages.MessageValidForwardAddress
 
 // truncateRunes cuts s to at most n characters without splitting one.
 func truncateRunes(s string, n int) string {

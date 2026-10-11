@@ -1,6 +1,10 @@
 package messages
 
 import (
+	domainmessages "github.com/Kapital-B/automata/svc/internal/domain/messages"
+)
+
+import (
 	"context"
 	"database/sql"
 	"encoding/json"
@@ -96,7 +100,7 @@ func testOpener(accounts domainaccounts.AccountRepository, box *fakeMailbox) *ap
 	return &appaccounts.MailboxOpener{
 		Accounts:  accounts,
 		Vault:     &passthroughVault{},
-		Providers: map[string]domainaccounts.MailProvider{appaccounts.ProviderM365: &fakeProvider{box: box}},
+		Providers: map[string]domainaccounts.MailProvider{domainacc.AccountProviderM365: &fakeProvider{box: box}},
 	}
 }
 
@@ -398,7 +402,7 @@ func TestSyncInboxForceIgnoresTheStoredDeltaLink(t *testing.T) {
 		t.Fatalf("second call used %q, want the stored delta link", got)
 	}
 
-	if _, err := svc.SyncInboxWithOptions(ctx, userID, accountID, SyncOptions{Force: true}); err != nil {
+	if _, err := svc.SyncInboxWithOptions(ctx, userID, accountID, domainmessages.MessageSyncOptions{Force: true}); err != nil {
 		t.Fatal(err)
 	}
 	if got := graph.calls[2]; got != "" {

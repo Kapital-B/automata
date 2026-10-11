@@ -13,13 +13,6 @@ import (
 	"github.com/google/uuid"
 )
 
-var ErrLLMUnavailable = domainissues.IssueErrLLMUnavailable
-var ErrNothingToSuggest = domainissues.IssueErrNothingToSuggest
-
-type SuggestInput = domainissues.IssueSuggestInput
-
-type SuggestResult = domainissues.IssueSuggestResult
-
 type suggestLLMPayload struct {
 	SchemaVersion int      `json:"schema_version"`
 	ProjectID     string   `json:"project_id"`
@@ -42,9 +35,9 @@ type suggestCandidate struct {
 
 // Suggest asks the LLM for an issue title and item refs from unassigned timeline items.
 // It never creates an issue. Mail in one call is always from a single account_id.
-func (s *Service) Suggest(ctx context.Context, userID, projectID uuid.UUID, in SuggestInput) (*SuggestResult, error) {
+func (s *Service) Suggest(ctx context.Context, userID, projectID uuid.UUID, in domainissues.IssueSuggestInput) (*domainissues.IssueSuggestResult, error) {
 	if s.LLM == nil {
-		return nil, ErrLLMUnavailable
+		return nil, domainissues.IssueErrLLMUnavailable
 	}
 	if s.Timeline == nil {
 		return nil, fmt.Errorf("timeline not configured")
@@ -58,7 +51,7 @@ func (s *Service) Suggest(ctx context.Context, userID, projectID uuid.UUID, in S
 		return nil, err
 	}
 	if p == nil || p.ArchivedAt != nil {
-		return nil, ErrNotFound
+		return nil, domainissues.IssueErrNotFound
 	}
 
 	items, err := s.Timeline.ListProjectTimeline(ctx, userID, orgID, projectID, domainprojects.TimelineFilter{
@@ -69,7 +62,7 @@ func (s *Service) Suggest(ctx context.Context, userID, projectID uuid.UUID, in S
 	}
 	candidates := buildSuggestCandidates(items, in.AccountID)
 	if len(candidates) == 0 {
-		return nil, ErrNothingToSuggest
+		return nil, domainissues.IssueErrNothingToSuggest
 	}
 
 	prompt := buildSuggestPrompt(projectID, p.Name, p.Code, candidates)
@@ -89,7 +82,7 @@ func (s *Service) Suggest(ctx context.Context, userID, projectID uuid.UUID, in S
 		}
 	}
 
-	refs := make([]ItemRef, 0)
+	refs := make([]domainissues.IssueItemRef, 0)
 	for _, idStr := range parsed.MessageIDs {
 		id, err := uuid.Parse(strings.TrimSpace(idStr))
 		if err != nil {
@@ -99,7 +92,7 @@ func (s *Service) Suggest(ctx context.Context, userID, projectID uuid.UUID, in S
 			continue
 		}
 		mid := id
-		refs = append(refs, ItemRef{MessageID: &mid})
+		refs = append(refs, domainissues.IssueItemRef{MessageID: &mid})
 	}
 	for _, idStr := range parsed.ManualItemIDs {
 		id, err := uuid.Parse(strings.TrimSpace(idStr))
@@ -110,7 +103,7 @@ func (s *Service) Suggest(ctx context.Context, userID, projectID uuid.UUID, in S
 			continue
 		}
 		mid := id
-		refs = append(refs, ItemRef{ManualItemID: &mid})
+		refs = append(refs, domainissues.IssueItemRef{ManualItemID: &mid})
 	}
 
 	title := strings.TrimSpace(parsed.IssueTitle)
@@ -125,7 +118,7 @@ func (s *Service) Suggest(ctx context.Context, userID, projectID uuid.UUID, in S
 		conf = 1
 	}
 
-	return &SuggestResult{
+	return &domainissues.IssueSuggestResult{
 		Title:      title,
 		ItemRefs:   refs,
 		Confidence: conf,

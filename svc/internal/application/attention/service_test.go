@@ -1,6 +1,12 @@
 package attention_test
 
 import (
+	domainattention "github.com/Kapital-B/automata/svc/internal/domain/attention"
+	domaindecisions "github.com/Kapital-B/automata/svc/internal/domain/decisions"
+	domainfacts "github.com/Kapital-B/automata/svc/internal/domain/facts"
+)
+
+import (
 	"context"
 	"database/sql"
 	"testing"
@@ -48,12 +54,12 @@ func TestAttentionIncludesProvisionalDecision(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	proj, err := projectSvc.Create(context.Background(), userID, appprojects.CreateProjectInput{Name: "Cooling", Code: "DC01"})
+	proj, err := projectSvc.Create(context.Background(), userID, domainprojects.ProjectCreateProjectInput{Name: "Cooling", Code: "DC01"})
 	if err != nil {
 		t.Fatal(err)
 	}
 	ctx := context.Background()
-	_, err = decisionSvc.Create(ctx, userID, proj.ID, appdecisions.CreateInput{
+	_, err = decisionSvc.Create(ctx, userID, proj.ID, domaindecisions.DecisionCreateInput{
 		Statement: "Approve vendor quote", Confirm: false,
 	})
 	if err != nil {
@@ -61,7 +67,7 @@ func TestAttentionIncludesProvisionalDecision(t *testing.T) {
 	}
 	_, err = (&appfacts.Service{
 		Users: repo, Projects: repo, Facts: repo, Issues: repo, Assignments: repo, Manuals: repo, Messages: repo,
-	}).Create(ctx, userID, proj.ID, appfacts.CreateInput{
+	}).Create(ctx, userID, proj.ID, domainfacts.FactCreateInput{
 		SubjectKey: "pump.p03.duty_kw", Label: "Duty", Value: 90.0, Confirm: false,
 	})
 	if err != nil {
@@ -102,13 +108,13 @@ func TestAttentionMergesMailActionItems(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	proj, err := projectSvc.Create(ctx, userID, appprojects.CreateProjectInput{Name: "Cooling", Code: "DC01"})
+	proj, err := projectSvc.Create(ctx, userID, domainprojects.ProjectCreateProjectInput{Name: "Cooling", Code: "DC01"})
 	if err != nil {
 		t.Fatal(err)
 	}
 	if _, err := (&appfacts.Service{
 		Users: repo, Projects: repo, Facts: repo, Issues: repo, Assignments: repo, Manuals: repo, Messages: repo,
-	}).Create(ctx, userID, proj.ID, appfacts.CreateInput{
+	}).Create(ctx, userID, proj.ID, domainfacts.FactCreateInput{
 		SubjectKey: "pump.p03.duty_kw", Label: "Duty", Value: 90.0, Confirm: false,
 	}); err != nil {
 		t.Fatal(err)
@@ -153,7 +159,7 @@ func TestAttentionMergesMailActionItems(t *testing.T) {
 	if res.Counts.ProvisionalFact < 1 {
 		t.Fatalf("want project fact still present, got counts %+v", res.Counts)
 	}
-	var mail *attention.Item
+	var mail *domainattention.AttentionItem
 	for i := range res.Items {
 		if res.Items[i].WhyMe == attention.WhyMailActionItem {
 			mail = &res.Items[i]
@@ -207,7 +213,7 @@ func TestAttentionPlacesMailToDosOnProjectAndIssue(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	proj, err := projectSvc.Create(ctx, userID, appprojects.CreateProjectInput{Name: "Cooling", Code: "DC01"})
+	proj, err := projectSvc.Create(ctx, userID, domainprojects.ProjectCreateProjectInput{Name: "Cooling", Code: "DC01"})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -272,7 +278,7 @@ func TestAttentionPlacesMailToDosOnProjectAndIssue(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	byRef := map[string]attention.Item{}
+	byRef := map[string]domainattention.AttentionItem{}
 	for _, it := range res.Items {
 		byRef[it.RefID] = it
 	}
@@ -310,7 +316,7 @@ func TestAttentionPlacesMailToDosOnProjectAndIssue(t *testing.T) {
 
 	// Filing the message elsewhere moves the to-do with it: another project
 	// wins over the issue's.
-	other, err := projectSvc.Create(ctx, userID, appprojects.CreateProjectInput{Name: "Roof", Code: "RF02"})
+	other, err := projectSvc.Create(ctx, userID, domainprojects.ProjectCreateProjectInput{Name: "Roof", Code: "RF02"})
 	if err != nil {
 		t.Fatal(err)
 	}

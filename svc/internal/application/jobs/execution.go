@@ -48,7 +48,7 @@ func (s *ExecutionService) terminalTTL() time.Duration {
 	if s.TerminalTTL > 0 {
 		return s.TerminalTTL
 	}
-	return DefaultTerminalTTL
+	return domainjobs.DefaultTerminalTTL
 }
 
 func (s *ExecutionService) HandleStreamRecord(ctx context.Context, jobID uuid.UUID, now time.Time) error {
@@ -183,7 +183,7 @@ func (s *ExecutionService) runChunk(ctx context.Context, job *domainjobs.JobReco
 	if len(current.RemainingJobs) > 0 {
 		nextType := current.RemainingJobs[0]
 		remaining := append([]string(nil), current.RemainingJobs[1:]...)
-		nextID := DeterministicJobID(current.ChainID, current.StepIndex+1, nextType)
+		nextID := domainjobs.DeterministicJobID(current.ChainID, current.StepIndex+1, nextType)
 		next = &domainjobs.CreateJobInput{
 			ID:             nextID,
 			JobType:        nextType,
@@ -231,7 +231,7 @@ func (s *ExecutionService) RunSynchronous(ctx context.Context, in domainjobs.Cre
 	if in.JobType == "" {
 		in.JobType = exec.JobType()
 	} else {
-		name, err := normalizeEnqueueType(in.JobType)
+		name, err := domainjobs.NormalizeEnqueueType(in.JobType)
 		if err != nil {
 			return nil, err
 		}

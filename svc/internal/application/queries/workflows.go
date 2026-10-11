@@ -4,7 +4,6 @@ import (
 	"context"
 	domainaccounts "github.com/Kapital-B/automata/svc/internal/domain/accounts"
 
-	"fmt"
 	domainauth "github.com/Kapital-B/automata/svc/internal/domain/auth"
 	domainjobs "github.com/Kapital-B/automata/svc/internal/domain/jobs"
 	domainmessages "github.com/Kapital-B/automata/svc/internal/domain/messages"
@@ -138,24 +137,12 @@ func (s *Service) SaveSchedules(ctx context.Context, user uuid.UUID, inputs []do
 		if in.ID == uuid.Nil {
 			in.ID = uuid.New()
 		}
-		if in.IntervalMinutes <= 0 {
-			in.IntervalMinutes = 10
-		}
-		if in.IntervalMinutes > 1440 {
-			in.IntervalMinutes = 1440
-		}
-		name := strings.TrimSpace(in.Name)
-		if name == "" {
-			name = "Scheduled chain"
-		}
-		if len(in.Jobs) == 0 {
-			return failure("unprocessable", fmt.Sprintf("%q needs at least one step", name), nil)
-		}
-		jobs, err := domainjobs.DefaultRegistry().NormalizeScheduleChain(in.Jobs)
+		var err error
+		in, err = domainjobs.NormalizeScheduleInput(in)
 		if err != nil {
-			return failure("unprocessable", fmt.Sprintf("%q cannot run: %v", name, err), err)
+			return failure("unprocessable", err.Error(), err)
 		}
-		rows = append(rows, domainjobs.ScheduleChainRow{ID: in.ID, UserID: user, Name: name, AccountID: in.AccountID, Jobs: jobs, IntervalMinutes: in.IntervalMinutes, Enabled: in.Enabled, NextRunAt: now.Add(time.Duration(in.IntervalMinutes) * time.Minute), CreatedAt: now, UpdatedAt: now})
+		rows = append(rows, domainjobs.ScheduleChainRow{ID: in.ID, UserID: user, Name: in.Name, AccountID: in.AccountID, Jobs: in.Jobs, IntervalMinutes: in.IntervalMinutes, Enabled: in.Enabled, NextRunAt: now.Add(time.Duration(in.IntervalMinutes) * time.Minute), CreatedAt: now, UpdatedAt: now})
 	}
 	return s.Schedules.ReplaceSchedulesByUser(ctx, user, rows)
 }

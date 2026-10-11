@@ -1,6 +1,11 @@
 package jobs
 
 import (
+	domaincontradictions "github.com/Kapital-B/automata/svc/internal/domain/contradictions"
+	domaininterpretations "github.com/Kapital-B/automata/svc/internal/domain/interpretations"
+)
+
+import (
 	"context"
 	"fmt"
 	"time"
@@ -36,37 +41,37 @@ type ExecutorDeps struct {
 func NewExecutorRegistry(deps ExecutorDeps) ExecutorRegistry {
 	reg := ExecutorRegistry{}
 	if deps.Sync != nil {
-		reg[TypeSync] = &appmessages.SyncExecutor{Service: deps.Sync}
+		reg[domainjobs.TypeSync] = &appmessages.SyncExecutor{Service: deps.Sync}
 	}
 	if deps.SyncSlack != nil {
-		reg[TypeSyncSlack] = &appconnectors.SyncSlackExecutor{Service: deps.SyncSlack}
+		reg[domainjobs.TypeSyncSlack] = &appconnectors.SyncSlackExecutor{Service: deps.SyncSlack}
 	}
 	if deps.Categorize != nil {
-		reg[TypeCategorize] = &appmessages.CategorizeExecutor{Service: deps.Categorize}
+		reg[domainjobs.TypeCategorize] = &appmessages.CategorizeExecutor{Service: deps.Categorize}
 	}
 	if deps.Summarize != nil {
-		reg[TypeSummarize] = &appmessages.SummarizeExecutor{Service: deps.Summarize}
+		reg[domainjobs.TypeSummarize] = &appmessages.SummarizeExecutor{Service: deps.Summarize}
 	}
 	if deps.DraftSuggest != nil {
-		reg[TypeDraftSuggest] = &appmessages.DraftSuggestExecutor{Service: deps.DraftSuggest}
+		reg[domainjobs.TypeDraftSuggest] = &appmessages.DraftSuggestExecutor{Service: deps.DraftSuggest}
 	}
 	if deps.ForwardRules != nil && deps.Store != nil {
-		reg[TypeForwardRules] = &appmessages.ForwardRulesExecutor{Service: deps.ForwardRules, Store: deps.Store}
+		reg[domainjobs.TypeForwardRules] = &appmessages.ForwardRulesExecutor{Service: deps.ForwardRules, Store: deps.Store}
 	}
 	if deps.ResolveContacts != nil {
-		reg[TypeResolveContacts] = &appcontacts.ResolveContactsExecutor{Service: deps.ResolveContacts}
+		reg[domainjobs.TypeResolveContacts] = &appcontacts.ResolveContactsExecutor{Service: deps.ResolveContacts}
 	}
 	if deps.AssignProjects != nil {
-		reg[TypeAssignProjects] = &appprojects.AssignProjectsExecutor{Service: deps.AssignProjects}
+		reg[domainjobs.TypeAssignProjects] = &appprojects.AssignProjectsExecutor{Service: deps.AssignProjects}
 	}
 	if deps.InterpretProject != nil {
-		reg[TypeInterpretProject] = &interpretProjectExecutor{service: deps.InterpretProject}
+		reg[domainjobs.TypeInterpretProject] = &interpretProjectExecutor{service: deps.InterpretProject}
 	}
 	if deps.ReconcileProject != nil {
-		reg[TypeReconcileProject] = &reconcileProjectExecutor{service: deps.ReconcileProject, projects: deps.Projects}
+		reg[domainjobs.TypeReconcileProject] = &reconcileProjectExecutor{service: deps.ReconcileProject, projects: deps.Projects}
 	}
 	if deps.ProjectAI != nil {
-		reg[TypeProjectAI] = &projectAIExecutor{service: deps.ProjectAI}
+		reg[domainjobs.TypeProjectAI] = &projectAIExecutor{service: deps.ProjectAI}
 	}
 	return reg
 }
@@ -75,7 +80,7 @@ type interpretProjectExecutor struct {
 	service *appinterpret.Service
 }
 
-func (e *interpretProjectExecutor) JobType() string { return TypeInterpretProject }
+func (e *interpretProjectExecutor) JobType() string { return domainjobs.TypeInterpretProject }
 
 func (e *interpretProjectExecutor) ExecuteChunk(ctx context.Context, run domainjobs.RunContext) (domainjobs.ChunkResult, error) {
 	if e == nil || e.service == nil {
@@ -84,7 +89,7 @@ func (e *interpretProjectExecutor) ExecuteChunk(ctx context.Context, run domainj
 	if run.Payload.ProjectID == nil {
 		return domainjobs.ChunkResult{}, fmt.Errorf("project_id is required")
 	}
-	view, err := e.service.Run(ctx, run.UserID, *run.Payload.ProjectID, appinterpret.RunInput{
+	view, err := e.service.Run(ctx, run.UserID, *run.Payload.ProjectID, domaininterpretations.InterpretationRunInput{
 		AccountID: run.AccountID,
 		Trigger:   run.JobType,
 	})
@@ -111,7 +116,7 @@ type reconcileProjectExecutor struct {
 	projects domainprojects.ProjectRepository
 }
 
-func (e *reconcileProjectExecutor) JobType() string { return TypeReconcileProject }
+func (e *reconcileProjectExecutor) JobType() string { return domainjobs.TypeReconcileProject }
 
 func (e *reconcileProjectExecutor) ExecuteChunk(ctx context.Context, run domainjobs.RunContext) (domainjobs.ChunkResult, error) {
 	if e == nil || e.service == nil {
@@ -120,7 +125,7 @@ func (e *reconcileProjectExecutor) ExecuteChunk(ctx context.Context, run domainj
 	if run.Payload.ProjectID == nil {
 		return domainjobs.ChunkResult{}, fmt.Errorf("project_id is required")
 	}
-	res, err := e.service.Run(ctx, run.UserID, *run.Payload.ProjectID, appreconcile.ReconcileInput{})
+	res, err := e.service.Run(ctx, run.UserID, *run.Payload.ProjectID, domaincontradictions.ReconciliationReconcileInput{})
 	if err != nil {
 		return domainjobs.ChunkResult{}, err
 	}
@@ -146,7 +151,7 @@ type projectAIExecutor struct {
 	service *appprojectai.Service
 }
 
-func (e *projectAIExecutor) JobType() string { return TypeProjectAI }
+func (e *projectAIExecutor) JobType() string { return domainjobs.TypeProjectAI }
 
 func (e *projectAIExecutor) ExecuteChunk(ctx context.Context, run domainjobs.RunContext) (domainjobs.ChunkResult, error) {
 	if e == nil || e.service == nil {

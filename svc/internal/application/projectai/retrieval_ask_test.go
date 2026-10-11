@@ -106,7 +106,7 @@ func (f *retrievalFixture) account(userID uuid.UUID) uuid.UUID {
 
 func (f *retrievalFixture) project(code string) uuid.UUID {
 	f.t.Helper()
-	p, err := f.projects.Create(f.ctx, f.userID, appprojects.CreateProjectInput{Name: "Project " + code, Code: code})
+	p, err := f.projects.Create(f.ctx, f.userID, domainprojects.ProjectCreateProjectInput{Name: "Project " + code, Code: code})
 	if err != nil {
 		f.t.Fatal(err)
 	}

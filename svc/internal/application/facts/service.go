@@ -18,15 +18,6 @@ import (
 	"github.com/google/uuid"
 )
 
-var ErrNotFound = domainfacts.FactErrNotFound
-var ErrInvalidSubjectKey = domainfacts.FactErrInvalidSubjectKey
-var ErrInvalidStatus = domainfacts.FactErrInvalidStatus
-var ErrInvalidEvidence = domainfacts.FactErrInvalidEvidence
-var ErrWrongProject = domainfacts.FactErrWrongProject
-var ErrSupersedeRequired = domainfacts.FactErrSupersedeRequired
-var ErrInvalidSupersedes = domainfacts.FactErrInvalidSupersedes
-var ErrNotProposed = domainfacts.FactErrNotProposed
-
 // Service handles fact CRUD, version confirm/reject, and evidence links.
 type Service struct {
 	Users       domainauth.UserRepository
@@ -42,22 +33,6 @@ func (s *Service) homeOrg(ctx context.Context, userID uuid.UUID) (uuid.UUID, err
 	return s.Users.GetHomeOrganisationID(ctx, userID)
 }
 
-type ListInclude = domainfacts.FactListInclude
-
-type EvidenceRef = domainfacts.FactEvidenceRef
-
-type VersionView = domainfacts.FactVersionView
-
-type FactView = domainfacts.FactFactView
-
-type CurrentPositionFact = domainfacts.FactCurrentPositionFact
-
-type CurrentPosition = domainfacts.FactCurrentPosition
-
-type CreateInput = domainfacts.FactCreateInput
-
-type ConfirmInput = domainfacts.FactConfirmInput
-
 func (s *Service) requireProjectMember(ctx context.Context, userID, projectID uuid.UUID) (orgID uuid.UUID, err error) {
 	orgID, err = s.homeOrg(ctx, userID)
 	if err != nil {
@@ -68,19 +43,19 @@ func (s *Service) requireProjectMember(ctx context.Context, userID, projectID uu
 		return uuid.Nil, err
 	}
 	if p == nil {
-		return uuid.Nil, ErrNotFound
+		return uuid.Nil, domainfacts.FactErrNotFound
 	}
 	member, err := s.Projects.GetProjectMember(ctx, projectID, userID)
 	if err != nil {
 		return uuid.Nil, err
 	}
 	if member == nil {
-		return uuid.Nil, ErrNotFound
+		return uuid.Nil, domainfacts.FactErrNotFound
 	}
 	return orgID, nil
 }
 
-func (s *Service) List(ctx context.Context, userID, projectID uuid.UUID, include ListInclude) ([]FactView, error) {
+func (s *Service) List(ctx context.Context, userID, projectID uuid.UUID, include domainfacts.FactListInclude) ([]domainfacts.FactFactView, error) {
 	orgID, err := s.requireProjectMember(ctx, userID, projectID)
 	if err != nil {
 		return nil, err
@@ -89,7 +64,7 @@ func (s *Service) List(ctx context.Context, userID, projectID uuid.UUID, include
 	if err != nil {
 		return nil, err
 	}
-	out := make([]FactView, 0, len(facts))
+	out := make([]domainfacts.FactFactView, 0, len(facts))
 	for _, fact := range facts {
 		view, err := s.buildFactView(ctx, fact, include, false)
 		if err != nil {
@@ -116,7 +91,7 @@ func (s *Service) List(ctx context.Context, userID, projectID uuid.UUID, include
 	return out, nil
 }
 
-func (s *Service) Get(ctx context.Context, userID, factID uuid.UUID) (*FactView, error) {
+func (s *Service) Get(ctx context.Context, userID, factID uuid.UUID) (*domainfacts.FactFactView, error) {
 	orgID, err := s.homeOrg(ctx, userID)
 	if err != nil {
 		return nil, err
@@ -126,26 +101,26 @@ func (s *Service) Get(ctx context.Context, userID, factID uuid.UUID) (*FactView,
 		return nil, err
 	}
 	if fact == nil {
-		return nil, ErrNotFound
+		return nil, domainfacts.FactErrNotFound
 	}
 	if _, err := s.requireProjectMember(ctx, userID, fact.ProjectID); err != nil {
 		return nil, err
 	}
-	return s.buildFactView(ctx, *fact, ListInclude{Proposed: true, History: true}, true)
+	return s.buildFactView(ctx, *fact, domainfacts.FactListInclude{Proposed: true, History: true}, true)
 }
 
-func (s *Service) CurrentPosition(ctx context.Context, userID, projectID uuid.UUID) (*CurrentPosition, error) {
-	views, err := s.List(ctx, userID, projectID, ListInclude{})
+func (s *Service) CurrentPosition(ctx context.Context, userID, projectID uuid.UUID) (*domainfacts.FactCurrentPosition, error) {
+	views, err := s.List(ctx, userID, projectID, domainfacts.FactListInclude{})
 	if err != nil {
 		return nil, err
 	}
-	out := &CurrentPosition{Facts: make([]CurrentPositionFact, 0, len(views))}
+	out := &domainfacts.FactCurrentPosition{Facts: make([]domainfacts.FactCurrentPositionFact, 0, len(views))}
 	for _, view := range views {
 		for _, ver := range view.Versions {
 			if ver.Version.Status != string(domainfacts.StatusActive) {
 				continue
 			}
-			out.Facts = append(out.Facts, CurrentPositionFact{
+			out.Facts = append(out.Facts, domainfacts.FactCurrentPositionFact{
 				FactID:        view.Fact.ID,
 				SubjectKey:    view.Fact.SubjectKey,
 				Label:         view.Fact.Label,
@@ -160,7 +135,7 @@ func (s *Service) CurrentPosition(ctx context.Context, userID, projectID uuid.UU
 	return out, nil
 }
 
-func (s *Service) Create(ctx context.Context, userID, projectID uuid.UUID, in CreateInput) (*FactView, error) {
+func (s *Service) Create(ctx context.Context, userID, projectID uuid.UUID, in domainfacts.FactCreateInput) (*domainfacts.FactFactView, error) {
 	orgID, err := s.requireProjectMember(ctx, userID, projectID)
 	if err != nil {
 		return nil, err
@@ -170,11 +145,11 @@ func (s *Service) Create(ctx context.Context, userID, projectID uuid.UUID, in Cr
 		return nil, err
 	}
 	if p == nil || p.ArchivedAt != nil {
-		return nil, ErrNotFound
+		return nil, domainfacts.FactErrNotFound
 	}
 	subjectKey := strings.TrimSpace(strings.ToLower(in.SubjectKey))
 	if !domainfacts.ValidSubjectKey(subjectKey) {
-		return nil, ErrInvalidSubjectKey
+		return nil, domainfacts.FactErrInvalidSubjectKey
 	}
 	label := strings.TrimSpace(in.Label)
 	if label == "" {
@@ -197,7 +172,7 @@ func (s *Service) Create(ctx context.Context, userID, projectID uuid.UUID, in Cr
 			return nil, err
 		}
 		if iss == nil || iss.ProjectID != projectID {
-			return nil, ErrWrongProject
+			return nil, domainfacts.FactErrWrongProject
 		}
 	}
 	for _, ref := range in.Evidence {
@@ -245,10 +220,10 @@ func (s *Service) Create(ctx context.Context, userID, projectID uuid.UUID, in Cr
 	var supersedes *uuid.UUID
 	if in.Confirm && active != nil {
 		if in.SupersedesVersionID == nil {
-			return nil, ErrSupersedeRequired
+			return nil, domainfacts.FactErrSupersedeRequired
 		}
 		if *in.SupersedesVersionID != active.ID {
-			return nil, ErrInvalidSupersedes
+			return nil, domainfacts.FactErrInvalidSupersedes
 		}
 		supersedes = in.SupersedesVersionID
 	} else if in.SupersedesVersionID != nil {
@@ -299,7 +274,7 @@ func (s *Service) Create(ctx context.Context, userID, projectID uuid.UUID, in Cr
 	return s.Get(ctx, userID, fact.ID)
 }
 
-func (s *Service) Confirm(ctx context.Context, userID, versionID uuid.UUID, in ConfirmInput) (*FactView, error) {
+func (s *Service) Confirm(ctx context.Context, userID, versionID uuid.UUID, in domainfacts.FactConfirmInput) (*domainfacts.FactFactView, error) {
 	orgID, err := s.homeOrg(ctx, userID)
 	if err != nil {
 		return nil, err
@@ -309,20 +284,20 @@ func (s *Service) Confirm(ctx context.Context, userID, versionID uuid.UUID, in C
 		return nil, err
 	}
 	if ver == nil {
-		return nil, ErrNotFound
+		return nil, domainfacts.FactErrNotFound
 	}
 	fact, err := s.Facts.GetFact(ctx, orgID, ver.FactID)
 	if err != nil {
 		return nil, err
 	}
 	if fact == nil {
-		return nil, ErrNotFound
+		return nil, domainfacts.FactErrNotFound
 	}
 	if _, err := s.requireProjectMember(ctx, userID, fact.ProjectID); err != nil {
 		return nil, err
 	}
 	if ver.Status != string(domainfacts.StatusProposed) {
-		return nil, ErrNotProposed
+		return nil, domainfacts.FactErrNotProposed
 	}
 
 	active, err := s.Facts.GetActiveFactVersion(ctx, fact.ID)
@@ -336,10 +311,10 @@ func (s *Service) Confirm(ctx context.Context, userID, versionID uuid.UUID, in C
 			supersedes = ver.SupersedesVersionID
 		}
 		if supersedes == nil {
-			return nil, ErrSupersedeRequired
+			return nil, domainfacts.FactErrSupersedeRequired
 		}
 		if *supersedes != active.ID {
-			return nil, ErrInvalidSupersedes
+			return nil, domainfacts.FactErrInvalidSupersedes
 		}
 		ver.SupersedesVersionID = supersedes
 		active.Status = string(domainfacts.StatusSuperseded)
@@ -365,7 +340,7 @@ func (s *Service) Confirm(ctx context.Context, userID, versionID uuid.UUID, in C
 	return s.Get(ctx, userID, fact.ID)
 }
 
-func (s *Service) Reject(ctx context.Context, userID, versionID uuid.UUID) (*FactView, error) {
+func (s *Service) Reject(ctx context.Context, userID, versionID uuid.UUID) (*domainfacts.FactFactView, error) {
 	orgID, err := s.homeOrg(ctx, userID)
 	if err != nil {
 		return nil, err
@@ -375,20 +350,20 @@ func (s *Service) Reject(ctx context.Context, userID, versionID uuid.UUID) (*Fac
 		return nil, err
 	}
 	if ver == nil {
-		return nil, ErrNotFound
+		return nil, domainfacts.FactErrNotFound
 	}
 	fact, err := s.Facts.GetFact(ctx, orgID, ver.FactID)
 	if err != nil {
 		return nil, err
 	}
 	if fact == nil {
-		return nil, ErrNotFound
+		return nil, domainfacts.FactErrNotFound
 	}
 	if _, err := s.requireProjectMember(ctx, userID, fact.ProjectID); err != nil {
 		return nil, err
 	}
 	if ver.Status != string(domainfacts.StatusProposed) {
-		return nil, ErrNotProposed
+		return nil, domainfacts.FactErrNotProposed
 	}
 	ver.Status = string(domainfacts.StatusRejected)
 	if err := s.Facts.UpdateFactVersion(ctx, *ver); err != nil {
@@ -397,7 +372,7 @@ func (s *Service) Reject(ctx context.Context, userID, versionID uuid.UUID) (*Fac
 	return s.Get(ctx, userID, fact.ID)
 }
 
-func (s *Service) AddEvidence(ctx context.Context, userID, versionID uuid.UUID, ref EvidenceRef) (*FactView, error) {
+func (s *Service) AddEvidence(ctx context.Context, userID, versionID uuid.UUID, ref domainfacts.FactEvidenceRef) (*domainfacts.FactFactView, error) {
 	orgID, err := s.homeOrg(ctx, userID)
 	if err != nil {
 		return nil, err
@@ -407,14 +382,14 @@ func (s *Service) AddEvidence(ctx context.Context, userID, versionID uuid.UUID, 
 		return nil, err
 	}
 	if ver == nil {
-		return nil, ErrNotFound
+		return nil, domainfacts.FactErrNotFound
 	}
 	fact, err := s.Facts.GetFact(ctx, orgID, ver.FactID)
 	if err != nil {
 		return nil, err
 	}
 	if fact == nil {
-		return nil, ErrNotFound
+		return nil, domainfacts.FactErrNotFound
 	}
 	if _, err := s.requireProjectMember(ctx, userID, fact.ProjectID); err != nil {
 		return nil, err
@@ -433,7 +408,7 @@ func (s *Service) AddEvidence(ctx context.Context, userID, versionID uuid.UUID, 
 	return s.Get(ctx, userID, fact.ID)
 }
 
-func (s *Service) RemoveEvidence(ctx context.Context, userID, versionID, evidenceID uuid.UUID) (*FactView, error) {
+func (s *Service) RemoveEvidence(ctx context.Context, userID, versionID, evidenceID uuid.UUID) (*domainfacts.FactFactView, error) {
 	orgID, err := s.homeOrg(ctx, userID)
 	if err != nil {
 		return nil, err
@@ -443,28 +418,28 @@ func (s *Service) RemoveEvidence(ctx context.Context, userID, versionID, evidenc
 		return nil, err
 	}
 	if ver == nil {
-		return nil, ErrNotFound
+		return nil, domainfacts.FactErrNotFound
 	}
 	fact, err := s.Facts.GetFact(ctx, orgID, ver.FactID)
 	if err != nil {
 		return nil, err
 	}
 	if fact == nil {
-		return nil, ErrNotFound
+		return nil, domainfacts.FactErrNotFound
 	}
 	if _, err := s.requireProjectMember(ctx, userID, fact.ProjectID); err != nil {
 		return nil, err
 	}
 	if err := s.Facts.RemoveFactEvidence(ctx, orgID, versionID, evidenceID); err != nil {
 		if errors.Is(err, domainshared.ErrNotFound) {
-			return nil, ErrNotFound
+			return nil, domainfacts.FactErrNotFound
 		}
 		return nil, err
 	}
 	return s.Get(ctx, userID, fact.ID)
 }
 
-func (s *Service) buildFactView(ctx context.Context, fact domainfacts.FactRow, include ListInclude, allVersions bool) (*FactView, error) {
+func (s *Service) buildFactView(ctx context.Context, fact domainfacts.FactRow, include domainfacts.FactListInclude, allVersions bool) (*domainfacts.FactFactView, error) {
 	versions, err := s.Facts.ListFactVersions(ctx, fact.ID)
 	if err != nil {
 		return nil, err
@@ -477,7 +452,7 @@ func (s *Service) buildFactView(ctx context.Context, fact domainfacts.FactRow, i
 	for _, ev := range evidenceAll {
 		byVersion[ev.FactVersionID] = append(byVersion[ev.FactVersionID], ev)
 	}
-	out := &FactView{Fact: fact, Versions: make([]VersionView, 0, len(versions))}
+	out := &domainfacts.FactFactView{Fact: fact, Versions: make([]domainfacts.FactVersionView, 0, len(versions))}
 	for _, ver := range versions {
 		if !allVersions {
 			switch domainfacts.Status(ver.Status) {
@@ -495,7 +470,7 @@ func (s *Service) buildFactView(ctx context.Context, fact domainfacts.FactRow, i
 				continue
 			}
 		}
-		out.Versions = append(out.Versions, VersionView{
+		out.Versions = append(out.Versions, domainfacts.FactVersionView{
 			Version:  ver,
 			Evidence: byVersion[ver.ID],
 		})
@@ -503,11 +478,11 @@ func (s *Service) buildFactView(ctx context.Context, fact domainfacts.FactRow, i
 	return out, nil
 }
 
-func (s *Service) validateEvidenceOnProject(ctx context.Context, userID, orgID, projectID uuid.UUID, ref EvidenceRef) error {
+func (s *Service) validateEvidenceOnProject(ctx context.Context, userID, orgID, projectID uuid.UUID, ref domainfacts.FactEvidenceRef) error {
 	msgSet := ref.MessageID != nil
 	manualSet := ref.ManualItemID != nil
 	if !domainfacts.ValidEvidenceXOR(msgSet, manualSet) {
-		return ErrInvalidEvidence
+		return domainfacts.FactErrInvalidEvidence
 	}
 	if ref.MessageID != nil {
 		eff, err := s.Assignments.EffectiveAssignment(ctx, userID, *ref.MessageID)
@@ -515,7 +490,7 @@ func (s *Service) validateEvidenceOnProject(ctx context.Context, userID, orgID, 
 			return err
 		}
 		if eff == nil || eff.ProjectID == nil || *eff.ProjectID != projectID {
-			return ErrWrongProject
+			return domainfacts.FactErrWrongProject
 		}
 		return nil
 	}
@@ -524,7 +499,7 @@ func (s *Service) validateEvidenceOnProject(ctx context.Context, userID, orgID, 
 		return err
 	}
 	if manual == nil || manual.ProjectID == nil || *manual.ProjectID != projectID {
-		return ErrWrongProject
+		return domainfacts.FactErrWrongProject
 	}
 	return nil
 }

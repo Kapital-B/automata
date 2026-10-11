@@ -11,27 +11,19 @@ import (
 	"github.com/google/uuid"
 )
 
-const MaxBatchAssignItems = domainprojects.ProjectMaxBatchAssignItems
-
-var ErrTooManyItems = domainprojects.ProjectErrTooManyItems
-
-type BatchAssignItem = domainprojects.ProjectBatchAssignItem
-
-type BatchAssignResult = domainprojects.ProjectBatchAssignResult
-
 // AssignBatch assigns or clears many items in one call.
 //
 // Items succeed or fail independently: one bad item must not sink the batch.
 // Unlike a loop over AssignMessage, project validation is hoisted out of the
 // per-item path and the post-commit interpret/reconcile hook fires once per
 // distinct project rather than once per item.
-func (s *Service) AssignBatch(ctx context.Context, userID uuid.UUID, items []BatchAssignItem) ([]BatchAssignResult, error) {
-	if len(items) > MaxBatchAssignItems {
-		return nil, ErrTooManyItems
+func (s *Service) AssignBatch(ctx context.Context, userID uuid.UUID, items []domainprojects.ProjectBatchAssignItem) ([]domainprojects.ProjectBatchAssignResult, error) {
+	if len(items) > domainprojects.ProjectMaxBatchAssignItems {
+		return nil, domainprojects.ProjectErrTooManyItems
 	}
-	results := make([]BatchAssignResult, len(items))
+	results := make([]domainprojects.ProjectBatchAssignResult, len(items))
 	for i, it := range items {
-		results[i] = BatchAssignResult{ID: it.ID, OK: true}
+		results[i] = domainprojects.ProjectBatchAssignResult{ID: it.ID, OK: true}
 	}
 	if len(items) == 0 {
 		return results, nil
@@ -239,7 +231,7 @@ const notRelevantReason = "not_relevant"
 
 // marksNotRelevant reports whether the item dismisses correspondence. A nil
 // flag leaves the existing decision alone.
-func marksNotRelevant(it BatchAssignItem) bool {
+func marksNotRelevant(it domainprojects.ProjectBatchAssignItem) bool {
 	return it.NotRelevant != nil && *it.NotRelevant
 }
 
@@ -249,7 +241,7 @@ type threadClear struct {
 	conversationID string
 }
 
-func (s *Service) batchAssignManual(ctx context.Context, orgID uuid.UUID, it BatchAssignItem) error {
+func (s *Service) batchAssignManual(ctx context.Context, orgID uuid.UUID, it domainprojects.ProjectBatchAssignItem) error {
 	if s.Manuals == nil {
 		return fmt.Errorf("manuals not configured")
 	}
@@ -258,7 +250,7 @@ func (s *Service) batchAssignManual(ctx context.Context, orgID uuid.UUID, it Bat
 		return err
 	}
 	if item == nil {
-		return ErrNotFound
+		return domainprojects.ProjectErrNotFound
 	}
 	status := "unassigned"
 	reason := "user_assign"
@@ -279,7 +271,7 @@ func (s *Service) batchAssignManual(ctx context.Context, orgID uuid.UUID, it Bat
 		reason, string(domainprojects.SourceUser), notRelevantAt)
 }
 
-func markFailed(results []BatchAssignResult, idx []int, code string) {
+func markFailed(results []domainprojects.ProjectBatchAssignResult, idx []int, code string) {
 	for _, i := range idx {
 		results[i].OK = false
 		results[i].Error = code
@@ -287,7 +279,7 @@ func markFailed(results []BatchAssignResult, idx []int, code string) {
 }
 
 // dropCommitsFor removes post-commit work for items whose write failed.
-func dropCommitsFor(commits []batchCommit, results []BatchAssignResult) []batchCommit {
+func dropCommitsFor(commits []batchCommit, results []domainprojects.ProjectBatchAssignResult) []batchCommit {
 	ok := map[uuid.UUID]bool{}
 	for _, r := range results {
 		ok[r.ID] = r.OK

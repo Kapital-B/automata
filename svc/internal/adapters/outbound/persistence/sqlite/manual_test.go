@@ -25,7 +25,7 @@ func TestManualCreateAndTimelineOrder(t *testing.T) {
 	svc := projectSvc(repo)
 	ctx := context.Background()
 	userID, _, accountID := seedUserAccount(t, repo)
-	p, err := svc.Create(ctx, userID, appprojects.CreateProjectInput{Name: "Cooling", Code: "DC01"})
+	p, err := svc.Create(ctx, userID, domainprojects.ProjectCreateProjectInput{Name: "Cooling", Code: "DC01"})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -43,13 +43,13 @@ func TestManualCreateAndTimelineOrder(t *testing.T) {
 	}); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := svc.AssignMessage(ctx, userID, msgID, appprojects.AssignInput{
+	if _, err := svc.AssignMessage(ctx, userID, msgID, domainprojects.ProjectAssignInput{
 		ProjectID: &p.ID, Scope: domainprojects.ScopeThread, Status: domainprojects.StatusCommitted,
 	}); err != nil {
 		t.Fatal(err)
 	}
 
-	manual, err := svc.CreateManualItem(ctx, userID, appprojects.CreateManualInput{
+	manual, err := svc.CreateManualItem(ctx, userID, domainprojects.ProjectCreateManualInput{
 		Channel: "teams", OccurredAt: late, Title: "Teams note",
 		BodyText: "Consider 90 kW", ProjectID: &p.ID,
 	})
@@ -81,12 +81,12 @@ func TestManualUnassignedAndAssign(t *testing.T) {
 	svc := projectSvc(repo)
 	ctx := context.Background()
 	userID, _, _ := seedUserAccount(t, repo)
-	p, err := svc.Create(ctx, userID, appprojects.CreateProjectInput{Name: "Cooling", Code: "DC01"})
+	p, err := svc.Create(ctx, userID, domainprojects.ProjectCreateProjectInput{Name: "Cooling", Code: "DC01"})
 	if err != nil {
 		t.Fatal(err)
 	}
 
-	manual, err := svc.CreateManualItem(ctx, userID, appprojects.CreateManualInput{
+	manual, err := svc.CreateManualItem(ctx, userID, domainprojects.ProjectCreateManualInput{
 		Channel: "whatsapp", OccurredAt: time.Now().UTC(), Title: "WA",
 		BodyText: "approved",
 	})
@@ -136,8 +136,8 @@ func TestManualOrgIsolation(t *testing.T) {
 	ctx := context.Background()
 	u1, _, _ := seedUserAccount(t, repo)
 	u2, _, _ := seedUserAccount(t, repo)
-	p1, _ := svc.Create(ctx, u1, appprojects.CreateProjectInput{Name: "A", Code: "AA01"})
-	m, err := svc.CreateManualItem(ctx, u1, appprojects.CreateManualInput{
+	p1, _ := svc.Create(ctx, u1, domainprojects.ProjectCreateProjectInput{Name: "A", Code: "AA01"})
+	m, err := svc.CreateManualItem(ctx, u1, domainprojects.ProjectCreateManualInput{
 		Channel: "note", OccurredAt: time.Now().UTC(), Title: "private",
 		BodyText: "secret", ProjectID: &p1.ID,
 	})
@@ -148,11 +148,11 @@ func TestManualOrgIsolation(t *testing.T) {
 	if err == nil {
 		t.Fatalf("user2 must not load user1 project, got %d items", len(got))
 	}
-	if err != appprojects.ErrNotFound {
+	if err != domainprojects.ProjectErrNotFound {
 		t.Fatalf("want ErrNotFound, got %v", err)
 	}
 	_, err = svc.AssignManualItem(ctx, u2, m.ID, nil)
-	if err != appprojects.ErrNotFound {
+	if err != domainprojects.ProjectErrNotFound {
 		t.Fatalf("want not found for other org, got %v", err)
 	}
 }
@@ -163,12 +163,12 @@ func TestManualParticipantsOnCommitted(t *testing.T) {
 	svc := projectSvc(repo)
 	ctx := context.Background()
 	userID, orgID, _ := seedUserAccount(t, repo)
-	p, _ := svc.Create(ctx, userID, appprojects.CreateProjectInput{Name: "A", Code: "AA01"})
+	p, _ := svc.Create(ctx, userID, domainprojects.ProjectCreateProjectInput{Name: "A", Code: "AA01"})
 	contactID, err := repo.ResolveEmailContact(ctx, orgID, "bob@ex.com", "Bob", time.Now().UTC())
 	if err != nil {
 		t.Fatal(err)
 	}
-	_, err = svc.CreateManualItem(ctx, userID, appprojects.CreateManualInput{
+	_, err = svc.CreateManualItem(ctx, userID, domainprojects.ProjectCreateManualInput{
 		Channel: "call", OccurredAt: time.Now().UTC(), Title: "Call",
 		BodyText: "notes", ProjectID: &p.ID, ParticipantContactIDs: []uuid.UUID{contactID},
 	})

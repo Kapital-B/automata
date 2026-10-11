@@ -57,14 +57,14 @@ func TestProjectCodeUniquePerOrg(t *testing.T) {
 	u1, _, _ := seedUserAccount(t, repo)
 	u2, _, _ := seedUserAccount(t, repo)
 
-	if _, err := svc.Create(ctx, u1, appprojects.CreateProjectInput{Name: "A", Code: "DC01"}); err != nil {
+	if _, err := svc.Create(ctx, u1, domainprojects.ProjectCreateProjectInput{Name: "A", Code: "DC01"}); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := svc.Create(ctx, u1, appprojects.CreateProjectInput{Name: "B", Code: "dc01"}); err != appprojects.ErrCodeTaken {
+	if _, err := svc.Create(ctx, u1, domainprojects.ProjectCreateProjectInput{Name: "B", Code: "dc01"}); err != domainprojects.ProjectErrCodeTaken {
 		t.Fatalf("want ErrCodeTaken got %v", err)
 	}
 	// Other org can reuse code
-	if _, err := svc.Create(ctx, u2, appprojects.CreateProjectInput{Name: "C", Code: "DC01"}); err != nil {
+	if _, err := svc.Create(ctx, u2, domainprojects.ProjectCreateProjectInput{Name: "C", Code: "DC01"}); err != nil {
 		t.Fatal(err)
 	}
 }
@@ -75,7 +75,7 @@ func TestCreateProjectInsertsSingleMember(t *testing.T) {
 	svc := &appprojects.Service{Users: repo, Projects: repo, Assignments: repo, Contacts: repo, Messages: repo}
 	ctx := context.Background()
 	userID, _, _ := seedUserAccount(t, repo)
-	p, err := svc.Create(ctx, userID, appprojects.CreateProjectInput{Name: "Cooling", Code: "DC01", MemberRole: "ME"})
+	p, err := svc.Create(ctx, userID, domainprojects.ProjectCreateProjectInput{Name: "Cooling", Code: "DC01", MemberRole: "ME"})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -98,14 +98,14 @@ func TestAssignThreadAppliesToSiblingWithoutOverride(t *testing.T) {
 	svc := &appprojects.Service{Users: repo, Projects: repo, Assignments: repo, Contacts: repo, Messages: repo}
 	ctx := context.Background()
 	userID, _, accountID := seedUserAccount(t, repo)
-	p, err := svc.Create(ctx, userID, appprojects.CreateProjectInput{Name: "Cooling", Code: "DC01"})
+	p, err := svc.Create(ctx, userID, domainprojects.ProjectCreateProjectInput{Name: "Cooling", Code: "DC01"})
 	if err != nil {
 		t.Fatal(err)
 	}
 	m1 := insertMsg(t, repo, accountID, "First", "conv-1", "hi")
 	m2 := insertMsg(t, repo, accountID, "Second", "conv-1", "hi again")
 
-	if _, err := svc.AssignMessage(ctx, userID, m1, appprojects.AssignInput{
+	if _, err := svc.AssignMessage(ctx, userID, m1, domainprojects.ProjectAssignInput{
 		ProjectID: &p.ID, Scope: domainprojects.ScopeThread, Status: domainprojects.StatusCommitted,
 	}); err != nil {
 		t.Fatal(err)
@@ -125,18 +125,18 @@ func TestMessageOverrideSurvivesThreadReassign(t *testing.T) {
 	svc := &appprojects.Service{Users: repo, Projects: repo, Assignments: repo, Contacts: repo, Messages: repo}
 	ctx := context.Background()
 	userID, _, accountID := seedUserAccount(t, repo)
-	p1, _ := svc.Create(ctx, userID, appprojects.CreateProjectInput{Name: "A", Code: "AA01"})
-	p2, _ := svc.Create(ctx, userID, appprojects.CreateProjectInput{Name: "B", Code: "BB01"})
+	p1, _ := svc.Create(ctx, userID, domainprojects.ProjectCreateProjectInput{Name: "A", Code: "AA01"})
+	p2, _ := svc.Create(ctx, userID, domainprojects.ProjectCreateProjectInput{Name: "B", Code: "BB01"})
 	m1 := insertMsg(t, repo, accountID, "One", "conv-x", "body")
 	m2 := insertMsg(t, repo, accountID, "Two", "conv-x", "body")
 
-	_, _ = svc.AssignMessage(ctx, userID, m1, appprojects.AssignInput{
+	_, _ = svc.AssignMessage(ctx, userID, m1, domainprojects.ProjectAssignInput{
 		ProjectID: &p1.ID, Scope: domainprojects.ScopeThread, Status: domainprojects.StatusCommitted,
 	})
-	_, _ = svc.AssignMessage(ctx, userID, m2, appprojects.AssignInput{
+	_, _ = svc.AssignMessage(ctx, userID, m2, domainprojects.ProjectAssignInput{
 		ProjectID: &p2.ID, Scope: domainprojects.ScopeMessage, Status: domainprojects.StatusCommitted,
 	})
-	_, _ = svc.AssignMessage(ctx, userID, m1, appprojects.AssignInput{
+	_, _ = svc.AssignMessage(ctx, userID, m1, domainprojects.ProjectAssignInput{
 		ProjectID: &p1.ID, Scope: domainprojects.ScopeThread, Status: domainprojects.StatusCommitted,
 	})
 
@@ -164,11 +164,11 @@ func TestEffectiveProjectIDsForMessagesMatchesIndividualAssignments(t *testing.T
 	ctx := context.Background()
 	userID, orgID, accountID := seedUserAccount(t, repo)
 	_, _, otherAccountID := seedUserAccount(t, repo)
-	p1, err := svc.Create(ctx, userID, appprojects.CreateProjectInput{Name: "A", Code: "AA01"})
+	p1, err := svc.Create(ctx, userID, domainprojects.ProjectCreateProjectInput{Name: "A", Code: "AA01"})
 	if err != nil {
 		t.Fatal(err)
 	}
-	p2, err := svc.Create(ctx, userID, appprojects.CreateProjectInput{Name: "B", Code: "BB01"})
+	p2, err := svc.Create(ctx, userID, domainprojects.ProjectCreateProjectInput{Name: "B", Code: "BB01"})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -177,12 +177,12 @@ func TestEffectiveProjectIDsForMessagesMatchesIndividualAssignments(t *testing.T
 	cleared := insertMsg(t, repo, accountID, "Cleared", "conv-batch", "body")
 	unassigned := insertMsg(t, repo, accountID, "Unassigned", "conv-other", "body")
 	foreign := insertMsg(t, repo, otherAccountID, "Foreign", "conv-batch", "body")
-	if _, err := svc.AssignMessage(ctx, userID, thread, appprojects.AssignInput{
+	if _, err := svc.AssignMessage(ctx, userID, thread, domainprojects.ProjectAssignInput{
 		ProjectID: &p1.ID, Scope: domainprojects.ScopeThread, Status: domainprojects.StatusCommitted,
 	}); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := svc.AssignMessage(ctx, userID, override, appprojects.AssignInput{
+	if _, err := svc.AssignMessage(ctx, userID, override, domainprojects.ProjectAssignInput{
 		ProjectID: &p2.ID, Scope: domainprojects.ScopeMessage, Status: domainprojects.StatusCommitted,
 	}); err != nil {
 		t.Fatal(err)
@@ -224,7 +224,7 @@ func TestAssignDoesNotCreateProjectMembers(t *testing.T) {
 	svc := &appprojects.Service{Users: repo, Projects: repo, Assignments: repo, Contacts: repo, Messages: repo}
 	ctx := context.Background()
 	userID, orgID, accountID := seedUserAccount(t, repo)
-	p, _ := svc.Create(ctx, userID, appprojects.CreateProjectInput{Name: "A", Code: "AA01"})
+	p, _ := svc.Create(ctx, userID, domainprojects.ProjectCreateProjectInput{Name: "A", Code: "AA01"})
 	m1 := insertMsg(t, repo, accountID, "Hello", "c1", "x")
 	contactID, err := repo.ResolveEmailContact(ctx, orgID, "sarah@ex.com", "Sarah", time.Now().UTC())
 	if err != nil {
@@ -233,7 +233,7 @@ func TestAssignDoesNotCreateProjectMembers(t *testing.T) {
 	_ = repo.UpsertParticipant(ctx, domaincontacts.CorrespondenceParticipantRow{
 		ID: uuid.New(), OrganisationID: orgID, ContactID: contactID, Role: "from", MessageID: &m1,
 	})
-	_, err = svc.AssignMessage(ctx, userID, m1, appprojects.AssignInput{
+	_, err = svc.AssignMessage(ctx, userID, m1, domainprojects.ProjectAssignInput{
 		ProjectID: &p.ID, Scope: domainprojects.ScopeThread, Status: domainprojects.StatusCommitted,
 	})
 	if err != nil {
@@ -252,19 +252,19 @@ func TestAutoAssignCommitsOnSiblingAndCodeOnly(t *testing.T) {
 	assign := &appprojects.AssignService{Users: repo, Projects: repo, Assignments: repo, Contacts: repo, Messages: repo, JobRuns: repo}
 	ctx := context.Background()
 	userID, _, accountID := seedUserAccount(t, repo)
-	p, _ := svc.Create(ctx, userID, appprojects.CreateProjectInput{Name: "Cooling Upgrade", Code: "DC01", Keywords: []string{"chiller"}})
-	p2, _ := svc.Create(ctx, userID, appprojects.CreateProjectInput{Name: "Other", Code: "OT02"})
+	p, _ := svc.Create(ctx, userID, domainprojects.ProjectCreateProjectInput{Name: "Cooling Upgrade", Code: "DC01", Keywords: []string{"chiller"}})
+	p2, _ := svc.Create(ctx, userID, domainprojects.ProjectCreateProjectInput{Name: "Other", Code: "OT02"})
 
 	// Sibling
 	m1 := insertMsg(t, repo, accountID, "kickoff", "sib", "hello")
 	m2 := insertMsg(t, repo, accountID, "followup", "sib", "hello")
-	_, _ = svc.AssignMessage(ctx, userID, m1, appprojects.AssignInput{
+	_, _ = svc.AssignMessage(ctx, userID, m1, domainprojects.ProjectAssignInput{
 		ProjectID: &p.ID, Scope: domainprojects.ScopeThread, Status: domainprojects.StatusCommitted,
 	})
 	// Clear thread so m2 needs assign, then sibling finder sees m1
 	// Actually after assign, thread already covers m2. Delete thread and re-assign only via override on m1 to test sibling.
 	_ = repo.DeleteThreadAssignment(ctx, accountID, "sib")
-	_, _ = svc.AssignMessage(ctx, userID, m1, appprojects.AssignInput{
+	_, _ = svc.AssignMessage(ctx, userID, m1, domainprojects.ProjectAssignInput{
 		ProjectID: &p.ID, Scope: domainprojects.ScopeMessage, Status: domainprojects.StatusCommitted,
 	})
 	if err := assign.AssignAfterSync(ctx, userID, accountID); err != nil {
@@ -318,7 +318,7 @@ func TestUnassignedSummaryCounts(t *testing.T) {
 	assign := &appprojects.AssignService{Users: repo, Projects: repo, Assignments: repo, Contacts: repo, Messages: repo}
 	ctx := context.Background()
 	userID, _, accountID := seedUserAccount(t, repo)
-	_, _ = svc.Create(ctx, userID, appprojects.CreateProjectInput{Name: "Cooling Upgrade", Code: "DC01"})
+	_, _ = svc.Create(ctx, userID, domainprojects.ProjectCreateProjectInput{Name: "Cooling Upgrade", Code: "DC01"})
 	_ = insertMsg(t, repo, accountID, "no match here", "u1", "body")
 	_ = insertMsg(t, repo, accountID, "Cooling Upgrade please", "u2", "body")
 	_ = assign.AssignAfterSync(ctx, userID, accountID)

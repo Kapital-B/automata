@@ -20,9 +20,6 @@ import (
 
 const oauthFlowSlackConnector = "slack_connector"
 
-var ErrInvalidOAuthState = domainconnectors.ConnectorErrInvalidOAuthState
-var ErrNotFound = domainconnectors.ConnectorErrNotFound
-
 // Service orchestrates Slack connector OAuth, bindings, and synchronization.
 type Service struct {
 	Connectors domainconnectors.ConnectorRepository
@@ -34,11 +31,7 @@ type Service struct {
 	JobRuns    domainjobs.JobRunRepository
 }
 
-type StartConnectInput = domainconnectors.ConnectorStartConnectInput
-
-type StartConnectOutput = domainconnectors.ConnectorStartConnectOutput
-
-func (s *Service) StartConnect(ctx context.Context, userID uuid.UUID, in StartConnectInput) (*StartConnectOutput, error) {
+func (s *Service) StartConnect(ctx context.Context, userID uuid.UUID, in domainconnectors.ConnectorStartConnectInput) (*domainconnectors.ConnectorStartConnectOutput, error) {
 	if s == nil || s.Slack == nil || s.OAuthState == nil {
 		return nil, fmt.Errorf("Slack connector is not configured")
 	}
@@ -61,24 +54,22 @@ func (s *Service) StartConnect(ctx context.Context, userID uuid.UUID, in StartCo
 	if err != nil {
 		return nil, err
 	}
-	return &StartConnectOutput{AuthorizationURL: authorizationURL, State: state}, nil
+	return &domainconnectors.ConnectorStartConnectOutput{AuthorizationURL: authorizationURL, State: state}, nil
 }
 
-type CompleteOAuthResult = domainconnectors.ConnectorCompleteOAuthResult
-
-func (s *Service) CompleteOAuth(ctx context.Context, code, state string) (*CompleteOAuthResult, error) {
+func (s *Service) CompleteOAuth(ctx context.Context, code, state string) (*domainconnectors.ConnectorCompleteOAuthResult, error) {
 	flow, userID, payloadJSON, ok, err := s.OAuthState.TakeOAuthState(ctx, state)
 	if err != nil {
 		return nil, err
 	}
 	if !ok || flow != oauthFlowSlackConnector || userID == nil {
-		return nil, ErrInvalidOAuthState
+		return nil, domainconnectors.ConnectorErrInvalidOAuthState
 	}
 	var statePayload struct {
 		Label *string `json:"label"`
 	}
 	if err := json.Unmarshal([]byte(payloadJSON), &statePayload); err != nil {
-		return nil, ErrInvalidOAuthState
+		return nil, domainconnectors.ConnectorErrInvalidOAuthState
 	}
 	oauthResult, err := s.Slack.ExchangeCode(ctx, code)
 	if err != nil {
@@ -115,7 +106,7 @@ func (s *Service) CompleteOAuth(ctx context.Context, code, state string) (*Compl
 	}, cipher); err != nil {
 		return nil, err
 	}
-	return &CompleteOAuthResult{ConnectorAccountID: id}, nil
+	return &domainconnectors.ConnectorCompleteOAuthResult{ConnectorAccountID: id}, nil
 }
 
 func (s *Service) List(ctx context.Context, userID uuid.UUID) ([]domainconnectors.ConnectorAccountRow, error) {
@@ -128,7 +119,7 @@ func (s *Service) Disconnect(ctx context.Context, userID, connectorAccountID uui
 		return err
 	}
 	if account == nil {
-		return ErrNotFound
+		return domainconnectors.ConnectorErrNotFound
 	}
 	return s.Connectors.DeleteConnectorAccount(ctx, userID, connectorAccountID)
 }
@@ -139,20 +130,18 @@ func (s *Service) ListBindings(ctx context.Context, userID, connectorAccountID u
 		return nil, err
 	}
 	if account == nil {
-		return nil, ErrNotFound
+		return nil, domainconnectors.ConnectorErrNotFound
 	}
 	return s.Connectors.ListConnectorBindings(ctx, userID, connectorAccountID)
 }
 
-type CreateBindingInput = domainconnectors.ConnectorCreateBindingInput
-
-func (s *Service) CreateBinding(ctx context.Context, userID, connectorAccountID uuid.UUID, in CreateBindingInput) (*domainconnectors.ConnectorBindingRow, error) {
+func (s *Service) CreateBinding(ctx context.Context, userID, connectorAccountID uuid.UUID, in domainconnectors.ConnectorCreateBindingInput) (*domainconnectors.ConnectorBindingRow, error) {
 	account, err := s.Connectors.GetConnectorAccount(ctx, userID, connectorAccountID)
 	if err != nil {
 		return nil, err
 	}
 	if account == nil {
-		return nil, ErrNotFound
+		return nil, domainconnectors.ConnectorErrNotFound
 	}
 	channelID := strings.TrimSpace(in.ExternalChannelID)
 	if channelID == "" {
@@ -165,7 +154,7 @@ func (s *Service) CreateBinding(ctx context.Context, userID, connectorAccountID 
 	organisationID := homeOrgID
 	if in.OrganisationID != nil {
 		if *in.OrganisationID != homeOrgID {
-			return nil, ErrNotFound
+			return nil, domainconnectors.ConnectorErrNotFound
 		}
 		organisationID = *in.OrganisationID
 	}
@@ -179,7 +168,7 @@ func (s *Service) CreateBinding(ctx context.Context, userID, connectorAccountID 
 			return nil, memberErr
 		}
 		if project == nil || project.ArchivedAt != nil || member == nil {
-			return nil, ErrNotFound
+			return nil, domainconnectors.ConnectorErrNotFound
 		}
 	}
 	label := strings.TrimSpace(in.Label)
@@ -210,7 +199,7 @@ func (s *Service) CreateBinding(ctx context.Context, userID, connectorAccountID 
 	return row, nil
 }
 
-func (s *Service) Sync(ctx context.Context, userID, connectorAccountID uuid.UUID) (*SyncResult, error) {
+func (s *Service) Sync(ctx context.Context, userID, connectorAccountID uuid.UUID) (*domainconnectors.ConnectorSyncResult, error) {
 	return s.SyncConnector(ctx, userID, connectorAccountID)
 }
 

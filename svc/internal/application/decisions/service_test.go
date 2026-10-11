@@ -1,6 +1,11 @@
 package decisions_test
 
 import (
+	domaindecisions "github.com/Kapital-B/automata/svc/internal/domain/decisions"
+	domainprojects "github.com/Kapital-B/automata/svc/internal/domain/projects"
+)
+
+import (
 	"context"
 	"database/sql"
 	"testing"
@@ -40,7 +45,7 @@ func setupDecisions(t *testing.T, name string) (*appdecisions.Service, uuid.UUID
 	if err != nil {
 		t.Fatal(err)
 	}
-	proj, err := projectSvc.Create(context.Background(), userID, appprojects.CreateProjectInput{Name: "Cooling", Code: "DC01"})
+	proj, err := projectSvc.Create(context.Background(), userID, domainprojects.ProjectCreateProjectInput{Name: "Cooling", Code: "DC01"})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -50,7 +55,7 @@ func setupDecisions(t *testing.T, name string) (*appdecisions.Service, uuid.UUID
 func TestCreateConfirmDecision(t *testing.T) {
 	svc, userID, projectID := setupDecisions(t, "decconfirm")
 	ctx := context.Background()
-	view, err := svc.Create(ctx, userID, projectID, appdecisions.CreateInput{
+	view, err := svc.Create(ctx, userID, projectID, domaindecisions.DecisionCreateInput{
 		Statement: "Proceed with 90 kW duty for Pump P-03", Confirm: false,
 	})
 	if err != nil {

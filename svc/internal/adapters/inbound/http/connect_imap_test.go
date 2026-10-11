@@ -48,9 +48,9 @@ func TestConnectIMAPStoresAVerifiedAccountAndReportsRejections(t *testing.T) {
 		Log: slog.New(slog.NewTextHandler(io.Discard, nil)),
 		AccountSvc: appaccounts.NewService(appaccounts.Deps{
 			Accounts: repo, OAuthState: repo, Vault: vault,
-			PasswordConnectors: map[string]domainaccounts.PasswordMailConnector{appaccounts.ProviderIMAP: conn},
+			PasswordConnectors: map[string]domainaccounts.PasswordMailConnector{domainaccounts.AccountProviderIMAP: conn},
 			Mailboxes: &appaccounts.MailboxOpener{Providers: map[string]domainaccounts.MailProvider{
-				appaccounts.ProviderIMAP: &imapmail.Provider{},
+				domainaccounts.AccountProviderIMAP: &imapmail.Provider{},
 			}},
 		}),
 		AccountsQueries: &queries.Service{Accounts: repo}, UsersQueries: &queries.Service{Users: repo}, TokenVerifier: security.JWT{Secret: []byte("abcdefghijklmnopqrstuvwxyz123456")}, AccountJobs: &submissions.Service{Accounts: repo}, ConnectorJobs: &submissions.Service{Accounts: repo}, Extraction: &submissions.Service{Accounts: repo}, JobRequests: &submissions.Service{Accounts: repo},

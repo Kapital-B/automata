@@ -1,6 +1,11 @@
 package projectai_test
 
 import (
+	domainfacts "github.com/Kapital-B/automata/svc/internal/domain/facts"
+	domainprojects "github.com/Kapital-B/automata/svc/internal/domain/projects"
+)
+
+import (
 	"context"
 	"database/sql"
 	"encoding/json"
@@ -53,12 +58,12 @@ func TestAskCitesActiveFact(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	proj, err := projectSvc.Create(context.Background(), userID, appprojects.CreateProjectInput{Name: "Cooling", Code: "DC01"})
+	proj, err := projectSvc.Create(context.Background(), userID, domainprojects.ProjectCreateProjectInput{Name: "Cooling", Code: "DC01"})
 	if err != nil {
 		t.Fatal(err)
 	}
 	ctx := context.Background()
-	view, err := factSvc.Create(ctx, userID, proj.ID, appfacts.CreateInput{
+	view, err := factSvc.Create(ctx, userID, proj.ID, domainfacts.FactCreateInput{
 		SubjectKey: "pump.p03.duty_kw", Label: "Pump P-03 duty", Value: 90.0, Unit: strPtr("kW"), Confirm: true,
 	})
 	if err != nil {
@@ -112,15 +117,15 @@ func TestAskAcrossCitesProjectFact(t *testing.T) {
 		t.Fatal(err)
 	}
 	ctx := context.Background()
-	proj, err := projectSvc.Create(ctx, userID, appprojects.CreateProjectInput{Name: "Cooling", Code: "DC01"})
+	proj, err := projectSvc.Create(ctx, userID, domainprojects.ProjectCreateProjectInput{Name: "Cooling", Code: "DC01"})
 	if err != nil {
 		t.Fatal(err)
 	}
-	_, err = projectSvc.Create(ctx, userID, appprojects.CreateProjectInput{Name: "Other", Code: "OT01"})
+	_, err = projectSvc.Create(ctx, userID, domainprojects.ProjectCreateProjectInput{Name: "Other", Code: "OT01"})
 	if err != nil {
 		t.Fatal(err)
 	}
-	view, err := factSvc.Create(ctx, userID, proj.ID, appfacts.CreateInput{
+	view, err := factSvc.Create(ctx, userID, proj.ID, domainfacts.FactCreateInput{
 		SubjectKey: "pump.p03.duty_kw", Label: "Pump P-03 duty", Value: 90.0, Unit: strPtr("kW"), Confirm: true,
 	})
 	if err != nil {

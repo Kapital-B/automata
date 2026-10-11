@@ -1,6 +1,10 @@
 package http
 
 import (
+	domainauth "github.com/Kapital-B/automata/svc/internal/domain/auth"
+)
+
+import (
 	"bytes"
 	"context"
 	"database/sql"
@@ -116,7 +120,7 @@ func TestContactsIsolationAndMergeHTTP(t *testing.T) {
 	}
 }
 
-func registerAndLogin(t *testing.T, svc *auth.Service, email, password string) (uuid.UUID, auth.TokenPair) {
+func registerAndLogin(t *testing.T, svc *auth.Service, email, password string) (uuid.UUID, domainauth.AuthTokenPair) {
 	t.Helper()
 	id, err := svc.Register(context.Background(), email, password)
 	if err != nil {

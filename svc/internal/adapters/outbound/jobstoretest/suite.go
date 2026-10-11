@@ -43,7 +43,7 @@ func nextInputFor(current *domainjobs.JobRecord, now time.Time) *domainjobs.Crea
 		return nil
 	}
 	return &domainjobs.CreateJobInput{
-		ID:            jobs.DeterministicJobID(current.ChainID, current.StepIndex+1, current.RemainingJobs[0]),
+		ID:            domainjobs.DeterministicJobID(current.ChainID, current.StepIndex+1, current.RemainingJobs[0]),
 		JobType:       current.RemainingJobs[0],
 		UserID:        current.UserID,
 		AccountID:     current.AccountID,
@@ -76,7 +76,7 @@ func RunContractTests(t *testing.T, factory Factory) {
 
 		// TypeSync holds a mailbox lock; the steps after it do not.
 		first, err := enq.EnqueueChain(ctx, user, &account, domainjobs.JobTriggerAPI,
-			[]string{jobs.TypeSync, jobs.TypeResolveContacts}, domainjobs.JobPayload{}, nil, nil)
+			[]string{domainjobs.TypeSync, domainjobs.TypeResolveContacts}, domainjobs.JobPayload{}, nil, nil)
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -96,7 +96,7 @@ func RunContractTests(t *testing.T, factory Factory) {
 		}
 
 		run(first)
-		second, err := store.List(ctx, domainjobs.JobListFilter{UserID: user, JobType: jobs.TypeResolveContacts, Limit: 10})
+		second, err := store.List(ctx, domainjobs.JobListFilter{UserID: user, JobType: domainjobs.TypeResolveContacts, Limit: 10})
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -108,7 +108,7 @@ func RunContractTests(t *testing.T, factory Factory) {
 		// The chain is done, so the scope is free again — immediately, without
 		// waiting for a lease to lapse or for anything to reclaim it.
 		if _, err := store.CreatePending(ctx, domainjobs.CreateJobInput{
-			ID: uuid.New(), JobType: jobs.TypeSync, UserID: user, AccountID: &account,
+			ID: uuid.New(), JobType: domainjobs.TypeSync, UserID: user, AccountID: &account,
 			TriggerKind: domainjobs.JobTriggerAPI, ChainID: uuid.New(),
 			AcquireLock: true, LockScope: "mailbox", LockKey: account.String(),
 			Now: now,
@@ -132,7 +132,7 @@ func RunContractTests(t *testing.T, factory Factory) {
 
 		acquire := func(at time.Time) (*domainjobs.JobRecord, error) {
 			return store.CreatePending(ctx, domainjobs.CreateJobInput{
-				ID: uuid.New(), JobType: jobs.TypeSync, UserID: user, AccountID: &account,
+				ID: uuid.New(), JobType: domainjobs.TypeSync, UserID: user, AccountID: &account,
 				TriggerKind: domainjobs.JobTriggerAPI, ChainID: uuid.New(),
 				AcquireLock: true, LockScope: "mailbox", LockKey: account.String(),
 				Now: at,
@@ -189,7 +189,7 @@ func RunContractTests(t *testing.T, factory Factory) {
 		account := uuid.New()
 		enq := &jobs.Enqueuer{Store: store}
 		first, err := enq.EnqueueChain(ctx, user, &account, domainjobs.JobTriggerAPI, []string{
-			jobs.TypeSync, jobs.TypeResolveContacts, jobs.TypeCategorize,
+			domainjobs.TypeSync, domainjobs.TypeResolveContacts, domainjobs.TypeCategorize,
 		}, domainjobs.JobPayload{}, nil, nil)
 		if err != nil {
 			t.Fatal(err)
@@ -201,14 +201,14 @@ func RunContractTests(t *testing.T, factory Factory) {
 		exec := &jobs.ExecutionService{
 			Store: store,
 			Executors: jobs.ExecutorRegistry{
-				jobs.TypeSync: &stubExecutor{typ: jobs.TypeSync, chunks: []domainjobs.ChunkResult{
+				domainjobs.TypeSync: &stubExecutor{typ: domainjobs.TypeSync, chunks: []domainjobs.ChunkResult{
 					{NextCursor: &domainjobs.JobCursor{Kind: "graph_next_link", Value: "p2"}, ProgressDelta: domainjobs.JobProgress{Processed: 100}},
 					{Done: true, ProgressDelta: domainjobs.JobProgress{Processed: 50}},
 				}},
-				jobs.TypeResolveContacts: &stubExecutor{typ: jobs.TypeResolveContacts, chunks: []domainjobs.ChunkResult{
+				domainjobs.TypeResolveContacts: &stubExecutor{typ: domainjobs.TypeResolveContacts, chunks: []domainjobs.ChunkResult{
 					{Done: true, ProgressDelta: domainjobs.JobProgress{Processed: 10}},
 				}},
-				jobs.TypeCategorize: &stubExecutor{typ: jobs.TypeCategorize, chunks: []domainjobs.ChunkResult{
+				domainjobs.TypeCategorize: &stubExecutor{typ: domainjobs.TypeCategorize, chunks: []domainjobs.ChunkResult{
 					{Done: true, ProgressDelta: domainjobs.JobProgress{Processed: 5}},
 				}},
 			},
@@ -236,16 +236,16 @@ func RunContractTests(t *testing.T, factory Factory) {
 		if doneSync.Status != domainjobs.JobStatusSuccess {
 			t.Fatalf("expected sync success, got %s", doneSync.Status)
 		}
-		nextID := jobs.DeterministicJobID(first.ChainID, 1, jobs.TypeResolveContacts)
+		nextID := domainjobs.DeterministicJobID(first.ChainID, 1, domainjobs.TypeResolveContacts)
 		next, err := store.GetByID(ctx, nextID)
 		if err != nil {
 			t.Fatal(err)
 		}
-		if next.Status != domainjobs.JobStatusPending || next.JobType != jobs.TypeResolveContacts {
+		if next.Status != domainjobs.JobStatusPending || next.JobType != domainjobs.TypeResolveContacts {
 			t.Fatalf("unexpected next job %+v", next)
 		}
 
-		for _, id := range []uuid.UUID{nextID, jobs.DeterministicJobID(first.ChainID, 2, jobs.TypeCategorize)} {
+		for _, id := range []uuid.UUID{nextID, domainjobs.DeterministicJobID(first.ChainID, 2, domainjobs.TypeCategorize)} {
 			if err := exec.HandleStreamRecord(ctx, id, now); err != nil {
 				t.Fatal(err)
 			}
@@ -253,7 +253,7 @@ func RunContractTests(t *testing.T, factory Factory) {
 				t.Fatal(err)
 			}
 		}
-		last, _ := store.GetByID(ctx, jobs.DeterministicJobID(first.ChainID, 2, jobs.TypeCategorize))
+		last, _ := store.GetByID(ctx, domainjobs.DeterministicJobID(first.ChainID, 2, domainjobs.TypeCategorize))
 		if last.Status != domainjobs.JobStatusSuccess {
 			t.Fatalf("expected categorize success, got %s", last.Status)
 		}
@@ -267,7 +267,7 @@ func RunContractTests(t *testing.T, factory Factory) {
 		now := time.Now().UTC()
 		user := uuid.New()
 		job, err := store.CreatePending(ctx, domainjobs.CreateJobInput{
-			ID: uuid.New(), JobType: jobs.TypeDraftSuggest, UserID: user, TriggerKind: domainjobs.JobTriggerAPI, ChainID: uuid.New(), Now: now,
+			ID: uuid.New(), JobType: domainjobs.TypeDraftSuggest, UserID: user, TriggerKind: domainjobs.JobTriggerAPI, ChainID: uuid.New(), Now: now,
 		})
 		if err != nil {
 			t.Fatal(err)
@@ -299,9 +299,9 @@ func RunContractTests(t *testing.T, factory Factory) {
 		now := time.Now().UTC()
 		user := uuid.New()
 		pending, _ := store.CreatePending(ctx, domainjobs.CreateJobInput{
-			ID: uuid.New(), JobType: jobs.TypeCategorize, UserID: user, TriggerKind: domainjobs.JobTriggerAPI, ChainID: uuid.New(), Now: now,
+			ID: uuid.New(), JobType: domainjobs.TypeCategorize, UserID: user, TriggerKind: domainjobs.JobTriggerAPI, ChainID: uuid.New(), Now: now,
 		})
-		cancelled, err := store.RequestCancel(ctx, user, pending.ID, now, jobs.DefaultTerminalTTL)
+		cancelled, err := store.RequestCancel(ctx, user, pending.ID, now, domainjobs.DefaultTerminalTTL)
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -310,17 +310,17 @@ func RunContractTests(t *testing.T, factory Factory) {
 		}
 
 		job, _ := store.CreatePending(ctx, domainjobs.CreateJobInput{
-			ID: uuid.New(), JobType: jobs.TypeCategorize, UserID: user, TriggerKind: domainjobs.JobTriggerAPI, ChainID: uuid.New(), Now: now,
+			ID: uuid.New(), JobType: domainjobs.TypeCategorize, UserID: user, TriggerKind: domainjobs.JobTriggerAPI, ChainID: uuid.New(), Now: now,
 		})
 		running, _ := store.KickPending(ctx, job.ID, job.Revision, "w", now.Add(time.Minute), now)
-		marked, err := store.RequestCancel(ctx, user, running.ID, now, jobs.DefaultTerminalTTL)
+		marked, err := store.RequestCancel(ctx, user, running.ID, now, domainjobs.DefaultTerminalTTL)
 		if err != nil {
 			t.Fatal(err)
 		}
 		if marked.Status != domainjobs.JobStatusRunning || marked.CancelRequestedAt == nil {
 			t.Fatalf("expected cancel requested while running, got %+v", marked)
 		}
-		final, err := store.CancelRunning(ctx, marked.ID, marked.Revision, *marked.AttemptID, now, jobs.DefaultTerminalTTL)
+		final, err := store.CancelRunning(ctx, marked.ID, marked.Revision, *marked.AttemptID, now, domainjobs.DefaultTerminalTTL)
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -338,7 +338,7 @@ func RunContractTests(t *testing.T, factory Factory) {
 		user := uuid.New()
 		account := uuid.New()
 		_, err := store.CreatePending(ctx, domainjobs.CreateJobInput{
-			ID: uuid.New(), JobType: jobs.TypeSync, UserID: user, AccountID: &account,
+			ID: uuid.New(), JobType: domainjobs.TypeSync, UserID: user, AccountID: &account,
 			TriggerKind: domainjobs.JobTriggerAPI, ChainID: uuid.New(),
 			AcquireLock: true, LockScope: "mailbox", LockKey: account.String(), Now: now,
 		})
@@ -346,7 +346,7 @@ func RunContractTests(t *testing.T, factory Factory) {
 			t.Fatal(err)
 		}
 		_, err = store.CreatePending(ctx, domainjobs.CreateJobInput{
-			ID: uuid.New(), JobType: jobs.TypeSync, UserID: user, AccountID: &account,
+			ID: uuid.New(), JobType: domainjobs.TypeSync, UserID: user, AccountID: &account,
 			TriggerKind: domainjobs.JobTriggerAPI, ChainID: uuid.New(),
 			AcquireLock: true, LockScope: "mailbox", LockKey: account.String(), Now: now,
 		})
@@ -397,14 +397,14 @@ func RunContractTests(t *testing.T, factory Factory) {
 		base := time.Date(2026, 8, 29, 12, 0, 0, 0, time.UTC)
 		for i := 0; i < 3; i++ {
 			_, err := store.CreatePending(ctx, domainjobs.CreateJobInput{
-				ID: uuid.New(), JobType: jobs.TypeSync, UserID: user, AccountID: &account, TriggerKind: domainjobs.JobTriggerAPI, ChainID: uuid.New(), Now: base.Add(time.Duration(i) * time.Minute),
+				ID: uuid.New(), JobType: domainjobs.TypeSync, UserID: user, AccountID: &account, TriggerKind: domainjobs.JobTriggerAPI, ChainID: uuid.New(), Now: base.Add(time.Duration(i) * time.Minute),
 			})
 			if err != nil {
 				t.Fatal(err)
 			}
 		}
 		_, err := store.CreatePending(ctx, domainjobs.CreateJobInput{
-			ID: uuid.New(), JobType: jobs.TypeSync, UserID: otherUser, AccountID: &account, TriggerKind: domainjobs.JobTriggerAPI, ChainID: uuid.New(), Now: base.Add(4 * time.Minute),
+			ID: uuid.New(), JobType: domainjobs.TypeSync, UserID: otherUser, AccountID: &account, TriggerKind: domainjobs.JobTriggerAPI, ChainID: uuid.New(), Now: base.Add(4 * time.Minute),
 		})
 		if err != nil {
 			t.Fatal(err)
@@ -457,7 +457,7 @@ func RunCrashWindowTests(t *testing.T, factory Factory) {
 		user := uuid.New()
 		account := uuid.New()
 		first, err := (&jobs.Enqueuer{Store: store}).EnqueueChain(ctx, user, &account, domainjobs.JobTriggerAPI, []string{
-			jobs.TypeSync, jobs.TypeCategorize,
+			domainjobs.TypeSync, domainjobs.TypeCategorize,
 		}, domainjobs.JobPayload{}, nil, nil)
 		if err != nil {
 			t.Fatal(err)
@@ -469,7 +469,7 @@ func RunCrashWindowTests(t *testing.T, factory Factory) {
 		attemptID := *running.AttemptID
 		revision := running.Revision
 		nextType := running.RemainingJobs[0]
-		nextID := jobs.DeterministicJobID(running.ChainID, running.StepIndex+1, nextType)
+		nextID := domainjobs.DeterministicJobID(running.ChainID, running.StepIndex+1, nextType)
 		_, err = store.CompleteStep(ctx, running.ID, revision, attemptID, domainjobs.JobProgress{Processed: 1}, &domainjobs.CreateJobInput{
 			ID:             nextID,
 			JobType:        nextType,
@@ -484,11 +484,11 @@ func RunCrashWindowTests(t *testing.T, factory Factory) {
 			ChainStartedAt: running.ChainStartedAt,
 			Payload:        running.Payload,
 			Now:            now,
-		}, now, jobs.DefaultTerminalTTL)
+		}, now, domainjobs.DefaultTerminalTTL)
 		if err != nil {
 			t.Fatal(err)
 		}
-		_, err = store.CompleteStep(ctx, running.ID, revision, attemptID, domainjobs.JobProgress{Processed: 1}, nil, now, jobs.DefaultTerminalTTL)
+		_, err = store.CompleteStep(ctx, running.ID, revision, attemptID, domainjobs.JobProgress{Processed: 1}, nil, now, domainjobs.DefaultTerminalTTL)
 		if !errors.Is(err, domainjobs.ErrJobConflict) {
 			t.Fatalf("expected stale complete conflict, got %v", err)
 		}

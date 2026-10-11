@@ -27,12 +27,6 @@ const (
 	WhyMailActionItem      = "mail_action_item"
 )
 
-type Item = domainattention.AttentionItem
-
-type Counts = domainattention.AttentionViewCounts
-
-type Result = domainattention.AttentionResult
-
 type Service struct {
 	Users          domainauth.UserRepository
 	Projects       domainprojects.ProjectRepository
@@ -53,7 +47,7 @@ func (s *Service) homeOrg(ctx context.Context, userID uuid.UUID) (uuid.UUID, err
 	return s.Users.GetHomeOrganisationID(ctx, userID)
 }
 
-func (s *Service) ForUser(ctx context.Context, userID uuid.UUID) (*Result, error) {
+func (s *Service) ForUser(ctx context.Context, userID uuid.UUID) (*domainattention.AttentionResult, error) {
 	orgID, err := s.homeOrg(ctx, userID)
 	if err != nil {
 		return nil, err
@@ -65,7 +59,7 @@ func (s *Service) ForUser(ctx context.Context, userID uuid.UUID) (*Result, error
 	if err != nil {
 		return nil, err
 	}
-	out := &Result{Items: make([]Item, 0, len(rows))}
+	out := &domainattention.AttentionResult{Items: make([]domainattention.AttentionItem, 0, len(rows))}
 	for _, row := range rows {
 		item, ok := attentionItemFromRow(row)
 		if !ok {
@@ -85,8 +79,8 @@ func (s *Service) ForUser(ctx context.Context, userID uuid.UUID) (*Result, error
 
 // attentionItemFromRow formats a repository row into the API shape, keeping
 // the titles and ids identical to the per-project implementation.
-func attentionItemFromRow(row domainprojects.AttentionRow) (Item, bool) {
-	item := Item{
+func attentionItemFromRow(row domainprojects.AttentionRow) (domainattention.AttentionItem, bool) {
+	item := domainattention.AttentionItem{
 		Title:       row.Title,
 		ProjectID:   row.ProjectID.String(),
 		ProjectName: row.ProjectName,
@@ -113,7 +107,7 @@ func attentionItemFromRow(row domainprojects.AttentionRow) (Item, bool) {
 		item.ID = "contradiction:" + row.RefID.String()
 		item.WhyMe = WhyOpenContradiction
 	default:
-		return Item{}, false
+		return domainattention.AttentionItem{}, false
 	}
 	return item, true
 }
@@ -148,7 +142,7 @@ func (s *Service) ProjectIDsNeedingInput(ctx context.Context, userID uuid.UUID) 
 	return out, nil
 }
 
-func (s *Service) ForProject(ctx context.Context, userID, projectID uuid.UUID) (*Result, error) {
+func (s *Service) ForProject(ctx context.Context, userID, projectID uuid.UUID) (*domainattention.AttentionResult, error) {
 	orgID, err := s.homeOrg(ctx, userID)
 	if err != nil {
 		return nil, err
@@ -158,11 +152,11 @@ func (s *Service) ForProject(ctx context.Context, userID, projectID uuid.UUID) (
 		return nil, err
 	}
 	if p == nil {
-		return &Result{Items: []Item{}, Counts: Counts{}}, nil
+		return &domainattention.AttentionResult{Items: []domainattention.AttentionItem{}, Counts: domainattention.AttentionViewCounts{}}, nil
 	}
 	m, err := s.Projects.GetProjectMember(ctx, projectID, userID)
 	if err != nil || m == nil {
-		return &Result{Items: []Item{}, Counts: Counts{}}, nil
+		return &domainattention.AttentionResult{Items: []domainattention.AttentionItem{}, Counts: domainattention.AttentionViewCounts{}}, nil
 	}
 	out, err := s.forProject(ctx, userID, orgID, *p, m)
 	if err != nil {
@@ -186,7 +180,7 @@ func (s *Service) ForProject(ctx context.Context, userID, projectID uuid.UUID) (
 // project its message is filed to, and on the issue whose trail carries the
 // message, when the caller can see that project. Nothing is stored: filing
 // mail elsewhere moves its to-dos with it.
-func (s *Service) mailItems(ctx context.Context, userID, orgID uuid.UUID) ([]Item, error) {
+func (s *Service) mailItems(ctx context.Context, userID, orgID uuid.UUID) ([]domainattention.AttentionItem, error) {
 	if s == nil || s.Summaries == nil {
 		return nil, nil
 	}
@@ -228,13 +222,13 @@ func (s *Service) mailItems(ctx context.Context, userID, orgID uuid.UUID) ([]Ite
 		return p.Name, true, nil
 	}
 
-	out := make([]Item, 0, len(rows))
+	out := make([]domainattention.AttentionItem, 0, len(rows))
 	for _, it := range rows {
 		title := strings.TrimSpace(it.Text)
 		if title == "" {
 			title = "Open mail action"
 		}
-		item := Item{
+		item := domainattention.AttentionItem{
 			ID:         "mail:" + it.ID.String(),
 			WhyMe:      WhyMailActionItem,
 			Title:      title,
@@ -309,8 +303,8 @@ func (s *Service) placeMessages(ctx context.Context, userID, orgID uuid.UUID, me
 	return projectOf, issueOf, nil
 }
 
-func (s *Service) forProject(ctx context.Context, userID, orgID uuid.UUID, p domainprojects.ProjectRow, m *domainprojects.ProjectMemberRow) (*Result, error) {
-	out := &Result{Items: make([]Item, 0)}
+func (s *Service) forProject(ctx context.Context, userID, orgID uuid.UUID, p domainprojects.ProjectRow, m *domainprojects.ProjectMemberRow) (*domainattention.AttentionResult, error) {
+	out := &domainattention.AttentionResult{Items: make([]domainattention.AttentionItem, 0)}
 	issues, err := s.Issues.ListIssuesByProject(ctx, orgID, p.ID)
 	if err != nil {
 		return nil, err
@@ -320,12 +314,12 @@ func (s *Service) forProject(ctx context.Context, userID, orgID uuid.UUID, p dom
 			continue
 		}
 		if iss.AssigneeUserID != nil && *iss.AssigneeUserID == userID {
-			out.Items = append(out.Items, Item{
+			out.Items = append(out.Items, domainattention.AttentionItem{
 				ID: "issue:" + iss.ID.String(), WhyMe: WhyIssueAssignee, Title: iss.Title,
 				ProjectID: p.ID.String(), ProjectName: p.Name, RefType: "issue", RefID: iss.ID.String(),
 			})
 		} else if iss.Status == string(domainissues.StatusAwaitingInput) && memberTouchesRole(m) {
-			out.Items = append(out.Items, Item{
+			out.Items = append(out.Items, domainattention.AttentionItem{
 				ID: "issue-role:" + iss.ID.String(), WhyMe: WhyMemberRole, Title: iss.Title,
 				ProjectID: p.ID.String(), ProjectName: p.Name, RefType: "issue", RefID: iss.ID.String(),
 			})
@@ -345,7 +339,7 @@ func (s *Service) forProject(ctx context.Context, userID, orgID uuid.UUID, p dom
 			if v.Status != string(domainfacts.StatusProposed) {
 				continue
 			}
-			out.Items = append(out.Items, Item{
+			out.Items = append(out.Items, domainattention.AttentionItem{
 				ID: "fact-version:" + v.ID.String(), WhyMe: WhyProvisionalFact,
 				Title:     "Confirm fact: " + f.Label,
 				ProjectID: p.ID.String(), ProjectName: p.Name, RefType: "fact_version", RefID: v.ID.String(),
@@ -368,7 +362,7 @@ func (s *Service) forProject(ctx context.Context, userID, orgID uuid.UUID, p dom
 			if mine {
 				why = WhyProvisionalDecision
 			}
-			out.Items = append(out.Items, Item{
+			out.Items = append(out.Items, domainattention.AttentionItem{
 				ID: "decision:" + d.ID.String(), WhyMe: why, Title: "Confirm decision: " + title,
 				ProjectID: p.ID.String(), ProjectName: p.Name, RefType: "decision", RefID: d.ID.String(),
 			})
@@ -381,7 +375,7 @@ func (s *Service) forProject(ctx context.Context, userID, orgID uuid.UUID, p dom
 			return nil, err
 		}
 		for _, c := range contrs {
-			out.Items = append(out.Items, Item{
+			out.Items = append(out.Items, domainattention.AttentionItem{
 				ID: "contradiction:" + c.ID.String(), WhyMe: WhyOpenContradiction, Title: c.Summary,
 				ProjectID: p.ID.String(), ProjectName: p.Name, RefType: "contradiction", RefID: c.ID.String(),
 			})
@@ -406,7 +400,7 @@ func memberTouchesRole(m *domainprojects.ProjectMemberRow) bool {
 	return true // any member can see awaiting_input as role-aware attention
 }
 
-func sortItems(items []Item) {
+func sortItems(items []domainattention.AttentionItem) {
 	rank := map[string]int{
 		WhyOpenContradiction:   0,
 		WhyProvisionalDecision: 1,
@@ -436,8 +430,8 @@ func sortItems(items []Item) {
 	})
 }
 
-func countItems(items []Item) Counts {
-	c := Counts{Total: len(items)}
+func countItems(items []domainattention.AttentionItem) domainattention.AttentionViewCounts {
+	c := domainattention.AttentionViewCounts{Total: len(items)}
 	for _, it := range items {
 		switch it.WhyMe {
 		case WhyIssueAssignee:

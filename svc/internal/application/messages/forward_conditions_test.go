@@ -15,21 +15,21 @@ func TestNormalizeForwardRuleRefusesWhatWouldMisbehave(t *testing.T) {
 	cases := map[string]struct {
 		mode, condition, want string
 	}{
-		"empty object":     {ForwardModeLogic, `{}`, "at least one condition"},
-		"empty all":        {ForwardModeLogic, `{"all":[]}`, "at least one condition"},
-		"missing":          {ForwardModeLogic, ``, "not valid"},
-		"unknown field":    {ForwardModeLogic, `{"all":[{"field":"body","op":"contains","value":"x"}]}`, "unknown condition field"},
-		"wrong op":         {ForwardModeLogic, `{"all":[{"field":"subject","op":"domain","value":"x"}]}`, "cannot use"},
-		"bool expected":    {ForwardModeLogic, `{"all":[{"field":"has_attachments","op":"equals","value":"yes"}]}`, "true or false"},
-		"empty value":      {ForwardModeLogic, `{"all":[{"field":"subject","op":"contains","value":" "}]}`, "needs a value"},
-		"typo in key":      {ForwardModeLogic, `{"al":[{"field":"subject","op":"contains","value":"x"}]}`, "not valid"},
-		"empty prompt":     {ForwardModeLLM, `{"prompt":"  "}`, "describe"},
-		"logic json as ai": {ForwardModeLLM, `{"all":[]}`, "not valid"},
+		"empty object":     {domainmessages.MessageForwardModeLogic, `{}`, "at least one condition"},
+		"empty all":        {domainmessages.MessageForwardModeLogic, `{"all":[]}`, "at least one condition"},
+		"missing":          {domainmessages.MessageForwardModeLogic, ``, "not valid"},
+		"unknown field":    {domainmessages.MessageForwardModeLogic, `{"all":[{"field":"body","op":"contains","value":"x"}]}`, "unknown condition field"},
+		"wrong op":         {domainmessages.MessageForwardModeLogic, `{"all":[{"field":"subject","op":"domain","value":"x"}]}`, "cannot use"},
+		"bool expected":    {domainmessages.MessageForwardModeLogic, `{"all":[{"field":"has_attachments","op":"equals","value":"yes"}]}`, "true or false"},
+		"empty value":      {domainmessages.MessageForwardModeLogic, `{"all":[{"field":"subject","op":"contains","value":" "}]}`, "needs a value"},
+		"typo in key":      {domainmessages.MessageForwardModeLogic, `{"al":[{"field":"subject","op":"contains","value":"x"}]}`, "not valid"},
+		"empty prompt":     {domainmessages.MessageForwardModeLLM, `{"prompt":"  "}`, "describe"},
+		"logic json as ai": {domainmessages.MessageForwardModeLLM, `{"all":[]}`, "not valid"},
 		"unknown mode":     {"regex", `{}`, "mode must be"},
 	}
 	for name, c := range cases {
-		_, _, err := NormalizeForwardRule(c.mode, json.RawMessage(c.condition))
-		var re *ForwardRuleError
+		_, _, err := domainmessages.MessageNormalizeForwardRule(c.mode, json.RawMessage(c.condition))
+		var re *domainmessages.MessageForwardRuleError
 		if !errors.As(err, &re) || !strings.Contains(re.Reason, c.want) {
 			t.Errorf("%s: err = %v, want a rule error mentioning %q", name, err, c.want)
 		}
@@ -37,12 +37,12 @@ func TestNormalizeForwardRuleRefusesWhatWouldMisbehave(t *testing.T) {
 }
 
 func TestNormalizeForwardRuleCanonicalises(t *testing.T) {
-	mode, cond, err := NormalizeForwardRule(" Logic ", json.RawMessage(`{"all":[{"field":"From","op":"eq","value":" Billing@Vendor.Example "},{"field":"from","op":"domain","value":"@Vendor.Example"}]}`))
+	mode, cond, err := domainmessages.MessageNormalizeForwardRule(" Logic ", json.RawMessage(`{"all":[{"field":"From","op":"eq","value":" Billing@Vendor.Example "},{"field":"from","op":"domain","value":"@Vendor.Example"}]}`))
 	if err != nil {
 		t.Fatal(err)
 	}
 	want := `{"all":[{"field":"from","op":"equals","value":"billing@vendor.example"},{"field":"from","op":"domain","value":"vendor.example"}]}`
-	if mode != ForwardModeLogic || cond != want {
+	if mode != domainmessages.MessageForwardModeLogic || cond != want {
 		t.Fatalf("got %s %s", mode, cond)
 	}
 }
@@ -67,7 +67,7 @@ func TestLogicFieldsMatch(t *testing.T) {
 		{`{"all":[{"field":"has_attachments","op":"equals","value":false}]}`, false},
 	}
 	for _, c := range cases {
-		_, norm, err := NormalizeForwardRule(ForwardModeLogic, json.RawMessage(c.cond))
+		_, norm, err := domainmessages.MessageNormalizeForwardRule(domainmessages.MessageForwardModeLogic, json.RawMessage(c.cond))
 		if err != nil {
 			t.Fatalf("%s: %v", c.cond, err)
 		}

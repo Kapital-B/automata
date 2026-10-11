@@ -52,7 +52,7 @@ func TestSchedulerTickEnqueuesDueSchedules(t *testing.T) {
 		UserID:          userID,
 		Name:            "nightly",
 		AccountID:       &accountID,
-		Jobs:            DefaultMailboxChain,
+		Jobs:            domainjobs.DefaultMailboxChain,
 		IntervalMinutes: 60,
 		Enabled:         true,
 		NextRunAt:       now,
@@ -73,7 +73,7 @@ func TestSchedulerTickEnqueuesDueSchedules(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	jobID := DeterministicScheduleJobID(scheduleID, now.Format(time.RFC3339), TypeSync)
+	jobID := domainjobs.DeterministicScheduleJobID(scheduleID, now.Format(time.RFC3339), domainjobs.TypeSync)
 	job, err := store.GetByID(ctx, jobID)
 	if err != nil {
 		t.Fatal(err)
@@ -108,7 +108,7 @@ func TestSchedulerScheduleCreationCrashWindow(t *testing.T) {
 		UserID:          userID,
 		Name:            "nightly",
 		AccountID:       &accountID,
-		Jobs:            []string{TypeSync},
+		Jobs:            []string{domainjobs.TypeSync},
 		IntervalMinutes: 60,
 		Enabled:         true,
 		NextRunAt:       now,
@@ -123,7 +123,7 @@ func TestSchedulerScheduleCreationCrashWindow(t *testing.T) {
 		t.Fatalf("expected simulated crash error")
 	}
 
-	jobID := DeterministicScheduleJobID(scheduleID, now.Format(time.RFC3339), TypeSync)
+	jobID := domainjobs.DeterministicScheduleJobID(scheduleID, now.Format(time.RFC3339), domainjobs.TypeSync)
 	if _, err := store.GetByID(ctx, jobID); err != nil {
 		t.Fatal(err)
 	}
@@ -147,7 +147,7 @@ func TestSchedulerRewakesPendingRecoversLeaseAndReconcilesEffects(t *testing.T) 
 	accountID := uuid.New()
 
 	pending, err := store.CreatePending(ctx, domainjobs.CreateJobInput{
-		ID: uuid.New(), JobType: TypeSync, UserID: userID, AccountID: &accountID,
+		ID: uuid.New(), JobType: domainjobs.TypeSync, UserID: userID, AccountID: &accountID,
 		TriggerKind: domainjobs.JobTriggerAPI, ChainID: uuid.New(), AcquireLock: true, LockScope: "mailbox", LockKey: accountID.String(),
 		Now: now.Add(-10 * time.Minute),
 	})
@@ -160,7 +160,7 @@ func TestSchedulerRewakesPendingRecoversLeaseAndReconcilesEffects(t *testing.T) 
 	}
 
 	expired, err := store.CreatePending(ctx, domainjobs.CreateJobInput{
-		ID: uuid.New(), JobType: TypeCategorize, UserID: userID,
+		ID: uuid.New(), JobType: domainjobs.TypeCategorize, UserID: userID,
 		TriggerKind: domainjobs.JobTriggerAPI, ChainID: uuid.New(), Now: now.Add(-20 * time.Minute),
 	})
 	if err != nil {
@@ -288,12 +288,12 @@ func TestSchedulerSkipsAChainItCannotRunWithoutStallingOthers(t *testing.T) {
 		}
 	}
 	chain(badUser, badAccount, bad, []string{"sync", "auto-draft"}, now.Add(-time.Minute))
-	chain(goodUser, goodAccount, good, []string{TypeSync, TypeCategorize}, now)
+	chain(goodUser, goodAccount, good, []string{domainjobs.TypeSync, domainjobs.TypeCategorize}, now)
 
 	service := SchedulerService{OAuthStates: repo, Schedules: repo, Accounts: repo, Store: store, OAuthStateTTL: 15 * time.Minute}
 	_ = service.Tick(ctx, now)
 
-	if _, err := store.GetByID(ctx, DeterministicScheduleJobID(good, now.Format(time.RFC3339), TypeSync)); err != nil {
+	if _, err := store.GetByID(ctx, domainjobs.DeterministicScheduleJobID(good, now.Format(time.RFC3339), domainjobs.TypeSync)); err != nil {
 		t.Fatalf("a valid chain was not enqueued behind an invalid one: %v", err)
 	}
 	rows, err := repo.ListSchedulesByUser(ctx, badUser)

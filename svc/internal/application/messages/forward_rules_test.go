@@ -123,7 +123,7 @@ func (f *forwardFixture) rule(t *testing.T, condition, to string, applyFrom *tim
 	t.Helper()
 	id := uuid.New()
 	if err := f.repo.CreateForwardRule(context.Background(), domainmessages.ForwardRuleRow{
-		ID: id, UserID: f.userID, AccountID: f.accountID, Name: "rule", Mode: ForwardModeLogic,
+		ID: id, UserID: f.userID, AccountID: f.accountID, Name: "rule", Mode: domainmessages.MessageForwardModeLogic,
 		ConditionJSON: condition, ForwardTo: to, Enabled: true, ApplyFrom: applyFrom,
 		CreatedAt: time.Now().UTC(), UpdatedAt: time.Now().UTC(),
 	}); err != nil {
@@ -134,7 +134,7 @@ func (f *forwardFixture) rule(t *testing.T, condition, to string, applyFrom *tim
 
 func (f *forwardFixture) run(t *testing.T) {
 	t.Helper()
-	if _, err := f.svc.RunAccount(context.Background(), f.userID, f.accountID, ForwardRulesOptions{Trigger: "test"}); err != nil {
+	if _, err := f.svc.RunAccount(context.Background(), f.userID, f.accountID, domainmessages.MessageForwardRulesOptions{Trigger: "test"}); err != nil {
 		t.Fatal(err)
 	}
 }
@@ -293,7 +293,7 @@ func TestCategoryRuleWaitsForCategorisation(t *testing.T) {
 	}
 
 	// Mail that was never categorised stops waiting eventually.
-	stale := f.message(t, "Invoice - stale", time.Now().UTC().Add(-categoryWait-time.Hour), "")
+	stale := f.message(t, "Invoice - stale", time.Now().UTC().Add(-domainmessages.MessageCategoryWait-time.Hour), "")
 	f.run(t)
 	if v := f.verdict(t, stale, f.ruleID); v == nil || v.Pending || v.Status != "skipped" {
 		t.Fatalf("stale uncategorised verdict = %+v, want a final skip", v)
@@ -316,7 +316,7 @@ func TestRuleToRemovedAddressIsBlockedNotFailed(t *testing.T) {
 	}
 	rules, _ := f.repo.ListForwardRules(context.Background(), f.userID, f.accountID)
 	allow, _ := f.repo.ListForwardAllowlist(context.Background(), f.userID)
-	if got := ForwardRuleBlock(rules[0], AllowlistSet(allow)); !strings.Contains(got, "allowlist") {
+	if got := domainmessages.MessageForwardRuleBlock(rules[0], domainmessages.MessageAllowlistSet(allow)); !strings.Contains(got, "allowlist") {
 		t.Fatalf("block reason = %q", got)
 	}
 }
@@ -367,7 +367,7 @@ func TestAIRuleTreatsTheEmailAsDataAndBoundsTheBody(t *testing.T) {
 	}
 	rule := uuid.New()
 	if err := f.repo.CreateForwardRule(context.Background(), domainmessages.ForwardRuleRow{
-		ID: rule, UserID: f.userID, AccountID: f.accountID, Name: "tax", Mode: ForwardModeLLM,
+		ID: rule, UserID: f.userID, AccountID: f.accountID, Name: "tax", Mode: domainmessages.MessageForwardModeLLM,
 		ConditionJSON: `{"prompt":"tax documents"}`, ForwardTo: "bills@example.com", Enabled: true, ApplyFrom: &epoch,
 		CreatedAt: time.Now().UTC(), UpdatedAt: time.Now().UTC(),
 	}); err != nil {
@@ -393,7 +393,7 @@ func TestAIRuleUnusableAnswersAreRetriedThenGivenUp(t *testing.T) {
 	f.svc.LLM = llm
 	rule := uuid.New()
 	if err := f.repo.CreateForwardRule(context.Background(), domainmessages.ForwardRuleRow{
-		ID: rule, UserID: f.userID, AccountID: f.accountID, Name: "tax", Mode: ForwardModeLLM,
+		ID: rule, UserID: f.userID, AccountID: f.accountID, Name: "tax", Mode: domainmessages.MessageForwardModeLLM,
 		ConditionJSON: `{"prompt":"tax documents"}`, ForwardTo: "books@example.com", Enabled: true, ApplyFrom: &epoch,
 		CreatedAt: time.Now().UTC(), UpdatedAt: time.Now().UTC(),
 	}); err != nil {
@@ -414,7 +414,7 @@ func TestPreviewCountsWhatARuleWouldReach(t *testing.T) {
 	f := newForwardFixture(t, &fakeMailbox{})
 	f.message(t, "Receipt", time.Date(2026, 5, 3, 0, 0, 0, 0, time.UTC), "finance")
 	f.message(t, "Hello", time.Date(2026, 5, 4, 0, 0, 0, 0, time.UTC), "personal")
-	p, err := f.svc.Preview(context.Background(), f.userID, f.accountID, ForwardModeLogic,
+	p, err := f.svc.Preview(context.Background(), f.userID, f.accountID, domainmessages.MessageForwardModeLogic,
 		json.RawMessage(`{"all":[{"field":"category_slug","op":"equals","value":"finance"}]}`), epoch)
 	if err != nil {
 		t.Fatal(err)
@@ -422,7 +422,7 @@ func TestPreviewCountsWhatARuleWouldReach(t *testing.T) {
 	if p.InScope != 3 || p.Matched == nil || *p.Matched != 2 || len(p.Samples) != 2 || p.Capped {
 		t.Fatalf("preview = in scope %d, matched %v, samples %d, capped %v", p.InScope, p.Matched, len(p.Samples), p.Capped)
 	}
-	ai, err := f.svc.Preview(context.Background(), f.userID, f.accountID, ForwardModeLLM, json.RawMessage(`{"prompt":"tax"}`), epoch)
+	ai, err := f.svc.Preview(context.Background(), f.userID, f.accountID, domainmessages.MessageForwardModeLLM, json.RawMessage(`{"prompt":"tax"}`), epoch)
 	if err != nil || ai.InScope != 3 || ai.Matched != nil {
 		t.Fatalf("AI preview = %+v, %v; want a scope count and no match count", ai, err)
 	}

@@ -55,7 +55,7 @@ func TestAskContextStatementsDoNotGrowWithFacts(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	proj, err := projectSvc.Create(ctx, userID, appprojects.CreateProjectInput{Name: "Cooling", Code: "DC01"})
+	proj, err := projectSvc.Create(ctx, userID, domainprojects.ProjectCreateProjectInput{Name: "Cooling", Code: "DC01"})
 	if err != nil {
 		t.Fatal(err)
 	}

@@ -44,18 +44,12 @@ type ForwardRulesService struct {
 	Now func() time.Time
 }
 
-type ForwardRulesOptions = domainmessages.MessageForwardRulesOptions
-
 func (s *ForwardRulesService) now() time.Time {
 	if s.Now != nil {
 		return s.Now().UTC()
 	}
 	return time.Now().UTC()
 }
-
-var RuleScopeStart = domainmessages.MessageRuleScopeStart
-
-type ForwardChunkResult = domainmessages.MessageForwardChunkResult
 
 // activeRule is an enabled rule that can run: its destination is still
 // allowlisted and its condition is valid. Anything else is blocked, which is
@@ -65,26 +59,22 @@ type activeRule struct {
 	condition string
 }
 
-var ForwardRuleBlock = domainmessages.MessageForwardRuleBlock
-
-var AllowlistSet = domainmessages.MessageAllowlistSet
-
 func (s *ForwardRulesService) activeRules(ctx context.Context, userID, accountID uuid.UUID) ([]activeRule, error) {
 	allowRows, err := s.Forwards.ListForwardAllowlist(ctx, userID)
 	if err != nil {
 		return nil, err
 	}
-	allowed := AllowlistSet(allowRows)
+	allowed := domainmessages.MessageAllowlistSet(allowRows)
 	rules, err := s.Forwards.ListForwardRules(ctx, userID, accountID)
 	if err != nil {
 		return nil, err
 	}
 	var out []activeRule
 	for _, r := range rules {
-		if !r.Enabled || ForwardRuleBlock(r, allowed) != "" {
+		if !r.Enabled || domainmessages.MessageForwardRuleBlock(r, allowed) != "" {
 			continue
 		}
-		_, cond, _ := NormalizeForwardRule(r.Mode, json.RawMessage(r.ConditionJSON))
+		_, cond, _ := domainmessages.MessageNormalizeForwardRule(r.Mode, json.RawMessage(r.ConditionJSON))
 		out = append(out, activeRule{row: r, condition: cond})
 	}
 	// Oldest rule first, so the order sends happen in is stable.
@@ -97,7 +87,7 @@ func (s *ForwardRulesService) activeRules(ctx context.Context, userID, accountID
 // is not final (a send to retry, a category to wait for) is marked pending
 // and the message comes back on a later run. Sends go through the effect
 // ledger, keyed by message and destination, so nothing is sent twice.
-func (s *ForwardRulesService) RunChunk(ctx context.Context, run domainjobs.RunContext, effects domainjobs.JobStore, after *domainmessages.ForwardCandidateCursor, limit int) (*ForwardChunkResult, error) {
+func (s *ForwardRulesService) RunChunk(ctx context.Context, run domainjobs.RunContext, effects domainjobs.JobStore, after *domainmessages.ForwardCandidateCursor, limit int) (*domainmessages.MessageForwardChunkResult, error) {
 	if s == nil || s.Forwards == nil || s.Mailboxes == nil || effects == nil {
 		return nil, fmt.Errorf("forward rules service not configured")
 	}
@@ -105,7 +95,7 @@ func (s *ForwardRulesService) RunChunk(ctx context.Context, run domainjobs.RunCo
 		return nil, fmt.Errorf("account_id is required")
 	}
 	accountID := *run.AccountID
-	res := &ForwardChunkResult{}
+	res := &domainmessages.MessageForwardChunkResult{}
 	rules, err := s.activeRules(ctx, run.UserID, accountID)
 	if err != nil {
 		return nil, err
@@ -149,7 +139,7 @@ func (s *ForwardRulesService) RunChunk(ctx context.Context, run domainjobs.RunCo
 		// sends would fail the same way; they wait for the next run.
 		deferSends := false
 		for _, rule := range rules {
-			if msg.ReceivedAt.Before(RuleScopeStart(rule.row)) {
+			if msg.ReceivedAt.Before(domainmessages.MessageRuleScopeStart(rule.row)) {
 				continue
 			}
 			prev, seen := verdicts[msg.ID.String()+"|"+rule.row.ID.String()]
@@ -173,7 +163,7 @@ type forwardWork struct {
 	run     domainjobs.RunContext
 	effects domainjobs.JobStore
 	box     domainaccounts.Mailbox
-	res     *ForwardChunkResult
+	res     *domainmessages.MessageForwardChunkResult
 }
 
 func (w *forwardWork) record(ctx context.Context, msg domainmessages.MessageRow, rule activeRule, status, reason string, pending bool, attempts int) error {
@@ -316,9 +306,9 @@ func effectError(audit string) string {
 
 func (s *ForwardRulesService) evaluate(ctx context.Context, rule activeRule, msg domainmessages.MessageRow) (ruleVerdict, error) {
 	switch rule.row.Mode {
-	case ForwardModeLogic:
+	case domainmessages.MessageForwardModeLogic:
 		return evaluateLogic(rule.condition, msg, s.now())
-	case ForwardModeLLM:
+	case domainmessages.MessageForwardModeLLM:
 		return s.evaluateLLM(ctx, rule.condition, msg)
 	default:
 		return ruleVerdict{}, fmt.Errorf("unsupported rule mode %q", rule.row.Mode)
@@ -329,7 +319,7 @@ func (s *ForwardRulesService) evaluateLLM(ctx context.Context, conditionJSON str
 	if s.LLM == nil {
 		return ruleVerdict{}, fmt.Errorf("AI rules are not available: no model is configured")
 	}
-	var c forwardLLMCondition
+	var c domainmessages.MessageForwardLLMCondition
 	if err := json.Unmarshal([]byte(conditionJSON), &c); err != nil {
 		return ruleVerdict{}, err
 	}
@@ -366,7 +356,7 @@ func (s *ForwardRulesService) evaluateLLM(ctx context.Context, conditionJSON str
 
 // RunAccount drives a whole run in-process: the inline and legacy queue
 // paths. It is the same engine the job executor pages through.
-func (s *ForwardRulesService) RunAccount(ctx context.Context, userID, accountID uuid.UUID, opts ForwardRulesOptions) (uuid.UUID, error) {
+func (s *ForwardRulesService) RunAccount(ctx context.Context, userID, accountID uuid.UUID, opts domainmessages.MessageForwardRulesOptions) (uuid.UUID, error) {
 	if s == nil || s.Forwards == nil || s.Mailboxes == nil || s.JobRuns == nil || s.Effects == nil {
 		return uuid.Nil, fmt.Errorf("forward rules service not configured")
 	}
@@ -387,7 +377,7 @@ func (s *ForwardRulesService) RunAccount(ctx context.Context, userID, accountID 
 		_ = s.JobRuns.InsertJobRun(ctx, jobID, accountID, "forward_rules", trigger, "running", started, time.Time{}, nil, `{}`)
 	}
 	run := domainjobs.RunContext{RunID: jobID, AttemptID: uuid.New(), UserID: userID, AccountID: &accountID}
-	total := ForwardChunkResult{}
+	total := domainmessages.MessageForwardChunkResult{}
 	var cursor *domainmessages.ForwardCandidateCursor
 	for {
 		res, err := s.RunChunk(ctx, run, s.Effects, cursor, forwardChunkInline)
@@ -420,8 +410,6 @@ func (s *ForwardRulesService) failRun(ctx context.Context, runID uuid.UUID, err 
 	return uuid.Nil, err
 }
 
-type ForwardPreview = domainmessages.MessageForwardPreview
-
 const (
 	previewMaxMessages = 5000
 	previewPageSize    = 200
@@ -431,12 +419,12 @@ const (
 // Preview counts what a rule would reach in existing mail received at or
 // after since, so switching it on for existing mail is a decision made with
 // numbers rather than a surprise.
-func (s *ForwardRulesService) Preview(ctx context.Context, userID, accountID uuid.UUID, mode string, condition json.RawMessage, since time.Time) (*ForwardPreview, error) {
-	mode, cond, err := NormalizeForwardRule(mode, condition)
+func (s *ForwardRulesService) Preview(ctx context.Context, userID, accountID uuid.UUID, mode string, condition json.RawMessage, since time.Time) (*domainmessages.MessageForwardPreview, error) {
+	mode, cond, err := domainmessages.MessageNormalizeForwardRule(mode, condition)
 	if err != nil {
 		return nil, err
 	}
-	out := &ForwardPreview{}
+	out := &domainmessages.MessageForwardPreview{}
 	matched := 0
 	filter := domainmessages.MessageListFilter{AccountID: &accountID, Limit: previewPageSize, OmitBody: true}
 	now := s.now()
@@ -451,7 +439,7 @@ func (s *ForwardRulesService) Preview(ctx context.Context, userID, accountID uui
 				break
 			}
 			out.InScope++
-			if mode == ForwardModeLogic {
+			if mode == domainmessages.MessageForwardModeLogic {
 				v, err := evaluateLogic(cond, m, now)
 				if err == nil && v.match {
 					matched++
@@ -472,7 +460,7 @@ func (s *ForwardRulesService) Preview(ctx context.Context, userID, accountID uui
 		last := page[len(page)-1]
 		filter.BeforeReceivedAt, filter.BeforeID = &last.ReceivedAt, &last.ID
 	}
-	if mode == ForwardModeLogic {
+	if mode == domainmessages.MessageForwardModeLogic {
 		out.Matched = &matched
 	}
 	return out, nil

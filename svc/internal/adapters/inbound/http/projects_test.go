@@ -1,6 +1,10 @@
 package http
 
 import (
+	domainprojects "github.com/Kapital-B/automata/svc/internal/domain/projects"
+)
+
+import (
 	"bytes"
 	"context"
 	"database/sql"
@@ -119,7 +123,7 @@ func TestAssignMessageHTTP(t *testing.T) {
 	}, []byte("tok")); err != nil {
 		t.Fatal(err)
 	}
-	p, err := projectSvc.Create(ctx, userID, appprojects.CreateProjectInput{Name: "Cooling", Code: "DC01"})
+	p, err := projectSvc.Create(ctx, userID, domainprojects.ProjectCreateProjectInput{Name: "Cooling", Code: "DC01"})
 	if err != nil {
 		t.Fatal(err)
 	}

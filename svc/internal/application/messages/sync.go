@@ -37,17 +37,11 @@ type SyncService struct {
 	ContactsEnqueuer domainjobs.JobEnqueuer
 }
 
-type SyncResult = domainmessages.MessageSyncResult
-
-type SyncOptions = domainmessages.MessageSyncOptions
-
-type SyncChunkResult = domainmessages.MessageSyncChunkResult
-
-func (s *SyncService) SyncInbox(ctx context.Context, userID uuid.UUID, accountID uuid.UUID) (*SyncResult, error) {
-	return s.SyncInboxWithOptions(ctx, userID, accountID, SyncOptions{})
+func (s *SyncService) SyncInbox(ctx context.Context, userID uuid.UUID, accountID uuid.UUID) (*domainmessages.MessageSyncResult, error) {
+	return s.SyncInboxWithOptions(ctx, userID, accountID, domainmessages.MessageSyncOptions{})
 }
 
-func (s *SyncService) SyncChunk(ctx context.Context, run domainjobs.RunContext) (*SyncChunkResult, error) {
+func (s *SyncService) SyncChunk(ctx context.Context, run domainjobs.RunContext) (*domainmessages.MessageSyncChunkResult, error) {
 	if s == nil || s.Accounts == nil || s.Messages == nil || s.Mailboxes == nil {
 		return nil, fmt.Errorf("sync service not configured")
 	}
@@ -151,7 +145,7 @@ func (s *SyncService) SyncChunk(ctx context.Context, run domainjobs.RunContext) 
 	if reportedReset == "" && run.Payload.Force {
 		reportedReset = "forced"
 	}
-	out := &SyncChunkResult{
+	out := &domainmessages.MessageSyncChunkResult{
 		MessagesUpserted: n,
 		Fetched:          len(list),
 		DeltaReused:      deltaUsed && !run.Payload.Force,
@@ -175,7 +169,7 @@ func (s *SyncService) SyncChunk(ctx context.Context, run domainjobs.RunContext) 
 	return out, nil
 }
 
-func (s *SyncService) SyncInboxWithOptions(ctx context.Context, userID uuid.UUID, accountID uuid.UUID, opts SyncOptions) (*SyncResult, error) {
+func (s *SyncService) SyncInboxWithOptions(ctx context.Context, userID uuid.UUID, accountID uuid.UUID, opts domainmessages.MessageSyncOptions) (*domainmessages.MessageSyncResult, error) {
 	if s == nil || s.Accounts == nil || s.Messages == nil || s.Mailboxes == nil {
 		return nil, fmt.Errorf("sync service not configured")
 	}
@@ -307,7 +301,7 @@ func (s *SyncService) SyncInboxWithOptions(ctx context.Context, userID uuid.UUID
 		meta := syncMetaJSON(len(list), n, deltaUsed, deltaResetReason)
 		_ = s.JobRuns.UpdateJobRunStatus(ctx, jobID, "success", timePtrSync(finished), nil, meta)
 	}
-	return &SyncResult{JobRunID: jobID, MessagesUpserted: n}, nil
+	return &domainmessages.MessageSyncResult{JobRunID: jobID, MessagesUpserted: n}, nil
 }
 
 func parseGraphTime(s string) (time.Time, error) {

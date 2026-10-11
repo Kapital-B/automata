@@ -171,7 +171,7 @@ func (f *fixture) service(conn domainaccounts.OAuthMailConnector) *appaccounts.S
 func (f *fixture) connect(t *testing.T, svc *appaccounts.Service) uuid.UUID {
 	t.Helper()
 	ctx := context.Background()
-	start, err := svc.StartConnect(ctx, f.userID, appaccounts.StartConnectInput{Provider: "google"})
+	start, err := svc.StartConnect(ctx, f.userID, domainaccounts.AccountStartConnectInput{Provider: "google"})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -245,7 +245,7 @@ func TestSignInStateCannotConnectAMailbox(t *testing.T) {
 		t.Fatal(err)
 	}
 	_, err := f.service(&stubConnector{email: "x@example.org", cred: "x"}).CompleteOAuth(ctx, "code", "signin-state")
-	if !errors.Is(err, appaccounts.ErrInvalidOAuthState) {
+	if !errors.Is(err, domainacc.AccountErrInvalidOAuthState) {
 		t.Fatalf("err = %v, want ErrInvalidOAuthState", err)
 	}
 }
@@ -260,7 +260,7 @@ func TestConnectStateForAnUnconfiguredProviderIsRefused(t *testing.T) {
 		t.Fatal(err)
 	}
 	_, err := f.service(&stubConnector{email: "x@example.org", cred: "x"}).CompleteOAuth(ctx, "code", "orphan-state")
-	if !errors.Is(err, appaccounts.ErrInvalidOAuthState) {
+	if !errors.Is(err, domainacc.AccountErrInvalidOAuthState) {
 		t.Fatalf("err = %v, want ErrInvalidOAuthState", err)
 	}
 }
@@ -284,8 +284,8 @@ func (f *fixture) passwordService(conn domainaccounts.PasswordMailConnector) *ap
 	})
 }
 
-func imapInput(email, password string) appaccounts.ConnectWithPasswordInput {
-	return appaccounts.ConnectWithPasswordInput{
+func imapInput(email, password string) domainacc.AccountConnectWithPasswordInput {
+	return domainaccounts.AccountConnectWithPasswordInput{
 		Provider: "imap",
 		Request:  domainaccounts.PasswordConnectRequest{Email: email, Password: password},
 	}

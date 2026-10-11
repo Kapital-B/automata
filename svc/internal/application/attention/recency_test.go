@@ -1,6 +1,10 @@
 package attention
 
 import (
+	domainattention "github.com/Kapital-B/automata/svc/internal/domain/attention"
+)
+
+import (
 	"testing"
 	"time"
 )
@@ -11,7 +15,7 @@ import (
 // could not be expressed.
 func TestSortItemsOrdersBySeverityThenRecency(t *testing.T) {
 	now := time.Now().UTC()
-	items := []Item{
+	items := []domainattention.AttentionItem{
 		{ID: "c-old", WhyMe: WhyOpenContradiction, Title: "aaa old", OccurredAt: now.Add(-48 * time.Hour)},
 		{ID: "f-new", WhyMe: WhyProvisionalFact, Title: "zzz new fact", OccurredAt: now},
 		{ID: "c-new", WhyMe: WhyOpenContradiction, Title: "zzz new", OccurredAt: now.Add(-time.Minute)},
@@ -32,8 +36,8 @@ func TestSortItemsOrdersBySeverityThenRecency(t *testing.T) {
 // cannot shuffle between refreshes.
 func TestSortItemsIsStableOnEqualTimestamps(t *testing.T) {
 	at := time.Now().UTC()
-	build := func() []Item {
-		return []Item{
+	build := func() []domainattention.AttentionItem {
+		return []domainattention.AttentionItem{
 			{ID: "b", WhyMe: WhyOpenContradiction, Title: "beta", OccurredAt: at},
 			{ID: "a", WhyMe: WhyOpenContradiction, Title: "alpha", OccurredAt: at},
 			{ID: "c", WhyMe: WhyOpenContradiction, Title: "gamma", OccurredAt: at},

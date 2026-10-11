@@ -176,7 +176,7 @@ func Run(t *testing.T, factory Factory) {
 		now := time.Now().UTC()
 		userID := uuid.New()
 		_, _, accountID := seedUserAccount(t, h.Repo, userID, now)
-		project, err := svc.Create(ctx, userID, appprojects.CreateProjectInput{Name: "Cooling", Code: "DC01"})
+		project, err := svc.Create(ctx, userID, domainprojects.ProjectCreateProjectInput{Name: "Cooling", Code: "DC01"})
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -184,12 +184,12 @@ func Run(t *testing.T, factory Factory) {
 		late := time.Date(2026, 3, 2, 15, 0, 0, 0, time.UTC)
 		conv := "conv-tl"
 		msgID := insertMsg(t, h.Repo, accountID, "Outlook: pump", conv, "pump sizing", early)
-		if _, err := svc.AssignMessage(ctx, userID, msgID, appprojects.AssignInput{
+		if _, err := svc.AssignMessage(ctx, userID, msgID, domainprojects.ProjectAssignInput{
 			ProjectID: &project.ID, Scope: domainprojects.ScopeThread, Status: domainprojects.StatusCommitted,
 		}); err != nil {
 			t.Fatal(err)
 		}
-		manual, err := svc.CreateManualItem(ctx, userID, appprojects.CreateManualInput{
+		manual, err := svc.CreateManualItem(ctx, userID, domainprojects.ProjectCreateManualInput{
 			Channel: "teams", OccurredAt: late, Title: "Teams note", BodyText: "Consider 90 kW", ProjectID: &project.ID,
 		})
 		if err != nil {
@@ -2390,7 +2390,7 @@ func runNotRelevantTests(t *testing.T, factory Factory) {
 		svc := &appprojects.Service{
 			Users: h.Repo, Projects: h.Repo, Assignments: h.Repo, Manuals: h.Repo, Timeline: h.Repo, Contacts: h.Repo, Messages: h.Repo,
 		}
-		project, err := svc.Create(ctx, userID, appprojects.CreateProjectInput{Name: "Cooling", Code: "DC01"})
+		project, err := svc.Create(ctx, userID, domainprojects.ProjectCreateProjectInput{Name: "Cooling", Code: "DC01"})
 		if err != nil {
 			t.Fatal(err)
 		}

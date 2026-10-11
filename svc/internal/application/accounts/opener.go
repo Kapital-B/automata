@@ -10,14 +10,8 @@ import (
 	"github.com/google/uuid"
 )
 
-const ProviderM365 = domainaccounts.AccountProviderM365
-
 // ProviderGoogle covers Gmail and Google Workspace, which are one mailbox.
 const ProviderGoogle = "google"
-
-const ProviderIMAP = domainaccounts.AccountProviderIMAP
-
-var ProviderKey = domainaccounts.AccountProviderKey
 
 // MailboxOpener turns an account into an open mailbox. It is the one place
 // that knows credentials are encrypted at rest, which provider decodes them,
@@ -44,7 +38,7 @@ func (o *MailboxOpener) Open(ctx context.Context, userID, accountID uuid.UUID) (
 	if len(cipher) == 0 {
 		return nil, row, fmt.Errorf("no tokens for account")
 	}
-	provider, ok := o.Providers[ProviderKey(row.Provider)]
+	provider, ok := o.Providers[domainaccounts.AccountProviderKey(row.Provider)]
 	if !ok {
 		return nil, row, fmt.Errorf("%w: %s", domainaccounts.ErrUnsupportedProvider, row.Provider)
 	}
@@ -82,7 +76,7 @@ func (o *MailboxOpener) Capabilities(provider string) (caps domainaccounts.Mailb
 	if o == nil {
 		return caps, false
 	}
-	p, ok := o.Providers[ProviderKey(provider)]
+	p, ok := o.Providers[domainaccounts.AccountProviderKey(provider)]
 	if !ok {
 		return caps, false
 	}

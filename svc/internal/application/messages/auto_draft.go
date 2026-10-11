@@ -24,18 +24,12 @@ type AutoDraftService struct {
 	ModelLabel string
 }
 
-type AutoDraftOptions = domainmessages.MessageAutoDraftOptions
-
-type AutoDraftResult = domainmessages.MessageAutoDraftResult
-
-type AutoDraftChunkResult = domainmessages.MessageAutoDraftChunkResult
-
 type autoDraftPayload struct {
 	Subject string `json:"subject"`
 	Body    string `json:"body"`
 }
 
-func (s *AutoDraftService) GenerateForAccount(ctx context.Context, userID, accountID uuid.UUID, opts AutoDraftOptions) (*AutoDraftResult, error) {
+func (s *AutoDraftService) GenerateForAccount(ctx context.Context, userID, accountID uuid.UUID, opts domainmessages.MessageAutoDraftOptions) (*domainmessages.MessageAutoDraftResult, error) {
 	if s == nil || s.Messages == nil || s.Summaries == nil || s.LLM == nil || s.JobRuns == nil {
 		return nil, fmt.Errorf("auto-draft service not configured")
 	}
@@ -60,7 +54,7 @@ func (s *AutoDraftService) GenerateForAccount(ctx context.Context, userID, accou
 		_ = s.JobRuns.InsertJobRun(ctx, runID, accountID, "draft_suggest", trigger, "running", started, time.Time{}, nil, `{}`)
 	}
 
-	fail := func(err error) (*AutoDraftResult, error) {
+	fail := func(err error) (*domainmessages.MessageAutoDraftResult, error) {
 		msg := err.Error()
 		_ = s.JobRuns.UpdateJobRunStatus(ctx, runID, "failed", timePtrAutoDraft(time.Now().UTC()), &msg, `{}`)
 		return nil, err
@@ -116,10 +110,10 @@ func (s *AutoDraftService) GenerateForAccount(ctx context.Context, userID, accou
 	}
 	meta := fmt.Sprintf(`{"total_action_items":%d,"processed_action_items":%d,"reply_candidates":%d,"drafts_generated":%d,"action_items_seen":%d,"only_unseen":%t}`, len(items), len(items), replyCandidates, len(drafts), len(seenIDs), onlyUnseen)
 	_ = s.JobRuns.UpdateJobRunStatus(ctx, runID, "success", timePtrAutoDraft(time.Now().UTC()), nil, meta)
-	return &AutoDraftResult{JobRunID: runID, ActionItemsSeen: len(seenIDs), DraftsGenerated: len(drafts)}, nil
+	return &domainmessages.MessageAutoDraftResult{JobRunID: runID, ActionItemsSeen: len(seenIDs), DraftsGenerated: len(drafts)}, nil
 }
 
-func (s *AutoDraftService) GenerateChunk(ctx context.Context, run domainjobs.RunContext) (*AutoDraftChunkResult, error) {
+func (s *AutoDraftService) GenerateChunk(ctx context.Context, run domainjobs.RunContext) (*domainmessages.MessageAutoDraftChunkResult, error) {
 	if s == nil || s.Messages == nil || s.Summaries == nil || s.LLM == nil {
 		return nil, fmt.Errorf("auto-draft service not configured")
 	}
@@ -173,7 +167,7 @@ func (s *AutoDraftService) GenerateChunk(ctx context.Context, run domainjobs.Run
 	if err := s.Summaries.InsertDraftSuggestions(ctx, drafts); err != nil {
 		return nil, err
 	}
-	return &AutoDraftChunkResult{
+	return &domainmessages.MessageAutoDraftChunkResult{
 		ActionItemsSeen: len(seenIDs),
 		DraftsGenerated: len(drafts),
 		Done:            true,

@@ -72,11 +72,11 @@ func TestAssignJobLeavesTriagedThreadsAlone(t *testing.T) {
 		t.Fatal(err)
 	}
 	svc := &appprojects.Service{Users: repo, Projects: repo, Assignments: repo, Manuals: repo, Timeline: repo, Contacts: repo, Messages: repo}
-	cooling, err := svc.Create(ctx, userID, appprojects.CreateProjectInput{Name: "Cooling", Code: "DC01"})
+	cooling, err := svc.Create(ctx, userID, domainprojects.ProjectCreateProjectInput{Name: "Cooling", Code: "DC01"})
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err := svc.Create(ctx, userID, appprojects.CreateProjectInput{Name: "Office move", Code: "OF02"}); err != nil {
+	if _, err := svc.Create(ctx, userID, domainprojects.ProjectCreateProjectInput{Name: "Office move", Code: "OF02"}); err != nil {
 		t.Fatal(err)
 	}
 	msg := func(subject, conv string, age time.Duration) uuid.UUID {
@@ -98,7 +98,7 @@ func TestAssignJobLeavesTriagedThreadsAlone(t *testing.T) {
 
 	yes := true
 	coolingID := cooling.ID
-	res, err := svc.AssignBatch(ctx, userID, []appprojects.BatchAssignItem{
+	res, err := svc.AssignBatch(ctx, userID, []domainprojects.ProjectBatchAssignItem{
 		{Kind: "message", ID: newsletter, NotRelevant: &yes},
 		{Kind: "message", ID: chiller, ProjectID: &coolingID},
 	})

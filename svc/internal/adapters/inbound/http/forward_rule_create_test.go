@@ -156,7 +156,7 @@ func TestSwitchingARuleOnSetsItsScope(t *testing.T) {
 	_, _, id := a.create(`{"name":"t","mode":"logic","condition_json":` + financeCondition + `,"forward_to":"dest@example.com"}`)
 	scope := func() time.Time {
 		rules, _ := a.repo.ListForwardRules(context.Background(), a.userID, a.accountID)
-		return appmessages.RuleScopeStart(rules[0])
+		return domainmessages.MessageRuleScopeStart(rules[0])
 	}
 	body := func(extra string) string {
 		return `{"name":"t","mode":"logic","condition_json":` + financeCondition + `,"forward_to":"dest@example.com","enabled":true` + extra + `}`

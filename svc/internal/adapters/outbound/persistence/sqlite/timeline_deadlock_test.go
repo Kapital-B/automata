@@ -32,7 +32,7 @@ func TestProjectTimelineOnSingleConnectionPool(t *testing.T) {
 	ctx := context.Background()
 	userID, orgID, accountID := seedUserAccount(t, repo)
 
-	p, err := svc.Create(ctx, userID, appprojects.CreateProjectInput{Name: "Cooling", Code: "DC01"})
+	p, err := svc.Create(ctx, userID, domainprojects.ProjectCreateProjectInput{Name: "Cooling", Code: "DC01"})
 	if err != nil {
 		t.Fatal(err)
 	}

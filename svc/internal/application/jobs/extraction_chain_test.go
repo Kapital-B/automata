@@ -12,14 +12,14 @@ import (
 )
 
 func extractionChain() []string {
-	return []string{appjobs.TypeInterpretProject, appjobs.TypeReconcileProject}
+	return []string{domainjobs.TypeInterpretProject, domainjobs.TypeReconcileProject}
 }
 
 // Extraction is a chain: interpret produces candidates and reconcile applies
 // them. Running only the first half is why correspondence never became facts.
 func TestExtractionChainIsValidAndOrdered(t *testing.T) {
 	store := memoryjobs.NewStore()
-	enq := &appjobs.Enqueuer{Store: store, Registry: appjobs.DefaultRegistry()}
+	enq := &appjobs.Enqueuer{Store: store, Registry: domainjobs.DefaultRegistry()}
 	ctx := context.Background()
 	userID, projectID := uuid.New(), uuid.New()
 
@@ -28,10 +28,10 @@ func TestExtractionChainIsValidAndOrdered(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if rec.JobType != appjobs.TypeInterpretProject {
+	if rec.JobType != domainjobs.TypeInterpretProject {
 		t.Errorf("first step = %q, want interpret_project", rec.JobType)
 	}
-	if len(rec.RemainingJobs) != 1 || rec.RemainingJobs[0] != appjobs.TypeReconcileProject {
+	if len(rec.RemainingJobs) != 1 || rec.RemainingJobs[0] != domainjobs.TypeReconcileProject {
 		t.Errorf("remaining = %v, want [reconcile_project]", rec.RemainingJobs)
 	}
 	if rec.Payload.ProjectID == nil || *rec.Payload.ProjectID != projectID {
@@ -42,7 +42,7 @@ func TestExtractionChainIsValidAndOrdered(t *testing.T) {
 // A burst of assignments must produce one extraction run, not one per item.
 func TestExtractionCoalescesPerProject(t *testing.T) {
 	store := memoryjobs.NewStore()
-	enq := &appjobs.Enqueuer{Store: store, Registry: appjobs.DefaultRegistry()}
+	enq := &appjobs.Enqueuer{Store: store, Registry: domainjobs.DefaultRegistry()}
 	ctx := context.Background()
 	userID, projectID := uuid.New(), uuid.New()
 
@@ -77,8 +77,8 @@ func TestExtractionCoalescesPerProject(t *testing.T) {
 }
 
 func TestExtractionLockIsKeyedByProject(t *testing.T) {
-	reg := appjobs.DefaultRegistry()
-	def := reg.MustGet(appjobs.TypeInterpretProject)
+	reg := domainjobs.DefaultRegistry()
+	def := reg.MustGet(domainjobs.TypeInterpretProject)
 	if !def.RequiresLock {
 		t.Fatal("interpret_project must take a lock so extraction coalesces")
 	}

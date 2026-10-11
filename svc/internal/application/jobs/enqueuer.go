@@ -12,7 +12,7 @@ import (
 // Enqueuer validates job types/chains and creates pending control-plane items.
 type Enqueuer struct {
 	Store    domainjobs.JobStore
-	Registry *Registry
+	Registry *domainjobs.Registry
 }
 
 func (e *Enqueuer) Enqueue(ctx context.Context, in domainjobs.CreateJobInput) (*domainjobs.JobRecord, error) {
@@ -21,9 +21,9 @@ func (e *Enqueuer) Enqueue(ctx context.Context, in domainjobs.CreateJobInput) (*
 	}
 	reg := e.Registry
 	if reg == nil {
-		reg = DefaultRegistry()
+		reg = domainjobs.DefaultRegistry()
 	}
-	name, err := normalizeEnqueueType(in.JobType)
+	name, err := domainjobs.NormalizeEnqueueType(in.JobType)
 	if err != nil {
 		return nil, err
 	}
@@ -34,7 +34,7 @@ func (e *Enqueuer) Enqueue(ctx context.Context, in domainjobs.CreateJobInput) (*
 	in.JobType = name
 	remaining := make([]string, 0, len(in.RemainingJobs))
 	for _, raw := range in.RemainingJobs {
-		n, err := normalizeEnqueueType(raw)
+		n, err := domainjobs.NormalizeEnqueueType(raw)
 		if err != nil {
 			return nil, err
 		}
@@ -50,9 +50,9 @@ func (e *Enqueuer) Enqueue(ctx context.Context, in domainjobs.CreateJobInput) (*
 	}
 	if in.ID == uuid.Nil {
 		if in.ScheduleID != nil && in.ScheduledFor != nil && in.StepIndex == 0 {
-			in.ID = DeterministicScheduleJobID(*in.ScheduleID, in.ScheduledFor.UTC().Format(time.RFC3339), in.JobType)
+			in.ID = domainjobs.DeterministicScheduleJobID(*in.ScheduleID, in.ScheduledFor.UTC().Format(time.RFC3339), in.JobType)
 		} else {
-			in.ID = DeterministicJobID(in.ChainID, in.StepIndex, in.JobType)
+			in.ID = domainjobs.DeterministicJobID(in.ChainID, in.StepIndex, in.JobType)
 		}
 	}
 	if in.TriggerKind == "" {
@@ -91,7 +91,7 @@ func (e *Enqueuer) Enqueue(ctx context.Context, in domainjobs.CreateJobInput) (*
 func (e *Enqueuer) EnqueueChain(ctx context.Context, userID uuid.UUID, accountID *uuid.UUID, trigger string, chain []string, payload domainjobs.JobPayload, scheduleID *uuid.UUID, scheduledFor *time.Time) (*domainjobs.JobRecord, error) {
 	reg := e.Registry
 	if reg == nil {
-		reg = DefaultRegistry()
+		reg = domainjobs.DefaultRegistry()
 	}
 	steps, err := reg.ValidateChain(chain)
 	if err != nil {
@@ -102,11 +102,11 @@ func (e *Enqueuer) EnqueueChain(ctx context.Context, userID uuid.UUID, accountID
 	var jobID uuid.UUID
 	if scheduleID != nil && scheduledFor != nil {
 		when := scheduledFor.UTC().Format(time.RFC3339)
-		chainID = DeterministicChainID(*scheduleID, when)
-		jobID = DeterministicScheduleJobID(*scheduleID, when, steps[0])
+		chainID = domainjobs.DeterministicChainID(*scheduleID, when)
+		jobID = domainjobs.DeterministicScheduleJobID(*scheduleID, when, steps[0])
 	} else {
 		chainID = uuid.New()
-		jobID = DeterministicJobID(chainID, 0, steps[0])
+		jobID = domainjobs.DeterministicJobID(chainID, 0, steps[0])
 	}
 	remaining := append([]string(nil), steps[1:]...)
 	return e.Enqueue(ctx, domainjobs.CreateJobInput{

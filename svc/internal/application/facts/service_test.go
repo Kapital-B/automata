@@ -1,6 +1,10 @@
 package facts_test
 
 import (
+	domainfacts "github.com/Kapital-B/automata/svc/internal/domain/facts"
+)
+
+import (
 	"context"
 	"database/sql"
 	"errors"
@@ -44,7 +48,7 @@ func setupFacts(t *testing.T, name string) (*sql.DB, *sqlite.Repository, *appfac
 	if err != nil {
 		t.Fatal(err)
 	}
-	proj, err := projectSvc.Create(context.Background(), userID, appprojects.CreateProjectInput{Name: "Cooling", Code: "DC01"})
+	proj, err := projectSvc.Create(context.Background(), userID, domainprojects.ProjectCreateProjectInput{Name: "Cooling", Code: "DC01"})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -60,10 +64,10 @@ func setupFacts(t *testing.T, name string) (*sql.DB, *sqlite.Repository, *appfac
 
 func TestInvalidSubjectKey(t *testing.T) {
 	_, _, factSvc, _, userID, projectID, _ := setupFacts(t, "factbadkey")
-	_, err := factSvc.Create(context.Background(), userID, projectID, appfacts.CreateInput{
+	_, err := factSvc.Create(context.Background(), userID, projectID, domainfacts.FactCreateInput{
 		SubjectKey: "duty", Label: "Duty", Value: 75, Confirm: true,
 	})
-	if !errors.Is(err, appfacts.ErrInvalidSubjectKey) {
+	if !errors.Is(err, domainfacts.FactErrInvalidSubjectKey) {
 		t.Fatalf("want invalid subject, got %v", err)
 	}
 }
@@ -71,7 +75,7 @@ func TestInvalidSubjectKey(t *testing.T) {
 func TestCreateConfirmAndSupersede(t *testing.T) {
 	_, _, factSvc, _, userID, projectID, _ := setupFacts(t, "factsupersede")
 	ctx := context.Background()
-	first, err := factSvc.Create(ctx, userID, projectID, appfacts.CreateInput{
+	first, err := factSvc.Create(ctx, userID, projectID, domainfacts.FactCreateInput{
 		SubjectKey: "pump.p03.duty_kw", Label: "Pump P-03 duty", Value: 75.0, Unit: strPtr("kW"), Confirm: true,
 	})
 	if err != nil {
@@ -82,7 +86,7 @@ func TestCreateConfirmAndSupersede(t *testing.T) {
 	}
 	activeID := first.Versions[0].Version.ID
 
-	proposed, err := factSvc.Create(ctx, userID, projectID, appfacts.CreateInput{
+	proposed, err := factSvc.Create(ctx, userID, projectID, domainfacts.FactCreateInput{
 		SubjectKey: "pump.p03.duty_kw", Label: "Pump P-03 duty", Value: 90.0, Unit: strPtr("kW"),
 	})
 	if err != nil {
@@ -98,12 +102,12 @@ func TestCreateConfirmAndSupersede(t *testing.T) {
 		t.Fatal("expected proposed version")
 	}
 
-	_, err = factSvc.Confirm(ctx, userID, proposedID, appfacts.ConfirmInput{})
-	if !errors.Is(err, appfacts.ErrSupersedeRequired) {
+	_, err = factSvc.Confirm(ctx, userID, proposedID, domainfacts.FactConfirmInput{})
+	if !errors.Is(err, domainfacts.FactErrSupersedeRequired) {
 		t.Fatalf("want supersede required, got %v", err)
 	}
 
-	confirmed, err := factSvc.Confirm(ctx, userID, proposedID, appfacts.ConfirmInput{SupersedesVersionID: &activeID})
+	confirmed, err := factSvc.Confirm(ctx, userID, proposedID, domainfacts.FactConfirmInput{SupersedesVersionID: &activeID})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -138,7 +142,7 @@ func TestCreateConfirmAndSupersede(t *testing.T) {
 func TestRejectProposed(t *testing.T) {
 	_, _, factSvc, _, userID, projectID, _ := setupFacts(t, "factreject")
 	ctx := context.Background()
-	view, err := factSvc.Create(ctx, userID, projectID, appfacts.CreateInput{
+	view, err := factSvc.Create(ctx, userID, projectID, domainfacts.FactCreateInput{
 		SubjectKey: "pump.p03.duty_kw", Label: "Duty", Value: 75, Confirm: false,
 	})
 	if err != nil {
@@ -167,15 +171,15 @@ func TestEvidenceCascadeLinkOnly(t *testing.T) {
 	}); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := projectSvc.AssignMessage(ctx, userID, msgID, appprojects.AssignInput{
+	if _, err := projectSvc.AssignMessage(ctx, userID, msgID, domainprojects.ProjectAssignInput{
 		ProjectID: &projectID, Scope: domainprojects.ScopeThread, Status: domainprojects.StatusCommitted,
 	}); err != nil {
 		t.Fatal(err)
 	}
 
-	view, err := factSvc.Create(ctx, userID, projectID, appfacts.CreateInput{
+	view, err := factSvc.Create(ctx, userID, projectID, domainfacts.FactCreateInput{
 		SubjectKey: "pump.p03.duty_kw", Label: "Duty", Value: 75, Confirm: true,
-		Evidence: []appfacts.EvidenceRef{{MessageID: &msgID}},
+		Evidence: []domainfacts.FactEvidenceRef{{MessageID: &msgID}},
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -205,13 +209,13 @@ func TestEvidenceCascadeLinkOnly(t *testing.T) {
 func TestUniqueSubjectPerProject(t *testing.T) {
 	_, _, factSvc, _, userID, projectID, _ := setupFacts(t, "factunique")
 	ctx := context.Background()
-	first, err := factSvc.Create(ctx, userID, projectID, appfacts.CreateInput{
+	first, err := factSvc.Create(ctx, userID, projectID, domainfacts.FactCreateInput{
 		SubjectKey: "pump.p03.duty_kw", Label: "Duty", Value: 75, Confirm: true,
 	})
 	if err != nil {
 		t.Fatal(err)
 	}
-	second, err := factSvc.Create(ctx, userID, projectID, appfacts.CreateInput{
+	second, err := factSvc.Create(ctx, userID, projectID, domainfacts.FactCreateInput{
 		SubjectKey: "pump.p03.duty_kw", Label: "Duty updated", Value: 80, Confirm: false,
 	})
 	if err != nil {

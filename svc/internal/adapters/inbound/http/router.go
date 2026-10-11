@@ -68,7 +68,6 @@ type Handlers struct {
 	AccountJobs      domainmessages.AccountJobSubmission
 	ConnectorJobs    domainconnectors.SyncSubmission
 	Extraction       domainprojects.ExtractionSubmission
-	JobTerminalTTL   time.Duration
 	SummariesQueries domainmessages.SummariesQueries
 	ForwardsQueries  domainmessages.ForwardsQueries
 	SchedulesQueries domainjobs.SchedulesQueries
@@ -1579,20 +1578,6 @@ func (h *Handlers) authorizeAccount(ctx context.Context, user, id uuid.UUID) (bo
 		return true, nil
 	}
 	return h.AccountsQueries.OwnsAccount(ctx, user, id)
-}
-
-func (h *Handlers) enqueueAccountJob(ctx context.Context, userID, accountID uuid.UUID, jobType string, payload domainjobs.JobPayload) (*domainjobs.JobRecord, error) {
-	if h.JobRequests == nil {
-		return nil, fmt.Errorf("job queue not configured")
-	}
-	return h.JobRequests.Submit(ctx, domainjobs.CreateJobInput{
-		JobType:     jobType,
-		UserID:      userID,
-		AccountID:   &accountID,
-		TriggerKind: domainjobs.JobTriggerAPI,
-		Payload:     payload,
-		Now:         time.Now().UTC(),
-	})
 }
 
 func (h *Handlers) jobStoreListItems(ctx context.Context, userID uuid.UUID, rows []domainjobs.JobRecord) ([]jobRunItem, error) {

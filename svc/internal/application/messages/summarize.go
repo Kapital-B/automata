@@ -21,10 +21,6 @@ type SummarizeService struct {
 	JobRuns   domainjobs.JobRunRepository
 }
 
-type SummarizeOptions = domainmessages.MessageSummarizeOptions
-
-type SummarizeResult = domainmessages.MessageSummarizeResult
-
 type summarizePayload struct {
 	GeneralSummary string `json:"general_summary"`
 	ActionItems    []struct {
@@ -51,7 +47,7 @@ const (
 	maxBodyCharsTight         = 120
 )
 
-func (s *SummarizeService) SummarizeAccount(ctx context.Context, userID uuid.UUID, accountID uuid.UUID, opts SummarizeOptions) (*SummarizeResult, error) {
+func (s *SummarizeService) SummarizeAccount(ctx context.Context, userID uuid.UUID, accountID uuid.UUID, opts domainmessages.MessageSummarizeOptions) (*domainmessages.MessageSummarizeResult, error) {
 	if s == nil || s.Messages == nil || s.Summaries == nil || s.LLM == nil || s.JobRuns == nil {
 		return nil, fmt.Errorf("summarize service not configured")
 	}
@@ -72,7 +68,7 @@ func (s *SummarizeService) SummarizeAccount(ctx context.Context, userID uuid.UUI
 		_ = s.JobRuns.InsertJobRun(ctx, runID, accountID, "summarize", trigger, "running", started, time.Time{}, nil, `{}`)
 	}
 
-	fail := func(err error) (*SummarizeResult, error) {
+	fail := func(err error) (*domainmessages.MessageSummarizeResult, error) {
 		msg := err.Error()
 		_ = s.JobRuns.UpdateJobRunStatus(ctx, runID, "failed", timePtrSummary(time.Now().UTC()), &msg, `{}`)
 		return nil, err
@@ -106,7 +102,7 @@ func (s *SummarizeService) SummarizeAccount(ctx context.Context, userID uuid.UUI
 		}
 		meta := fmt.Sprintf(`{"total_messages":0,"summarize_candidates":0,"processed_messages":0,"action_items":0,"fyi_items":0%s}`, chainMeta)
 		_ = s.JobRuns.UpdateJobRunStatus(ctx, runID, "success", timePtrSummary(time.Now().UTC()), nil, meta)
-		return &SummarizeResult{JobRunID: runID, ActionItems: 0, FYIItems: 0}, nil
+		return &domainmessages.MessageSummarizeResult{JobRunID: runID, ActionItems: 0, FYIItems: 0}, nil
 	}
 
 	settings, err := s.Summaries.GetSummarySettings(ctx, userID)
@@ -208,7 +204,7 @@ func (s *SummarizeService) SummarizeAccount(ctx context.Context, userID uuid.UUI
 	}
 	meta := fmt.Sprintf(`{"total_messages":%d,"summarize_candidates":%d,"processed_messages":%d,"action_items":%d,"fyi_items":%d%s}`, len(filtered), len(msgs), len(filtered), len(toInsert), len(fyiRows), chainMeta)
 	_ = s.JobRuns.UpdateJobRunStatus(ctx, runID, "success", timePtrSummary(time.Now().UTC()), nil, meta)
-	return &SummarizeResult{JobRunID: runID, ActionItems: len(toInsert), FYIItems: len(fyiRows)}, nil
+	return &domainmessages.MessageSummarizeResult{JobRunID: runID, ActionItems: len(toInsert), FYIItems: len(fyiRows)}, nil
 }
 
 func (s *SummarizeService) summarizeMessages(ctx context.Context, msgs []domainmessages.MessageRow) (*summarizePayload, error) {

@@ -23,10 +23,6 @@ func NewService(d Deps) *Service {
 	return &Service{deps: d}
 }
 
-type StartConnectInput = domainaccounts.AccountStartConnectInput
-
-type StartConnectOutput = domainaccounts.AccountStartConnectOutput
-
 // mailboxConnectFlow is the OAuth state flow for connecting any provider's
 // mailbox. The value predates provider support, which is why it says m365:
 // oauth_states.flow carries an unnamed CHECK over a fixed list, and widening
@@ -37,15 +33,8 @@ type StartConnectOutput = domainaccounts.AccountStartConnectOutput
 // is still enforced by the flow.
 const mailboxConnectFlow = "m365_mail"
 
-// placeholderMsAccountKind fills ms_account_kind for non-Microsoft accounts.
-// The column is NOT NULL under an unnamed CHECK over Microsoft's two values,
-// and widening an unnamed CHECK is what broke the DSQL deploys on PR #9, so
-// rather than migrate it the value is written and never read: nothing outside
-// the Microsoft provider consults it (RFC multi-provider mail §5.1, option A).
-const placeholderMsAccountKind = domainacc.KindWork
-
 func connectOptions(provider string, kind domainacc.MsAccountKind) (domainaccounts.ConnectOptions, error) {
-	if provider != ProviderM365 {
+	if provider != domainaccounts.AccountProviderM365 {
 		return domainaccounts.ConnectOptions{}, nil
 	}
 	if !kind.Valid() || kind == domainacc.KindCommon {
@@ -54,8 +43,8 @@ func connectOptions(provider string, kind domainacc.MsAccountKind) (domainaccoun
 	return domainaccounts.ConnectOptions{MsAccountKind: kind}, nil
 }
 
-func (s *Service) StartConnect(ctx context.Context, userID uuid.UUID, in StartConnectInput) (*StartConnectOutput, error) {
-	provider := ProviderKey(in.Provider)
+func (s *Service) StartConnect(ctx context.Context, userID uuid.UUID, in domainacc.AccountStartConnectInput) (*domainacc.AccountStartConnectOutput, error) {
+	provider := domainaccounts.AccountProviderKey(in.Provider)
 	conn, ok := s.deps.Connectors[provider]
 	if !ok {
 		return nil, fmt.Errorf("unsupported provider")
@@ -79,7 +68,7 @@ func (s *Service) StartConnect(ctx context.Context, userID uuid.UUID, in StartCo
 	if err != nil {
 		return nil, err
 	}
-	return &StartConnectOutput{AuthorizationURL: authURL, State: st}, nil
+	return &domainacc.AccountStartConnectOutput{AuthorizationURL: authURL, State: st}, nil
 }
 
 func randomState() (string, error) {
@@ -90,25 +79,21 @@ func randomState() (string, error) {
 	return base64.RawURLEncoding.EncodeToString(b), nil
 }
 
-var ErrInvalidOAuthState = domainaccounts.AccountErrInvalidOAuthState
-
-type CompleteOAuthResult = domainaccounts.AccountCompleteOAuthResult
-
-func (s *Service) CompleteOAuth(ctx context.Context, code, state string) (*CompleteOAuthResult, error) {
+func (s *Service) CompleteOAuth(ctx context.Context, code, state string) (*domainaccounts.AccountCompleteOAuthResult, error) {
 	flow, stateUserID, payloadJSON, ok, err := s.deps.OAuthState.TakeOAuthState(ctx, state)
 	if err != nil {
 		return nil, err
 	}
 	if !ok || stateUserID == nil || flow != mailboxConnectFlow {
-		return nil, ErrInvalidOAuthState
+		return nil, domainacc.AccountErrInvalidOAuthState
 	}
 	provider, kind, labelHint, err := DecodeMailboxOAuthPayload(payloadJSON)
 	if err != nil {
-		return nil, ErrInvalidOAuthState
+		return nil, domainacc.AccountErrInvalidOAuthState
 	}
 	conn, ok := s.deps.Connectors[provider]
 	if !ok {
-		return nil, ErrInvalidOAuthState
+		return nil, domainaccounts.AccountErrInvalidOAuthState
 	}
 	connected, err := conn.Complete(ctx, code, domainaccounts.ConnectOptions{MsAccountKind: kind})
 	if err != nil {
@@ -118,15 +103,13 @@ func (s *Service) CompleteOAuth(ctx context.Context, code, state string) (*Compl
 	if err != nil {
 		return nil, err
 	}
-	return &CompleteOAuthResult{AccountID: id}, nil
+	return &domainacc.AccountCompleteOAuthResult{AccountID: id}, nil
 }
-
-type ConnectWithPasswordInput = domainaccounts.AccountConnectWithPasswordInput
 
 // ConnectWithPassword verifies typed-in credentials against the provider and
 // stores the mailbox. A failure the user can fix wraps
 // domainaccounts.ErrConnectRejected and nothing is stored.
-func (s *Service) ConnectWithPassword(ctx context.Context, userID uuid.UUID, in ConnectWithPasswordInput) (uuid.UUID, error) {
+func (s *Service) ConnectWithPassword(ctx context.Context, userID uuid.UUID, in domainaccounts.AccountConnectWithPasswordInput) (uuid.UUID, error) {
 	conn, ok := s.deps.PasswordConnectors[in.Provider]
 	if !ok {
 		return uuid.Nil, fmt.Errorf("%w: %s", domainaccounts.ErrUnsupportedProvider, in.Provider)
@@ -169,8 +152,8 @@ func (s *Service) saveConnected(ctx context.Context, userID uuid.UUID, provider 
 		return existing.ID, nil
 	}
 	rowKind := connected.MsAccountKind
-	if provider != ProviderM365 {
-		rowKind = placeholderMsAccountKind
+	if provider != domainaccounts.AccountProviderM365 {
+		rowKind = domainaccounts.KindWork
 	}
 	id := uuid.New()
 	now := time.Now().UTC()
@@ -202,7 +185,7 @@ func (s *Service) findAccount(ctx context.Context, userID uuid.UUID, provider, e
 		return nil, err
 	}
 	for i := range rows {
-		if ProviderKey(rows[i].Provider) == provider && strings.EqualFold(rows[i].PrimaryEmail, email) {
+		if domainacc.AccountProviderKey(rows[i].Provider) == provider && strings.EqualFold(rows[i].PrimaryEmail, email) {
 			return &rows[i], nil
 		}
 	}
@@ -219,17 +202,15 @@ const (
 	ConnectPassword = "password"
 )
 
-type ProviderInfo = domainaccounts.AccountProviderInfo
-
 // Providers lists what can be connected, in a stable order, so the UI offers
 // only what this deployment is configured for.
-func (s *Service) Providers() []ProviderInfo {
-	var out []ProviderInfo
+func (s *Service) Providers() []domainacc.AccountProviderInfo {
+	var out []domainacc.AccountProviderInfo
 	add := func(provider, connect string) {
 		caps, _ := s.deps.Mailboxes.Capabilities(provider)
-		out = append(out, ProviderInfo{Provider: provider, Connect: connect, Capabilities: caps})
+		out = append(out, domainacc.AccountProviderInfo{Provider: provider, Connect: connect, Capabilities: caps})
 	}
-	for _, p := range []string{ProviderM365, ProviderGoogle, ProviderIMAP} {
+	for _, p := range []string{domainaccounts.AccountProviderM365, ProviderGoogle, domainacc.AccountProviderIMAP} {
 		if _, ok := s.deps.Connectors[p]; ok {
 			add(p, ConnectOAuth)
 		} else if _, ok := s.deps.PasswordConnectors[p]; ok {

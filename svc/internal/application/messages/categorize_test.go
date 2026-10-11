@@ -84,7 +84,7 @@ func TestCategorizeAccountValidJSON(t *testing.T) {
 		}},
 		JobRuns: repo,
 	}
-	res, err := svc.CategorizeAccount(context.Background(), userID, accountID, CategorizeOptions{})
+	res, err := svc.CategorizeAccount(context.Background(), userID, accountID, domainmessages.MessageCategorizeOptions{})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -110,7 +110,7 @@ func TestCategorizeAccountRetriesInvalidJSON(t *testing.T) {
 		}},
 		JobRuns: repo,
 	}
-	if _, err := svc.CategorizeAccount(context.Background(), userID, accountID, CategorizeOptions{}); err != nil {
+	if _, err := svc.CategorizeAccount(context.Background(), userID, accountID, domainmessages.MessageCategorizeOptions{}); err != nil {
 		t.Fatal(err)
 	}
 	rows, err := repo.ListMessages(context.Background(), userID, domainmessages.MessageListFilter{AccountID: &accountID, Category: "important"})
@@ -132,7 +132,7 @@ func TestCategorizeAccountFailsWhenInvalidTwice(t *testing.T) {
 		}},
 		JobRuns: repo,
 	}
-	if _, err := svc.CategorizeAccount(context.Background(), userID, accountID, CategorizeOptions{}); err == nil {
+	if _, err := svc.CategorizeAccount(context.Background(), userID, accountID, domainmessages.MessageCategorizeOptions{}); err == nil {
 		t.Fatal("expected invalid JSON error")
 	}
 	rows, err := repo.ListMessages(context.Background(), userID, domainmessages.MessageListFilter{AccountID: &accountID, Category: "important"})
@@ -156,7 +156,7 @@ func TestCategorizeAccountSkipsAlreadyCategorizedUnlessRecategorize(t *testing.T
 		JobRuns:  repo,
 	}
 
-	first, err := svc.CategorizeAccount(context.Background(), userID, accountID, CategorizeOptions{})
+	first, err := svc.CategorizeAccount(context.Background(), userID, accountID, domainmessages.MessageCategorizeOptions{})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -164,7 +164,7 @@ func TestCategorizeAccountSkipsAlreadyCategorizedUnlessRecategorize(t *testing.T
 		t.Fatalf("expected first categorize to process one message, got %d", first.MessagesCategorized)
 	}
 
-	second, err := svc.CategorizeAccount(context.Background(), userID, accountID, CategorizeOptions{})
+	second, err := svc.CategorizeAccount(context.Background(), userID, accountID, domainmessages.MessageCategorizeOptions{})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -172,7 +172,7 @@ func TestCategorizeAccountSkipsAlreadyCategorizedUnlessRecategorize(t *testing.T
 		t.Fatalf("expected second categorize without recategorize to process 0, got %d", second.MessagesCategorized)
 	}
 
-	third, err := svc.CategorizeAccount(context.Background(), userID, accountID, CategorizeOptions{Recategorize: true})
+	third, err := svc.CategorizeAccount(context.Background(), userID, accountID, domainmessages.MessageCategorizeOptions{Recategorize: true})
 	if err != nil {
 		t.Fatal(err)
 	}

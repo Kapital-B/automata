@@ -13,17 +13,11 @@ import (
 	"github.com/google/uuid"
 )
 
-type SyncResult = domainconnectors.ConnectorSyncResult
-
-type SyncOptions = domainconnectors.ConnectorSyncOptions
-
-type ConnectorSyncChunkResult = domainconnectors.ConnectorConnectorSyncChunkResult
-
-func (s *Service) SyncConnector(ctx context.Context, userID, connectorAccountID uuid.UUID) (*SyncResult, error) {
-	return s.SyncConnectorWithOptions(ctx, userID, connectorAccountID, SyncOptions{})
+func (s *Service) SyncConnector(ctx context.Context, userID, connectorAccountID uuid.UUID) (*domainconnectors.ConnectorSyncResult, error) {
+	return s.SyncConnectorWithOptions(ctx, userID, connectorAccountID, domainconnectors.ConnectorSyncOptions{})
 }
 
-func (s *Service) SyncConnectorChunk(ctx context.Context, run domainjobs.RunContext) (*ConnectorSyncChunkResult, error) {
+func (s *Service) SyncConnectorChunk(ctx context.Context, run domainjobs.RunContext) (*domainconnectors.ConnectorConnectorSyncChunkResult, error) {
 	if s == nil || s.Connectors == nil || s.Slack == nil || s.Vault == nil {
 		return nil, fmt.Errorf("connector sync not configured")
 	}
@@ -39,7 +33,7 @@ func (s *Service) SyncConnectorChunk(ctx context.Context, run domainjobs.RunCont
 		return nil, err
 	}
 	if account == nil {
-		return nil, ErrNotFound
+		return nil, domainconnectors.ConnectorErrNotFound
 	}
 	if account.Provider != "slack" {
 		return nil, fmt.Errorf("unsupported connector provider")
@@ -58,7 +52,7 @@ func (s *Service) SyncConnectorChunk(ctx context.Context, run domainjobs.RunCont
 	}
 	offset := jobkit.DecodeOffsetCursor(run.Cursor)
 	if offset >= len(bindings) {
-		return &ConnectorSyncChunkResult{Done: true}, nil
+		return &domainconnectors.ConnectorConnectorSyncChunkResult{Done: true}, nil
 	}
 	binding := bindings[offset]
 	pageCursor := ""
@@ -100,7 +94,7 @@ func (s *Service) SyncConnectorChunk(ctx context.Context, run domainjobs.RunCont
 		}
 		upserted++
 	}
-	out := &ConnectorSyncChunkResult{MessagesUpserted: upserted}
+	out := &domainconnectors.ConnectorConnectorSyncChunkResult{MessagesUpserted: upserted}
 	if strings.TrimSpace(page.NextCursor) != "" {
 		out.NextCursor = &domainjobs.JobCursor{Kind: "slack_history", Value: fmt.Sprintf("%d|%s", offset, strings.TrimSpace(page.NextCursor))}
 		return out, nil
@@ -123,14 +117,14 @@ func (s *Service) SyncConnectorChunk(ctx context.Context, run domainjobs.RunCont
 func (s *Service) SyncConnectorWithOptions(
 	ctx context.Context,
 	userID, connectorAccountID uuid.UUID,
-	options SyncOptions,
-) (*SyncResult, error) {
+	options domainconnectors.ConnectorSyncOptions,
+) (*domainconnectors.ConnectorSyncResult, error) {
 	account, err := s.Connectors.GetConnectorAccount(ctx, userID, connectorAccountID)
 	if err != nil {
 		return nil, err
 	}
 	if account == nil {
-		return nil, ErrNotFound
+		return nil, domainconnectors.ConnectorErrNotFound
 	}
 	if account.Provider != "slack" {
 		return nil, fmt.Errorf("unsupported connector provider")
@@ -234,7 +228,7 @@ func (s *Service) SyncConnectorWithOptions(
 	if s.JobRuns != nil {
 		_ = s.JobRuns.UpdateJobRunStatus(ctx, runID, "success", &finishedAt, nil, meta)
 	}
-	return &SyncResult{JobRunID: runID, MessagesUpserted: upserted}, nil
+	return &domainconnectors.ConnectorSyncResult{JobRunID: runID, MessagesUpserted: upserted}, nil
 }
 
 func (s *Service) failSync(

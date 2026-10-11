@@ -30,11 +30,11 @@ func TestEnqueueMapsAliasesOnlyAtEnqueue(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if job.JobType != TypeDraftSuggest {
-		t.Fatalf("expected alias to map to %q, got %q", TypeDraftSuggest, job.JobType)
+	if job.JobType != domainjobs.TypeDraftSuggest {
+		t.Fatalf("expected alias to map to %q, got %q", domainjobs.TypeDraftSuggest, job.JobType)
 	}
-	if len(job.RemainingJobs) != 1 || job.RemainingJobs[0] != TypeForwardRules {
-		t.Fatalf("expected remaining alias to map to %q, got %#v", TypeForwardRules, job.RemainingJobs)
+	if len(job.RemainingJobs) != 1 || job.RemainingJobs[0] != domainjobs.TypeForwardRules {
+		t.Fatalf("expected remaining alias to map to %q, got %#v", domainjobs.TypeForwardRules, job.RemainingJobs)
 	}
 }
 
@@ -47,13 +47,13 @@ func TestEnqueueChainUsesDeterministicScheduleIDs(t *testing.T) {
 	when := time.Date(2026, 8, 29, 0, 0, 0, 0, time.UTC)
 
 	enqueuer := Enqueuer{Store: store}
-	job, err := enqueuer.EnqueueChain(ctx, userID, &accountID, domainjobs.JobTriggerSchedule, DefaultMailboxChain, domainjobs.JobPayload{}, &scheduleID, &when)
+	job, err := enqueuer.EnqueueChain(ctx, userID, &accountID, domainjobs.JobTriggerSchedule, domainjobs.DefaultMailboxChain, domainjobs.JobPayload{}, &scheduleID, &when)
 	if err != nil {
 		t.Fatal(err)
 	}
 
-	expectedChainID := DeterministicChainID(scheduleID, when.Format(time.RFC3339))
-	expectedJobID := DeterministicScheduleJobID(scheduleID, when.Format(time.RFC3339), TypeSync)
+	expectedChainID := domainjobs.DeterministicChainID(scheduleID, when.Format(time.RFC3339))
+	expectedJobID := domainjobs.DeterministicScheduleJobID(scheduleID, when.Format(time.RFC3339), domainjobs.TypeSync)
 	if job.ChainID != expectedChainID {
 		t.Fatalf("expected deterministic chain id %s, got %s", expectedChainID, job.ChainID)
 	}
