@@ -76,6 +76,20 @@ cd web
 npm ci && npm run dev
 ```
 
+### Sample projects and email for development
+
+Register or sign in once so the target user exists, then run the local seed command from `svc/` against the same database as the API:
+
+```bash
+cd svc
+DATABASE_ENGINE=postgres DATABASE_URL='postgres://automata:automata@localhost:5432/automata?sslmode=disable' \
+  go run ./cmd/seeddev -email you@example.com
+```
+
+For the SQLite debug setup, use `DATABASE_ENGINE=sqlite` and set `DATABASE_URL` to the SQLite file path used by the API. The command also accepts `-engine`, `-database-url`, and `-seed` flags. The default seed is `42`; rerunning with the same seed for the same user reuses the generated records instead of adding duplicates. Another seed creates a separate set.
+
+Each run creates five realistic projects, 200 emails in 45 threads of lengths 1–8, and a dedicated **Demo mail** account. Its connection is marked expired because it has no real mailbox credentials. All threads are assigned to their projects. Project codes begin with `DEMO<seed>-`, making the sample projects easy to find. This command is intended only for a local development database; it does not run automatically at startup.
+
 **Debug shortcut only (not the default):** `JOBS_INLINE=true go run ./cmd/server` skips Floci and runs the job inline in the HTTP process.
 
 The parity path uses four separate `provided.al2023` bootstrap archives:
